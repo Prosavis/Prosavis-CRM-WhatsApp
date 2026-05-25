@@ -1,3 +1,6 @@
+-- Seed exclusivamente local para `supabase db reset`.
+-- No usar este archivo para validar operación productiva ni cargar datos remotos.
+
 insert into auth.users (
   instance_id,
   id,
@@ -78,7 +81,7 @@ set name = excluded.name,
 insert into public.platform_settings (key, value, updated_by)
 values (
   'whatsapp_automation',
-  '{"enabled":false,"geminiEnabled":false,"phase":"local-demo"}',
+  '{"enabled":false,"geminiEnabled":false,"mode":"manual"}',
   '11111111-1111-1111-1111-111111111111'
 )
 on conflict (key) do update

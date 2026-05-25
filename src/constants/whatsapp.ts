@@ -1,4 +1,5 @@
-export const WHATSAPP_CRM_PHONE_NUMBER_ID = 'demo-phone-number-id';
+export const WHATSAPP_CRM_PHONE_NUMBER_ID =
+  import.meta.env.VITE_WHATSAPP_PHONE_NUMBER_ID?.trim() ?? '';
 
 export const WHATSAPP_TAG_PRESET_COLORS = [
   '#00a884',

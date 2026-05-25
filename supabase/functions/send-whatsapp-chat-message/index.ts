@@ -16,19 +16,11 @@ async function sendTextToMeta(params: {
   const graphVersion = Deno.env.get('META_GRAPH_API_VERSION') ?? 'v21.0';
 
   if (!accessToken) {
-    return {
-      status: 'failed',
-      waMessageId: null,
-      payload: { error: 'Falta WHATSAPP_ACCESS_TOKEN para envio real.' },
-    };
+    throw new Error('Falta WHATSAPP_ACCESS_TOKEN para envio real.');
   }
 
   if (!params.phoneNumberId) {
-    return {
-      status: 'failed',
-      waMessageId: null,
-      payload: { error: 'Falta WHATSAPP_PHONE_NUMBER_ID para envio real.' },
-    };
+    throw new Error('Falta WHATSAPP_PHONE_NUMBER_ID para envio real.');
   }
 
   const response = await fetch(
@@ -87,14 +79,21 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: 'conversationStableKey y messageBody son requeridos.' }, 400);
     }
 
-    const metaResult =
-      metaSendEnabled
-        ? await sendTextToMeta({ recipientPhone, messageBody, phoneNumberId })
-        : {
-            status: 'sent' as const,
-            waMessageId: null,
-            payload: { phase: 'stub', metaSendEnabled: false },
-          };
+    if (!recipientPhone) {
+      return jsonResponse({ error: 'recipientPhone es requerido para envio real.' }, 400);
+    }
+
+    if (!metaSendEnabled) {
+      return jsonResponse(
+        {
+          error:
+            'Envio Meta desactivado. Configure ENABLE_META_SEND=true y secrets validos para operar en produccion.',
+        },
+        503,
+      );
+    }
+
+    const metaResult = await sendTextToMeta({ recipientPhone, messageBody, phoneNumberId });
 
     const { data: message, error: insertError } = await supabase
       .from('whatsapp_message_log')
