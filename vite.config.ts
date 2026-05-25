@@ -10,8 +10,12 @@ export default defineConfig({
       '@': resolve(__dirname, './src'),
     },
   },
+  optimizeDeps: {
+    include: ['react', 'react-dom', '@mui/material', 'prop-types', 'react-is'],
+  },
   server: {
     port: 3001,
+    strictPort: true,
     open: true,
   },
   preview: {

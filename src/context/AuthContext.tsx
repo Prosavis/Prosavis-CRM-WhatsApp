@@ -39,7 +39,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
       return;
     }
 
-    setProfile(await loadProfile(nextSession.user.id));
+    try {
+      setProfile(await loadProfile(nextSession.user.id));
+    } catch (error) {
+      console.error('No se pudo cargar el perfil de administrador:', error);
+      setProfile(null);
+    }
   }, []);
 
   useEffect(() => {
