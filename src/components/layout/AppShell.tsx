@@ -1,28 +1,15 @@
 import type { PropsWithChildren } from 'react';
 import { NavLink } from 'react-router-dom';
-import {
-  Box,
-  Button,
-  Chip,
-  Container,
-  IconButton,
-  Stack,
-  Tooltip,
-  Typography,
-} from '@mui/material';
-import {
-  DarkMode as DarkModeIcon,
-  LightMode as LightModeIcon,
-  Logout as LogoutIcon,
-  WhatsApp as WhatsAppIcon,
-} from '@mui/icons-material';
-import { DesignTokens } from '@/constants/designSystem';
+import { Box, Button, Chip, Container, Stack, Typography } from '@mui/material';
+import { Logout as LogoutIcon, WhatsApp as WhatsAppIcon } from '@mui/icons-material';
+import ThemeToggle from '@/components/common/ThemeToggle';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/hooks/useAuth';
+import { getProSavisLogoSrc } from '@/utils/prosavisBrand';
 
 export default function AppShell({ children }: PropsWithChildren) {
   const { profile, signOut } = useAuth();
-  const { mode, toggleMode } = useTheme();
+  const { mode } = useTheme();
 
   return (
     <Box
@@ -51,24 +38,21 @@ export default function AppShell({ children }: PropsWithChildren) {
         >
           <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
             <Box
+              component="img"
+              src={getProSavisLogoSrc(mode)}
+              alt="ProSavis"
               sx={{
-                width: 44,
-                height: 44,
-                borderRadius: 2,
-                display: 'grid',
-                placeItems: 'center',
-                color: '#fff',
-                background: `linear-gradient(135deg, ${DesignTokens.brand.primary.blue}, ${DesignTokens.brand.primary.orange})`,
+                width: 48,
+                height: 48,
+                objectFit: 'contain',
               }}
-            >
-              <WhatsAppIcon />
-            </Box>
+            />
             <Box>
               <Typography variant="h6" sx={{ lineHeight: 1, fontWeight: 700 }}>
-                Prosavis CRM WhatsApp
+                ProSavis CRM WhatsApp
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                WhatsApp Cloud · Supabase
+                WhatsApp Cloud · ProSavis
               </Typography>
             </Box>
           </Stack>
@@ -88,11 +72,7 @@ export default function AppShell({ children }: PropsWithChildren) {
               variant="outlined"
               sx={{ display: { xs: 'none', md: 'inline-flex' } }}
             />
-            <Tooltip title={mode === 'light' ? 'Modo oscuro' : 'Modo claro'}>
-              <IconButton onClick={toggleMode} color="inherit">
-                {mode === 'light' ? <DarkModeIcon /> : <LightModeIcon />}
-              </IconButton>
-            </Tooltip>
+            <ThemeToggle size="medium" />
             <Button
               variant="text"
               color="inherit"

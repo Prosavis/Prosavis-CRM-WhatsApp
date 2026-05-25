@@ -1,19 +1,35 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
-import { Box, CircularProgress } from '@mui/material';
+import { Box, CircularProgress, Stack } from '@mui/material';
 import { useAuth } from '@/hooks/useAuth';
+import { useTheme } from '@/context/ThemeContext';
 import AppShell from '@/components/layout/AppShell';
 import LoginPage from '@/components/auth/LoginPage';
 import WhatsAppCloudPage from '@/pages/whatsapp/WhatsAppCloudPage';
+import { getProSavisLogoSrc } from '@/utils/prosavisBrand';
+
+function BrandedLoadingScreen() {
+  const { mode } = useTheme();
+
+  return (
+    <Box sx={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
+      <Stack spacing={2} alignItems="center">
+        <Box
+          component="img"
+          src={getProSavisLogoSrc(mode)}
+          alt="ProSavis"
+          sx={{ width: 72, height: 72, objectFit: 'contain' }}
+        />
+        <CircularProgress size={28} />
+      </Stack>
+    </Box>
+  );
+}
 
 function ProtectedApp() {
   const { loading, user, isAdmin } = useAuth();
 
   if (loading) {
-    return (
-      <Box sx={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
-        <CircularProgress />
-      </Box>
-    );
+    return <BrandedLoadingScreen />;
   }
 
   if (!user) return <Navigate to="/login" replace />;

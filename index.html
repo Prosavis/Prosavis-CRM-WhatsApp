@@ -1,12 +1,42 @@
 <!doctype html>
-<html lang="en">
+<html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" href="/assets/icons/iconoProsavisClean.png" id="favicon" />
+    <script>
+      (function () {
+        const saved = localStorage.getItem('prosavis-theme-mode');
+        const isDark =
+          saved === 'dark' ||
+          (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        var el = document.getElementById('favicon');
+        if (el) {
+          el.href = isDark
+            ? '/assets/icons/iconProsavisNaranjaClean.png'
+            : '/assets/icons/iconoProsavisClean.png';
+        }
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>prosavis-crm-whatsapp</title>
+    <meta name="theme-color" content="#002446" />
+    <meta
+      name="description"
+      content="ProSavis CRM WhatsApp — operación de conversaciones, métricas y leads con WhatsApp Cloud API"
+    />
+    <link rel="apple-touch-icon" href="/assets/icons/iconoProsavisClean.png" />
+    <link rel="manifest" href="/manifest.json" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <title>ProSavis CRM WhatsApp</title>
   </head>
   <body>
+    <noscript>Necesitas habilitar JavaScript para ejecutar esta aplicación.</noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

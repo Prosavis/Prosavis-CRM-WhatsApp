@@ -1,4 +1,6 @@
-import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import toast from 'react-hot-toast';
+import useSoundEffects from '@/hooks/useSoundEffects';
 import {
   Alert,
   Box,
@@ -173,6 +175,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   onUploadSticker,
   onSendSticker,
 }) => {
+  const { playSuccess, playError } = useSoundEffects();
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -478,20 +481,26 @@ const MessageInput: React.FC<MessageInputProps> = ({
               return keep;
             }));
             setSendError('Algunos adjuntos no se enviaron. Revisa los marcados en rojo e intenta de nuevo.');
+            playError();
+            toast.error('Algunos adjuntos no se enviaron');
           } else {
             lexicalEditorRef.current?.setWhatsAppText('');
             clearPendingFile();
+            playSuccess();
           }
         } else if (onSendMedia && pendingFiles[0]) {
           const first = pendingFiles[0];
           await onSendMedia(first.file, first.mediaType, text.trim() || undefined);
           lexicalEditorRef.current?.setWhatsAppText('');
           clearPendingFile(first.id);
+          playSuccess();
         }
         lexicalEditorRef.current?.focus();
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'No se pudo enviar el archivo';
         setSendError(msg);
+        playError();
+        toast.error(msg);
       } finally {
         setSending(false);
       }
@@ -506,13 +515,16 @@ const MessageInput: React.FC<MessageInputProps> = ({
       await onSend(trimmed);
       lexicalEditorRef.current?.setWhatsAppText('');
       lexicalEditorRef.current?.focus();
+      playSuccess();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'No se pudo enviar el mensaje';
       setSendError(msg);
+      playError();
+      toast.error(msg);
     } finally {
       setSending(false);
     }
-  }, [text, sending, onSend, onSendMedia, onSendMediaBatch, pendingFiles, clearPendingFile, stopTypingNow]);
+  }, [text, sending, onSend, onSendMedia, onSendMediaBatch, pendingFiles, clearPendingFile, stopTypingNow, playSuccess, playError]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {

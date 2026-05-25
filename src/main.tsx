@@ -6,6 +6,7 @@ import { Toaster } from 'react-hot-toast';
 import App from '@/App';
 import { AuthProvider } from '@/context/AuthContext';
 import { ProSavisThemeProvider } from '@/context/ThemeContext';
+import { FaviconUpdater } from '@/components/common/FaviconUpdater';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -23,6 +24,7 @@ createRoot(document.getElementById('root')!).render(
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <AuthProvider>
+            <FaviconUpdater />
             <App />
             <Toaster position="top-right" />
           </AuthProvider>

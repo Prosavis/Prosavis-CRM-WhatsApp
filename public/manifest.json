@@ -1,0 +1,20 @@
+{
+  "short_name": "ProSavis CRM",
+  "name": "ProSavis CRM WhatsApp",
+  "icons": [
+    {
+      "src": "/assets/icons/iconoProsavisClean.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/assets/icons/iconoProsavisClean.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#002446",
+  "background_color": "#ffffff"
+}

@@ -71,6 +71,7 @@ import WhatsAppAutomationHeaderSwitch from '@/components/whatsapp/WhatsAppAutoma
 import WhatsAppInternalContactsButton from '@/components/whatsapp/WhatsAppInternalContactsButton';
 import { WHATSAPP_CLOUD_PRODUCTION } from '@/constants/whatsappCloudAccounts';
 import { useWhatsAppAutomationSetting } from '@/hooks/useWhatsAppAutomationSetting';
+import useSoundEffects from '@/hooks/useSoundEffects';
 import {
   bulkWhatsAppSend,
   listWhatsAppMessageTemplates,
@@ -163,11 +164,13 @@ const WhatsAppCloudPage: React.FC = () => {
     applyToggle,
     cancelConfirm,
   } = useWhatsAppAutomationSetting();
+  const { playNavigation } = useSoundEffects();
   const { registerTabController, unregisterTabController } = useAdminTour();
   const tabParam = searchParams.get('tab');
   const activeTab = tabParam === 'metrics' ? 1 : tabParam === 'leads' ? 2 : tabParam === 'discounts' ? 3 : tabParam === 'settings' ? 4 : 0;
 
   const handleMainTabChange = (_: React.SyntheticEvent, value: number) => {
+    playNavigation();
     const next = new URLSearchParams(searchParams);
     if (value === 0) next.delete('tab');
     else if (value === 1) next.set('tab', 'metrics');

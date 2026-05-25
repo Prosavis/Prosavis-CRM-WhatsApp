@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import toast from 'react-hot-toast';
 import { Box, CircularProgress, Snackbar, Alert, Button } from '@mui/material';
 import { alpha, useTheme } from '@mui/material/styles';
 import ConversationList from './ConversationList';
@@ -32,6 +33,8 @@ import {
   computeWhatsAppInboxMetrics,
   type WhatsAppInboxMetrics,
 } from '@/utils/whatsappInboxStats';
+import { areSoundsEnabled, getSoundVolume } from '@/utils/soundPreferences';
+import useSoundEffects from '@/hooks/useSoundEffects';
 
 const INBOUND_NOTIFY_AUDIO = `${import.meta.env.BASE_URL}assets/audio/WhatsAppSound.mp3`;
 
@@ -117,6 +120,19 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     severity: 'success' | 'error';
   }>({ open: false, message: '', severity: 'success' });
 
+  const { playSuccess, playError } = useSoundEffects();
+
+  const notifyAction = useCallback((message: string, severity: 'success' | 'error') => {
+    setActionSnack({ open: true, message, severity });
+    if (severity === 'success') {
+      toast.success(message);
+      playSuccess();
+    } else {
+      toast.error(message);
+      playError();
+    }
+  }, [playSuccess, playError]);
+
   const notifyAudioRef = useRef<HTMLAudioElement | null>(null);
   const inboundBaselineReadyRef = useRef(false);
   const inboundPrevSnapshotRef = useRef<Map<string, { at: number }>>(new Map());
@@ -140,7 +156,9 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   }, [inboxMetrics, onInboxMetrics]);
 
   useEffect(() => {
-    notifyAudioRef.current = new Audio(INBOUND_NOTIFY_AUDIO);
+    const audio = new Audio(INBOUND_NOTIFY_AUDIO);
+    audio.volume = getSoundVolume();
+    notifyAudioRef.current = audio;
   }, []);
 
   useEffect(() => {
@@ -227,7 +245,13 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
       return ta >= tb ? a : b;
     });
 
-    void notifyAudioRef.current?.play().catch(() => {});
+    if (areSoundsEnabled() && !document.hidden) {
+      const audio = notifyAudioRef.current;
+      if (audio) {
+        audio.volume = getSoundVolume();
+        void audio.play().catch(() => {});
+      }
+    }
     setInboundAlert({
       message: `Nuevo mensaje en ${conversationShortLabel(best)}`,
       conversationId: best.id,
@@ -371,18 +395,18 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
       const isUnread = conversation.unreadCount > 0 || conversation.crmForceUnread;
       if (isUnread) {
         await markAsRead(undefined, conversation.id, phoneNumberId);
-        setActionSnack({ open: true, message: 'Conversación marcada como leída', severity: 'success' });
+        notifyAction('Conversación marcada como leída', 'success');
       } else {
         await patchWhatsAppConversationAdmin({
           conversationId: conversation.id,
           patch: { crmForceUnread: true },
         });
-        setActionSnack({ open: true, message: 'Conversación marcada como no leída', severity: 'success' });
+        notifyAction('Conversación marcada como no leída', 'success');
       }
     } catch {
-      setActionSnack({ open: true, message: 'No se pudo cambiar el estado de lectura', severity: 'error' });
+      notifyAction('No se pudo cambiar el estado de lectura', 'error');
     }
-  }, [phoneNumberId]);
+  }, [phoneNumberId, notifyAction]);
 
   const handleContextArchiveToggle = useCallback(async (conversation: WhatsAppConversation) => {
     try {
@@ -390,15 +414,14 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
         conversationId: conversation.id,
         patch: { isArchived: !conversation.isArchived },
       });
-      setActionSnack({
-        open: true,
-        message: conversation.isArchived ? 'Conversación desarchivada' : 'Conversación archivada',
-        severity: 'success',
-      });
+      notifyAction(
+        conversation.isArchived ? 'Conversación desarchivada' : 'Conversación archivada',
+        'success',
+      );
     } catch {
-      setActionSnack({ open: true, message: 'No se pudo actualizar el archivo', severity: 'error' });
+      notifyAction('No se pudo actualizar el archivo', 'error');
     }
-  }, []);
+  }, [notifyAction]);
 
   const handleContextPinToggle = useCallback(async (conversation: WhatsAppConversation) => {
     try {
@@ -406,15 +429,14 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
         conversationId: conversation.id,
         patch: { isPinned: !conversation.isPinned },
       });
-      setActionSnack({
-        open: true,
-        message: conversation.isPinned ? 'Conversación desfijada' : 'Conversación fijada',
-        severity: 'success',
-      });
+      notifyAction(
+        conversation.isPinned ? 'Conversación desfijada' : 'Conversación fijada',
+        'success',
+      );
     } catch {
-      setActionSnack({ open: true, message: 'No se pudo fijar/desfijar', severity: 'error' });
+      notifyAction('No se pudo fijar/desfijar', 'error');
     }
-  }, []);
+  }, [notifyAction]);
 
   const handleContextAssignTags = useCallback(async (
     conversation: WhatsAppConversation,
@@ -422,12 +444,12 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   ) => {
     try {
       await assignWhatsAppTags(conversation.id, tagIds);
-      setActionSnack({ open: true, message: 'Tags actualizados', severity: 'success' });
+      notifyAction('Tags actualizados', 'success');
       void loadTags();
     } catch {
-      setActionSnack({ open: true, message: 'No se pudieron asignar los tags', severity: 'error' });
+      notifyAction('No se pudieron asignar los tags', 'error');
     }
-  }, [loadTags]);
+  }, [loadTags, notifyAction]);
 
   const handleContextDeleteConversation = useCallback(async (conversation: WhatsAppConversation) => {
     const confirmed = window.prompt(
@@ -443,11 +465,11 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
       if (selectedConversation?.id === conversation.id) {
         setSelectedConversation(null);
       }
-      setActionSnack({ open: true, message: 'Conversación eliminada', severity: 'success' });
+      notifyAction('Conversación eliminada', 'success');
     } catch {
-      setActionSnack({ open: true, message: 'No se pudo eliminar la conversación', severity: 'error' });
+      notifyAction('No se pudo eliminar la conversación', 'error');
     }
-  }, [phoneNumberId, selectedConversation?.id]);
+  }, [phoneNumberId, selectedConversation?.id, notifyAction]);
 
   const handleContextBlockConversation = useCallback(async (conversation: WhatsAppConversation) => {
     const ok = window.confirm(
@@ -456,11 +478,11 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     if (!ok) return;
     try {
       await blockWhatsAppUser(conversation.id, phoneNumberId);
-      setActionSnack({ open: true, message: 'Contacto bloqueado', severity: 'success' });
+      notifyAction('Contacto bloqueado', 'success');
     } catch {
-      setActionSnack({ open: true, message: 'No se pudo bloquear el contacto', severity: 'error' });
+      notifyAction('No se pudo bloquear el contacto', 'error');
     }
-  }, [phoneNumberId]);
+  }, [phoneNumberId, notifyAction]);
 
   const showRightColumn = Boolean(selectedConversation && rightPanel !== 'none');
 

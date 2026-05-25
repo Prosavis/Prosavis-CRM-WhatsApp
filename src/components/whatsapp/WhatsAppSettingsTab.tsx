@@ -22,11 +22,15 @@ import {
   ListItemText,
   ListItemSecondaryAction,
   Chip,
+  FormControlLabel,
+  Switch,
+  Slider,
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import SaveIcon from '@mui/icons-material/Save';
+import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import BusinessIcon from '@mui/icons-material/Business';
 import TextSnippetIcon from '@mui/icons-material/TextSnippet';
 import {
@@ -39,6 +43,11 @@ import {
   type WhatsAppBusinessProfile,
   type WhatsAppSnippet,
 } from '@/services/whatsappService';
+import useSoundEffects from '@/hooks/useSoundEffects';
+import {
+  areSoundsEnabled,
+  getSoundVolume,
+} from '@/utils/soundPreferences';
 
 interface WhatsAppSettingsTabProps {
   phoneNumberId?: string;
@@ -67,6 +76,10 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
   const [snippetBody, setSnippetBody] = useState('');
   const [snippetSaving, setSnippetSaving] = useState(false);
   const [snippetError, setSnippetError] = useState<string | null>(null);
+
+  const { setEnabled: setSoundsEnabled, setVolume: setSoundVolume, playClick } = useSoundEffects();
+  const [soundsOn, setSoundsOn] = useState(areSoundsEnabled);
+  const [volumePercent, setVolumePercent] = useState(Math.round(getSoundVolume() * 100));
 
   const loadProfile = useCallback(async () => {
     setProfileLoading(true);
@@ -349,6 +362,56 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
                   ))}
                 </List>
               )}
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} md={6}>
+          <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, height: '100%' }}>
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 3 }}>
+                <VolumeUpIcon color="primary" />
+                <Typography variant="h6" fontWeight={600}>
+                  Experiencia
+                </Typography>
+              </Box>
+              <Stack spacing={2.5}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={soundsOn}
+                      onChange={(_, checked) => {
+                        setSoundsOn(checked);
+                        setSoundsEnabled(checked);
+                        if (checked) playClick();
+                      }}
+                    />
+                  }
+                  label="Sonidos de la interfaz"
+                />
+                <Box sx={{ px: 1 }}>
+                  <Typography variant="body2" color="text.secondary" gutterBottom>
+                    Volumen ({volumePercent}%)
+                  </Typography>
+                  <Slider
+                    value={volumePercent}
+                    min={0}
+                    max={100}
+                    disabled={!soundsOn}
+                    onChange={(_, value) => {
+                      const pct = Array.isArray(value) ? value[0] : value;
+                      setVolumePercent(pct);
+                      setSoundVolume(pct / 100);
+                    }}
+                    onChangeCommitted={() => {
+                      if (soundsOn) playClick();
+                    }}
+                  />
+                </Box>
+                <Typography variant="caption" color="text.secondary">
+                  Incluye notificaciones de mensajes entrantes y efectos al enviar o cambiar de pestaña.
+                </Typography>
+              </Stack>
             </CardContent>
           </Card>
         </Grid>

@@ -1,5 +1,5 @@
 /**
- * SISTEMA DE DISEÑO CENTRALIZADO - PROSAVIS PANEL
+ * SISTEMA DE DISEÑO CENTRALIZADO - PROSAVIS CRM WHATSAPP
  *
  * Este archivo define el sistema de diseño completo de la aplicación,
  * similar al design system de Prosavis-App.
@@ -194,20 +194,6 @@ export const DesignTokens = {
     tooltip: 1070,
   },
 } as const;
-
-/** Paleta sugerida para tags de WhatsApp (valor persistido como string en backend) */
-export const WHATSAPP_TAG_PRESET_COLORS = [
-  DesignTokens.semantic.info,
-  DesignTokens.semantic.success,
-  DesignTokens.semantic.error,
-  DesignTokens.semantic.warning,
-  DesignTokens.charts.purple,
-  DesignTokens.charts.teal,
-  DesignTokens.charts.cyan,
-  DesignTokens.charts.deepPurple,
-  DesignTokens.charts.pink,
-  DesignTokens.verification.inactive,
-] as const;
 
 // ============================================================================
 // COMPONENTES DE DISEÑO - PATRONES REUTILIZABLES
