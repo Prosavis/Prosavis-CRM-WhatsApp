@@ -1,5 +1,6 @@
 # Despliega todas las Edge Functions del repo al proyecto remoto.
 # Requisito: `npx supabase login` o variable SUPABASE_ACCESS_TOKEN.
+# Alternativa sin CLI: `node scripts/pack-edge-function.mjs` + despliegue vía MCP/Dashboard.
 param(
   [string]$ProjectRef = "djzwjaegxbhlefanmmee"
 )

@@ -74,29 +74,29 @@ Referencia local en `.env.example` (solo para `supabase functions serve`).
 3. Cuando quieras **inbox entrante real**: `WHATSAPP_WEBHOOK_MODE=active` (mientras esté en `shadow`, los POST se auditan pero no materializan chats).
 4. Para **enviar** desde el CRM: `ENABLE_META_SEND=true` y token de Meta válido.
 5. **Vercel** (`prosavis-crm-whats-app`): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_WHATSAPP_PHONE_NUMBER_ID` en Production → **Redeploy** (Vite incrusta `VITE_*` en build).
-6. **Desplegar Edge Functions restantes** (opciones avanzadas del Panel aún en stub local):
+6. **Redeploy en Vercel** tras cambiar `VITE_*` (lo haces desde el dashboard o `vercel --prod`).
+
+7. Prueba: enviar un WhatsApp al número WABA → revisar filas en `whatsapp_webhook_events`, `whatsapp_conversations`, `whatsapp_message_log`.
+
+## Edge Functions en remoto
+
+**Todas las funciones del repo están desplegadas** en `djzwjaegxbhlefanmmee` (42 slugs, mayo 2026).
+
+- **Implementación completa:** webhook, envío de chat, métricas, log, settings, media, patch/mark read, purge, leads→conversación, plantillas IA (list), etc.
+- **Stub autenticado** (evitan 404; respuesta mínima hasta portar lógica del Panel): reacciones, bulk, plantillas Meta, stickers/snippets CRUD, sugerencia IA, transcripción, Wompi, etc.
+
+Para **re-desplegar** tras cambiar código en `supabase/functions/`:
 
 ```powershell
 npx supabase login
 .\scripts\deploy-edge-functions.ps1
 ```
 
-7. Prueba: enviar un WhatsApp al número WABA → revisar filas en `whatsapp_webhook_events`, `whatsapp_conversations`, `whatsapp_message_log`.
+O regenerar manifest y desplegar por lotes:
 
-## Edge Functions en remoto (estado 2026-05-25)
-
-**Desplegadas y operativas (núcleo inbox + webhook):**
-
-- `on-whatsapp-webhook` (sin JWT; webhook Meta)
-- `send-whatsapp-chat-message`
-- `list-whatsapp-message-log`, `get-whatsapp-metrics`
-- `get-whatsapp-automation-setting`, `set-whatsapp-automation-setting`
-- `get-whatsapp-media-signed-url`, `get-whatsapp-media-url`
-- `patch-whatsapp-conversation`, `mark-whatsapp-as-read`
-- `purge-whatsapp-message-log`, `ensure-whatsapp-conversation-from-lead`
-- `list-whatsapp-ia-templates`
-
-**En repo pero aún no desplegadas en remoto** (reacciones, plantillas Meta, IA, stickers, bulk, etc.): ejecutar `scripts/deploy-edge-functions.ps1`. Varias devuelven stub `{ success: true }` hasta implementación completa.
+```powershell
+node scripts/pack-edge-function.mjs > scripts/deploy-manifest.json
+```
 
 ## Operación WhatsApp Cloud
 

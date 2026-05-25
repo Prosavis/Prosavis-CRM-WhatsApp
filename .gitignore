@@ -26,3 +26,4 @@ supabase/functions/.env*
 
 .vercel
 scripts/.deploy-*.json
+scripts/deploy-manifest.json

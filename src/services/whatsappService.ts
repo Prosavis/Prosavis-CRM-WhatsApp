@@ -13,7 +13,25 @@ const DEFAULT_MESSAGE_LIMIT = 200;
 
 async function invokeFn<T>(name: string, body?: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.functions.invoke<T>(name, { body });
-  if (error) throw error;
+  if (error) {
+    const ctx = error as { context?: Response };
+    const response = ctx.context;
+    if (response) {
+      try {
+        const payload = await response.json();
+        const message =
+          typeof payload === 'object' && payload && 'error' in payload
+            ? String((payload as { error: unknown }).error)
+            : JSON.stringify(payload);
+        throw new Error(message || error.message);
+      } catch (parseError) {
+        if (parseError instanceof Error && parseError.message !== error.message) {
+          throw parseError;
+        }
+      }
+    }
+    throw error;
+  }
   if (data === null || data === undefined) {
     throw new Error(`La funcion ${name} no devolvio datos.`);
   }
@@ -383,13 +401,20 @@ export async function sendMessage(
   phoneNumberId?: string,
   replyToWaMessageId?: string,
 ) {
-  const data = await invokeFn('send-whatsapp-chat-message', {
+  const data = await invokeFn<{
+    success: boolean;
+    waMessageId?: string;
+    error?: string;
+  }>('send-whatsapp-chat-message', {
     to,
     text,
     ...(phoneNumberId ? { phoneNumberId } : {}),
     ...(replyToWaMessageId ? { replyToWaMessageId } : {}),
   });
-  return data as { success: boolean; waMessageId?: string };
+  if (!data.success) {
+    throw new Error(data.error ?? 'No se pudo enviar el mensaje por WhatsApp.');
+  }
+  return data;
 }
 
 export type WhatsAppOutboundMediaType = 'image' | 'audio' | 'video' | 'document' | 'sticker';
@@ -409,7 +434,11 @@ export async function sendMedia(
     isAnimatedSticker?: boolean;
   },
 ) {
-  const data = await invokeFn('send-whatsapp-chat-message', {
+  const data = await invokeFn<{
+    success: boolean;
+    waMessageId?: string;
+    error?: string;
+  }>('send-whatsapp-chat-message', {
     to,
     mediaUrl,
     mediaType,
@@ -424,7 +453,10 @@ export async function sendMedia(
       ? { isAnimatedSticker: options.isAnimatedSticker }
       : {}),
   });
-  return data as { success: boolean; waMessageId?: string; error?: string };
+  if (!data.success) {
+    throw new Error(data.error ?? 'No se pudo enviar el archivo por WhatsApp.');
+  }
+  return data;
 }
 
 export async function sendReaction(params: {
