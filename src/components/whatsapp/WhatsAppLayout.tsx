@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Box, CircularProgress, Snackbar, Alert, Button } from '@mui/material';
+import { Box, Snackbar, Alert, Button } from '@mui/material';
 import { alpha, useTheme } from '@mui/material/styles';
 import ConversationList from './ConversationList';
 import ChatArea from './ChatArea';
@@ -11,6 +11,7 @@ import { useWhatsAppContactContext } from '@/hooks/useWhatsAppContactContext';
 import { useAuth } from '@/hooks/useAuth';
 import {
   subscribeToConversations,
+  refetchConversations,
   subscribeToWhatsAppAdminPresence,
   clearMyWhatsAppPresence,
   PRESENCE_TTL_MS,
@@ -101,10 +102,12 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   onInboxMetrics,
 }) => {
   const theme = useTheme();
-  const { user, profile } = useAuth();
+  const { user, profile, session, loading: authLoading } = useAuth();
   const [conversations, setConversations] = useState<WhatsAppConversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<WhatsAppConversation | null>(null);
   const [loading, setLoading] = useState(true);
+  const [inboxError, setInboxError] = useState<string | null>(null);
+  const [subscriptionKey, setSubscriptionKey] = useState(0);
   const [rightPanel, setRightPanel] = useState<RightPanelMode>('none');
   const [composerDraft, setComposerDraft] = useState('');
   const [tags, setTags] = useState<WhatsAppTag[]>([]);
@@ -164,26 +167,58 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   useEffect(() => {
     inboundBaselineReadyRef.current = false;
     inboundPrevSnapshotRef.current = new Map();
+    setSelectedConversation(null);
   }, [phoneNumberId]);
 
+  const handleRetryInbox = useCallback(() => {
+    setSubscriptionKey((key) => key + 1);
+  }, []);
+
   useEffect(() => {
+    if (authLoading || !session?.access_token) {
+      return;
+    }
+
     setLoading(true);
-    setSelectedConversation(null);
+    setInboxError(null);
 
     const unsub = subscribeToConversations(
       (convs) => {
         setConversations(convs);
         setLoading(false);
+        setInboxError(null);
       },
       phoneNumberId,
       (error) => {
         console.error('Error en listener de conversaciones:', error);
+        setInboxError(error.message || 'No se pudieron cargar las conversaciones');
         setLoading(false);
       },
     );
 
     return () => unsub();
-  }, [phoneNumberId]);
+  }, [phoneNumberId, session?.access_token, authLoading, subscriptionKey]);
+
+  useEffect(() => {
+    if (authLoading || !session?.access_token) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      void refetchConversations(phoneNumberId)
+        .then((convs) => {
+          setConversations(convs);
+          setInboxError(null);
+        })
+        .catch((error: unknown) => {
+          const message =
+            error instanceof Error ? error.message : 'No se pudieron recargar las conversaciones';
+          setInboxError(message);
+        });
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [phoneNumberId, session?.access_token, authLoading]);
 
   const loadTags = useCallback(async () => {
     try {
@@ -486,20 +521,12 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
 
   const showRightColumn = Boolean(selectedConversation && rightPanel !== 'none');
 
-  if (loading) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-        <CircularProgress />
-      </Box>
-    );
-  }
-
   return (
     <Box
       sx={{
         display: 'flex',
         flexDirection: 'column',
-        height: fullscreen ? '100%' : 'calc(100vh - 160px)',
+        height: fullscreen ? '100%' : 'calc(100vh - 128px)',
         '@keyframes waInboundPulse': {
           '0%': {
             boxShadow: `0 0 0 0 ${alpha(theme.palette.primary.main, 0.35)}`,
@@ -533,8 +560,24 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
             borderRight: 1,
             borderColor: 'divider',
             flexShrink: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            minHeight: 0,
           }}
         >
+          {inboxError && (
+            <Alert
+              severity="error"
+              sx={{ m: 1, flexShrink: 0 }}
+              action={
+                <Button color="inherit" size="small" onClick={handleRetryInbox}>
+                  Reintentar
+                </Button>
+              }
+            >
+              {inboxError}
+            </Alert>
+          )}
           <ConversationList
             conversations={conversations}
             tabCounts={inboxMetrics.tabCounts}

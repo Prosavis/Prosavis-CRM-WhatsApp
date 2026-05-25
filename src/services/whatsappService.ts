@@ -282,19 +282,36 @@ async function fetchConversations(phoneNumberId?: string): Promise<WhatsAppConve
   return (data ?? []).map(mapConversationRow);
 }
 
+export async function refetchConversations(
+  phoneNumberId?: string,
+): Promise<WhatsAppConversation[]> {
+  return fetchConversations(phoneNumberId);
+}
+
 export function subscribeToConversations(
   callback: (conversations: WhatsAppConversation[]) => void,
   phoneNumberId?: string,
   onError?: (error: Error) => void,
 ): Unsubscribe {
+  let disposed = false;
   let channel: RealtimeChannel | null = null;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
   const load = async () => {
+    if (disposed) return;
     try {
       callback(await fetchConversations(phoneNumberId));
     } catch (error) {
       onError?.(error instanceof Error ? error : new Error(String(error)));
     }
+  };
+
+  const scheduleRetry = () => {
+    if (disposed || retryTimer) return;
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      void load();
+    }, 2000);
   };
 
   void load();
@@ -305,9 +322,15 @@ export function subscribeToConversations(
       { event: '*', schema: 'public', table: 'whatsapp_conversations' },
       () => void load(),
     )
-    .subscribe();
+    .subscribe((status) => {
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        scheduleRetry();
+      }
+    });
 
   return () => {
+    disposed = true;
+    if (retryTimer) clearTimeout(retryTimer);
     if (channel) void supabase.removeChannel(channel);
   };
 }

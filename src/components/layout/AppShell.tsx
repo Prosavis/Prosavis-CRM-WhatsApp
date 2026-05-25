@@ -1,7 +1,6 @@
 import type { PropsWithChildren } from 'react';
-import { NavLink } from 'react-router-dom';
-import { Box, Button, Chip, Container, Stack, Typography } from '@mui/material';
-import { Logout as LogoutIcon, WhatsApp as WhatsAppIcon } from '@mui/icons-material';
+import { Box, Button, Chip, Container, Stack } from '@mui/material';
+import { Logout as LogoutIcon } from '@mui/icons-material';
 import ThemeToggle from '@/components/common/ThemeToggle';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/hooks/useAuth';
@@ -16,7 +15,7 @@ export default function AppShell({ children }: PropsWithChildren) {
       sx={{
         minHeight: '100vh',
         bgcolor: 'background.default',
-        py: { xs: 2, md: 3 },
+        py: { xs: 1.5, md: 2 },
       }}
     >
       <Container maxWidth={false} sx={{ maxWidth: 1920 }}>
@@ -27,55 +26,38 @@ export default function AppShell({ children }: PropsWithChildren) {
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: 2,
-            mb: 3,
-            p: 2,
-            borderRadius: 3,
+            mb: 1.5,
+            px: 1.5,
+            py: 1,
+            borderRadius: 2,
             bgcolor: 'background.paper',
             border: 1,
             borderColor: 'divider',
-            boxShadow: 1,
           }}
         >
-          <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
-            <Box
-              component="img"
-              src={getProSavisLogoSrc(mode)}
-              alt="ProSavis"
-              sx={{
-                width: 48,
-                height: 48,
-                objectFit: 'contain',
-              }}
-            />
-            <Box>
-              <Typography variant="h6" sx={{ lineHeight: 1, fontWeight: 700 }}>
-                ProSavis CRM WhatsApp
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                WhatsApp Cloud · ProSavis
-              </Typography>
-            </Box>
-          </Stack>
+          <Box
+            component="img"
+            src={getProSavisLogoSrc(mode)}
+            alt="ProSavis"
+            sx={{
+              width: 36,
+              height: 36,
+              objectFit: 'contain',
+            }}
+          />
 
           <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-            <Button
-              component={NavLink}
-              to="/whatsapp"
-              variant="contained"
-              color="primary"
-              startIcon={<WhatsAppIcon />}
-            >
-              WhatsApp Cloud
-            </Button>
             <Chip
               label={profile?.email ?? 'Admin'}
+              size="small"
               variant="outlined"
-              sx={{ display: { xs: 'none', md: 'inline-flex' } }}
+              sx={{ display: { xs: 'none', sm: 'inline-flex' }, maxWidth: 220 }}
             />
-            <ThemeToggle size="medium" />
+            <ThemeToggle size="small" />
             <Button
               variant="text"
               color="inherit"
+              size="small"
               startIcon={<LogoutIcon />}
               onClick={() => void signOut()}
             >

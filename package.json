@@ -29,8 +29,7 @@
     "react-dom": "^19.2.6",
     "react-hot-toast": "^2.6.0",
     "framer-motion": "^12.23.15",
-    "react-router-dom": "^7.15.1",
-    "recharts": "^3.8.1"
+    "react-router-dom": "^7.15.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

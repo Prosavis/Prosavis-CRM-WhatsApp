@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useState, useMemo } from 'react';
 import {
   Box,
   TextField,
@@ -20,6 +20,7 @@ import {
   IconButton,
   Tooltip,
   Checkbox,
+  CircularProgress,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import SearchIcon from '@mui/icons-material/Search';
@@ -190,6 +191,21 @@ function InboxFilterTabLabel({ label, count, selected, icon }: InboxFilterTabLab
 
 type FilterType = 'last24h' | 'all' | 'unread' | 'tagged' | 'archived';
 
+const INBOX_FILTER_STORAGE_KEY = 'whatsapp-inbox-filter';
+const VALID_INBOX_FILTERS: FilterType[] = ['last24h', 'all', 'unread', 'tagged', 'archived'];
+
+function readStoredInboxFilter(): FilterType {
+  try {
+    const stored = sessionStorage.getItem(INBOX_FILTER_STORAGE_KEY);
+    if (stored && VALID_INBOX_FILTERS.includes(stored as FilterType)) {
+      return stored as FilterType;
+    }
+  } catch {
+    // sessionStorage puede estar bloqueado
+  }
+  return 'last24h';
+}
+
 const ConversationList: React.FC<ConversationListProps> = ({
   conversations,
   tabCounts,
@@ -210,8 +226,16 @@ const ConversationList: React.FC<ConversationListProps> = ({
   onBlockConversation,
 }) => {
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<FilterType>('last24h');
+  const [filter, setFilter] = useState<FilterType>(readStoredInboxFilter);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(INBOX_FILTER_STORAGE_KEY, filter);
+    } catch {
+      // sessionStorage puede estar bloqueado
+    }
+  }, [filter]);
   const [tagMenuAnchor, setTagMenuAnchor] = useState<null | HTMLElement>(null);
   const [contextMenu, setContextMenu] = useState<{
     mouseX: number;
@@ -780,6 +804,12 @@ const ConversationList: React.FC<ConversationListProps> = ({
             </ListItemButton>
           );
         })}
+
+        {loading && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+            <CircularProgress size={28} />
+          </Box>
+        )}
 
         {filtered.length === 0 && !loading && (
           <Box sx={{ p: 4, textAlign: 'center' }}>
