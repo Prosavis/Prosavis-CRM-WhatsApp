@@ -7,7 +7,7 @@ Deno.serve(async (req) => {
   try {
     const { supabase } = await requireCrmAdmin(req);
     const body = await req.json();
-    const stableKey = String(body.stableKey ?? '').trim();
+    const stableKey = String(body.stableKey ?? body.conversationKey ?? body.conversationId ?? '').trim();
 
     if (!stableKey) return jsonResponse({ error: 'stableKey es requerido.' }, 400);
 
@@ -17,7 +17,7 @@ Deno.serve(async (req) => {
       .eq('stable_key', stableKey);
 
     if (error) throw error;
-    return jsonResponse({ ok: true });
+    return jsonResponse({ success: true });
   } catch (error) {
     if (error instanceof Response) return error;
     return jsonResponse({ error: String(error) }, 500);

@@ -35,7 +35,7 @@ Deno.serve(async (req) => {
     const patch = toDbPatch(body.patch ?? {});
 
     if (!stableKey) return jsonResponse({ error: 'stableKey es requerido.' }, 400);
-    if (!Object.keys(patch).length) return jsonResponse({ ok: true });
+    if (!Object.keys(patch).length) return jsonResponse({ success: true });
 
     const { error } = await supabase
       .from('whatsapp_conversations')
@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
       .eq('stable_key', stableKey);
 
     if (error) throw error;
-    return jsonResponse({ ok: true });
+    return jsonResponse({ success: true });
   } catch (error) {
     if (error instanceof Response) return error;
     return jsonResponse({ error: String(error) }, 500);

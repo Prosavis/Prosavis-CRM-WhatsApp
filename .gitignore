@@ -25,3 +25,4 @@ supabase/functions/.env*
 *.sw?
 
 .vercel
+scripts/.deploy-*.json
