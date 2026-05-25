@@ -7,8 +7,8 @@ Aplicativo independiente para operar Inbox, Métricas, Leads y Descuentos de Wha
 | Recurso | Valor |
 | --- | --- |
 | Supabase (remoto) | `https://djzwjaegxbhlefanmmee.supabase.co` |
-| App producción (Vercel) | `https://prosavis-crm-whats-app.vercel.app` |
-| Proyecto Vercel correcto | `prosavis-crm-whats-app` |
+| App producción (Vercel) | `https://prosavis-crm-whatsapp.vercel.app` |
+| Proyecto Vercel | `prosavis-crm-whatsapp` |
 | Webhook Meta | `https://djzwjaegxbhlefanmmee.supabase.co/functions/v1/on-whatsapp-webhook` |
 
 ## Desarrollo local
@@ -73,8 +73,8 @@ Referencia local en `.env.example` (solo para `supabase functions serve`).
 2. Confirmar en Supabase Secrets: `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, verify token y app secret (ya hechos si indicaste que configuraste los dos tokens).
 3. Cuando quieras **inbox entrante real**: `WHATSAPP_WEBHOOK_MODE=active` (mientras esté en `shadow`, los POST se auditan pero no materializan chats).
 4. Para **enviar** desde el CRM: `ENABLE_META_SEND=true` y token de Meta válido.
-5. **Vercel** (`prosavis-crm-whats-app`): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_WHATSAPP_PHONE_NUMBER_ID` en Production → **Redeploy** (Vite incrusta `VITE_*` en build).
-6. **Redeploy en Vercel** tras cambiar `VITE_*` (lo haces desde el dashboard o `vercel --prod`).
+5. **Vercel** (`prosavis-crm-whatsapp`): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_WHATSAPP_PHONE_NUMBER_ID` en Production → nuevo deploy (Vite incrusta `VITE_*` en build).
+6. **Nuevo deploy en Vercel** tras cambiar `VITE_*` (dashboard o `npx vercel deploy --prod`).
 
 7. Prueba: enviar un WhatsApp al número WABA → revisar filas en `whatsapp_webhook_events`, `whatsapp_conversations`, `whatsapp_message_log`.
 
