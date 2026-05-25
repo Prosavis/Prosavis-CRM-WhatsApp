@@ -5,21 +5,34 @@ import {
   Button,
   Chip,
   Container,
+  IconButton,
   Stack,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import {
+  DarkMode as DarkModeIcon,
+  LightMode as LightModeIcon,
   Logout as LogoutIcon,
   WhatsApp as WhatsAppIcon,
 } from '@mui/icons-material';
+import { DesignTokens } from '@/constants/designSystem';
+import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/hooks/useAuth';
 
 export default function AppShell({ children }: PropsWithChildren) {
   const { profile, signOut } = useAuth();
+  const { mode, toggleMode } = useTheme();
 
   return (
-    <Box sx={{ minHeight: '100vh', py: { xs: 2, md: 3 } }}>
-      <Container maxWidth="xl">
+    <Box
+      sx={{
+        minHeight: '100vh',
+        bgcolor: 'background.default',
+        py: { xs: 2, md: 3 },
+      }}
+    >
+      <Container maxWidth={false} sx={{ maxWidth: 1920 }}>
         <Box
           component="header"
           sx={{
@@ -29,10 +42,11 @@ export default function AppShell({ children }: PropsWithChildren) {
             gap: 2,
             mb: 3,
             p: 2,
-            borderRadius: 5,
-            bgcolor: 'rgba(255, 255, 255, 0.78)',
-            border: '1px solid rgba(7, 94, 84, 0.1)',
-            backdropFilter: 'blur(18px)',
+            borderRadius: 3,
+            bgcolor: 'background.paper',
+            border: 1,
+            borderColor: 'divider',
+            boxShadow: 1,
           }}
         >
           <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
@@ -40,23 +54,21 @@ export default function AppShell({ children }: PropsWithChildren) {
               sx={{
                 width: 44,
                 height: 44,
-                borderRadius: '16px',
+                borderRadius: 2,
                 display: 'grid',
                 placeItems: 'center',
                 color: '#fff',
-                background:
-                  'linear-gradient(135deg, #075e54 0%, #00a884 100%)',
-                boxShadow: '0 14px 30px rgba(0, 168, 132, 0.3)',
+                background: `linear-gradient(135deg, ${DesignTokens.brand.primary.blue}, ${DesignTokens.brand.primary.orange})`,
               }}
             >
               <WhatsAppIcon />
             </Box>
             <Box>
-              <Typography variant="h6" sx={{ lineHeight: 1 }}>
+              <Typography variant="h6" sx={{ lineHeight: 1, fontWeight: 700 }}>
                 Prosavis CRM WhatsApp
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Inbox operativo y metricas sobre Supabase
+                WhatsApp Cloud · Supabase
               </Typography>
             </Box>
           </Stack>
@@ -66,6 +78,7 @@ export default function AppShell({ children }: PropsWithChildren) {
               component={NavLink}
               to="/whatsapp"
               variant="contained"
+              color="primary"
               startIcon={<WhatsAppIcon />}
             >
               WhatsApp Cloud
@@ -75,6 +88,11 @@ export default function AppShell({ children }: PropsWithChildren) {
               variant="outlined"
               sx={{ display: { xs: 'none', md: 'inline-flex' } }}
             />
+            <Tooltip title={mode === 'light' ? 'Modo oscuro' : 'Modo claro'}>
+              <IconButton onClick={toggleMode} color="inherit">
+                {mode === 'light' ? <DarkModeIcon /> : <LightModeIcon />}
+              </IconButton>
+            </Tooltip>
             <Button
               variant="text"
               color="inherit"

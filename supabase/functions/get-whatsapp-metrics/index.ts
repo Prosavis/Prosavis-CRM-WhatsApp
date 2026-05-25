@@ -72,6 +72,10 @@ Deno.serve(async (req) => {
     const totalFailed = outbound.filter((row) => row.status === 'failed').length;
     const totalResponses = inbound.length;
 
+    const { data: leadRows } = await supabase.from('crm_leads').select('status,opt_out,secuencia_activa');
+    const leads = leadRows ?? [];
+    const optOutCount = leads.filter((l) => l.opt_out === true).length;
+
     return jsonResponse({
       period: { from: from.toISOString(), to: new Date().toISOString() },
       totalSent,
@@ -81,14 +85,14 @@ Deno.serve(async (req) => {
       totalFailed,
       totalResponses,
       responseRate: totalSent > 0 ? totalResponses / totalSent : 0,
-      optOutCount: 0,
+      optOutCount,
       byCampaign,
       leads: {
-        total: 0,
-        enSeguimiento: 0,
-        enRebooking: 0,
-        optOut: 0,
-        agendados: 0,
+        total: leads.length,
+        enSeguimiento: leads.filter((l) => l.secuencia_activa === 'SEGUIMIENTO').length,
+        enRebooking: leads.filter((l) => l.secuencia_activa === 'REBOOKING').length,
+        optOut: optOutCount,
+        agendados: leads.filter((l) => l.status === 'AGENDADO').length,
       },
     });
   } catch (error) {

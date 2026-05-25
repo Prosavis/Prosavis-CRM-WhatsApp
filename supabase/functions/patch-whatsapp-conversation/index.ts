@@ -5,6 +5,10 @@ function toDbPatch(patch: Record<string, unknown>) {
   const dbPatch: Record<string, unknown> = {};
 
   if ('adminNotes' in patch) dbPatch.admin_notes = patch.adminNotes;
+  if ('contactName' in patch) dbPatch.contact_name = patch.contactName;
+  if ('contactPhotoUrl' in patch) dbPatch.contact_photo_url = patch.contactPhotoUrl;
+  if ('whatsappProfileName' in patch) dbPatch.whatsapp_profile_name = patch.whatsappProfileName;
+  if ('crmForceUnread' in patch) dbPatch.crm_force_unread = patch.crmForceUnread;
   if ('tagIds' in patch) dbPatch.tag_ids = patch.tagIds;
   if ('isPinned' in patch) {
     dbPatch.is_pinned = patch.isPinned;
@@ -27,7 +31,7 @@ Deno.serve(async (req) => {
   try {
     const { supabase } = await requireCrmAdmin(req);
     const body = await req.json();
-    const stableKey = String(body.stableKey ?? '').trim();
+    const stableKey = String(body.stableKey ?? body.conversationId ?? '').trim();
     const patch = toDbPatch(body.patch ?? {});
 
     if (!stableKey) return jsonResponse({ error: 'stableKey es requerido.' }, 400);

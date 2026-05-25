@@ -67,9 +67,9 @@ Deno.serve(async (req) => {
   try {
     const { supabase, user } = await requireCrmAdmin(req);
     const body = await req.json();
-    const stableKey = String(body.conversationStableKey ?? '').trim();
-    const messageBody = String(body.messageBody ?? '').trim();
-    const recipientPhone = String(body.recipientPhone ?? stableKey).trim();
+    const stableKey = String(body.conversationStableKey ?? body.to ?? '').trim();
+    const messageBody = String(body.messageBody ?? body.text ?? '').trim();
+    const recipientPhone = String(body.recipientPhone ?? body.to ?? stableKey).trim();
     const phoneNumberId = String(
       body.phoneNumberId ?? Deno.env.get('WHATSAPP_PHONE_NUMBER_ID') ?? '',
     ).trim();

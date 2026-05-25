@@ -1,0 +1,47 @@
+.wa-composer-root {
+  font: inherit;
+  line-height: 1.5;
+  min-height: 72px;
+  outline: none;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.wa-composer-paragraph {
+  margin: 0;
+  min-height: 1.5em;
+}
+
+.wa-composer-text-bold {
+  font-weight: 700;
+}
+
+.wa-composer-text-italic {
+  font-style: italic;
+}
+
+.wa-composer-text-strikethrough {
+  text-decoration: line-through;
+}
+
+.wa-composer-text-code {
+  background-color: rgba(0, 0, 0, 0.06);
+  border-radius: 3px;
+  font-family: monospace, ui-monospace, monospace;
+  font-size: 0.9em;
+  padding: 1px 4px;
+}
+
+.wa-composer-placeholder {
+  color: inherit;
+  left: 0;
+  opacity: 0.42;
+  overflow: hidden;
+  pointer-events: none;
+  position: absolute;
+  text-overflow: ellipsis;
+  top: 0;
+  user-select: none;
+  white-space: nowrap;
+}
