@@ -1,0 +1,49 @@
+project_id = "prosavis-crm-whatsapp"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+site_url = "http://localhost:3001"
+additional_redirect_urls = ["http://localhost:3001"]
+jwt_expiry = 3600
+enable_signup = true
+
+[storage]
+enabled = true
+file_size_limit = "25MiB"
+
+[functions.get-whatsapp-metrics]
+verify_jwt = true
+
+[functions.list-whatsapp-message-log]
+verify_jwt = true
+
+[functions.send-whatsapp-chat-message]
+verify_jwt = true
+
+[functions.mark-whatsapp-as-read]
+verify_jwt = true
+
+[functions.patch-whatsapp-conversation]
+verify_jwt = true
+
+[functions.get-whatsapp-automation-setting]
+verify_jwt = true
+
+[functions.set-whatsapp-automation-setting]
+verify_jwt = true
