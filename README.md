@@ -33,6 +33,12 @@ y copia la anon key que entrega `npx supabase start`.
 Para usar Supabase remoto, crea `.env.local` desde `.env.example` y completa
 las variables con la URL y publishable/anon key del proyecto remoto.
 
+## Despliegue
+
+- Supabase remoto: `https://djzwjaegxbhlefanmmee.supabase.co`
+- Vercel: `https://prosavis-crm-whatsapp.vercel.app`
+- El admin remoto inicial usa el correo `support@prosavis.com`.
+
 ## Verificacion
 
 ```powershell
