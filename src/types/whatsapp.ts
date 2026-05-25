@@ -37,7 +37,10 @@ export interface WhatsAppMessage {
   mediaType?: 'image' | 'audio' | 'video' | 'document' | 'sticker';
   mediaUrl?: string;
   storageUrl?: string;
+  storagePath?: string;
   caption?: string;
+  filename?: string;
+  mimeType?: string;
   status: string;
   waMessageId?: string;
   intent?: string;

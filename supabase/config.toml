@@ -47,3 +47,9 @@ verify_jwt = true
 
 [functions.set-whatsapp-automation-setting]
 verify_jwt = true
+
+[functions.on-whatsapp-webhook]
+verify_jwt = false
+
+[functions.get-whatsapp-media-signed-url]
+verify_jwt = true

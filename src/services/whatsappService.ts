@@ -63,7 +63,10 @@ function mapMessage(row: MessageRow): WhatsAppMessage {
     mediaType: row.media_type ?? undefined,
     mediaUrl: row.media_url ?? undefined,
     storageUrl: row.storage_url ?? undefined,
+    storagePath: row.storage_path ?? undefined,
     caption: row.caption ?? undefined,
+    filename: row.filename ?? undefined,
+    mimeType: row.mime_type ?? undefined,
     status: row.status,
     waMessageId: row.wa_message_id ?? undefined,
     intent: row.intent ?? undefined,
@@ -294,4 +297,20 @@ export async function setWhatsAppAutomationSetting(enabled: boolean): Promise<vo
   });
 
   if (error) throw error;
+}
+
+export async function getWhatsAppMediaSignedUrl(params: {
+  mediaAssetId?: string;
+  storagePath?: string;
+  bucketId?: string;
+  expiresIn?: number;
+}): Promise<string> {
+  const { data, error } = await supabase.functions.invoke<{ signedUrl: string }>(
+    'get-whatsapp-media-signed-url',
+    { body: params },
+  );
+
+  if (error) throw error;
+  if (!data?.signedUrl) throw new Error('No se pudo generar URL firmada del archivo.');
+  return data.signedUrl;
 }

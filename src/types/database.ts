@@ -140,6 +140,87 @@ export interface Database {
         };
         Update: Partial<Database['public']['Tables']['platform_settings']['Insert']>;
       };
+      whatsapp_webhook_events: {
+        Row: {
+          id: string;
+          event_type: string;
+          payload: Json;
+          signature: string | null;
+          verified: boolean;
+          processing_mode: 'shadow' | 'active';
+          processed: boolean;
+          error_message: string | null;
+          received_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['whatsapp_webhook_events']['Row']>;
+        Update: Partial<Database['public']['Tables']['whatsapp_webhook_events']['Row']>;
+      };
+      whatsapp_media_assets: {
+        Row: {
+          id: string;
+          message_log_id: string | null;
+          conversation_stable_key: string | null;
+          bucket_id: string;
+          storage_path: string;
+          media_id: string | null;
+          mime_type: string | null;
+          size_bytes: number | null;
+          sha256: string | null;
+          expires_at: string | null;
+          created_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['whatsapp_media_assets']['Row']> & {
+          storage_path: string;
+        };
+        Update: Partial<Database['public']['Tables']['whatsapp_media_assets']['Row']>;
+      };
+      whatsapp_templates: {
+        Row: {
+          id: string;
+          name: string;
+          language: string;
+          category: string | null;
+          status: string;
+          components: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['whatsapp_templates']['Row']> & {
+          name: string;
+        };
+        Update: Partial<Database['public']['Tables']['whatsapp_templates']['Row']>;
+      };
+      whatsapp_snippets: {
+        Row: {
+          id: string;
+          title: string;
+          body: string;
+          is_active: boolean;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['whatsapp_snippets']['Row']> & {
+          title: string;
+          body: string;
+        };
+        Update: Partial<Database['public']['Tables']['whatsapp_snippets']['Row']>;
+      };
+      whatsapp_stickers: {
+        Row: {
+          id: string;
+          name: string;
+          storage_path: string;
+          created_by: string | null;
+          archived: boolean;
+          created_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['whatsapp_stickers']['Row']> & {
+          name: string;
+          storage_path: string;
+        };
+        Update: Partial<Database['public']['Tables']['whatsapp_stickers']['Row']>;
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

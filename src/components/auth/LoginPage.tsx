@@ -105,8 +105,8 @@ export default function LoginPage({ unauthorized = false }: LoginPageProps) {
                 {submitting ? 'Entrando...' : 'Entrar al CRM'}
               </Button>
               <Typography variant="body2" color="text.secondary">
-                En local crea un usuario desde Supabase Studio y agrega su id a
-                `admin_profiles`.
+                En local usa el usuario admin del seed o crea otro desde Supabase
+                Studio y agregalo a `admin_profiles`.
               </Typography>
             </Stack>
           </CardContent>

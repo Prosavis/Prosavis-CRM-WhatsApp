@@ -27,6 +27,21 @@ VITE_SUPABASE_URL=
 VITE_SUPABASE_ANON_KEY=
 ```
 
+Para usar Supabase local, deja `VITE_SUPABASE_URL=http://127.0.0.1:54321`
+y copia la anon key que entrega `npx supabase start`.
+
+Para usar Supabase remoto, crea `.env.local` desde `.env.example` y completa
+las variables con la URL y publishable/anon key del proyecto remoto.
+
+## Verificacion
+
+```powershell
+npm run type-check
+npm run lint
+npm run build
+npm run dev
+```
+
 ## Alcance Fase 1
 
 - Inbox con conversaciones y mensajes por Supabase Realtime.

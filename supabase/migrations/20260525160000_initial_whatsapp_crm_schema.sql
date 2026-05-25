@@ -110,6 +110,63 @@ create table if not exists public.whatsapp_blocklist (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.whatsapp_webhook_events (
+  id uuid primary key default gen_random_uuid(),
+  event_type text not null default 'unknown',
+  payload jsonb not null default '{}',
+  signature text,
+  verified boolean not null default false,
+  processing_mode text not null default 'shadow' check (processing_mode in ('shadow', 'active')),
+  processed boolean not null default false,
+  error_message text,
+  received_at timestamptz not null default now()
+);
+
+create table if not exists public.whatsapp_media_assets (
+  id uuid primary key default gen_random_uuid(),
+  message_log_id uuid references public.whatsapp_message_log(id) on delete set null,
+  conversation_stable_key text references public.whatsapp_conversations(stable_key) on delete cascade,
+  bucket_id text not null default 'whatsapp-media',
+  storage_path text not null,
+  media_id text,
+  mime_type text,
+  size_bytes bigint,
+  sha256 text,
+  expires_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.whatsapp_templates (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  language text not null default 'es',
+  category text,
+  status text not null default 'draft',
+  components jsonb not null default '[]',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (name, language)
+);
+
+create table if not exists public.whatsapp_snippets (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  body text not null,
+  is_active boolean not null default true,
+  created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.whatsapp_stickers (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  storage_path text not null,
+  created_by uuid references auth.users(id),
+  archived boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
 create index if not exists whatsapp_conversations_last_message_at_idx
   on public.whatsapp_conversations (last_message_at desc);
 create index if not exists whatsapp_conversations_phone_number_id_idx
@@ -125,6 +182,32 @@ create index if not exists whatsapp_message_log_campaign_idx
 create index if not exists whatsapp_message_log_visible_created_idx
   on public.whatsapp_message_log (created_at)
   where hidden_from_panel = false;
+create index if not exists whatsapp_webhook_events_received_at_idx
+  on public.whatsapp_webhook_events (received_at desc);
+create index if not exists whatsapp_media_assets_stable_key_idx
+  on public.whatsapp_media_assets (conversation_stable_key, created_at desc);
+create index if not exists whatsapp_templates_status_idx
+  on public.whatsapp_templates (status);
+create index if not exists platform_settings_updated_by_idx
+  on public.platform_settings (updated_by);
+create index if not exists whatsapp_admin_presence_admin_uid_idx
+  on public.whatsapp_admin_presence (admin_uid);
+create index if not exists whatsapp_admin_presence_stable_key_idx
+  on public.whatsapp_admin_presence (conversation_stable_key);
+create index if not exists whatsapp_blocklist_created_by_idx
+  on public.whatsapp_blocklist (created_by);
+create index if not exists whatsapp_chat_tags_created_by_idx
+  on public.whatsapp_chat_tags (created_by);
+create index if not exists whatsapp_conversations_assigned_to_idx
+  on public.whatsapp_conversations (assigned_to);
+create index if not exists whatsapp_media_assets_message_log_id_idx
+  on public.whatsapp_media_assets (message_log_id);
+create index if not exists whatsapp_message_log_agent_uid_idx
+  on public.whatsapp_message_log (agent_uid);
+create index if not exists whatsapp_snippets_created_by_idx
+  on public.whatsapp_snippets (created_by);
+create index if not exists whatsapp_stickers_created_by_idx
+  on public.whatsapp_stickers (created_by);
 
 create or replace function app_private.is_crm_admin()
 returns boolean
@@ -142,12 +225,30 @@ as $$
   );
 $$;
 
+create or replace function app_private.is_crm_super_admin()
+returns boolean
+language sql
+security definer
+set search_path = ''
+stable
+as $$
+  select exists (
+    select 1
+    from public.admin_profiles
+    where id = auth.uid()
+      and is_active = true
+      and role = 'super_admin'
+  );
+$$;
+
 grant usage on schema app_private to authenticated;
 grant execute on function app_private.is_crm_admin() to authenticated;
+grant execute on function app_private.is_crm_super_admin() to authenticated;
 
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
+set search_path = ''
 as $$
 begin
   new.updated_at = now();
@@ -165,6 +266,16 @@ create trigger set_whatsapp_conversations_updated_at
 before update on public.whatsapp_conversations
 for each row execute function public.set_updated_at();
 
+drop trigger if exists set_whatsapp_templates_updated_at on public.whatsapp_templates;
+create trigger set_whatsapp_templates_updated_at
+before update on public.whatsapp_templates
+for each row execute function public.set_updated_at();
+
+drop trigger if exists set_whatsapp_snippets_updated_at on public.whatsapp_snippets;
+create trigger set_whatsapp_snippets_updated_at
+before update on public.whatsapp_snippets
+for each row execute function public.set_updated_at();
+
 alter table public.admin_profiles enable row level security;
 alter table public.whatsapp_conversations enable row level security;
 alter table public.whatsapp_message_log enable row level security;
@@ -172,35 +283,24 @@ alter table public.whatsapp_chat_tags enable row level security;
 alter table public.whatsapp_admin_presence enable row level security;
 alter table public.platform_settings enable row level security;
 alter table public.whatsapp_blocklist enable row level security;
+alter table public.whatsapp_webhook_events enable row level security;
+alter table public.whatsapp_media_assets enable row level security;
+alter table public.whatsapp_templates enable row level security;
+alter table public.whatsapp_snippets enable row level security;
+alter table public.whatsapp_stickers enable row level security;
 
 create policy "Admins read own profile"
 on public.admin_profiles
 for select
 to authenticated
-using (id = auth.uid() and is_active = true);
+using (id = (select auth.uid()) and is_active = true);
 
 create policy "Super admins manage profiles"
 on public.admin_profiles
 for all
 to authenticated
-using (
-  exists (
-    select 1
-    from public.admin_profiles profile
-    where profile.id = auth.uid()
-      and profile.is_active = true
-      and profile.role = 'super_admin'
-  )
-)
-with check (
-  exists (
-    select 1
-    from public.admin_profiles profile
-    where profile.id = auth.uid()
-      and profile.is_active = true
-      and profile.role = 'super_admin'
-  )
-);
+using (app_private.is_crm_super_admin())
+with check (app_private.is_crm_super_admin());
 
 create policy "CRM admins read conversations"
 on public.whatsapp_conversations
@@ -251,6 +351,40 @@ with check (app_private.is_crm_admin());
 
 create policy "CRM admins manage blocklist"
 on public.whatsapp_blocklist
+for all
+to authenticated
+using (app_private.is_crm_admin())
+with check (app_private.is_crm_admin());
+
+create policy "CRM admins read webhook events"
+on public.whatsapp_webhook_events
+for select
+to authenticated
+using (app_private.is_crm_admin());
+
+create policy "CRM admins manage media assets"
+on public.whatsapp_media_assets
+for all
+to authenticated
+using (app_private.is_crm_admin())
+with check (app_private.is_crm_admin());
+
+create policy "CRM admins manage templates"
+on public.whatsapp_templates
+for all
+to authenticated
+using (app_private.is_crm_admin())
+with check (app_private.is_crm_admin());
+
+create policy "CRM admins manage snippets"
+on public.whatsapp_snippets
+for all
+to authenticated
+using (app_private.is_crm_admin())
+with check (app_private.is_crm_admin());
+
+create policy "CRM admins manage stickers"
+on public.whatsapp_stickers
 for all
 to authenticated
 using (app_private.is_crm_admin())
