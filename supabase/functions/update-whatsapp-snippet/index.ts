@@ -1,6 +1,6 @@
 ﻿import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { requireCrmAdmin } from '../_shared/supabase.ts';
-import { formatError } from '../_shared/whatsappOutbound.ts';
+import { formatError } from '../_shared/errors.ts';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });

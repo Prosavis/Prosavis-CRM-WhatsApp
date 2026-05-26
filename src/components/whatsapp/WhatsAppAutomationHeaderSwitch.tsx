@@ -41,7 +41,7 @@ const WhatsAppAutomationHeaderSwitch: React.FC<WhatsAppAutomationHeaderSwitchPro
 
   return (
     <>
-      <Tooltip title="Bot automatizado (Gemini): respuestas automáticas a mensajes entrantes en esta línea">
+      <Tooltip title="Bot automatizado (IA): respuestas automáticas a mensajes entrantes en esta línea">
         <Box
           data-tour={tourDataTour}
           sx={{

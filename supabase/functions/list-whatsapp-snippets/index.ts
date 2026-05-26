@@ -1,6 +1,6 @@
 ﻿import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { requireCrmAdmin } from '../_shared/supabase.ts';
-import { formatError } from '../_shared/whatsappOutbound.ts';
+import { formatError } from '../_shared/errors.ts';
 
 const DEFAULT_SNIPPETS = [
   { shortcut: '/gracias', label: 'Agradecimiento', body: '¡Gracias por comunicarte con Prosavis! ¿Hay algo más en lo que te pueda ayudar?' },

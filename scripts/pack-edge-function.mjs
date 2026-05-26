@@ -4,8 +4,26 @@ import path from 'path';
 const root = path.resolve('supabase/functions');
 const sharedDir = path.join(root, '_shared');
 
-function readShared() {
-  return ['cors.ts', 'supabase.ts', 'stub.ts'].map((f) => ({
+function readSharedFor(indexContent) {
+  const needed = new Set(['cors.ts', 'supabase.ts']);
+  for (const match of indexContent.matchAll(/from '\.\.\/_shared\/([^']+)'/g)) {
+    needed.add(match[1]);
+  }
+
+  const scanned = new Set();
+  while (true) {
+    const pending = [...needed].filter((f) => !scanned.has(f));
+    if (!pending.length) break;
+    for (const file of pending) {
+      scanned.add(file);
+      const content = fs.readFileSync(path.join(sharedDir, file), 'utf8');
+      for (const match of content.matchAll(/from '\.\/([^']+)'/g)) {
+        needed.add(match[1]);
+      }
+    }
+  }
+
+  return [...needed].sort().map((f) => ({
     name: `../_shared/${f}`,
     content: fs.readFileSync(path.join(sharedDir, f), 'utf8'),
   }));
@@ -13,9 +31,9 @@ function readShared() {
 
 export function packFunction(name) {
   const indexPath = path.join(root, name, 'index.ts');
-  const indexContent = fs.readFileSync(indexPath, 'utf8');
-  const files = [{ name: 'index.ts', content: indexContent }, ...readShared()];
-  const usesStub = indexContent.includes("serveStub");
+  const indexContent = fs.readFileSync(indexPath, 'utf8').replace(/^\uFEFF/, '');
+  const usesStub = indexContent.includes('serveStub');
+  const files = [{ name: 'index.ts', content: indexContent }, ...readSharedFor(indexContent)];
   if (!usesStub) {
     return files.filter((f) => !f.name.endsWith('stub.ts'));
   }

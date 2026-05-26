@@ -1,7 +1,7 @@
 ﻿import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { requireCrmAdmin } from '../_shared/supabase.ts';
 import { formatError } from '../_shared/whatsappOutbound.ts';
-import { geminiGenerateText } from '../_shared/geminiClient.ts';
+import { getNvidiaApiKey, llmGenerateText, resolveNvidiaModel, DEFAULT_TEMPLATE_MODEL } from '../_shared/llmClient.ts';
 
 function extractVariables(body: string): string[] {
   const matches = body.match(/\{\{([^}]+)\}\}/g) ?? [];
@@ -17,11 +17,12 @@ Deno.serve(async (req) => {
     const prompt = String(body.prompt ?? '').trim();
     if (!prompt) return jsonResponse({ error: 'Se requiere prompt.' }, 400);
 
-    const apiKey = Deno.env.get('GEMINI_API_KEY')?.trim();
-    if (!apiKey) return jsonResponse({ error: 'GEMINI_API_KEY no configurada.' }, 412);
+    const apiKey = getNvidiaApiKey();
+    if (!apiKey) return jsonResponse({ error: 'NVIDIA_API_KEY no configurada.' }, 412);
 
-    const generated = await geminiGenerateText({
+    const generated = await llmGenerateText({
       apiKey,
+      model: resolveNvidiaModel('NVIDIA_MODEL_TEMPLATE', DEFAULT_TEMPLATE_MODEL),
       systemInstruction:
         'Genera plantillas cortas de WhatsApp para Prosavis (servicios de limpieza en Colombia). ' +
         'Usa tono cordial y variables {{nombre}}, {{fecha}}, {{precio}} cuando aplique. Devuelve solo el texto.',

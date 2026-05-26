@@ -1014,7 +1014,11 @@ export interface WhatsAppSnippet {
 }
 
 export async function listWhatsAppSnippets(): Promise<WhatsAppSnippet[]> {
-  const data = await invokeFn<{ snippets: WhatsAppSnippet[] }>('list-whatsapp-snippets', {});
+  const data = await invokeFn<{ snippets?: WhatsAppSnippet[]; error?: string }>(
+    'list-whatsapp-snippets',
+    {},
+  );
+  if (data.error) throw new Error(data.error);
   return data.snippets ?? [];
 }
 
@@ -1072,10 +1076,11 @@ function normalizeWhatsAppBusinessProfile(
 export async function getWhatsAppBusinessProfile(
   phoneNumberId?: string,
 ): Promise<WhatsAppBusinessProfile> {
-  const data = await invokeFn<{ profile?: Partial<WhatsAppBusinessProfile> }>(
+  const data = await invokeFn<{ profile?: Partial<WhatsAppBusinessProfile>; error?: string }>(
     'get-whatsapp-business-profile',
     { phoneNumberId },
   );
+  if (data.error) throw new Error(data.error);
   return normalizeWhatsAppBusinessProfile(data.profile);
 }
 

@@ -26,4 +26,9 @@ supabase/functions/.env*
 
 .vercel
 scripts/.deploy-*.json
+scripts/.edge-deploy/
 scripts/deploy-manifest.json
+scripts/firebase-export/.env
+scripts/firebase-export/secrets/
+scripts/firebase-export/output/
+scripts/firebase-export/node_modules/

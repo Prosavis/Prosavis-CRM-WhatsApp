@@ -1,0 +1,26 @@
+{
+  "name": "prosavis-firebase-export",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "migrate:inventory": "tsx inventory.ts",
+    "migrate:export": "tsx export.ts",
+    "migrate:storage": "tsx migrate-storage.ts",
+    "migrate:validate": "tsx validate.ts",
+    "migrate:sync-admins": "tsx sync-admins.ts",
+    "migrate:capacity": "tsx capacity-report.ts",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.106.2",
+    "dotenv": "^16.4.7",
+    "firebase-admin": "^13.4.0",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.3",
+    "tsx": "^4.19.4",
+    "typescript": "~6.0.2"
+  }
+}

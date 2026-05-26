@@ -69,6 +69,7 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
 
   const [snippets, setSnippets] = useState<WhatsAppSnippet[]>([]);
   const [snippetsLoading, setSnippetsLoading] = useState(true);
+  const [snippetsError, setSnippetsError] = useState<string | null>(null);
   const [snippetDialog, setSnippetDialog] = useState(false);
   const [snippetEdit, setSnippetEdit] = useState<WhatsAppSnippet | null>(null);
   const [snippetShortcut, setSnippetShortcut] = useState('');
@@ -102,11 +103,13 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
 
   const loadSnippets = useCallback(async () => {
     setSnippetsLoading(true);
+    setSnippetsError(null);
     try {
       const result = await listWhatsAppSnippets();
       setSnippets(Array.isArray(result) ? result : []);
-    } catch (err) {
-      console.error('Error loading snippets:', err);
+    } catch (err: unknown) {
+      setSnippetsError((err as Error)?.message || 'Error al cargar atajos');
+      setSnippets([]);
     } finally {
       setSnippetsLoading(false);
     }
@@ -319,11 +322,17 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
 
               <Divider sx={{ mb: 1 }} />
 
+              {snippetsError && (
+                <Alert severity="error" sx={{ mb: 2 }}>
+                  {snippetsError}
+                </Alert>
+              )}
+
               {snippetsLoading ? (
                 <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
                   <CircularProgress />
                 </Box>
-              ) : snippets.length === 0 ? (
+              ) : snippetsError ? null : snippets.length === 0 ? (
                 <Typography color="text.secondary" sx={{ py: 3, textAlign: 'center' }}>
                   No hay atajos configurados
                 </Typography>

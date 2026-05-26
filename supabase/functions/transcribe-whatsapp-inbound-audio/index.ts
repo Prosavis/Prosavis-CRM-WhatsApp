@@ -1,9 +1,13 @@
 ﻿import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { requireCrmAdmin } from '../_shared/supabase.ts';
 import { formatError, WHATSAPP_API_VERSION } from '../_shared/whatsappOutbound.ts';
-import { geminiGenerateText, bytesToBase64 } from '../_shared/geminiClient.ts';
+import {
+  DEFAULT_TRANSCRIBE_MODEL,
+  getNvidiaApiKey,
+  llmTranscribeAudio,
+  resolveNvidiaModel,
+} from '../_shared/llmClient.ts';
 
-const TRANSCRIPTION_MODEL = 'gemini-2.5-flash';
 const MAX_STT_AUDIO_BYTES = 16 * 1024 * 1024;
 
 function isVoiceTranscriptionEnabled(): boolean {
@@ -24,46 +28,6 @@ async function downloadWhatsAppMediaBinary(mediaId: string, accessToken: string)
   if (!blobRes.ok) throw new Error('No se pudo descargar media de Meta');
   const buffer = new Uint8Array(await blobRes.arrayBuffer());
   return { buffer, mimeType };
-}
-
-async function transcribeWithGemini(params: {
-  apiKey: string;
-  buffer: Uint8Array;
-  mimeType: string;
-}): Promise<string> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${TRANSCRIPTION_MODEL}:generateContent?key=${params.apiKey}`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{
-        role: 'user',
-        parts: [
-          {
-            inlineData: {
-              mimeType: params.mimeType,
-              data: bytesToBase64(params.buffer),
-            },
-          },
-          {
-            text:
-              'Transcribe este audio de WhatsApp en español de Colombia. ' +
-              'Devuelve solo el texto; si no se entiende, indica que no fue posible transcribir sin inventar.',
-          },
-        ],
-      }],
-      generationConfig: { temperature: 0, maxOutputTokens: 2048 },
-    }),
-  });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error((data as { error?: { message?: string } })?.error?.message ?? 'Error Gemini');
-  }
-  const parts = (data as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> })
-    ?.candidates?.[0]?.content?.parts ?? [];
-  const transcript = parts.map((part) => part.text ?? '').join('').trim();
-  if (!transcript) throw new Error('Gemini no devolvió una transcripción');
-  return transcript;
 }
 
 Deno.serve(async (req) => {
@@ -96,9 +60,11 @@ Deno.serve(async (req) => {
     }
 
     const accessToken = Deno.env.get('WHATSAPP_ACCESS_TOKEN')?.trim();
-    const apiKey = Deno.env.get('GEMINI_API_KEY')?.trim();
+    const apiKey = getNvidiaApiKey();
     if (!accessToken) return jsonResponse({ error: 'WHATSAPP_ACCESS_TOKEN no configurado.' }, 412);
-    if (!apiKey) return jsonResponse({ error: 'GEMINI_API_KEY no configurada.' }, 412);
+    if (!apiKey) return jsonResponse({ error: 'NVIDIA_API_KEY no configurada.' }, 412);
+
+    const transcriptionModel = resolveNvidiaModel('NVIDIA_MODEL_TRANSCRIBE', DEFAULT_TRANSCRIBE_MODEL);
 
     try {
       const media = await downloadWhatsAppMediaBinary(String(row.media_id), accessToken);
@@ -109,16 +75,17 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: 'El audio supera el límite de 16 MB para transcripción.' }, 400);
       }
 
-      const transcript = await transcribeWithGemini({
+      const transcript = await llmTranscribeAudio({
         apiKey,
         buffer: media.buffer,
         mimeType: media.mimeType,
+        model: transcriptionModel,
       });
 
       await supabase.from('whatsapp_message_log').update({
         voice_transcription: transcript,
         voice_transcription_at: new Date().toISOString(),
-        voice_transcription_model: TRANSCRIPTION_MODEL,
+        voice_transcription_model: transcriptionModel,
         voice_transcription_mime_type: media.mimeType,
         voice_transcription_bytes: media.buffer.byteLength,
         voice_transcription_status: 'completed',

@@ -2,6 +2,17 @@
 
 Aplicativo independiente para operar Inbox, Métricas, Leads y Descuentos de WhatsApp Cloud con **Supabase** (sin Firebase).
 
+**Migración:** datos históricos importados desde Firestore (mayo 2026).
+
+**Documentación centralizada** (prosavis-firebase):
+
+- [MIGRACION_SUPABASE_CRM.md](https://github.com/Prosavis/prosavis-firebase/blob/main/docs/whatsapp/MIGRACION_SUPABASE_CRM.md) — cutover, runbook, rollback
+- [WHATSAPP_CRM_SUPABASE_ARQUITECTURA.md](https://github.com/Prosavis/prosavis-firebase/blob/main/docs/whatsapp/WHATSAPP_CRM_SUPABASE_ARQUITECTURA.md) — schema, Edge Functions, Storage
+- [crm-supabase-etl-runbook.md](https://github.com/Prosavis/prosavis-firebase/blob/main/docs/operacion-y-despliegue/crm-supabase-etl-runbook.md) — scripts ETL, validación, capacidad
+- [guia-operativa-meta-whatsapp.md](https://github.com/Prosavis/prosavis-firebase/blob/main/docs/operacion-y-despliegue/guia-operativa-meta-whatsapp.md) — webhook Meta, plantillas WABA
+
+Ruta local en monorepo: `prosavis-firebase/docs/whatsapp/` y `docs/operacion-y-despliegue/`.
+
 ## URLs y proyectos
 
 | Recurso | Valor |
@@ -66,6 +77,20 @@ Referencia local en `.env.example` (solo para `supabase functions serve`).
 | `ENABLE_META_SEND` | `true` = envío real; `false` = mantenimiento (sin envíos) |
 | `WHATSAPP_WEBHOOK_MODE` | `shadow` = solo audita; `active` = crea conversaciones/mensajes |
 | `META_GRAPH_API_VERSION` | Versión Graph API (ej. `v21.0`) |
+| `NVIDIA_API_KEY` | IA en inbox: sugerencias, plantillas, booking JSON, transcripción audio |
+| `NVIDIA_MODEL_REPLY` | Modelo reply (default `meta/llama-4-maverick-17b-128e-instruct`) |
+| `NVIDIA_MODEL_JSON` | Modelo JSON booking (default `nvidia/nemotron-mini-4b-instruct`) |
+| `NVIDIA_MODEL_TEMPLATE` | Modelo plantillas IA (default igual que reply) |
+| `NVIDIA_MODEL_TRANSCRIBE` | Modelo STT (default `google/gemma-3n-e4b-it`) |
+
+Configuración rápida con archivo local (ver `.env.secrets.local.example`):
+
+```powershell
+Copy-Item .env.secrets.local.example .env.secrets.local
+# Editar .env.secrets.local con NVIDIA_API_KEY y tokens Meta
+.\scripts\set-supabase-secrets.ps1
+.\scripts\deploy-wave-a-llm.ps1
+```
 
 ## Checklist operativo (después de configurar tokens)
 
@@ -78,12 +103,25 @@ Referencia local en `.env.example` (solo para `supabase functions serve`).
 
 7. Prueba: enviar un WhatsApp al número WABA → revisar filas en `whatsapp_webhook_events`, `whatsapp_conversations`, `whatsapp_message_log`.
 
+## Scripts ETL (Firebase → Supabase)
+
+En `scripts/firebase-export/`:
+
+```powershell
+npm run migrate:inventory
+npm run migrate:export -- --phase=whatsapp
+npm run migrate:export -- --phase=crm
+npm run migrate:validate
+npm run migrate:storage -- --prefix=whatsapp-media/ --full-prefix
+npm run migrate:sync-admins
+npm run migrate:capacity
+```
+
+Delta incremental: `--since=2026-05-26T00:00:00.000Z`
+
 ## Edge Functions en remoto
 
-**Todas las funciones del repo están desplegadas** en `djzwjaegxbhlefanmmee` (42 slugs, mayo 2026).
-
-- **Implementación completa:** webhook, envío de chat, métricas, log, settings, media, patch/mark read, purge, leads→conversación, plantillas IA (list), etc.
-- **Stub autenticado** (evitan 404; respuesta mínima hasta portar lógica del Panel): reacciones, bulk, plantillas Meta, stickers/snippets CRUD, sugerencia IA, transcripción, Wompi, etc.
+- Edge Functions en remoto (42 slugs, mayo 2026) — ver [WHATSAPP_CRM_SUPABASE_ARQUITECTURA.md](https://github.com/Prosavis/prosavis-firebase/blob/main/docs/whatsapp/WHATSAPP_CRM_SUPABASE_ARQUITECTURA.md) en prosavis-firebase.
 
 Para **re-desplegar** tras cambiar código en `supabase/functions/`:
 

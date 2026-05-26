@@ -6,7 +6,7 @@ import {
   getConversationHistory,
   mergedTurnsToTranscript,
 } from '../_shared/conversationHistory.ts';
-import { geminiGenerateJson, geminiGenerateText } from '../_shared/geminiClient.ts';
+import { getNvidiaApiKey, llmGenerateJson, llmGenerateText } from '../_shared/llmClient.ts';
 import {
   getStaticCleaningWompiReference,
   getStaticCleaningWompiUrl,
@@ -62,8 +62,8 @@ Deno.serve(async (req) => {
 
     if (!stableKey) return jsonResponse({ error: 'Se requiere stableKey.' }, 400);
 
-    const apiKey = Deno.env.get('GEMINI_API_KEY')?.trim();
-    if (!apiKey) return jsonResponse({ error: 'GEMINI_API_KEY no configurada.' }, 412);
+    const apiKey = getNvidiaApiKey();
+    if (!apiKey) return jsonResponse({ error: 'NVIDIA_API_KEY no configurada.' }, 412);
 
     const history = await getConversationHistory(supabase, stableKey, 40, {
       includeVoiceTranscriptions,
@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
 
     const phone = normalizePhone(stableKey);
     const transcript = mergedTurnsToTranscript(merged);
-    const bookingContext = await geminiGenerateJson<ReturnType<typeof emptyBookingContext>>({
+    const bookingContext = await llmGenerateJson<ReturnType<typeof emptyBookingContext>>({
       apiKey,
       prompt:
         'Analiza esta conversación de WhatsApp de Prosavis (limpieza en Colombia) y responde SOLO JSON con ' +
@@ -105,7 +105,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    const suggestion = await geminiGenerateText({
+    const suggestion = await llmGenerateText({
       apiKey,
       systemInstruction:
         'Eres un agente de ventas de Prosavis (limpieza residencial en Colombia). Responde en español, cordial y concreto. ' +
