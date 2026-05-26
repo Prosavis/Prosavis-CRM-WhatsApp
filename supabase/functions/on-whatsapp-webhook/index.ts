@@ -115,8 +115,14 @@ function getMessageContent(message: JsonRecord): {
   caption: string | null;
   mimeType: string | null;
   filename: string | null;
+  location: JsonRecord | null;
+  contacts: unknown[] | null;
+  reactionTo: string | null;
+  reactionRemoved: boolean;
+  isVoiceNote: boolean;
 } {
   const type = getString(message.type) || 'unknown';
+
   if (type === 'text') {
     const text = asRecord(message.text);
     return {
@@ -126,6 +132,63 @@ function getMessageContent(message: JsonRecord): {
       caption: null,
       mimeType: null,
       filename: null,
+      location: null,
+      contacts: null,
+      reactionTo: null,
+      reactionRemoved: false,
+      isVoiceNote: false,
+    };
+  }
+
+  if (type === 'location') {
+    const location = asRecord(message.location);
+    return {
+      messageBody: getString(location.name) || getString(location.address) || '[ubicación]',
+      mediaType: null,
+      mediaId: null,
+      caption: null,
+      mimeType: null,
+      filename: null,
+      location,
+      contacts: null,
+      reactionTo: null,
+      reactionRemoved: false,
+      isVoiceNote: false,
+    };
+  }
+
+  if (type === 'contacts') {
+    const contacts = asArray(message.contacts);
+    return {
+      messageBody: '[contacto]',
+      mediaType: null,
+      mediaId: null,
+      caption: null,
+      mimeType: null,
+      filename: null,
+      location: null,
+      contacts,
+      reactionTo: null,
+      reactionRemoved: false,
+      isVoiceNote: false,
+    };
+  }
+
+  if (type === 'reaction') {
+    const reaction = asRecord(message.reaction);
+    const emoji = getString(reaction.emoji);
+    return {
+      messageBody: emoji,
+      mediaType: null,
+      mediaId: null,
+      caption: null,
+      mimeType: null,
+      filename: null,
+      location: null,
+      contacts: null,
+      reactionTo: getString(reaction.message_id) || null,
+      reactionRemoved: emoji === '',
+      isVoiceNote: false,
     };
   }
 
@@ -138,6 +201,11 @@ function getMessageContent(message: JsonRecord): {
       caption: null,
       mimeType: null,
       filename: null,
+      location: null,
+      contacts: null,
+      reactionTo: null,
+      reactionRemoved: false,
+      isVoiceNote: false,
     };
   }
 
@@ -152,7 +220,66 @@ function getMessageContent(message: JsonRecord): {
     caption,
     mimeType: getString(media.mime_type) || null,
     filename,
+    location: null,
+    contacts: null,
+    reactionTo: null,
+    reactionRemoved: false,
+    isVoiceNote: type === 'audio' && media.voice === true,
   };
+}
+
+async function persistInboundMedia(params: {
+  supabase: ReturnType<typeof getServiceClient>;
+  mediaId: string;
+  mimeType: string | null;
+  stableKey: string;
+}): Promise<{ storagePath: string | null; storageUrl: string | null }> {
+  const accessToken = Deno.env.get('WHATSAPP_ACCESS_TOKEN')?.trim();
+  if (!accessToken) return { storagePath: null, storageUrl: null };
+
+  try {
+    const metaRes = await fetch(`https://graph.facebook.com/v21.0/${params.mediaId}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const metaJson = await metaRes.json();
+    if (!metaRes.ok) return { storagePath: null, storageUrl: null };
+
+    const downloadUrl = getString(metaJson.url);
+    const mimeType = getString(metaJson.mime_type) || params.mimeType || 'application/octet-stream';
+    if (!downloadUrl) return { storagePath: null, storageUrl: null };
+
+    const binaryRes = await fetch(downloadUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!binaryRes.ok) return { storagePath: null, storageUrl: null };
+
+    const bytes = new Uint8Array(await binaryRes.arrayBuffer());
+    const ext = mimeType.includes('jpeg') ? 'jpg'
+      : mimeType.includes('png') ? 'png'
+      : mimeType.includes('webp') ? 'webp'
+      : mimeType.includes('ogg') ? 'ogg'
+      : mimeType.includes('mpeg') ? 'mp3'
+      : mimeType.includes('pdf') ? 'pdf'
+      : mimeType.includes('mp4') ? 'mp4'
+      : 'bin';
+    const storagePath = `${params.stableKey}/${params.mediaId}.${ext}`;
+
+    const { error: uploadError } = await params.supabase.storage
+      .from('whatsapp-media')
+      .upload(storagePath, bytes, { upsert: true, contentType: mimeType });
+    if (uploadError) return { storagePath: null, storageUrl: null };
+
+    const { data: signed } = await params.supabase.storage
+      .from('whatsapp-media')
+      .createSignedUrl(storagePath, 7200);
+
+    return {
+      storagePath,
+      storageUrl: signed?.signedUrl ?? null,
+    };
+  } catch {
+    return { storagePath: null, storageUrl: null };
+  }
 }
 
 async function processInboundMessage(params: {
@@ -181,6 +308,19 @@ async function processInboundMessage(params: {
   const contactName = getContactName(params.contacts, senderPhone);
   const content = getMessageContent(params.message);
   const createdAt = getUnixDate(params.message.timestamp);
+
+  let storagePath: string | null = null;
+  let storageUrl: string | null = null;
+  if (content.mediaId) {
+    const persisted = await persistInboundMedia({
+      supabase: params.supabase,
+      mediaId: content.mediaId,
+      mimeType: content.mimeType,
+      stableKey: senderPhone,
+    });
+    storagePath = persisted.storagePath;
+    storageUrl = persisted.storageUrl;
+  }
 
   const { data: existingConversation, error: conversationReadError } = await params.supabase
     .from('whatsapp_conversations')
@@ -215,26 +355,51 @@ async function processInboundMessage(params: {
 
   if (conversationError) throw conversationError;
 
-  const { error: insertError } = await params.supabase.from('whatsapp_message_log').insert({
-    conversation_stable_key: senderPhone,
-    recipient_phone: senderPhone,
-    direction: 'inbound',
-    sender_type: 'user',
-    message_body: content.messageBody,
-    media_type: content.mediaType,
-    media_id: content.mediaId,
-    caption: content.caption,
-    status: 'received',
-    wa_message_id: waMessageId,
-    filename: content.filename,
-    mime_type: content.mimeType,
-    phone_number_id: phoneNumberId,
-    raw_payload: params.message,
-    created_at: createdAt,
-  });
+  const { data: insertedMessage, error: insertError } = await params.supabase
+    .from('whatsapp_message_log')
+    .insert({
+      conversation_stable_key: senderPhone,
+      recipient_phone: senderPhone,
+      direction: 'inbound',
+      sender_type: 'user',
+      message_body: content.messageBody,
+      media_type: content.mediaType,
+      media_id: content.mediaId,
+      media_url: storageUrl,
+      storage_url: storageUrl,
+      storage_path: storagePath,
+      caption: content.caption,
+      status: 'received',
+      wa_message_id: waMessageId,
+      filename: content.filename,
+      mime_type: content.mimeType,
+      phone_number_id: phoneNumberId,
+      location: content.location,
+      contacts: content.contacts,
+      reaction_to: content.reactionTo,
+      reaction_removed: content.reactionRemoved,
+      is_voice_note: content.isVoiceNote,
+      raw_payload: params.message,
+      created_at: createdAt,
+    })
+    .select('id')
+    .single();
 
   if (insertError && isUniqueViolation(insertError)) return 'duplicate';
   if (insertError) throw insertError;
+
+  if (content.mediaId && storagePath && insertedMessage?.id) {
+    await params.supabase.from('whatsapp_media_assets').insert({
+      message_log_id: insertedMessage.id,
+      conversation_stable_key: senderPhone,
+      bucket_id: 'whatsapp-media',
+      storage_path: storagePath,
+      media_id: content.mediaId,
+      mime_type: content.mimeType,
+      size_bytes: null,
+    });
+  }
+
   return 'inserted';
 }
 

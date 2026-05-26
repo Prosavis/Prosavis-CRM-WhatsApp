@@ -78,8 +78,8 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
   const [snippetError, setSnippetError] = useState<string | null>(null);
 
   const { setEnabled: setSoundsEnabled, setVolume: setSoundVolume, playClick } = useSoundEffects();
-  const [soundsOn, setSoundsOn] = useState(areSoundsEnabled);
-  const [volumePercent, setVolumePercent] = useState(Math.round(getSoundVolume() * 100));
+  const [soundsOn, setSoundsOn] = useState(() => areSoundsEnabled());
+  const [volumePercent, setVolumePercent] = useState(() => Math.round(getSoundVolume() * 100));
 
   const loadProfile = useCallback(async () => {
     setProfileLoading(true);
@@ -87,12 +87,12 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
     try {
       const p = await getWhatsAppBusinessProfile(phoneNumberId);
       setProfile(p);
-      setEditAbout(p.about);
-      setEditDescription(p.description);
-      setEditAddress(p.address);
-      setEditEmail(p.email);
-      setEditWebsite1(p.websites[0] || '');
-      setEditWebsite2(p.websites[1] || '');
+      setEditAbout(p.about ?? '');
+      setEditDescription(p.description ?? '');
+      setEditAddress(p.address ?? '');
+      setEditEmail(p.email ?? '');
+      setEditWebsite1(p.websites?.[0] ?? '');
+      setEditWebsite2(p.websites?.[1] ?? '');
     } catch (err: unknown) {
       setProfileError((err as Error)?.message || 'Error al cargar perfil');
     } finally {
@@ -104,7 +104,7 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
     setSnippetsLoading(true);
     try {
       const result = await listWhatsAppSnippets();
-      setSnippets(result);
+      setSnippets(Array.isArray(result) ? result : []);
     } catch (err) {
       console.error('Error loading snippets:', err);
     } finally {
@@ -231,7 +231,7 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
                     onChange={(e) => setEditAbout(e.target.value)}
                     fullWidth
                     size="small"
-                    helperText={`${editAbout.length}/139 caracteres`}
+                    helperText={`${editAbout?.length ?? 0}/139 caracteres`}
                     inputProps={{ maxLength: 139 }}
                   />
                   <TextField
@@ -242,7 +242,7 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
                     size="small"
                     multiline
                     rows={3}
-                    helperText={`${editDescription.length}/512 caracteres`}
+                    helperText={`${editDescription?.length ?? 0}/512 caracteres`}
                     inputProps={{ maxLength: 512 }}
                   />
                   <TextField
@@ -346,7 +346,7 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
                         }
                         secondary={
                           <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-                            {s.body.length > 100 ? s.body.slice(0, 100) + '…' : s.body}
+                            {(s.body?.length ?? 0) > 100 ? `${s.body.slice(0, 100)}…` : (s.body ?? '')}
                           </Typography>
                         }
                       />

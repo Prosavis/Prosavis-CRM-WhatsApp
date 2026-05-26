@@ -6,7 +6,6 @@ import {
   Card,
   CardContent,
   CircularProgress,
-  Container,
   Grid,
   Typography,
   Chip,
@@ -25,8 +24,6 @@ import {
   MenuItem,
   FormControl,
   InputLabel,
-  Tab,
-  Tabs,
   IconButton,
   Tooltip,
   Button,
@@ -47,18 +44,11 @@ import {
   Reply as ReplyIcon,
   Block as BlockIcon,
   Search as SearchIcon,
-  Inbox as InboxIcon,
-  BarChart as BarChartIcon,
-  Fullscreen as FullscreenIcon,
-  Close as CloseIcon,
   FilterAltOff as FilterAltOffIcon,
   NavigateBefore as NavigateBeforeIcon,
   NavigateNext as NavigateNextIcon,
   DoneAll as DoneAllIcon,
   DeleteSweep as DeleteSweepIcon,
-  ContactPhone as ContactPhoneIcon,
-  ConfirmationNumber as ConfirmationNumberIcon,
-  Settings as SettingsIcon,
   Chat as ChatIcon,
   People as PeopleIcon,
   Hub as HubIcon,
@@ -67,8 +57,7 @@ import Stepper from '@mui/material/Stepper';
 import Step from '@mui/material/Step';
 import StepLabel from '@mui/material/StepLabel';
 import WhatsAppLayout from '@/components/whatsapp/WhatsAppLayout';
-import WhatsAppAutomationHeaderSwitch from '@/components/whatsapp/WhatsAppAutomationHeaderSwitch';
-import WhatsAppInternalContactsButton from '@/components/whatsapp/WhatsAppInternalContactsButton';
+import WhatsAppTopBar from '@/components/whatsapp/WhatsAppTopBar';
 import { WHATSAPP_CLOUD_PRODUCTION } from '@/constants/whatsappCloudAccounts';
 import { useWhatsAppAutomationSetting } from '@/hooks/useWhatsAppAutomationSetting';
 import useSoundEffects from '@/hooks/useSoundEffects';
@@ -198,7 +187,6 @@ const WhatsAppCloudPage: React.FC = () => {
     });
     return () => unregisterTabController('/whatsapp-cloud');
   }, [registerTabController, unregisterTabController, activeTab, setSearchParams]);
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const [inboxTotalContacts, setInboxTotalContacts] = useState<number | null>(null);
   const [metrics, setMetrics] = useState<MetricsData | null>(null);
   const [metricsLoading, setMetricsLoading] = useState(true);
@@ -258,14 +246,6 @@ const WhatsAppCloudPage: React.FC = () => {
   const handleInboxMetrics = useCallback((metrics: WhatsAppInboxMetrics) => {
     setInboxTotalContacts(metrics.totalConversations);
   }, []);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isFullscreen) setIsFullscreen(false);
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isFullscreen]);
 
   const loadMetrics = useCallback(async () => {
     setMetricsLoading(true);
@@ -459,174 +439,23 @@ const WhatsAppCloudPage: React.FC = () => {
 
   return (
     <>
-      {/* Fullscreen overlay */}
-      {isFullscreen && (
-        <Box
-          sx={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            zIndex: 1300,
-            bgcolor: 'background.paper',
-            display: 'flex',
-            flexDirection: 'column',
-          }}
-        >
-          {/* Fullscreen header */}
-          <Box
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              px: 2,
-              py: 1,
-              bgcolor: '#075e54',
-              color: '#fff',
-              gap: 2,
-              flexShrink: 0,
-            }}
-          >
-            <WhatsAppIcon sx={{ fontSize: 28 }} />
-            <Typography variant="h6" fontWeight={600} sx={{ flex: 1 }}>
-              WhatsApp Cloud API
-            </Typography>
+      <WhatsAppTopBar
+        activeTab={activeTab}
+        onTabChange={handleMainTabChange}
+        geminiEnabled={geminiEnabled}
+        automationLoading={automationLoading}
+        confirmTarget={confirmTarget}
+        onRequestAutomationToggle={(checked) => setConfirmTarget(checked)}
+        onConfirmAutomationApply={() => void applyToggle()}
+        onConfirmAutomationCancel={cancelConfirm}
+        inboxTotalContacts={inboxTotalContacts}
+        onOpenBulk={handleOpenBulk}
+      />
 
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-              <WhatsAppAutomationHeaderSwitch
-                fullscreen
-                geminiEnabled={geminiEnabled}
-                loading={automationLoading}
-                confirmTarget={confirmTarget}
-                onRequestToggle={(checked) => setConfirmTarget(checked)}
-                onConfirmApply={() => void applyToggle()}
-                onConfirmCancel={cancelConfirm}
-                tourDataTour="whatsapp-inbox-bot-bar"
-              />
-              <WhatsAppInternalContactsButton fullscreen />
-              {inboxTotalContacts !== null && (
-                <Tooltip title="Total de conversaciones en esta línea (incluye archivadas)">
-                  <Chip
-                    size="small"
-                    label={`${inboxTotalContacts.toLocaleString('es-CO')} contactos`}
-                    sx={{
-                      bgcolor: 'rgba(255,255,255,0.12)',
-                      color: '#fff',
-                      borderColor: 'rgba(255,255,255,0.35)',
-                      fontWeight: 600,
-                    }}
-                    variant="outlined"
-                  />
-                </Tooltip>
-              )}
-              <Tooltip title="Envío masivo WhatsApp">
-                <Button
-                  variant="outlined"
-                  size="small"
-                  startIcon={<SendIcon />}
-                  onClick={handleOpenBulk}
-                  sx={{ textTransform: 'none', color: '#fff', borderColor: 'rgba(255,255,255,0.55)' }}
-                >
-                  Masivo
-                </Button>
-              </Tooltip>
-            </Box>
-
-            <Tooltip title="Salir de pantalla completa">
-              <IconButton onClick={() => setIsFullscreen(false)} sx={{ color: '#fff' }}>
-                <CloseIcon />
-              </IconButton>
-            </Tooltip>
-          </Box>
-
-          {/* Fullscreen content */}
-          <Box sx={{ flex: 1, overflow: 'hidden' }}>
-            <WhatsAppLayout
-              phoneNumberId={phoneNumberId}
-              wabaId={wabaId}
-              fullscreen
-              focusPhone={focusPhone}
-              onClearFocusPhone={handleClearFocusPhone}
-              globalAutomationEnabled={geminiEnabled}
-              globalAutomationLoading={automationLoading}
-              onInboxMetrics={handleInboxMetrics}
-            />
-          </Box>
-        </Box>
-      )}
-
-      <Container maxWidth="xl" sx={{ py: 1.5 }}>
-        {activeTab === 0 && !isFullscreen && (
-          <Box
-            data-tour="whatsapp-header"
-            sx={{
-              mb: 1,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 1,
-              flexWrap: 'wrap',
-              justifyContent: 'flex-end',
-            }}
-          >
-            <WhatsAppAutomationHeaderSwitch
-              geminiEnabled={geminiEnabled}
-              loading={automationLoading}
-              confirmTarget={confirmTarget}
-              onRequestToggle={(checked) => setConfirmTarget(checked)}
-              onConfirmApply={() => void applyToggle()}
-              onConfirmCancel={cancelConfirm}
-              tourDataTour="whatsapp-inbox-bot-bar"
-            />
-            <WhatsAppInternalContactsButton />
-
-            {inboxTotalContacts !== null && (
-              <Tooltip title="Total de conversaciones en esta línea (incluye archivadas)">
-                <Chip
-                  size="small"
-                  color="primary"
-                  label={`${inboxTotalContacts.toLocaleString('es-CO')} contactos`}
-                  sx={{ fontWeight: 600 }}
-                  variant="outlined"
-                />
-              </Tooltip>
-            )}
-
-            <Tooltip title="Envío masivo WhatsApp">
-              <Button
-                variant="outlined"
-                size="small"
-                startIcon={<SendIcon />}
-                onClick={handleOpenBulk}
-                sx={{ textTransform: 'none' }}
-              >
-                Masivo
-              </Button>
-            </Tooltip>
-
-            <Tooltip title="Pantalla completa">
-              <IconButton onClick={() => setIsFullscreen(true)} color="primary" size="small">
-                <FullscreenIcon />
-              </IconButton>
-            </Tooltip>
-          </Box>
-        )}
-
-        <Tabs
-          value={activeTab}
-          onChange={handleMainTabChange}
-          data-tour="whatsapp-tabs"
-          sx={{ mb: 1.5, borderBottom: 1, borderColor: 'divider' }}
-        >
-          <Tab icon={<InboxIcon />} iconPosition="start" label="Inbox" />
-          <Tab icon={<BarChartIcon />} iconPosition="start" label="Métricas" />
-          <Tab icon={<ContactPhoneIcon />} iconPosition="start" label="Leads" />
-          <Tab icon={<ConfirmationNumberIcon />} iconPosition="start" label="Descuentos" />
-          <Tab icon={<SettingsIcon />} iconPosition="start" label="Configuración" />
-        </Tabs>
-
+      <Box sx={{ px: { xs: 0.5, sm: 0 } }}>
         <Box
           data-tour="whatsapp-tab-inbox"
-          sx={{ display: activeTab === 0 && !isFullscreen ? 'block' : 'none' }}
+          sx={{ display: activeTab === 0 ? 'block' : 'none' }}
         >
           <WhatsAppLayout
             phoneNumberId={phoneNumberId}
@@ -1125,7 +954,7 @@ const WhatsAppCloudPage: React.FC = () => {
             </Suspense>
           </div>
         )}
-      </Container>
+      </Box>
 
       <Dialog open={bulkOpen} onClose={() => !bulkLoading && setBulkOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>Envío masivo WhatsApp</DialogTitle>

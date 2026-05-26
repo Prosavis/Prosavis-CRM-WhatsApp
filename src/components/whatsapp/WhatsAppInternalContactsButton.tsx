@@ -30,11 +30,7 @@ function displayValue(c: WhatsAppInternalContact): string {
   return c.copyDisplay ?? c.value;
 }
 
-export interface WhatsAppInternalContactsButtonProps {
-  fullscreen?: boolean;
-}
-
-const WhatsAppInternalContactsButton: React.FC<WhatsAppInternalContactsButtonProps> = ({ fullscreen }) => {
+const WhatsAppInternalContactsButton: React.FC = () => {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
 
@@ -55,10 +51,7 @@ const WhatsAppInternalContactsButton: React.FC<WhatsAppInternalContactsButtonPro
         <IconButton
           size="small"
           onClick={(e) => setAnchorEl(e.currentTarget)}
-          sx={{
-            color: fullscreen ? '#fff' : 'primary.main',
-            border: fullscreen ? '1px solid rgba(255,255,255,0.35)' : undefined,
-          }}
+          sx={{ color: 'primary.main' }}
           aria-label="Abrir contactos internos"
         >
           <ContactsIcon fontSize="small" />

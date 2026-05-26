@@ -524,10 +524,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     }
 
     const safeName = file.name.replace(/[^\w.\-]+/g, '_');
-    const storagePath = `${Date.now()}_${safeName}`;
+    const storagePath = `whatsapp-stickers/${Date.now()}_${safeName}`;
+    const objectPath = storagePath.replace(/^whatsapp-stickers\//, '');
     const { publicUrl: downloadUrl } = await uploadWhatsAppStorageFile(
       'whatsapp-stickers',
-      storagePath,
+      objectPath,
       file,
     );
     await createWhatsAppSticker({

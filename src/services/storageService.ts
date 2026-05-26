@@ -13,7 +13,7 @@ export async function uploadWhatsAppStorageFile(
 
   const { data: signed, error: signError } = await supabase.storage
     .from(bucket)
-    .createSignedUrl(data.path, 3600);
+    .createSignedUrl(data.path, 7200);
   if (signError || !signed?.signedUrl) throw signError ?? new Error('No se pudo firmar URL.');
   return { storagePath: data.path, publicUrl: signed.signedUrl };
 }

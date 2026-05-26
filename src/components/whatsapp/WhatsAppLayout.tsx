@@ -81,7 +81,6 @@ function conversationMatchesFocusPhone(
 interface WhatsAppLayoutProps {
   phoneNumberId?: string;
   wabaId?: string;
-  fullscreen?: boolean;
   focusPhone?: string;
   /** Llamar al cerrar el chat que coincidía con `focusPhone` (p. ej. quitar el query de la URL). */
   onClearFocusPhone?: () => void;
@@ -94,7 +93,6 @@ interface WhatsAppLayoutProps {
 const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   phoneNumberId,
   wabaId,
-  fullscreen,
   focusPhone,
   onClearFocusPhone,
   globalAutomationEnabled,
@@ -526,7 +524,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
       sx={{
         display: 'flex',
         flexDirection: 'column',
-        height: fullscreen ? '100%' : 'calc(100vh - 128px)',
+        height: 'calc(100vh - 96px)',
         '@keyframes waInboundPulse': {
           '0%': {
             boxShadow: `0 0 0 0 ${alpha(theme.palette.primary.main, 0.35)}`,
@@ -545,9 +543,9 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
         sx={{
           display: 'flex',
           flex: 1,
-          border: fullscreen ? 'none' : 1,
+          border: 1,
           borderColor: 'divider',
-          borderRadius: fullscreen ? 0 : 1,
+          borderRadius: 1,
           overflow: 'hidden',
           bgcolor: 'background.paper',
         }}
@@ -555,7 +553,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
         <Box
           data-tour="whatsapp-inbox-list"
           sx={{
-            width: fullscreen ? 500 : 440,
+            width: 440,
             minWidth: 320,
             borderRight: 1,
             borderColor: 'divider',

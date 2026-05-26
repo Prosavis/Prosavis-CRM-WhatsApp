@@ -1055,14 +1055,28 @@ export interface WhatsAppBusinessProfile {
   profilePictureUrl: string;
 }
 
+function normalizeWhatsAppBusinessProfile(
+  raw?: Partial<WhatsAppBusinessProfile> | null,
+): WhatsAppBusinessProfile {
+  return {
+    about: raw?.about ?? '',
+    address: raw?.address ?? '',
+    description: raw?.description ?? '',
+    email: raw?.email ?? '',
+    vertical: raw?.vertical ?? '',
+    websites: Array.isArray(raw?.websites) ? raw.websites : [],
+    profilePictureUrl: raw?.profilePictureUrl ?? '',
+  };
+}
+
 export async function getWhatsAppBusinessProfile(
   phoneNumberId?: string,
 ): Promise<WhatsAppBusinessProfile> {
-  const data = await invokeFn<{ profile: WhatsAppBusinessProfile }>(
+  const data = await invokeFn<{ profile?: Partial<WhatsAppBusinessProfile> }>(
     'get-whatsapp-business-profile',
     { phoneNumberId },
   );
-  return data.profile;
+  return normalizeWhatsAppBusinessProfile(data.profile);
 }
 
 export async function updateWhatsAppBusinessProfile(
@@ -1312,5 +1326,8 @@ export function resolveOutboundMediaSpec(file: File): OutboundMediaSpec | null {
   const ext = file.name.split('.').pop()?.toLowerCase() || '';
   const fallbackMime = EXT_TO_MIME[ext];
   if (fallbackMime && OUTBOUND_MEDIA_BY_MIME[fallbackMime]) return OUTBOUND_MEDIA_BY_MIME[fallbackMime];
+  if (ext) {
+    return { mediaType: 'document', maxSizeMB: 100, label: 'documento' };
+  }
   return null;
 }
