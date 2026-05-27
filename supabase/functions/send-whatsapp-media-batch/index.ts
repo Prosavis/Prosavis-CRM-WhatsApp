@@ -71,8 +71,9 @@ Deno.serve(async (req) => {
       if (!attachment?.clientAttachmentId) {
         return jsonResponse({ error: `Adjunto ${index + 1}: falta clientAttachmentId.` }, 400);
       }
-      if (!attachment.mediaUrl) {
-        return jsonResponse({ error: `Adjunto ${index + 1}: falta mediaUrl.` }, 400);
+      const hasValidUrl = Boolean(attachment.mediaUrl || (attachment.storagePath && attachment.mediaType));
+      if (!hasValidUrl) {
+        return jsonResponse({ error: `Adjunto ${index + 1}: falta mediaUrl o storagePath.` }, 400);
       }
       if (!BATCH_ALLOWED_MEDIA.includes(attachment.mediaType)) {
         return jsonResponse({ error: `Adjunto ${index + 1}: tipo no soportado.` }, 400);

@@ -1,60 +1,52 @@
-# Carga secrets en Supabase desde .env.secrets.local (nunca commitear ese archivo).
-param(
-  [string]$ProjectRef = "djzwjaegxbhlefanmmee",
-  [string]$EnvFile = ".env.secrets.local"
-)
+<#
+.SYNOPSIS
+  Sincroniza secrets de Edge Functions desde .env.secrets.local a Supabase.
+.DESCRIPTION
+  Lee variables de .env.secrets.local y las pasa a `supabase secrets set`.
+  Requiere `supabase` CLI autenticado y `SUPABASE_ACCESS_TOKEN` en el entorno.
+.EXAMPLE
+  .\scripts\set-supabase-secrets.ps1
+#>
 
-$ErrorActionPreference = "Stop"
-$root = Split-Path -Parent $PSScriptRoot
-Set-Location $root
-
-if (-not (Test-Path $EnvFile)) {
-  Write-Error "No existe $EnvFile. Copia .env.secrets.local.example y completa los valores."
+$secretsFile = Join-Path $PSScriptRoot ".." ".env.secrets.local"
+if (-not (Test-Path $secretsFile)) {
+  Write-Error "No se encuentra .env.secrets.local. Copie desde .env.secrets.local.example y complete valores."
+  exit 1
 }
 
 $vars = @{}
-Get-Content $EnvFile | ForEach-Object {
+Get-Content $secretsFile | ForEach-Object {
   $line = $_.Trim()
-  if (-not $line -or $line.StartsWith("#")) { return }
-  $idx = $line.IndexOf("=")
-  if ($idx -lt 1) { return }
-  $key = $line.Substring(0, $idx).Trim()
-  $value = $line.Substring($idx + 1).Trim()
-  if ($value.StartsWith('"') -and $value.EndsWith('"')) {
-    $value = $value.Substring(1, $value.Length - 2)
-  }
-  $vars[$key] = $value
-}
-
-$required = @("NVIDIA_API_KEY")
-foreach ($key in $required) {
-  if (-not $vars[$key]) {
-    Write-Error "Falta $key en $EnvFile"
+  if ($line -and -not $line.StartsWith("#")) {
+    $eq = $line.IndexOf("=")
+    if ($eq -gt 0) {
+      $key = $line.Substring(0, $eq).Trim()
+      $value = $line.Substring($eq + 1).Trim()
+      if ($value -and $value -ne "") {
+        $vars[$key] = $value
+      }
+    }
   }
 }
 
-$secretKeys = @(
-  "NVIDIA_API_KEY",
-  "NVIDIA_MODEL_REPLY",
-  "NVIDIA_MODEL_JSON",
-  "NVIDIA_MODEL_TEMPLATE",
-  "NVIDIA_MODEL_TRANSCRIBE",
-  "WHATSAPP_ACCESS_TOKEN",
-  "WHATSAPP_PHONE_NUMBER_ID",
-  "WHATSAPP_VERIFY_TOKEN",
-  "WHATSAPP_APP_SECRET",
-  "ENABLE_META_SEND",
-  "WHATSAPP_WEBHOOK_MODE",
-  "META_GRAPH_API_VERSION"
-)
-
-$cliArgs = @("secrets", "set", "--project-ref", $ProjectRef)
-foreach ($key in $secretKeys) {
-  if ($vars.ContainsKey($key) -and $vars[$key]) {
-    $cliArgs += "${key}=$($vars[$key])"
-  }
+if ($vars.Count -eq 0) {
+  Write-Warning "No se encontraron variables en .env.secrets.local"
+  exit 0
 }
 
-Write-Host "Configurando $($cliArgs.Count - 4) secrets en $ProjectRef ..."
-npx supabase @cliArgs
-Write-Host "Secrets aplicados."
+Write-Host "Configurando $($vars.Count) secrets en Supabase..." -ForegroundColor Cyan
+$argsList = @()
+foreach ($kv in $vars.GetEnumerator()) {
+  $argsList += "$($kv.Key)=$($kv.Value)"
+}
+
+try {
+  & npx supabase secrets set @argsList --project-ref djzwjaegxbhlefanmmee
+  if ($LASTEXITCODE -eq 0) {
+    Write-Host "✓ Secrets configurados correctamente" -ForegroundColor Green
+  } else {
+    Write-Error "Error al configurar secrets (exit code: $LASTEXITCODE)"
+  }
+} catch {
+  Write-Error "Error: $_"
+}

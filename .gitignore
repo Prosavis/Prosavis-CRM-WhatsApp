@@ -35,7 +35,17 @@ supabase/functions/.env.*
 .vercel
 scripts/.deploy-*.json
 scripts/.edge-deploy/
+scripts/.edge-deploy-payloads/
 scripts/deploy-manifest.json
+scripts/mcp-runner/
+.cursor/edge-mcp-deploy-results/
+.cursor/edge-mcp-args/
+.cursor/_mcp-deploy-args/
+.cursor/*mcp*.json
+.cursor/*deploy*.json
+.cursor/callmcp*.json
+.cursor/_*.json
+.cursor/*.txt
 scripts/firebase-export/.env
 scripts/firebase-export/secrets/
 scripts/firebase-export/output/

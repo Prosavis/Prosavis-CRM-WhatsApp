@@ -34,7 +34,8 @@ Deno.serve(async (req) => {
 
     if (!to) return jsonResponse({ error: 'Se requiere destinatario (to).' }, 400);
 
-    const isMedia = Boolean(mediaUrl && mediaType);
+    const hasMediaUrl = Boolean(mediaUrl || (mediaType && storagePath));
+    const isMedia = mediaType ? hasMediaUrl : false;
     if (!isMedia && !text) {
       return jsonResponse({ error: 'Se requiere text o mediaUrl con mediaType.' }, 400);
     }

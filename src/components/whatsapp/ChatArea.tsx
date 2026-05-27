@@ -456,15 +456,15 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       );
 
       const replyId = replyToMessage?.waMessageId;
-      // Limpiamos el reply ANTES del await para que no quede colgado tras un error.
       setReplyToMessage(null);
 
-      await sendMedia(stableKey, mediaType, url, {
+      // La URL pública se usa como fallback; la Edge Function crea su propio signed URL
+      // desde storagePath usando service_role, por lo que incluso si url está vacío funciona.
+      await sendMedia(stableKey, mediaType, url || `wa://${storagePath}`, {
         caption,
         storagePath,
         mimeType: file.type || undefined,
         sizeBytes: file.size,
-        // El `filename` solo aplica a documentos en Graph; para los demás tipos lo ignora el backend.
         ...(mediaType === 'document' ? { filename: file.name } : {}),
         ...(phoneNumberId ? { phoneNumberId } : {}),
         ...(replyId ? { replyToWaMessageId: replyId } : {}),
@@ -542,7 +542,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           uploaded.push({
             clientAttachmentId: attachment.id,
             mediaType: attachment.mediaType,
-            mediaUrl,
+            // La edge function crea su propio signed URL desde storagePath con service_role.
+            // mediaUrl se pasa como fallback por si storagePath no está disponible.
+            mediaUrl: mediaUrl || `wa://${storagePath}`,
             storagePath,
             filename: attachment.mediaType === 'document' ? attachment.file.name : undefined,
             mimeType: attachment.file.type || undefined,
