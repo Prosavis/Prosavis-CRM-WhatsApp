@@ -1,0 +1,1 @@
+{"project_id":"djzwjaegxbhlefanmmee","name":"send-whatsapp-media-batch","entrypoint_path":"index.ts","verify_jwt":true,"fileNames":["index.ts","../_shared/cors.ts","../_shared/supabase.ts","../_shared/whatsappMediaStorage.ts","../_shared/whatsappOutbound.ts","../_shared/whatsappIdentity.ts"]}
