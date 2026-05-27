@@ -80,7 +80,6 @@ const TOP_LEVEL_COLLECTIONS: Array<{
   { path: 'leads', supabaseTable: 'crm_leads' },
   { path: 'discount_codes', supabaseTable: 'crm_discount_codes' },
   { path: 'whatsapp_operator_snippets', supabaseTable: 'whatsapp_snippets' },
-  { path: 'whatsapp_ia_templates', supabaseTable: 'whatsapp_ia_templates' },
   { path: 'whatsapp_stickers', supabaseTable: 'whatsapp_stickers' },
   { path: 'whatsapp_blocklist', supabaseTable: 'whatsapp_blocklist' },
   { path: 'whatsapp_outbound_batches', supabaseTable: 'whatsapp_outbound_batches' },

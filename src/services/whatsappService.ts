@@ -758,66 +758,6 @@ export async function getProsavisCleaningWompiCheckoutUrl(amountCOP: number): Pr
   }>('get-prosavis-cleaning-wompi-checkout-url', { amountCOP });
 }
 
-// --- Plantillas IA ---
-
-export interface IATemplateSummary {
-  id: string;
-  label: string;
-  description: string;
-  body: string;
-  variables: string[];
-  isDefault: boolean;
-  generatedByAI: boolean;
-}
-
-export async function listWhatsAppIATemplates(): Promise<IATemplateSummary[]> {
-  const data = await invokeFn<{ templates: IATemplateSummary[] }>('list-whatsapp-ia-templates');
-  return data.templates ?? [];
-}
-
-export async function createWhatsAppIATemplate(params: {
-  label: string;
-  description: string;
-  body: string;
-}): Promise<{ success: boolean; id: string }> {
-  return invokeFn<{ success: boolean; id: string }>('create-whatsapp-ia-template', params);
-}
-
-export async function generateWhatsAppIATemplate(prompt: string): Promise<{
-  success: boolean;
-  id: string;
-  template: IATemplateSummary;
-}> {
-  return invokeFn<{ success: boolean; id: string; template: IATemplateSummary }>(
-    'generate-whatsapp-ia-template',
-    { prompt },
-  );
-}
-
-export async function deleteWhatsAppIATemplate(templateId: string): Promise<{ success: boolean }> {
-  return invokeFn<{ success: boolean }>('delete-whatsapp-ia-template', { templateId });
-}
-
-export async function resolveWhatsAppIATemplate(params: {
-  templateId: string;
-  recipientPhone: string;
-  customValues?: Record<string, string>;
-}): Promise<{ body: string; contactName?: string; unresolvedVariables: string[] }> {
-  return invokeFn<{ body: string; contactName?: string; unresolvedVariables: string[] }>(
-    'resolve-whatsapp-ia-template',
-    params,
-  );
-}
-
-export async function sendWhatsAppQuickReply(params: {
-  recipientPhone: string;
-  body: string;
-  templateId?: string;
-  phoneNumberId?: string;
-}): Promise<{ success: boolean }> {
-  return invokeFn<{ success: boolean }>('send-whatsapp-quick-reply', params);
-}
-
 export async function bulkWhatsAppSend(params: {
   recipients: Array<{ phone: string; name?: string }>;
   templateName?: string;

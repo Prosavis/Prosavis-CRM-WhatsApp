@@ -6,32 +6,15 @@ import {
   Chip,
   CircularProgress,
   Collapse,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
   Divider,
-  IconButton,
   TextField,
   Tooltip,
   Typography,
 } from '@mui/material';
-import Tabs from '@mui/material/Tabs';
-import Tab from '@mui/material/Tab';
-import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
-import AddIcon from '@mui/icons-material/Add';
-import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import {
   listWhatsAppMessageTemplates,
   sendWhatsAppTemplateMessageAdmin,
-  listWhatsAppIATemplates,
-  createWhatsAppIATemplate,
-  generateWhatsAppIATemplate,
-  deleteWhatsAppIATemplate,
-  resolveWhatsAppIATemplate,
-  sendWhatsAppQuickReply,
   type WhatsAppTemplateSummary,
-  type IATemplateSummary,
 } from '@/services/whatsappService';
 import {
   WHATSAPP_TEMPLATE_SECTIONS,
@@ -157,34 +140,6 @@ const TemplatesSidePanel: React.FC<TemplatesSidePanelProps> = ({
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState(0);
-
-  // IA templates state
-  const [iaTemplates, setIaTemplates] = useState<IATemplateSummary[]>([]);
-  const [iaLoading, setIaLoading] = useState(false);
-  const [iaExpandedId, setIaExpandedId] = useState<string | null>(null);
-  const [iaResolvedBody, setIaResolvedBody] = useState<string | null>(null);
-  const [iaResolving, setIaResolving] = useState(false);
-  const [iaSending, setIaSending] = useState(false);
-  const [iaCustomValues, setIaCustomValues] = useState<Record<string, string>>({});
-  const [iaUnresolved, setIaUnresolved] = useState<string[]>([]);
-
-  // Create dialog
-  const [createOpen, setCreateOpen] = useState(false);
-  const [createLabel, setCreateLabel] = useState('');
-  const [createDesc, setCreateDesc] = useState('');
-  const [createBody, setCreateBody] = useState('');
-  const [creating, setCreating] = useState(false);
-
-  // Generate dialog
-  const [generateOpen, setGenerateOpen] = useState(false);
-  const [generatePrompt, setGeneratePrompt] = useState('');
-  const [generating, setGenerating] = useState(false);
-
-  // Delete confirm
-  const [deleteTarget, setDeleteTarget] = useState<IATemplateSummary | null>(null);
-  const [deleting, setDeleting] = useState(false);
-
   const filteredTemplates = useMemo(() => {
     const approved = templates.filter((t) => t.status === 'APPROVED');
     const esCo = approved.filter((t) => t.language === 'es_CO');
@@ -307,144 +262,6 @@ const TemplatesSidePanel: React.FC<TemplatesSidePanelProps> = ({
     }
   };
 
-  // --- IA templates ---
-
-  const loadIATemplates = useCallback(async () => {
-    setIaLoading(true);
-    try {
-      const list = await listWhatsAppIATemplates();
-      setIaTemplates(list);
-    } catch {
-      setIaTemplates([]);
-    } finally {
-      setIaLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadIATemplates();
-  }, [loadIATemplates]);
-
-  const handleIaExpand = async (t: IATemplateSummary) => {
-    if (iaExpandedId === t.id) {
-      setIaExpandedId(null);
-      setIaResolvedBody(null);
-      setIaUnresolved([]);
-      setIaCustomValues({});
-      return;
-    }
-    setIaExpandedId(t.id);
-    setIaResolvedBody(null);
-    setIaUnresolved([]);
-    setIaCustomValues({});
-    setIaResolving(true);
-    try {
-      const result = await resolveWhatsAppIATemplate({
-        templateId: t.id,
-        recipientPhone,
-      });
-      setIaResolvedBody(result.body);
-      setIaUnresolved(result.unresolvedVariables);
-    } catch {
-      setIaResolvedBody(t.body);
-      setIaUnresolved(t.variables);
-    } finally {
-      setIaResolving(false);
-    }
-  };
-
-  const handleResolveWithCustom = async (templateId: string) => {
-    setIaResolving(true);
-    try {
-      const result = await resolveWhatsAppIATemplate({
-        templateId,
-        recipientPhone,
-        customValues: iaCustomValues,
-      });
-      setIaResolvedBody(result.body);
-      setIaUnresolved(result.unresolvedVariables);
-    } catch {
-      // keep current
-    } finally {
-      setIaResolving(false);
-    }
-  };
-
-  const handleIaSend = async (templateId: string) => {
-    if (!iaResolvedBody) return;
-    setIaSending(true);
-    setSendError(null);
-    try {
-      await sendWhatsAppQuickReply({
-        recipientPhone,
-        body: iaResolvedBody,
-        templateId,
-        phoneNumberId,
-      });
-      setIaExpandedId(null);
-      setIaResolvedBody(null);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Error al enviar';
-      setSendError(msg);
-    } finally {
-      setIaSending(false);
-    }
-  };
-
-  const handleCreate = async () => {
-    if (!createLabel.trim() || !createBody.trim()) return;
-    setCreating(true);
-    try {
-      await createWhatsAppIATemplate({
-        label: createLabel.trim(),
-        description: createDesc.trim() || createLabel.trim(),
-        body: createBody.trim(),
-      });
-      setCreateOpen(false);
-      setCreateLabel('');
-      setCreateDesc('');
-      setCreateBody('');
-      void loadIATemplates();
-    } catch {
-      // silently fail
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  const handleGenerate = async () => {
-    if (!generatePrompt.trim()) return;
-    setGenerating(true);
-    try {
-      await generateWhatsAppIATemplate(generatePrompt.trim());
-      setGenerateOpen(false);
-      setGeneratePrompt('');
-      void loadIATemplates();
-    } catch {
-      // silently fail
-    } finally {
-      setGenerating(false);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!deleteTarget) return;
-    setDeleting(true);
-    try {
-      await deleteWhatsAppIATemplate(deleteTarget.id);
-      setDeleteTarget(null);
-      if (iaExpandedId === deleteTarget.id) {
-        setIaExpandedId(null);
-        setIaResolvedBody(null);
-      }
-      void loadIATemplates();
-    } catch {
-      // silently fail
-    } finally {
-      setDeleting(false);
-    }
-  };
-
   return (
     <Box
       sx={{
@@ -468,100 +285,88 @@ const TemplatesSidePanel: React.FC<TemplatesSidePanelProps> = ({
         <Typography variant="caption" color="text.secondary" display="block" noWrap title={recipientPhone}>
           A: {recipientPhone}
         </Typography>
-        <Tabs
-          value={activeTab}
-          onChange={(_, v) => setActiveTab(v)}
-          variant="fullWidth"
-          sx={{ mt: 1, minHeight: 32, '& .MuiTab-root': { minHeight: 32, py: 0.5, fontSize: '0.75rem' } }}
-        >
-          <Tab label="Meta" />
-          <Tab label="IA" />
-        </Tabs>
       </Box>
 
       <Box sx={{ flex: 1, overflow: 'auto', p: 1.5 }}>
-        {/* === TAB META === */}
-        {activeTab === 0 && (
-          <>
-            {listError && (
-              <Alert severity="error" sx={{ mb: 1 }} onClose={() => setListError(null)}>
-                {listError}
-              </Alert>
-            )}
+        {listError && (
+          <Alert severity="error" sx={{ mb: 1 }} onClose={() => setListError(null)}>
+            {listError}
+          </Alert>
+        )}
 
-            {loadingList ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                <CircularProgress size={28} />
+        {loadingList ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+            <CircularProgress size={28} />
+          </Box>
+        ) : filteredTemplates.length === 0 ? (
+          <Typography variant="body2" color="text.secondary" sx={{ px: 1 }}>
+            No hay plantillas aprobadas en español.
+          </Typography>
+        ) : (
+          templatesBySection.map(({ section, templates: sectionTemplates }) => (
+            <Box key={section.key} sx={{ mb: 2 }}>
+              <Box sx={{ px: 0.5, mb: 1 }}>
+                <Typography variant="caption" fontWeight={700} color="text.primary">
+                  {section.label}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" display="block">
+                  {section.description}
+                </Typography>
               </Box>
-            ) : filteredTemplates.length === 0 ? (
-              <Typography variant="body2" color="text.secondary" sx={{ px: 1 }}>
-                No hay plantillas aprobadas en español.
-              </Typography>
-            ) : (
-              templatesBySection.map(({ section, templates: sectionTemplates }) => (
-                <Box key={section.key} sx={{ mb: 2 }}>
-                  <Box sx={{ px: 0.5, mb: 1 }}>
-                    <Typography variant="caption" fontWeight={700} color="text.primary">
-                      {section.label}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" display="block">
-                      {section.description}
-                    </Typography>
-                  </Box>
 
-                  {sectionTemplates.map((t) => {
-                    const id = `${t.name}:${t.language}`;
-                    const isOpen = expandedId === id;
-                    return (
-                      <Box key={id} sx={{ mb: 1.5 }}>
-                        <Box
-                          onClick={() => toggleExpand(t)}
-                          sx={{
-                            cursor: 'pointer',
-                            borderRadius: 1,
-                            p: 1,
-                            bgcolor: isOpen ? 'action.selected' : 'background.paper',
-                            border: 1,
-                            borderColor: 'divider',
-                            '&:hover': { bgcolor: isOpen ? 'action.selected' : 'action.hover' },
-                          }}
+              {sectionTemplates.map((t) => {
+                const id = `${t.name}:${t.language}`;
+                const isOpen = expandedId === id;
+                return (
+                  <Box key={id} sx={{ mb: 1.5 }}>
+                    <Box
+                      onClick={() => toggleExpand(t)}
+                      sx={{
+                        cursor: 'pointer',
+                        borderRadius: 1,
+                        p: 1,
+                        bgcolor: isOpen ? 'action.selected' : 'background.paper',
+                        border: 1,
+                        borderColor: 'divider',
+                        '&:hover': { bgcolor: isOpen ? 'action.selected' : 'action.hover' },
+                      }}
+                    >
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.75 }}>
+                        <Typography
+                          variant="caption"
+                          fontWeight={600}
+                          color="text.primary"
+                          sx={{ lineHeight: 1.3 }}
                         >
-                          <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.75 }}>
-                            <Typography
-                              variant="caption"
-                              fontWeight={600}
-                              color="text.primary"
-                              sx={{ lineHeight: 1.3 }}
-                            >
-                              {t.name}
-                            </Typography>
-                            <TemplateCategoryChip category={t.category} />
-                          </Box>
-                          <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 0.75 }}>
-                            <Box sx={BUBBLE_PREVIEW_SX}>
-                              <Typography
-                                variant="body2"
-                                sx={{
-                                  whiteSpace: 'pre-wrap',
-                                  wordBreak: 'break-word',
-                                  color: '#111b21',
-                                  lineHeight: 1.4,
-                                  fontSize: '0.8125rem',
-                                }}
-                              >
-                                {previewTextForList(t)}
-                              </Typography>
-                            </Box>
-                          </Box>
+                          {t.name}
+                        </Typography>
+                        <TemplateCategoryChip category={t.category} />
                       </Box>
+                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 0.75 }}>
+                        <Box sx={BUBBLE_PREVIEW_SX}>
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-word',
+                              color: '#111b21',
+                              lineHeight: 1.4,
+                              fontSize: '0.8125rem',
+                            }}
+                          >
+                            {previewTextForList(t)}
+                          </Typography>
+                        </Box>
+                      </Box>
+                    </Box>
 
-                        <Collapse in={isOpen}>
-                          <Box sx={{ pt: 1.5, px: 0.5 }}>
-                            {sendError && (
-                              <Alert severity="error" sx={{ mb: 1 }} onClose={() => setSendError(null)}>
-                                {sendError}
-                              </Alert>
-                            )}
+                    <Collapse in={isOpen}>
+                      <Box sx={{ pt: 1.5, px: 0.5 }}>
+                        {sendError && (
+                          <Alert severity="error" sx={{ mb: 1 }} onClose={() => setSendError(null)}>
+                            {sendError}
+                          </Alert>
+                        )}
 
                         {slots.header > 0 && (
                           <Box sx={{ mb: 1.5 }}>
@@ -646,306 +451,15 @@ const TemplatesSidePanel: React.FC<TemplatesSidePanelProps> = ({
                           )}
                         </Box>
                       </Box>
-                        </Collapse>
-                        <Divider sx={{ mt: 1 }} />
-                      </Box>
-                    );
-                  })}
-                </Box>
-              ))
-            )}
-          </>
-        )}
-
-        {/* === TAB IA === */}
-        {activeTab === 1 && (
-          <Box>
-            <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
-              <Button
-                variant="outlined"
-                size="small"
-                startIcon={<AddIcon />}
-                onClick={() => setCreateOpen(true)}
-                sx={{ flex: 1, fontSize: '0.7rem' }}
-              >
-                Crear plantilla
-              </Button>
-              <Button
-                variant="outlined"
-                size="small"
-                startIcon={<AutoAwesomeIcon />}
-                onClick={() => setGenerateOpen(true)}
-                sx={{ flex: 1, fontSize: '0.7rem' }}
-                color="secondary"
-              >
-                Generar con IA
-              </Button>
-            </Box>
-
-            {iaLoading ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                <CircularProgress size={28} />
-              </Box>
-            ) : iaTemplates.length === 0 ? (
-              <Typography variant="body2" color="text.secondary" sx={{ px: 1, py: 2 }}>
-                No hay plantillas IA. Crea una nueva o genera con inteligencia artificial.
-              </Typography>
-            ) : (
-              iaTemplates.map((t) => {
-                const isOpen = iaExpandedId === t.id;
-                return (
-                  <Box key={t.id} sx={{ mb: 1.5 }}>
-                    <Box
-                      onClick={() => void handleIaExpand(t)}
-                      sx={{
-                        cursor: 'pointer',
-                        borderRadius: 1,
-                        p: 1,
-                        bgcolor: isOpen ? 'action.selected' : 'background.paper',
-                        border: 1,
-                        borderColor: 'divider',
-                        '&:hover': { bgcolor: isOpen ? 'action.selected' : 'action.hover' },
-                      }}
-                    >
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        <Typography variant="caption" fontWeight={600} color="text.primary" sx={{ flex: 1 }}>
-                          {t.label}
-                        </Typography>
-                        {t.generatedByAI && (
-                          <Chip
-                            label="IA"
-                            size="small"
-                            sx={{ height: 18, fontSize: '0.6rem', bgcolor: '#ede7f6', color: '#4527a0' }}
-                          />
-                        )}
-                        {t.isDefault && (
-                          <Chip
-                            label="Default"
-                            size="small"
-                            sx={{ height: 18, fontSize: '0.6rem', bgcolor: '#e8f5e9', color: '#2e7d32' }}
-                          />
-                        )}
-                        <IconButton
-                          size="small"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDeleteTarget(t);
-                          }}
-                          sx={{ p: 0.25 }}
-                        >
-                          <DeleteOutlineIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-                        </IconButton>
-                      </Box>
-                      <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.25 }}>
-                        {t.description}
-                      </Typography>
-                      {t.variables.length > 0 && (
-                        <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5, flexWrap: 'wrap' }}>
-                          {t.variables.map((v) => (
-                            <Chip
-                              key={v}
-                              label={`{{${v}}}`}
-                              size="small"
-                              variant="outlined"
-                              sx={{ height: 18, fontSize: '0.6rem' }}
-                            />
-                          ))}
-                        </Box>
-                      )}
-                    </Box>
-
-                    <Collapse in={isOpen}>
-                      <Box sx={{ pt: 1.5, px: 0.5 }}>
-                        {iaResolving ? (
-                          <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
-                            <CircularProgress size={24} />
-                          </Box>
-                        ) : iaResolvedBody !== null ? (
-                          <>
-                            {iaUnresolved.length > 0 && (
-                              <Box sx={{ mb: 1.5 }}>
-                                <Typography variant="caption" fontWeight={600} display="block" gutterBottom>
-                                  Variables pendientes
-                                </Typography>
-                                {iaUnresolved.map((v) => (
-                                  <TextField
-                                    key={v}
-                                    fullWidth
-                                    size="small"
-                                    sx={{ mb: 1 }}
-                                    label={`{{${v}}}`}
-                                    value={iaCustomValues[v] || ''}
-                                    onChange={(e) =>
-                                      setIaCustomValues((prev) => ({ ...prev, [v]: e.target.value }))
-                                    }
-                                  />
-                                ))}
-                                <Button
-                                  size="small"
-                                  variant="text"
-                                  onClick={() => void handleResolveWithCustom(t.id)}
-                                  disabled={iaResolving}
-                                >
-                                  Aplicar valores
-                                </Button>
-                              </Box>
-                            )}
-                            <Box sx={BUBBLE_PREVIEW_SX}>
-                              <Typography
-                                variant="body2"
-                                sx={{
-                                  whiteSpace: 'pre-wrap',
-                                  wordBreak: 'break-word',
-                                  color: '#111b21',
-                                  lineHeight: 1.4,
-                                  fontSize: '0.8125rem',
-                                }}
-                              >
-                                {iaResolvedBody}
-                              </Typography>
-                            </Box>
-                            {sendError && (
-                              <Alert severity="error" sx={{ mt: 1 }} onClose={() => setSendError(null)}>
-                                {sendError}
-                              </Alert>
-                            )}
-                            <Box sx={{ display: 'flex', gap: 1, mt: 1.5 }}>
-                              <Button
-                                fullWidth
-                                variant="contained"
-                                size="small"
-                                disabled={iaSending}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  void handleIaSend(t.id);
-                                }}
-                              >
-                                {iaSending ? <CircularProgress size={20} color="inherit" /> : 'Enviar'}
-                              </Button>
-                              {onApplyDraftToComposer && (
-                                <Button
-                                  fullWidth
-                                  variant="outlined"
-                                  size="small"
-                                  disabled={iaSending}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onApplyDraftToComposer(iaResolvedBody || '');
-                                  }}
-                                >
-                                  Cargar en editor
-                                </Button>
-                              )}
-                            </Box>
-                          </>
-                        ) : null}
-                      </Box>
                     </Collapse>
                     <Divider sx={{ mt: 1 }} />
                   </Box>
                 );
-              })
-            )}
-          </Box>
+              })}
+            </Box>
+          ))
         )}
       </Box>
-
-      {/* Dialog: Crear plantilla IA */}
-      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Crear plantilla IA</DialogTitle>
-        <DialogContent>
-          <TextField
-            fullWidth
-            size="small"
-            label="Nombre"
-            value={createLabel}
-            onChange={(e) => setCreateLabel(e.target.value)}
-            sx={{ mt: 1, mb: 1.5 }}
-          />
-          <TextField
-            fullWidth
-            size="small"
-            label="Descripción (opcional)"
-            value={createDesc}
-            onChange={(e) => setCreateDesc(e.target.value)}
-            sx={{ mb: 1.5 }}
-          />
-          <TextField
-            fullWidth
-            multiline
-            minRows={4}
-            size="small"
-            label="Cuerpo del mensaje"
-            value={createBody}
-            onChange={(e) => setCreateBody(e.target.value)}
-            helperText='Usa {{nombre}} para el nombre del contacto. Puedes crear variables con {{mi_variable}}.'
-            sx={{ mb: 1 }}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCreateOpen(false)}>Cancelar</Button>
-          <Button
-            variant="contained"
-            onClick={handleCreate}
-            disabled={creating || !createLabel.trim() || !createBody.trim()}
-          >
-            {creating ? <CircularProgress size={20} color="inherit" /> : 'Crear'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Dialog: Generar con IA */}
-      <Dialog open={generateOpen} onClose={() => setGenerateOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Generar plantilla con IA</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Describe qué tipo de plantilla necesitas y la IA la generará automáticamente.
-          </Typography>
-          <TextField
-            fullWidth
-            multiline
-            minRows={3}
-            size="small"
-            label="¿Qué plantilla necesitas?"
-            placeholder="Ej: Un mensaje para invitar clientes a probar nuestro servicio de limpieza profunda con 20% de descuento"
-            value={generatePrompt}
-            onChange={(e) => setGeneratePrompt(e.target.value)}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setGenerateOpen(false)}>Cancelar</Button>
-          <Button
-            variant="contained"
-            color="secondary"
-            onClick={handleGenerate}
-            disabled={generating || !generatePrompt.trim()}
-            startIcon={generating ? <CircularProgress size={16} color="inherit" /> : <AutoAwesomeIcon />}
-          >
-            {generating ? 'Generando...' : 'Generar'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Dialog: Confirmar eliminación */}
-      <Dialog open={deleteTarget !== null} onClose={() => setDeleteTarget(null)}>
-        <DialogTitle>Eliminar plantilla</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2">
-            ¿Eliminar la plantilla &quot;{deleteTarget?.label}&quot;? Esta acción no se puede deshacer.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDeleteTarget(null)}>Cancelar</Button>
-          <Button
-            variant="contained"
-            color="error"
-            onClick={handleDelete}
-            disabled={deleting}
-          >
-            {deleting ? <CircularProgress size={20} color="inherit" /> : 'Eliminar'}
-          </Button>
-        </DialogActions>
-      </Dialog>
     </Box>
   );
 };

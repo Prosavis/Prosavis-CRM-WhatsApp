@@ -50,7 +50,6 @@ const skip = new Set([
   'mark-whatsapp-as-read',
   'purge-whatsapp-message-log',
   'ensure-whatsapp-conversation-from-lead',
-  'list-whatsapp-ia-templates',
   'get-whatsapp-media-url',
 ]);
 

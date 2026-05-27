@@ -42,8 +42,6 @@ import { migrateConversations } from './mappers/whatsapp-conversations.js';
 
 import { migrateDiscountCodes } from './mappers/whatsapp-discount-codes.js';
 
-import { migrateIaTemplates } from './mappers/whatsapp-ia-templates.js';
-
 import { migrateLeads } from './mappers/whatsapp-leads.js';
 
 import { migrateMessageLog } from './mappers/whatsapp-messages.js';
@@ -87,8 +85,6 @@ const WHATSAPP_STEPS: StepDef[] = [
   { name: 'discount_codes', run: migrateDiscountCodes },
 
   { name: 'snippets', run: migrateSnippets },
-
-  { name: 'ia_templates', run: migrateIaTemplates },
 
   { name: 'stickers', run: migrateStickers },
 

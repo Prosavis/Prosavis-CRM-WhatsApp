@@ -71,7 +71,6 @@ const COUNT_CHECKS: CountCheck[] = [
 
   { label: 'whatsapp_operator_snippets', firestoreCount: () => countCollection('whatsapp_operator_snippets'), supabaseTable: 'whatsapp_snippets' },
 
-  { label: 'whatsapp_ia_templates', firestoreCount: () => countCollection('whatsapp_ia_templates'), supabaseTable: 'whatsapp_ia_templates' },
 
   { label: 'whatsapp_stickers', firestoreCount: () => countCollection('whatsapp_stickers'), supabaseTable: 'whatsapp_stickers' },
 

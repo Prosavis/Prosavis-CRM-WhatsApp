@@ -12,17 +12,12 @@ const deployDir = path.join(__dirname, '..', '.edge-deploy');
 const WAVES = {
   a: [
     'suggest-whatsapp-agent-reply',
-    'generate-whatsapp-ia-template',
     'transcribe-whatsapp-inbound-audio',
     'get-whatsapp-booking-context',
-    'create-whatsapp-ia-template',
-    'delete-whatsapp-ia-template',
-    'resolve-whatsapp-ia-template',
   ],
   b: [
     'bulk-whatsapp-send',
     'send-whatsapp-template-message',
-    'send-whatsapp-quick-reply',
     'send-whatsapp-reaction',
     'send-whatsapp-media-batch',
     'block-whatsapp-user-admin',
@@ -45,7 +40,6 @@ const WAVES = {
     'update-whatsapp-business-profile',
     'patch-whatsapp-conversation',
     'on-whatsapp-webhook',
-    'list-whatsapp-ia-templates',
     'get-whatsapp-media-url',
     'get-whatsapp-media-signed-url',
     'ensure-whatsapp-conversation-from-lead',

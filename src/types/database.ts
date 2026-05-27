@@ -206,23 +206,6 @@ export interface Database {
         };
         Update: Partial<Database['public']['Tables']['crm_discount_codes']['Row']>;
       };
-      whatsapp_ia_templates: {
-        Row: {
-          id: string;
-          name: string;
-          body: string;
-          variables: Json;
-          created_by: string | null;
-          archived: boolean;
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: Partial<Database['public']['Tables']['whatsapp_ia_templates']['Row']> & {
-          name: string;
-          body: string;
-        };
-        Update: Partial<Database['public']['Tables']['whatsapp_ia_templates']['Row']>;
-      };
       crm_contact_profiles: {
         Row: {
           id: string;
@@ -306,22 +289,6 @@ export interface Database {
           storage_path: string;
         };
         Update: Partial<Database['public']['Tables']['whatsapp_media_assets']['Row']>;
-      };
-      whatsapp_templates: {
-        Row: {
-          id: string;
-          name: string;
-          language: string;
-          category: string | null;
-          status: string;
-          components: Json;
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: Partial<Database['public']['Tables']['whatsapp_templates']['Row']> & {
-          name: string;
-        };
-        Update: Partial<Database['public']['Tables']['whatsapp_templates']['Row']>;
       };
       whatsapp_snippets: {
         Row: {

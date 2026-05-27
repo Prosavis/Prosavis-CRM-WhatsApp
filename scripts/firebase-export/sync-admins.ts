@@ -10,7 +10,6 @@ import { migrateBlocklist } from './mappers/whatsapp-blocklist.js';
 import { migrateBroadcastJobs } from './mappers/whatsapp-broadcast-jobs.js';
 import { migrateConversations } from './mappers/whatsapp-conversations.js';
 import { migrateDiscountCodes } from './mappers/whatsapp-discount-codes.js';
-import { migrateIaTemplates } from './mappers/whatsapp-ia-templates.js';
 import { migrateMessageLog } from './mappers/whatsapp-messages.js';
 import { migrateOutboundBatches } from './mappers/whatsapp-outbound-batches.js';
 import { migratePlatformSettings } from './mappers/whatsapp-platform-settings.js';
@@ -125,7 +124,6 @@ const BACKFILL_STEPS: Array<{ name: string; run: MapperFn }> = [
   { name: 'tags', run: migrateWhatsappTags },
   { name: 'platform_settings', run: migratePlatformSettings },
   { name: 'snippets', run: migrateSnippets },
-  { name: 'ia_templates', run: migrateIaTemplates },
   { name: 'stickers', run: migrateStickers },
   { name: 'blocklist', run: migrateBlocklist },
   { name: 'discount_codes', run: migrateDiscountCodes },
