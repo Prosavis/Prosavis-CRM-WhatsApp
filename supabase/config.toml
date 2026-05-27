@@ -27,23 +27,98 @@ enable_signup = true
 enabled = true
 file_size_limit = "25MiB"
 
+# verify_jwt = false porque las funciones ya validan el JWT internamente
+# con requireCrmAdmin(). Si se deja true, el gateway de Supabase rechaza
+# el preflight OPTIONS y rompe CORS.
 [functions.get-whatsapp-metrics]
-verify_jwt = true
+verify_jwt = false
 
 [functions.list-whatsapp-message-log]
-verify_jwt = true
+verify_jwt = false
 
 [functions.send-whatsapp-chat-message]
-verify_jwt = true
+verify_jwt = false
 
 [functions.mark-whatsapp-as-read]
-verify_jwt = true
+verify_jwt = false
 
 [functions.patch-whatsapp-conversation]
-verify_jwt = true
+verify_jwt = false
 
 [functions.on-whatsapp-webhook]
 verify_jwt = false
 
 [functions.get-whatsapp-media-signed-url]
-verify_jwt = true
+verify_jwt = false
+
+[functions.get-whatsapp-media-url]
+verify_jwt = false
+
+[functions.send-whatsapp-reaction]
+verify_jwt = false
+
+[functions.send-whatsapp-media-batch]
+verify_jwt = false
+
+[functions.transcribe-whatsapp-inbound-audio]
+verify_jwt = false
+
+[functions.list-whatsapp-message-templates]
+verify_jwt = false
+
+[functions.send-whatsapp-template-message]
+verify_jwt = false
+
+[functions.suggest-whatsapp-agent-reply]
+verify_jwt = false
+
+[functions.get-whatsapp-booking-context]
+verify_jwt = false
+
+[functions.get-prosavis-cleaning-wompi-checkout-url]
+verify_jwt = false
+
+[functions.bulk-whatsapp-send]
+verify_jwt = false
+
+[functions.ensure-whatsapp-conversation-from-lead]
+verify_jwt = false
+
+[functions.delete-whatsapp-message-log-entry]
+verify_jwt = false
+
+[functions.delete-whatsapp-conversation-admin]
+verify_jwt = false
+
+[functions.block-whatsapp-user-admin]
+verify_jwt = false
+
+[functions.list-whatsapp-stickers]
+verify_jwt = false
+
+[functions.create-whatsapp-sticker]
+verify_jwt = false
+
+[functions.update-whatsapp-sticker]
+verify_jwt = false
+
+[functions.list-whatsapp-snippets]
+verify_jwt = false
+
+[functions.create-whatsapp-snippet]
+verify_jwt = false
+
+[functions.update-whatsapp-snippet]
+verify_jwt = false
+
+[functions.delete-whatsapp-snippet]
+verify_jwt = false
+
+[functions.get-whatsapp-business-profile]
+verify_jwt = false
+
+[functions.update-whatsapp-business-profile]
+verify_jwt = false
+
+[functions.purge-whatsapp-message-log]
+verify_jwt = false
