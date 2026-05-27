@@ -1,8 +1,8 @@
 export const WHATSAPP_CLOUD_PRODUCTION = {
-  phoneNumberId: '1035566289641219',
-  wabaId: '1644307903653451',
-  phoneDisplay: '+57 312 253 1271',
-  botLabel: 'Bot automatizado Meta',
-} as const;
+  phoneNumberId: import.meta.env.VITE_WHATSAPP_PHONE_NUMBER_ID?.trim() ?? '',
+  wabaId: import.meta.env.VITE_WHATSAPP_WABA_ID?.trim() ?? '',
+  phoneDisplay: import.meta.env.VITE_WHATSAPP_PHONE_DISPLAY?.trim() ?? '',
+  botLabel: import.meta.env.VITE_WHATSAPP_BOT_LABEL?.trim() ?? '',
+};
 
 export type WhatsAppCloudProduction = typeof WHATSAPP_CLOUD_PRODUCTION;
