@@ -47,6 +47,8 @@ import SubtitlesIcon from '@mui/icons-material/Subtitles';
 import type { WhatsAppContact, WhatsAppMessage } from '@/services/whatsappService';
 import {
   getMediaUrl,
+  getWhatsAppMediaSignedUrl,
+  isMetaHostedMediaUrl,
   downloadMediaBlob,
   getExtensionFromMime,
   transcribeWhatsAppInboundAudio,
@@ -122,18 +124,44 @@ function useMediaPrefetch(message: WhatsAppMessage) {
   const [error, setError] = useState(false);
   const fetchedRef = useRef(false);
 
-  const directUrl = message.mediaUrl || message.storageUrl;
+  const rawDirectUrl = message.mediaUrl || message.storageUrl;
+  const directUrl =
+    rawDirectUrl && !isMetaHostedMediaUrl(rawDirectUrl) ? rawDirectUrl : null;
+  const cacheKey = message.mediaId ?? message.storagePath ?? null;
 
   const resolveMedia = useCallback(async () => {
-    if (directUrl || mediaData || loading || !message.mediaId) return;
-    if (mediaCache.has(message.mediaId)) {
-      setMediaData(mediaCache.get(message.mediaId)!);
+    if (directUrl || mediaData || loading) return;
+    if (!message.mediaId && !message.storagePath) return;
+
+    if (cacheKey && mediaCache.has(cacheKey)) {
+      setMediaData(mediaCache.get(cacheKey)!);
       return;
     }
+
     setLoading(true);
     setError(false);
     try {
-      const result = await getMediaUrl(message.mediaId);
+      if (message.storagePath) {
+        const signed = await getWhatsAppMediaSignedUrl({ storagePath: message.storagePath });
+        const data = {
+          url: signed,
+          mimeType: message.mimeType || 'application/octet-stream',
+        };
+        if (cacheKey) mediaCache.set(cacheKey, data);
+        setMediaData(data);
+        return;
+      }
+
+      if (!message.mediaId) {
+        setError(true);
+        return;
+      }
+
+      const result = await getMediaUrl(message.mediaId, {
+        storagePath: message.storagePath,
+        mimeType: message.mimeType,
+        stableKeyHint: message.recipientPhone,
+      });
       const data = { url: result.url, mimeType: result.mimeType };
       mediaCache.set(message.mediaId, data);
       setMediaData(data);
@@ -142,17 +170,28 @@ function useMediaPrefetch(message: WhatsAppMessage) {
     } finally {
       setLoading(false);
     }
-  }, [message.mediaId, directUrl, mediaData, loading]);
+  }, [
+    message.mediaId,
+    message.storagePath,
+    message.mimeType,
+    message.recipientPhone,
+    directUrl,
+    mediaData,
+    loading,
+    cacheKey,
+  ]);
 
   useEffect(() => {
-    if (!message.mediaId || directUrl || fetchedRef.current) return;
-    if (mediaCache.has(message.mediaId)) {
-      setMediaData(mediaCache.get(message.mediaId)!);
+    if (directUrl) return;
+    if (!message.mediaId && !message.storagePath) return;
+    if (fetchedRef.current) return;
+    if (cacheKey && mediaCache.has(cacheKey)) {
+      setMediaData(mediaCache.get(cacheKey)!);
       return;
     }
     fetchedRef.current = true;
     resolveMedia();
-  }, [message.mediaId, directUrl, resolveMedia]);
+  }, [message.mediaId, message.storagePath, directUrl, resolveMedia, cacheKey]);
 
   const effectiveUrl = directUrl || mediaData?.url || null;
   const effectiveMime = mediaData?.mimeType || '';

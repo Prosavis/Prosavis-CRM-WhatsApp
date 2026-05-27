@@ -84,8 +84,6 @@ interface WhatsAppLayoutProps {
   focusPhone?: string;
   /** Llamar al cerrar el chat que coincidía con `focusPhone` (p. ej. quitar el query de la URL). */
   onClearFocusPhone?: () => void;
-  globalAutomationEnabled: boolean | null;
-  globalAutomationLoading: boolean;
   /** Métricas del inbox (contactos totales, tabs, tags) para cabeceras externas o analítica. */
   onInboxMetrics?: (metrics: WhatsAppInboxMetrics) => void;
 }
@@ -95,8 +93,6 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   wabaId,
   focusPhone,
   onClearFocusPhone,
-  globalAutomationEnabled,
-  globalAutomationLoading,
   onInboxMetrics,
 }) => {
   const theme = useTheme();
@@ -624,8 +620,6 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
               onManageTags={() => setTagManagerOpen(true)}
               onConversationPermanentlyDeleted={handleConversationPermanentlyDeleted}
               snippets={snippets}
-              globalAutomationEnabled={globalAutomationEnabled}
-              globalAutomationLoading={globalAutomationLoading}
               myUid={myUid}
               myDisplayName={myDisplayName}
               peerPresences={peersInSelectedChat}

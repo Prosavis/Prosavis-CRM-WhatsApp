@@ -1,5 +1,12 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { getServiceClient } from '../_shared/supabase.ts';
+import {
+  buildStoragePath,
+  downloadWhatsAppMediaFromMeta,
+  getWhatsAppAccessToken,
+  OUTBOUND_META_SIGNED_URL_EXPIRES_SECONDS,
+  persistToWhatsAppBucket,
+} from '../_shared/whatsappMediaStorage.ts';
 
 const encoder = new TextEncoder();
 type JsonRecord = Record<string, unknown>;
@@ -234,50 +241,34 @@ async function persistInboundMedia(params: {
   mimeType: string | null;
   stableKey: string;
 }): Promise<{ storagePath: string | null; storageUrl: string | null }> {
-  const accessToken = Deno.env.get('WHATSAPP_ACCESS_TOKEN')?.trim();
-  if (!accessToken) return { storagePath: null, storageUrl: null };
+  if (!getWhatsAppAccessToken()) {
+    console.error('[on-whatsapp-webhook] persistInboundMedia: WHATSAPP_ACCESS_TOKEN ausente', {
+      mediaId: params.mediaId,
+    });
+    return { storagePath: null, storageUrl: null };
+  }
 
   try {
-    const metaRes = await fetch(`https://graph.facebook.com/v21.0/${params.mediaId}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    const metaJson = await metaRes.json();
-    if (!metaRes.ok) return { storagePath: null, storageUrl: null };
-
-    const downloadUrl = getString(metaJson.url);
-    const mimeType = getString(metaJson.mime_type) || params.mimeType || 'application/octet-stream';
-    if (!downloadUrl) return { storagePath: null, storageUrl: null };
-
-    const binaryRes = await fetch(downloadUrl, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (!binaryRes.ok) return { storagePath: null, storageUrl: null };
-
-    const bytes = new Uint8Array(await binaryRes.arrayBuffer());
-    const ext = mimeType.includes('jpeg') ? 'jpg'
-      : mimeType.includes('png') ? 'png'
-      : mimeType.includes('webp') ? 'webp'
-      : mimeType.includes('ogg') ? 'ogg'
-      : mimeType.includes('mpeg') ? 'mp3'
-      : mimeType.includes('pdf') ? 'pdf'
-      : mimeType.includes('mp4') ? 'mp4'
-      : 'bin';
-    const storagePath = `${params.stableKey}/${params.mediaId}.${ext}`;
-
-    const { error: uploadError } = await params.supabase.storage
-      .from('whatsapp-media')
-      .upload(storagePath, bytes, { upsert: true, contentType: mimeType });
-    if (uploadError) return { storagePath: null, storageUrl: null };
-
-    const { data: signed } = await params.supabase.storage
-      .from('whatsapp-media')
-      .createSignedUrl(storagePath, 7200);
-
-    return {
+    const { bytes, mimeType } = await downloadWhatsAppMediaFromMeta(params.mediaId);
+    const resolvedMimeType = mimeType || params.mimeType || 'application/octet-stream';
+    const storagePath = buildStoragePath(params.stableKey, params.mediaId, resolvedMimeType);
+    const persisted = await persistToWhatsAppBucket(
+      params.supabase,
+      bytes,
       storagePath,
-      storageUrl: signed?.signedUrl ?? null,
+      resolvedMimeType,
+      OUTBOUND_META_SIGNED_URL_EXPIRES_SECONDS,
+    );
+    return {
+      storagePath: persisted.storagePath,
+      storageUrl: persisted.signedUrl,
     };
-  } catch {
+  } catch (error) {
+    console.error('[on-whatsapp-webhook] persistInboundMedia failed', {
+      mediaId: params.mediaId,
+      stableKey: params.stableKey,
+      error: String(error),
+    });
     return { storagePath: null, storageUrl: null };
   }
 }

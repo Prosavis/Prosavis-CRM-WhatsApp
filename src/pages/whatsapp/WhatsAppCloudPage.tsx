@@ -59,7 +59,6 @@ import StepLabel from '@mui/material/StepLabel';
 import WhatsAppLayout from '@/components/whatsapp/WhatsAppLayout';
 import WhatsAppTopBar from '@/components/whatsapp/WhatsAppTopBar';
 import { WHATSAPP_CLOUD_PRODUCTION } from '@/constants/whatsappCloudAccounts';
-import { useWhatsAppAutomationSetting } from '@/hooks/useWhatsAppAutomationSetting';
 import useSoundEffects from '@/hooks/useSoundEffects';
 import {
   bulkWhatsAppSend,
@@ -145,14 +144,6 @@ const { phoneNumberId, wabaId, phoneDisplay, botLabel } = WHATSAPP_CLOUD_PRODUCT
 
 const WhatsAppCloudPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const {
-    geminiEnabled,
-    loading: automationLoading,
-    confirmTarget,
-    setConfirmTarget,
-    applyToggle,
-    cancelConfirm,
-  } = useWhatsAppAutomationSetting();
   const { playNavigation } = useSoundEffects();
   const { registerTabController, unregisterTabController } = useAdminTour();
   const tabParam = searchParams.get('tab');
@@ -442,12 +433,6 @@ const WhatsAppCloudPage: React.FC = () => {
       <WhatsAppTopBar
         activeTab={activeTab}
         onTabChange={handleMainTabChange}
-        geminiEnabled={geminiEnabled}
-        automationLoading={automationLoading}
-        confirmTarget={confirmTarget}
-        onRequestAutomationToggle={(checked) => setConfirmTarget(checked)}
-        onConfirmAutomationApply={() => void applyToggle()}
-        onConfirmAutomationCancel={cancelConfirm}
         inboxTotalContacts={inboxTotalContacts}
         onOpenBulk={handleOpenBulk}
       />
@@ -462,8 +447,6 @@ const WhatsAppCloudPage: React.FC = () => {
             wabaId={wabaId}
             focusPhone={focusPhone}
             onClearFocusPhone={handleClearFocusPhone}
-            globalAutomationEnabled={geminiEnabled}
-            globalAutomationLoading={automationLoading}
             onInboxMetrics={handleInboxMetrics}
           />
         </Box>

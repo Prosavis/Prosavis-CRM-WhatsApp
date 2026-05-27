@@ -6,6 +6,10 @@ import {
   normalizePhone,
   resolveRecipient,
 } from './whatsappIdentity.ts';
+import {
+  createWhatsAppMediaSignedUrl,
+  OUTBOUND_META_SIGNED_URL_EXPIRES_SECONDS,
+} from './whatsappMediaStorage.ts';
 
 export type MediaType = 'image' | 'audio' | 'video' | 'document' | 'sticker';
 
@@ -390,11 +394,20 @@ export async function sendWhatsAppMediaOutbound(
 
   await ensureConversation(supabase, stableKey, recipientPhone, graph.phoneNumberId);
 
+  let mediaUrlForMeta = params.mediaUrl;
+  if (params.storagePath?.trim()) {
+    mediaUrlForMeta = await createWhatsAppMediaSignedUrl(
+      supabase,
+      params.storagePath.trim(),
+      OUTBOUND_META_SIGNED_URL_EXPIRES_SECONDS,
+    );
+  }
+
   const metaResult = await sendToMeta({
     to: params.to,
     phoneNumberId: graph.phoneNumberId,
     accessToken: graph.accessToken,
-    mediaUrl: params.mediaUrl,
+    mediaUrl: mediaUrlForMeta,
     mediaType: params.mediaType,
     caption: params.caption,
     filename: params.filename,
@@ -409,7 +422,7 @@ export async function sendWhatsAppMediaOutbound(
     sender_type: 'agent',
     message_body: metaResult.logMessageBody,
     media_type: params.mediaType,
-    media_url: params.mediaUrl,
+    media_url: mediaUrlForMeta,
     caption: params.caption ?? null,
     filename: params.filename ?? null,
     status: metaResult.status,

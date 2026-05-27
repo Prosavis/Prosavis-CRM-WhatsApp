@@ -31,8 +31,6 @@ import BlockIcon from '@mui/icons-material/Block';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
-import SmartToyIcon from '@mui/icons-material/SmartToy';
-import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
 import CheckBoxOutlinedIcon from '@mui/icons-material/CheckBoxOutlined';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
@@ -101,9 +99,6 @@ interface ChatAreaProps {
   onManageTags?: () => void;
   onConversationPermanentlyDeleted?: () => void;
   snippets?: WhatsAppSnippet[];
-  /** Estado del interruptor «Bot automatizado» en la barra superior (misma fuente que el inbox). */
-  globalAutomationEnabled?: boolean | null;
-  globalAutomationLoading?: boolean;
   /** Uid del admin actual (para escribir su doc de presencia). */
   myUid?: string | null;
   /** Nombre que verán los demás admins en los indicadores de presencia. */
@@ -233,16 +228,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   onManageTags,
   onConversationPermanentlyDeleted,
   snippets,
-  globalAutomationEnabled,
-  globalAutomationLoading = false,
   myUid,
   myDisplayName,
   peerPresences = [],
 }) => {
   const [messages, setMessages] = useState<WhatsAppMessage[]>([]);
   const [loading, setLoading] = useState(true);
-  const [botToggleConfirm, setBotToggleConfirm] = useState(false);
-  const [botToggleLoading, setBotToggleLoading] = useState(false);
   const [suggestionDraft, setSuggestionDraft] = useState('');
   const [suggestionLoading, setSuggestionLoading] = useState(false);
   const [suggestionHint, setSuggestionHint] = useState<string | null>(null);
@@ -265,8 +256,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
   const [tagAnchor, setTagAnchor] = useState<HTMLElement | null>(null);
   const [tagSaving, setTagSaving] = useState(false);
-  const [botGlobalOffDialogOpen, setBotGlobalOffDialogOpen] = useState(false);
-
   const [deleteConversationOpen, setDeleteConversationOpen] = useState(false);
   const [deleteConversationPhrase, setDeleteConversationPhrase] = useState('');
   const [deleteConversationLoading, setDeleteConversationLoading] = useState(false);
@@ -289,37 +278,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   });
   const [stickers, setStickers] = useState<WhatsAppSticker[]>([]);
   const [stickersLoading, setStickersLoading] = useState(false);
-
-  const isManualInboundMode = useMemo(() => {
-    if (globalAutomationLoading) {
-      return !!conversation.automatedInboundDisabled;
-    }
-    if (globalAutomationEnabled === false) {
-      return true;
-    }
-    return !!conversation.automatedInboundDisabled;
-  }, [
-    globalAutomationLoading,
-    globalAutomationEnabled,
-    conversation.automatedInboundDisabled,
-  ]);
-
-  const botIconTooltip = useMemo(() => {
-    if (globalAutomationLoading) {
-      return 'Cargando estado del bot…';
-    }
-    if (globalAutomationEnabled === false) {
-      return 'Bot global desactivado — solo manual en todos los chats';
-    }
-    if (conversation.automatedInboundDisabled) {
-      return 'Bot desactivado en este chat (solo manual)';
-    }
-    return 'Bot activo en este chat';
-  }, [
-    globalAutomationLoading,
-    globalAutomationEnabled,
-    conversation.automatedInboundDisabled,
-  ]);
 
   useEffect(() => {
     setLoading(true);
@@ -503,6 +461,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
       await sendMedia(stableKey, mediaType, url, {
         caption,
+        storagePath,
+        mimeType: file.type || undefined,
+        sizeBytes: file.size,
         // El `filename` solo aplica a documentos en Graph; para los demás tipos lo ignora el backend.
         ...(mediaType === 'document' ? { filename: file.name } : {}),
         ...(phoneNumberId ? { phoneNumberId } : {}),
@@ -748,22 +709,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       setBookingContextLoading(false);
     }
   }, [bookingContext, includeVoiceTranscriptions, stableKey]);
-
-  const handleBotToggle = useCallback(async () => {
-    setBotToggleConfirm(false);
-    setBotToggleLoading(true);
-    try {
-      const newValue = !conversation.automatedInboundDisabled;
-      await patchWhatsAppConversationAdmin({
-        conversationId: conversation.id,
-        patch: { automatedInboundDisabled: newValue },
-      });
-    } catch (err) {
-      console.error('Error toggling bot for conversation:', err);
-    } finally {
-      setBotToggleLoading(false);
-    }
-  }, [conversation.id, conversation.automatedInboundDisabled]);
 
   const handleToggleSelect = useCallback((id: string) => {
     setSelectedIds((prev) => {
@@ -1045,9 +990,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 <Typography variant="caption" color="text.secondary" noWrap>
                   {conversation.contactPhone || conversation.phone || ''}
                 </Typography>
-                {isManualInboundMode && (
-                  <Chip label="Solo manual" size="small" color="error" sx={{ height: 18 }} />
-                )}
                 {(conversation.tagIds || []).map((tagId) => {
                   const tag = tags.find((t) => t.id === tagId);
                   if (!tag) return null;
@@ -1102,30 +1044,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               >
                 <DeleteForeverOutlinedIcon fontSize="small" />
               </IconButton>
-            </Tooltip>
-            <Tooltip title={botIconTooltip}>
-              <Box component="span" sx={{ display: 'inline-flex' }}>
-                <IconButton
-                  size="small"
-                  onClick={() => {
-                    if (globalAutomationLoading) return;
-                    if (globalAutomationEnabled === false) {
-                      setBotGlobalOffDialogOpen(true);
-                      return;
-                    }
-                    setBotToggleConfirm(true);
-                  }}
-                  disabled={botToggleLoading || globalAutomationLoading}
-                >
-                  {botToggleLoading || globalAutomationLoading ? (
-                    <CircularProgress size={18} />
-                  ) : isManualInboundMode ? (
-                    <SmartToyOutlinedIcon fontSize="small" sx={{ color: 'error.main' }} />
-                  ) : (
-                    <SmartToyIcon fontSize="small" sx={{ color: 'success.main' }} />
-                  )}
-                </IconButton>
-              </Box>
             </Tooltip>
             <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
             <Tooltip title="Ficha del cliente">
@@ -1616,43 +1534,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             }
           >
             {deleteConversationLoading ? <CircularProgress size={20} /> : 'Eliminar definitivamente'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Bot global apagado: informativo (no se puede alternar por chat hasta activar el global) */}
-      <Dialog open={botGlobalOffDialogOpen} onClose={() => setBotGlobalOffDialogOpen(false)}>
-        <DialogTitle>Bot global desactivado</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            Tienes el bot automatizado desactivado en la barra superior, así que todos los chats —incluido este— están en
-            modo manual. Cuando actives el bot para todos, podrás decidir en cada chat si el asistente responde solo aquí
-            o no.
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button variant="contained" onClick={() => setBotGlobalOffDialogOpen(false)}>
-            Entendido
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Bot toggle confirm (solo cuando el bot global está activo) */}
-      <Dialog open={botToggleConfirm} onClose={() => setBotToggleConfirm(false)}>
-        <DialogTitle>
-          {conversation.automatedInboundDisabled ? 'Reactivar bot automático' : 'Desactivar bot automático'}
-        </DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            {conversation.automatedInboundDisabled
-              ? 'El bot volverá a responder automáticamente en este chat.'
-              : 'El bot dejará de responder en este chat. Seguirás viendo los mensajes aquí para responder manualmente.'}
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setBotToggleConfirm(false)}>Cancelar</Button>
-          <Button variant="contained" color={conversation.automatedInboundDisabled ? 'success' : 'warning'} onClick={handleBotToggle}>
-            {conversation.automatedInboundDisabled ? 'Reactivar' : 'Desactivar'}
           </Button>
         </DialogActions>
       </Dialog>

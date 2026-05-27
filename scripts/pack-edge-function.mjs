@@ -44,8 +44,6 @@ const skip = new Set([
   'get-whatsapp-metrics',
   'list-whatsapp-message-log',
   'send-whatsapp-chat-message',
-  'get-whatsapp-automation-setting',
-  'set-whatsapp-automation-setting',
   'get-whatsapp-media-signed-url',
   'on-whatsapp-webhook',
   'patch-whatsapp-conversation',

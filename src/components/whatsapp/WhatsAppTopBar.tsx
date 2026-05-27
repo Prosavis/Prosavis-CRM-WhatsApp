@@ -24,18 +24,11 @@ import ThemeToggle from '@/components/common/ThemeToggle';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/hooks/useAuth';
 import { getProSavisLogoSrc } from '@/utils/prosavisBrand';
-import WhatsAppAutomationHeaderSwitch from './WhatsAppAutomationHeaderSwitch';
 import WhatsAppInternalContactsButton from './WhatsAppInternalContactsButton';
 
 export interface WhatsAppTopBarProps {
   activeTab: number;
   onTabChange: (_: React.SyntheticEvent, value: number) => void;
-  geminiEnabled: boolean | null;
-  automationLoading: boolean;
-  confirmTarget: boolean | null;
-  onRequestAutomationToggle: (checked: boolean) => void;
-  onConfirmAutomationApply: () => void;
-  onConfirmAutomationCancel: () => void;
   inboxTotalContacts: number | null;
   onOpenBulk: () => void;
 }
@@ -51,12 +44,6 @@ const TAB_ITEMS = [
 const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
   activeTab,
   onTabChange,
-  geminiEnabled,
-  automationLoading,
-  confirmTarget,
-  onRequestAutomationToggle,
-  onConfirmAutomationApply,
-  onConfirmAutomationCancel,
   inboxTotalContacts,
   onOpenBulk,
 }) => {
@@ -148,16 +135,6 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
           ml: { xs: 0, lg: 'auto' },
         }}
       >
-        <WhatsAppAutomationHeaderSwitch
-          geminiEnabled={geminiEnabled}
-          loading={automationLoading}
-          confirmTarget={confirmTarget}
-          onRequestToggle={onRequestAutomationToggle}
-          onConfirmApply={onConfirmAutomationApply}
-          onConfirmCancel={onConfirmAutomationCancel}
-          tourDataTour="whatsapp-inbox-bot-bar"
-        />
-
         <WhatsAppInternalContactsButton />
 
         {inboxTotalContacts !== null && (

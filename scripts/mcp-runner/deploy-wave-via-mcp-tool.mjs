@@ -46,8 +46,6 @@ const WAVES = {
     'patch-whatsapp-conversation',
     'on-whatsapp-webhook',
     'list-whatsapp-ia-templates',
-    'get-whatsapp-automation-setting',
-    'set-whatsapp-automation-setting',
     'get-whatsapp-media-url',
     'get-whatsapp-media-signed-url',
     'ensure-whatsapp-conversation-from-lead',

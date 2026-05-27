@@ -574,14 +574,47 @@ export async function markAsRead(
   return data as { success: boolean };
 }
 
-export async function getMediaUrl(mediaId: string) {
+export function isMetaHostedMediaUrl(url: string | undefined | null): boolean {
+  if (!url) return false;
+  return /lookaside\.fbsbx\.com|fbcdn\.net/i.test(url);
+}
+
+export async function getMediaUrl(
+  mediaId: string,
+  options?: {
+    storagePath?: string;
+    mediaAssetId?: string;
+    stableKeyHint?: string;
+    mimeType?: string;
+  },
+) {
+  if (options?.storagePath) {
+    try {
+      const signed = await getWhatsAppMediaSignedUrl({ storagePath: options.storagePath });
+      return {
+        url: signed,
+        mimeType: options.mimeType ?? 'application/octet-stream',
+        fileSize: 0,
+      };
+    } catch {
+      // Continúa con la Edge Function (backfill / persistencia).
+    }
+  }
+
   const data = await invokeFn<{
     signedUrl?: string;
     storagePath?: string;
     mimeType: string;
     fileSize: number;
-  }>('get-whatsapp-media-url', { mediaId });
-  if (data.signedUrl) {
+  }>('get-whatsapp-media-url', {
+    mediaId,
+    ...(options?.mediaAssetId ? { mediaAssetId: options.mediaAssetId } : {}),
+    ...(options?.storagePath ? { storagePath: options.storagePath } : {}),
+    ...(options?.stableKeyHint ? { stableKeyHint: options.stableKeyHint } : {}),
+    ...(options?.mimeType ? { mimeType: options.mimeType } : {}),
+  });
+
+  if (data.signedUrl && !isMetaHostedMediaUrl(data.signedUrl)) {
     return { url: data.signedUrl, mimeType: data.mimeType, fileSize: data.fileSize };
   }
   if (data.storagePath) {
@@ -623,22 +656,6 @@ export async function sendWhatsAppTemplateMessageAdmin(params: {
     'send-whatsapp-template-message',
     params,
   );
-}
-
-// --- Automation settings ---
-
-export async function getWhatsAppAutomationSetting(): Promise<{ geminiInboundEnabled: boolean }> {
-  const data = await invokeFn<{ enabled?: boolean; geminiInboundEnabled?: boolean }>(
-    'get-whatsapp-automation-setting',
-  );
-  return { geminiInboundEnabled: data.geminiInboundEnabled ?? data.enabled ?? false };
-}
-
-export async function setWhatsAppAutomationSetting(enabled: boolean): Promise<{ success: boolean }> {
-  return invokeFn<{ success: boolean }>('set-whatsapp-automation-setting', {
-    enabled,
-    geminiInboundEnabled: enabled,
-  });
 }
 
 export interface BookingContextData {
