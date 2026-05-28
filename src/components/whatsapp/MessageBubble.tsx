@@ -77,7 +77,8 @@ interface MessageBubbleProps {
   onReact?: (msg: WhatsAppMessage, emoji: string) => void;
 }
 
-const mediaCache = new Map<string, { url: string; mimeType: string }>();
+const MEDIA_CACHE_TTL_MS = 10 * 60 * 1000;
+const mediaCache = new Map<string, { url: string; mimeType: string; cachedAt: number }>();
 
 const MESSAGE_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
   hour: '2-digit',
@@ -124,8 +125,7 @@ function useMediaPrefetch(message: WhatsAppMessage) {
   const [error, setError] = useState(false);
   const fetchedRef = useRef(false);
 
-  const directUrl =
-    message.mediaUrl && !isMetaHostedMediaUrl(message.mediaUrl) ? message.mediaUrl : null;
+  const directUrl = null;
   const cacheKey = message.mediaId ?? message.storagePath ?? null;
 
   const resolveMedia = useCallback(async () => {
@@ -133,8 +133,12 @@ function useMediaPrefetch(message: WhatsAppMessage) {
     if (!message.mediaId && !message.storagePath) return;
 
     if (cacheKey && mediaCache.has(cacheKey)) {
-      setMediaData(mediaCache.get(cacheKey)!);
-      return;
+      const cached = mediaCache.get(cacheKey)!;
+      if (Date.now() - cached.cachedAt < MEDIA_CACHE_TTL_MS) {
+        setMediaData(cached);
+        return;
+      }
+      mediaCache.delete(cacheKey);
     }
 
     setLoading(true);
@@ -145,6 +149,7 @@ function useMediaPrefetch(message: WhatsAppMessage) {
         const data = {
           url: signed,
           mimeType: message.mimeType || 'application/octet-stream',
+          cachedAt: Date.now(),
         };
         if (cacheKey) mediaCache.set(cacheKey, data);
         setMediaData(data);
@@ -161,7 +166,7 @@ function useMediaPrefetch(message: WhatsAppMessage) {
         mimeType: message.mimeType,
         stableKeyHint: message.recipientPhone,
       });
-      const data = { url: result.url, mimeType: result.mimeType };
+      const data = { url: result.url, mimeType: result.mimeType, cachedAt: Date.now() };
       mediaCache.set(message.mediaId, data);
       setMediaData(data);
     } catch {
@@ -185,8 +190,12 @@ function useMediaPrefetch(message: WhatsAppMessage) {
     if (!message.mediaId && !message.storagePath) return;
     if (fetchedRef.current) return;
     if (cacheKey && mediaCache.has(cacheKey)) {
-      setMediaData(mediaCache.get(cacheKey)!);
-      return;
+      const cached = mediaCache.get(cacheKey)!;
+      if (Date.now() - cached.cachedAt < MEDIA_CACHE_TTL_MS) {
+        setMediaData(cached);
+        return;
+      }
+      mediaCache.delete(cacheKey);
     }
     fetchedRef.current = true;
     resolveMedia();
