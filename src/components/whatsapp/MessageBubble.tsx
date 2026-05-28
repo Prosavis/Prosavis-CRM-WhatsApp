@@ -124,9 +124,8 @@ function useMediaPrefetch(message: WhatsAppMessage) {
   const [error, setError] = useState(false);
   const fetchedRef = useRef(false);
 
-  const rawDirectUrl = message.mediaUrl || message.storageUrl;
   const directUrl =
-    rawDirectUrl && !isMetaHostedMediaUrl(rawDirectUrl) ? rawDirectUrl : null;
+    message.mediaUrl && !isMetaHostedMediaUrl(message.mediaUrl) ? message.mediaUrl : null;
   const cacheKey = message.mediaId ?? message.storagePath ?? null;
 
   const resolveMedia = useCallback(async () => {

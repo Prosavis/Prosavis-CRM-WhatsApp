@@ -6,6 +6,14 @@ import {
   resolveWhatsAppMediaById,
 } from '../_shared/whatsappMediaStorage.ts';
 
+function statusCodeFromError(error: unknown): number {
+  if (error instanceof Error && 'statusCode' in error) {
+    return (error as Error & { statusCode: number }).statusCode;
+  }
+  if (error instanceof Response) return error.status;
+  return 502;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -43,23 +51,48 @@ Deno.serve(async (req) => {
         });
         return jsonResponse(
           { error: error instanceof Error ? error.message : String(error) },
-          502,
+          statusCodeFromError(error),
         );
       }
     }
 
     let resolvedBucketId = bucketId;
     let resolvedStoragePath = storagePath;
+    let resolvedMimeType = mimeTypeHint;
+    let resolvedSize = 0;
 
     if (mediaAssetId) {
       const { data: asset, error: assetError } = await supabase
         .from('whatsapp_media_assets')
-        .select('bucket_id,storage_path,mime_type,size_bytes')
+        .select('bucket_id,storage_path,mime_type,size_bytes,media_id')
         .eq('id', mediaAssetId)
         .single();
       if (assetError) throw assetError;
       resolvedBucketId = asset.bucket_id;
       resolvedStoragePath = asset.storage_path;
+      if (asset.mime_type) resolvedMimeType = asset.mime_type;
+      if (asset.size_bytes) resolvedSize = asset.size_bytes;
+
+      if (asset.media_id) {
+        try {
+          const persisted = await resolveWhatsAppMediaById({
+            supabase,
+            mediaId: asset.media_id,
+            stableKeyHint: stableKeyHint || undefined,
+            mimeTypeHint: resolvedMimeType,
+            expiresIn,
+          });
+          return jsonResponse({
+            signedUrl: persisted.signedUrl,
+            storagePath: persisted.storagePath,
+            mimeType: persisted.mimeType,
+            fileSize: persisted.fileSize,
+            expiresIn,
+          });
+        } catch {
+          // Fall through to direct signed URL attempt below
+        }
+      }
     }
 
     if (!resolvedStoragePath) {
@@ -76,13 +109,13 @@ Deno.serve(async (req) => {
     return jsonResponse({
       signedUrl,
       storagePath: resolvedStoragePath,
-      mimeType: mimeTypeHint ?? 'application/octet-stream',
-      fileSize: 0,
+      mimeType: resolvedMimeType ?? 'application/octet-stream',
+      fileSize: resolvedSize,
       expiresIn,
     });
   } catch (error) {
     if (error instanceof Response) return error;
     console.error('[get-whatsapp-media-url] unexpected error', error);
-    return jsonResponse({ error: String(error) }, 500);
+    return jsonResponse({ error: error instanceof Error ? error.message : String(error) }, statusCodeFromError(error));
   }
 });

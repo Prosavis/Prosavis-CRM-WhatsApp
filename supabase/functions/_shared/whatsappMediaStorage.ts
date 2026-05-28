@@ -280,43 +280,61 @@ export async function resolveWhatsAppMediaById(params: {
 }): Promise<PersistedWhatsAppMedia> {
   const existing = await findExistingMediaAsset(params.supabase, params.mediaId);
   if (existing) {
-    const signedUrl = await createWhatsAppMediaSignedUrl(
-      params.supabase,
-      existing.storagePath,
-      params.expiresIn ?? DEFAULT_SIGNED_URL_EXPIRES_SECONDS,
-      existing.bucketId,
-    );
-    return {
-      storagePath: existing.storagePath,
-      signedUrl,
-      mimeType: existing.mimeType ?? params.mimeTypeHint ?? 'application/octet-stream',
-      fileSize: existing.sizeBytes ?? 0,
-    };
+    try {
+      const signedUrl = await createWhatsAppMediaSignedUrl(
+        params.supabase,
+        existing.storagePath,
+        params.expiresIn ?? DEFAULT_SIGNED_URL_EXPIRES_SECONDS,
+        existing.bucketId,
+      );
+      return {
+        storagePath: existing.storagePath,
+        signedUrl,
+        mimeType: existing.mimeType ?? params.mimeTypeHint ?? 'application/octet-stream',
+        fileSize: existing.sizeBytes ?? 0,
+      };
+    } catch {
+      console.warn('[resolveWhatsAppMediaById] signed URL failed for', {
+        mediaId: params.mediaId,
+        storagePath: existing.storagePath,
+      });
+    }
   }
 
-  const { bytes, mimeType } = await downloadWhatsAppMediaFromMeta(params.mediaId);
-  const storagePath = buildStoragePath(
-    params.stableKeyHint?.trim() || 'unknown',
-    params.mediaId,
-    mimeType || params.mimeTypeHint || 'application/octet-stream',
-  );
+  try {
+    const { bytes, mimeType } = await downloadWhatsAppMediaFromMeta(params.mediaId);
+    const storagePath = buildStoragePath(
+      params.stableKeyHint?.trim() || 'unknown',
+      params.mediaId,
+      mimeType || params.mimeTypeHint || 'application/octet-stream',
+    );
 
-  const persisted = await persistToWhatsAppBucket(
-    params.supabase,
-    bytes,
-    storagePath,
-    mimeType,
-    params.expiresIn ?? DEFAULT_SIGNED_URL_EXPIRES_SECONDS,
-  );
+    const persisted = await persistToWhatsAppBucket(
+      params.supabase,
+      bytes,
+      storagePath,
+      mimeType,
+      params.expiresIn ?? DEFAULT_SIGNED_URL_EXPIRES_SECONDS,
+    );
 
-  await backfillInboundMediaRecords({
-    supabase: params.supabase,
-    mediaId: params.mediaId,
-    storagePath: persisted.storagePath,
-    mimeType: persisted.mimeType,
-    fileSize: persisted.fileSize,
-    signedUrl: persisted.signedUrl,
-  });
+    await backfillInboundMediaRecords({
+      supabase: params.supabase,
+      mediaId: params.mediaId,
+      storagePath: persisted.storagePath,
+      mimeType: persisted.mimeType,
+      fileSize: persisted.fileSize,
+      signedUrl: persisted.signedUrl,
+    });
 
-  return persisted;
+    return persisted;
+  } catch (metaError) {
+    console.error('[resolveWhatsAppMediaById] Meta download failed', {
+      mediaId: params.mediaId,
+      error: String(metaError),
+    });
+    throw Object.assign(
+      new Error('Medio no disponible. El archivo expiró en Storage y ya no está disponible en Meta.'),
+      { statusCode: 410 },
+    );
+  }
 }
