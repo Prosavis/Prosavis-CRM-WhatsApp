@@ -48,7 +48,6 @@ import type { WhatsAppContact, WhatsAppMessage } from '@/services/whatsappServic
 import {
   getMediaUrl,
   getWhatsAppMediaSignedUrl,
-  isMetaHostedMediaUrl,
   downloadMediaBlob,
   getExtensionFromMime,
   transcribeWhatsAppInboundAudio,
