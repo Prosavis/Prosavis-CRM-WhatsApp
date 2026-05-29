@@ -54,3 +54,9 @@ seed.sql
 
 # opencode config
 opencode.json
+# OpenCode project config (local)
+opencode.json
+
+
+# Graphify: knowledge graph (local, each dev generates their own)
+graphify-out/
