@@ -51,3 +51,6 @@ scripts/firebase-export/secrets/
 scripts/firebase-export/output/
 scripts/firebase-export/node_modules/
 seed.sql
+
+# opencode config
+opencode.json
