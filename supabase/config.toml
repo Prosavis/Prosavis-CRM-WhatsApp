@@ -122,3 +122,6 @@ verify_jwt = false
 
 [functions.purge-whatsapp-message-log]
 verify_jwt = false
+
+[functions.log-whatsapp-outbound]
+verify_jwt = false
