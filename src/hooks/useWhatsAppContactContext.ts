@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/config/supabase';
 import type { WhatsAppConversation } from '@/services/whatsappService';
-import type { Lead } from '@/types/lead';
+import type { DirectoryEntry } from '@/types/lead';
 import { normalizeWhatsAppPanelPhone } from '@/utils/whatsappPhone';
 
 export interface ContactPanelUser {
@@ -20,7 +20,10 @@ export interface ContactPanelUser {
 }
 
 export interface WhatsAppContactContextValue {
-  lead: Lead | null;
+  /** The directory entry (replaces `lead`). */
+  directoryEntry: DirectoryEntry | null;
+  /** @deprecated Use `directoryEntry` instead */
+  lead: DirectoryEntry | null;
   user: ContactPanelUser | null;
   loading: boolean;
   refresh: () => Promise<void>;
@@ -29,40 +32,66 @@ export interface WhatsAppContactContextValue {
   photoUrl?: string;
 }
 
-function mapLeadRow(row: Record<string, unknown>): Lead {
+function mapDirectoryRow(row: Record<string, unknown>): DirectoryEntry {
   return {
     id: String(row.id),
-    phone: row.phone != null ? String(row.phone) : undefined,
+    fullName: row.full_name != null ? String(row.full_name) : '',
+    displayName: row.display_name != null ? String(row.display_name) : undefined,
     email: row.email != null ? String(row.email) : undefined,
-    name: row.name != null ? String(row.name) : undefined,
+    phone: row.phone != null ? String(row.phone) : undefined,
+    photoUrl: row.photo_url != null ? String(row.photo_url) : undefined,
     address: row.address != null ? String(row.address) : undefined,
     notes: row.notes != null ? String(row.notes) : undefined,
-    userId: row.user_id != null ? String(row.user_id) : undefined,
-    channels: (row.channels as Lead['channels']) ?? [],
-    status: row.status as Lead['status'],
-    source: row.source as Lead['source'],
-    mensajes_enviados: Number(row.mensajes_enviados ?? 0),
-    secuencia_activa: row.secuencia_activa as Lead['secuencia_activa'],
-    secuencia_paso: Number(row.secuencia_paso ?? 0),
-    opt_out: Boolean(row.opt_out),
-    last_response_text:
-      row.last_response_text != null ? String(row.last_response_text) : undefined,
+    appUserId: row.app_user_id != null ? String(row.app_user_id) : undefined,
+    isAppUser: Boolean(row.is_app_user),
+    providerId: row.provider_id != null ? String(row.provider_id) : undefined,
+    serviceId: row.service_id != null ? String(row.service_id) : undefined,
+    classification: (row.classification as DirectoryEntry['classification']) ?? 'unknown',
+    qualityTag: (row.quality_tag as DirectoryEntry['qualityTag']) ?? 'standard',
+    status: (row.status as string) ?? 'active',
+    source: row.source != null ? String(row.source) : undefined,
+    channels: (row.channels as DirectoryEntry['channels']) ?? [],
+    paymentStatus: row.payment_status != null ? String(row.payment_status) : undefined,
+    pendingAmount: Number(row.pending_amount ?? 0),
+    pendingAppointmentsCount: Number(row.pending_appointments_count ?? 0),
+    lastChargedAmount: row.last_charged_amount != null ? Number(row.last_charged_amount) : undefined,
+    otpRequired: Boolean(row.otp_required),
+    preferredServiceAddressLine: row.preferred_service_address_line != null ? String(row.preferred_service_address_line) : undefined,
+    preferredServiceAddressRef: row.preferred_service_address_ref != null ? String(row.preferred_service_address_ref) : undefined,
+    firstContactAt: row.first_contact_at != null ? String(row.first_contact_at) : undefined,
+    lastContactAt: row.last_contact_at != null ? String(row.last_contact_at) : undefined,
+    messagesCount: Number(row.messages_count ?? 0),
+    activeSequence: (row.active_sequence as string) ?? 'NINGUNA',
+    sequenceStep: Number(row.sequence_step ?? 0),
+    optOut: Boolean(row.opt_out),
+    lastResponseText: row.last_response_text != null ? String(row.last_response_text) : undefined,
+    lastResponseAt: row.last_response_at != null ? String(row.last_response_at) : undefined,
+    lastWhatsAppMessageAt: row.last_whatsapp_message_at != null ? String(row.last_whatsapp_message_at) : undefined,
+    lastWhatsAppMessageText: row.last_whatsapp_message_text != null ? String(row.last_whatsapp_message_text) : undefined,
+    lastWhatsAppIntent: row.last_whatsapp_intent != null ? String(row.last_whatsapp_intent) : undefined,
+    unreadWhatsAppCount: Number(row.unread_whatsapp_count ?? 0),
+    whatsAppAssignedTo: row.whatsapp_assigned_to != null ? String(row.whatsapp_assigned_to) : undefined,
+    whatsAppConversationId: row.whatsapp_conversation_id != null ? String(row.whatsapp_conversation_id) : undefined,
     appointmentId: row.appointment_id != null ? String(row.appointment_id) : undefined,
-    createdAt: new Date(String(row.created_at)),
-    updatedAt: new Date(String(row.updated_at)),
+    internalNotes: row.internal_notes != null ? String(row.internal_notes) : undefined,
+    tags: (row.tags as string[]) ?? [],
+    metadata: (row.metadata ?? {}) as Record<string, unknown>,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+    lastSyncedAt: row.last_synced_at != null ? String(row.last_synced_at) : undefined,
   };
 }
 
 export function useWhatsAppContactContext(
   conversation: WhatsAppConversation | null | undefined,
 ): WhatsAppContactContextValue {
-  const [lead, setLead] = useState<Lead | null>(null);
+  const [directoryEntry, setDirectoryEntry] = useState<DirectoryEntry | null>(null);
   const [user, setUser] = useState<WhatsAppContactContextValue['user']>(null);
   const [loading, setLoading] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!conversation) {
-      setLead(null);
+      setDirectoryEntry(null);
       setUser(null);
       return;
     }
@@ -74,12 +103,13 @@ export function useWhatsAppContactContext(
       );
 
       if (phone) {
-        const { data: leadRow } = await supabase
-          .from('crm_leads')
+        // Query crm_directory instead of crm_leads
+        const { data: dirRow } = await supabase
+          .from('crm_directory')
           .select('*')
           .eq('phone', phone)
           .maybeSingle();
-        setLead(leadRow ? mapLeadRow(leadRow) : null);
+        setDirectoryEntry(dirRow ? mapDirectoryRow(dirRow) : null);
 
         const { data: profile } = await supabase
           .from('crm_contact_profiles')
@@ -89,11 +119,11 @@ export function useWhatsAppContactContext(
 
         if (profile) {
           const meta = (profile.metadata ?? {}) as Record<string, unknown>;
-          const displayName = profile.display_name ?? undefined;
+          const dName = profile.display_name ?? undefined;
           setUser({
             id: String(profile.user_id ?? profile.phone ?? phone),
-            name: displayName,
-            displayName,
+            name: dName,
+            displayName: dName,
             email: profile.email ?? undefined,
             photoURL: profile.photo_url ?? undefined,
             photoUrl: profile.photo_url ?? undefined,
@@ -108,7 +138,7 @@ export function useWhatsAppContactContext(
           setUser(null);
         }
       } else {
-        setLead(null);
+        setDirectoryEntry(null);
         setUser(null);
       }
     } finally {
@@ -128,7 +158,8 @@ export function useWhatsAppContactContext(
   const photoUrl = conversation?.contactPhotoUrl ?? user?.photoUrl ?? user?.photoURL;
 
   return {
-    lead,
+    directoryEntry,
+    lead: directoryEntry, // backward compat
     user,
     loading,
     refresh,

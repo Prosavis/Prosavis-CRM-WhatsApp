@@ -70,7 +70,7 @@ import {
   purgeWhatsAppMessageLog,
   type WhatsAppTemplateSummary,
 } from '@/services/whatsappService';
-import { leadService } from '@/services/leadService';
+import { directoryService } from '@/services/directoryService';
 import type { WhatsAppInboxMetrics } from '@/utils/whatsappInboxStats';
 
 const LeadsPage = lazy(() => import('../leads/LeadsPage'));
@@ -361,10 +361,10 @@ const WhatsAppCloudPage: React.FC = () => {
     setBulkImportLoading('leads');
     setBulkImportError(null);
     try {
-      const phones = await leadService.fetchAllPhonesForBulk();
+      const phones = await directoryService.fetchAllPhonesForBulk();
       setBulkRecipients(phones.join('\n'));
     } catch (e) {
-      setBulkImportError((e as Error).message || 'No se pudieron cargar los leads');
+      setBulkImportError((e as Error).message || 'No se pudieron cargar las entradas del directorio');
     } finally {
       setBulkImportLoading(null);
     }
@@ -374,13 +374,13 @@ const WhatsAppCloudPage: React.FC = () => {
     setBulkImportLoading('union');
     setBulkImportError(null);
     try {
-      const [inboxPhones, leadPhones] = await Promise.all([
+      const [inboxPhones, dirPhones] = await Promise.all([
         fetchConversationPhoneNumbersForBulk(phoneNumberId),
-        leadService.fetchAllPhonesForBulk(),
+        directoryService.fetchAllPhonesForBulk(),
       ]);
-      setBulkRecipients([...new Set([...inboxPhones, ...leadPhones])].join('\n'));
+      setBulkRecipients([...new Set([...inboxPhones, ...dirPhones])].join('\n'));
     } catch (e) {
-      setBulkImportError((e as Error).message || 'Error al combinar Inbox y leads');
+      setBulkImportError((e as Error).message || 'Error al combinar Inbox y directorio');
     } finally {
       setBulkImportLoading(null);
     }
@@ -463,7 +463,7 @@ const WhatsAppCloudPage: React.FC = () => {
               Solo administradores
             </Alert>
             <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-              <Tooltip title="Borra documentos en Firestore (whatsapp_message_log). No modifica leads ni conversaciones.">
+              <Tooltip title="Borra documentos en Firestore (whatsapp_message_log). No modifica el directorio ni conversaciones.">
                 <Button
                   variant="outlined"
                   color="warning"
@@ -506,8 +506,8 @@ const WhatsAppCloudPage: React.FC = () => {
             <DialogContent>
               <DialogContentText component="div" sx={{ mb: 2 }}>
                 Se eliminarán filas de la colección <strong>whatsapp_message_log</strong> en Firestore. Las métricas y la
-                tabla de esta pestaña se basan en esos datos; al borrarlos, los contadores quedarán en cero (salvo leads,
-                que no se tocan).
+                tabla de esta pestaña se basan en esos datos; al borrarlos, los contadores quedarán en cero (salvo el
+                directorio, que no se toca).
               </DialogContentText>
               <RadioGroup
                 value={purgeScope}
@@ -632,7 +632,7 @@ const WhatsAppCloudPage: React.FC = () => {
             ))}
           </Grid>
 
-          {/* Tasa de respuesta y Leads */}
+          {/* Tasa de respuesta y Directorio */}
           {metrics && (
             <Grid container spacing={2} sx={{ mb: 3 }} data-tour="whatsapp-metrics-funnel">
               <Grid item xs={12} md={4}>
@@ -657,7 +657,7 @@ const WhatsAppCloudPage: React.FC = () => {
                 <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, height: '100%' }}>
                   <CardContent>
                     <Typography variant="body2" color="text.secondary" fontWeight={500} gutterBottom>
-                      Leads
+                      Leads / Directorio
                     </Typography>
                     <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
                       <Chip label={`Total: ${metrics.leads.total}`} variant="outlined" />
@@ -983,7 +983,7 @@ const WhatsAppCloudPage: React.FC = () => {
               {bulkRecipientSource === 'system' && (
                 <Box sx={{ mb: 2 }}>
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-                    Importa números del Inbox de WhatsApp (esta línea), de todos los leads con teléfono, o la unión de
+                    Importa números del Inbox de WhatsApp (esta línea), de todo el directorio con teléfono, o la unión de
                     ambos sin duplicados. El resultado rellena el cuadro de abajo; puedes editarlo antes de continuar.
                   </Typography>
                   <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} flexWrap="wrap">
@@ -1017,7 +1017,7 @@ const WhatsAppCloudPage: React.FC = () => {
                       onClick={handleBulkLoadLeads}
                       sx={{ textTransform: 'none' }}
                     >
-                      Leads (teléfono)
+                      Directorio (teléfono)
                     </Button>
                     <Button
                       variant="outlined"
@@ -1033,7 +1033,7 @@ const WhatsAppCloudPage: React.FC = () => {
                       onClick={handleBulkLoadUnion}
                       sx={{ textTransform: 'none' }}
                     >
-                      Inbox + leads (únicos)
+                      Inbox + directorio (únicos)
                     </Button>
                   </Stack>
                   {bulkImportError && (

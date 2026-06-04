@@ -34,7 +34,7 @@ export const WHATSAPP_TEMPLATE_SECTIONS: WhatsAppTemplateSectionMeta[] = [
   {
     key: 'reactivation',
     label: 'Reactivación',
-    description: 'Leads enfriados y clientes que ya habían agendado.',
+    description: 'Contactos enfriados y clientes que ya habían agendado.',
     order: 4,
   },
   {

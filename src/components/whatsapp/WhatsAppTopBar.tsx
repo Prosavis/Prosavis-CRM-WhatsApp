@@ -37,7 +37,7 @@ export interface WhatsAppTopBarProps {
 const TAB_ITEMS = [
   { icon: <InboxIcon fontSize="small" />, label: 'Inbox' },
   { icon: <BarChartIcon fontSize="small" />, label: 'Métricas' },
-  { icon: <ContactPhoneIcon fontSize="small" />, label: 'Leads' },
+  { icon: <ContactPhoneIcon fontSize="small" />, label: 'Directorio' },
   { icon: <ConfirmationNumberIcon fontSize="small" />, label: 'Descuentos' },
   { icon: <SettingsIcon fontSize="small" />, label: 'Configuración' },
   { icon: <MonitorHeartIcon fontSize="small" />, label: 'Monitoreo' },

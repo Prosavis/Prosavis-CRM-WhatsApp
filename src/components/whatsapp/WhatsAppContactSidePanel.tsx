@@ -25,23 +25,16 @@ import type { WhatsAppConversation } from '@/services/whatsappService';
 import { patchWhatsAppConversationAdmin } from '@/services/whatsappService';
 import type { WhatsAppContactContextValue } from '@/hooks/useWhatsAppContactContext';
 import { updateUserProfileViaFunction } from '@/services/cloudFunctions';
-import { leadService } from '@/services/leadService';
+import { directoryService } from '@/services/directoryService';
 import { AppointmentService } from '@/services/appointmentService';
 import type { Appointment } from '@/types/appointment';
-import type { LeadSequenceType, LeadStatus } from '@/types/lead';
+import type { DirectoryEntry } from '@/types/lead';
 import type { User } from '@/types';
 
 const UserDetailsDialog = React.lazy(() => import('../common/UserDetailsDialog'));
 
-const LEAD_STATUSES: LeadStatus[] = [
-  'PENDIENTE',
-  'NO_AGENDO',
-  'AGENDADO',
-  'COMPLETADO',
-  'OPT_OUT',
-];
-
-const SEQUENCES: LeadSequenceType[] = ['NINGUNA', 'SEGUIMIENTO', 'REBOOKING'];
+const ENTRY_STATUSES = ['active', 'inactive', 'opt_out'];
+const SEQUENCES = ['NINGUNA', 'SEGUIMIENTO', 'REBOOKING'];
 
 function statusLabel(s: string): string {
   const map: Record<string, string> = {
@@ -75,7 +68,9 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
   canShowTemplates,
   onBackToTemplates,
 }) => {
-  const { user, lead, refetch, loading } = contact;
+  const { user, directoryEntry, lead, refetch, loading } = contact;
+  // Use directoryEntry as primary, fall back to lead for backward compat
+  const entry: DirectoryEntry | null = directoryEntry ?? lead;
 
   const [userName, setUserName] = useState('');
   const [userPhone, setUserPhone] = useState('');
@@ -85,12 +80,12 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
   const [userCity, setUserCity] = useState('');
   const [userAddress, setUserAddress] = useState('');
 
-  const [leadName, setLeadName] = useState('');
-  const [leadEmail, setLeadEmail] = useState('');
-  const [leadStatus, setLeadStatus] = useState<LeadStatus>('PENDIENTE');
-  const [leadSeq, setLeadSeq] = useState<LeadSequenceType>('NINGUNA');
-  const [leadAddress, setLeadAddress] = useState('');
-  const [leadNotes, setLeadNotes] = useState('');
+  const [entryFullName, setEntryFullName] = useState('');
+  const [entryEmail, setEntryEmail] = useState('');
+  const [entryStatus, setEntryStatus] = useState('active');
+  const [entrySeq, setEntrySeq] = useState('NINGUNA');
+  const [entryAddress, setEntryAddress] = useState('');
+  const [entryNotes, setEntryNotes] = useState('');
 
   const [adminNotes, setAdminNotes] = useState(conversation.adminNotes || '');
 
@@ -131,22 +126,22 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
   }, [user]);
 
   useEffect(() => {
-    if (lead) {
-      setLeadName(lead.name || '');
-      setLeadEmail(lead.email || '');
-      setLeadStatus(lead.status);
-      setLeadSeq(lead.secuencia_activa);
-      setLeadAddress(lead.address || '');
-      setLeadNotes(lead.notes || '');
+    if (entry) {
+      setEntryFullName(entry.fullName || '');
+      setEntryEmail(entry.email || '');
+      setEntryStatus(entry.status || 'active');
+      setEntrySeq(entry.activeSequence || 'NINGUNA');
+      setEntryAddress(entry.address || '');
+      setEntryNotes(entry.notes || '');
     } else {
-      setLeadName('');
-      setLeadEmail('');
-      setLeadStatus('PENDIENTE');
-      setLeadSeq('NINGUNA');
-      setLeadAddress('');
-      setLeadNotes('');
+      setEntryFullName('');
+      setEntryEmail('');
+      setEntryStatus('active');
+      setEntrySeq('NINGUNA');
+      setEntryAddress('');
+      setEntryNotes('');
     }
-  }, [lead]);
+  }, [entry]);
 
   useEffect(() => {
     const uid = user?.id;
@@ -159,7 +154,7 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
     (async () => {
       try {
         const asClient = await AppointmentService.getAppointments({ clientId: uid, limit: 30 });
-        let merged = [...asClient.appointments];
+        const merged = [...asClient.appointments];
         if (user.isProvider) {
           const asProv = await AppointmentService.getAppointments({ providerId: uid, limit: 30 });
           const seen = new Set(merged.map((a) => a.id));
@@ -249,26 +244,26 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
     }
   };
 
-  const handleSaveLead = async () => {
-    if (!lead) return;
+  const handleSaveEntry = async () => {
+    if (!entry) return;
     setError(null);
     setOkMsg(null);
     setSavingLead(true);
     try {
-      await leadService.updateLead(lead.id, {
-        name: leadName.trim() || undefined,
-        email: leadEmail.trim() || undefined,
-        status: leadStatus,
-        secuencia_activa: leadSeq,
-        address: leadAddress.trim() || undefined,
-        notes: leadNotes.trim() || undefined,
+      await directoryService.updateEntry(entry.id, {
+        fullName: entryFullName.trim() || '',
+        email: entryEmail.trim() || undefined,
+        status: entryStatus,
+        activeSequence: entrySeq,
+        address: entryAddress.trim() || undefined,
+        notes: entryNotes.trim() || undefined,
       });
-      const canonical = leadName.trim();
+      const canonical = entryFullName.trim();
       if (canonical.length >= 2) await syncConversationName(canonical);
-      setOkMsg('Lead actualizado');
+      setOkMsg('Entrada actualizada');
       await refetch();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Error al guardar lead');
+      setError(e instanceof Error ? e.message : 'Error al guardar entrada');
     } finally {
       setSavingLead(false);
     }
@@ -405,22 +400,22 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
 
         <Divider sx={{ my: 2 }} />
 
-        {lead ? (
+        {entry ? (
           <>
             <Typography variant="caption" color="text.secondary" fontWeight={600} display="block" sx={{ mb: 1 }}>
-              Lead
+              Directorio
             </Typography>
             <Stack spacing={1}>
-              <TextField label="Nombre" size="small" value={leadName} onChange={(e) => setLeadName(e.target.value)} fullWidth />
-              <TextField label="Email" size="small" value={leadEmail} onChange={(e) => setLeadEmail(e.target.value)} fullWidth />
+              <TextField label="Nombre" size="small" value={entryFullName} onChange={(e) => setEntryFullName(e.target.value)} fullWidth />
+              <TextField label="Email" size="small" value={entryEmail} onChange={(e) => setEntryEmail(e.target.value)} fullWidth />
               <FormControl size="small" fullWidth>
                 <InputLabel>Estado</InputLabel>
                 <Select
                   label="Estado"
-                  value={leadStatus}
-                  onChange={(e) => setLeadStatus(e.target.value as LeadStatus)}
+                  value={entryStatus}
+                  onChange={(e) => setEntryStatus(e.target.value)}
                 >
-                  {LEAD_STATUSES.map((s) => (
+                  {ENTRY_STATUSES.map((s) => (
                     <MenuItem key={s} value={s}>
                       {s}
                     </MenuItem>
@@ -431,8 +426,8 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
                 <InputLabel>Secuencia</InputLabel>
                 <Select
                   label="Secuencia"
-                  value={leadSeq}
-                  onChange={(e) => setLeadSeq(e.target.value as LeadSequenceType)}
+                  value={entrySeq}
+                  onChange={(e) => setEntrySeq(e.target.value)}
                 >
                   {SEQUENCES.map((s) => (
                     <MenuItem key={s} value={s}>
@@ -441,16 +436,16 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
                   ))}
                 </Select>
               </FormControl>
-              <TextField label="Dirección" size="small" value={leadAddress} onChange={(e) => setLeadAddress(e.target.value)} fullWidth />
-              <TextField label="Notas lead" size="small" value={leadNotes} onChange={(e) => setLeadNotes(e.target.value)} fullWidth multiline minRows={2} />
-              <Button variant="contained" size="small" color="secondary" disabled={savingLead} onClick={() => void handleSaveLead()} sx={{ textTransform: 'none' }}>
-                {savingLead ? 'Guardando…' : 'Guardar lead'}
+              <TextField label="Dirección" size="small" value={entryAddress} onChange={(e) => setEntryAddress(e.target.value)} fullWidth />
+              <TextField label="Notas" size="small" value={entryNotes} onChange={(e) => setEntryNotes(e.target.value)} fullWidth multiline minRows={2} />
+              <Button variant="contained" size="small" color="secondary" disabled={savingLead} onClick={() => void handleSaveEntry()} sx={{ textTransform: 'none' }}>
+                {savingLead ? 'Guardando…' : 'Guardar'}
               </Button>
             </Stack>
           </>
         ) : (
           <Typography variant="body2" color="text.secondary">
-            No hay lead en Firestore para este teléfono.
+            No hay entrada en el directorio para este teléfono.
           </Typography>
         )}
 

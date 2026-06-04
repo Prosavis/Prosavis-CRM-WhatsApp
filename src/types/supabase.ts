@@ -571,6 +571,58 @@ export type Database = {
         }
         Relationships: []
       }
+      crm_directory: {
+        Row: {
+          id: string
+          full_name: string
+          display_name: string | null
+          email: string | null
+          phone: string | null
+          photo_url: string | null
+          address: string | null
+          notes: string | null
+          app_user_id: string | null
+          is_app_user: boolean
+          provider_id: string | null
+          service_id: string | null
+          classification: string
+          quality_tag: string
+          status: string
+          source: string | null
+          channels: string[]
+          payment_status: string | null
+          pending_amount: number
+          pending_appointments_count: number
+          last_charged_amount: number | null
+          otp_required: boolean
+          preferred_service_address_line: string | null
+          preferred_service_address_ref: string | null
+          first_contact_at: string | null
+          last_contact_at: string | null
+          messages_count: number
+          active_sequence: string
+          sequence_step: number
+          opt_out: boolean
+          last_response_text: string | null
+          last_response_at: string | null
+          last_whatsapp_message_at: string | null
+          last_whatsapp_message_text: string | null
+          last_whatsapp_intent: string | null
+          unread_whatsapp_count: number
+          whatsapp_assigned_to: string | null
+          whatsapp_conversation_id: string | null
+          appointment_id: string | null
+          internal_notes: string | null
+          tags: string[]
+          metadata: Json
+          created_at: string
+          updated_at: string
+          last_synced_at: string | null
+        }
+        Insert: Partial<Database['public']['Tables']['crm_directory']['Row']>
+        Update: Partial<Database['public']['Tables']['crm_directory']['Row']>
+        Relationships: []
+      }
       crm_leads: {
         Row: {
           created_at: string

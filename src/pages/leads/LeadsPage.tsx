@@ -3,7 +3,6 @@ import FilterListIcon from '@mui/icons-material/FilterList';
 import PeopleIcon from '@mui/icons-material/People';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SearchIcon from '@mui/icons-material/Search';
-import SyncIcon from '@mui/icons-material/Sync';
 import WhatsAppIcon from '@mui/icons-material/WhatsApp';
 
 import Alert from '@mui/material/Alert';
@@ -40,48 +39,60 @@ import TextField from '@mui/material/TextField';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { leadService } from '@/services/leadService';
-import type { Lead, LeadSource, LeadStatus } from '@/types/lead';
+import { directoryService } from '@/services/directoryService';
+import type { DirectoryEntry, DirectorySource } from '@/types/lead';
 
-const STATUS_COLORS: Record<LeadStatus, 'default' | 'warning' | 'info' | 'success' | 'error'> = {
-  PENDIENTE: 'warning',
-  NO_AGENDO: 'default',
-  AGENDADO: 'info',
-  COMPLETADO: 'success',
-  OPT_OUT: 'error',
-  PAGO_RECHAZADO: 'error',
+const CLASSIFICATION_CHIP_COLORS: Record<string, 'default' | 'primary' | 'info' | 'warning'> = {
+  user: 'primary',
+  company: 'info',
+  lead: 'warning',
+  unknown: 'default',
 };
 
-const STATUS_LABELS: Record<LeadStatus, string> = {
-  PENDIENTE: 'Pendiente',
-  NO_AGENDO: 'No agendó',
-  AGENDADO: 'Agendado',
-  COMPLETADO: 'Completado',
-  OPT_OUT: 'Opt-out',
-  PAGO_RECHAZADO: 'Pago rechazado',
+const CLASSIFICATION_LABELS: Record<string, string> = {
+  user: 'Usuario',
+  company: 'Empresa',
+  lead: 'Lead',
+  unknown: 'Desconocido',
 };
 
-const SOURCE_LABELS: Record<LeadSource, string> = {
+const STATUS_CHIP_COLORS: Record<string, 'default' | 'success' | 'error' | 'warning'> = {
+  active: 'success',
+  inactive: 'default',
+  opt_out: 'error',
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  active: 'Activo',
+  inactive: 'Inactivo',
+  opt_out: 'Opt-out',
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  APP_USER: 'App User',
+  WHATSAPP_INBOUND: 'WhatsApp Inbound',
   META_ADS: 'Meta Ads',
   REFERIDO: 'Referido',
   ORGANICO: 'Orgánico',
   BROADCAST: 'Broadcast',
-  WHATSAPP_INBOUND: 'WhatsApp Inbound',
   PANEL: 'Panel',
-  APP_USER: 'App User',
 };
 
-interface LeadStats {
+const CHANNEL_COLORS: Record<string, 'primary' | 'success'> = {
+  WHATSAPP: 'primary',
+  IN_APP: 'success',
+};
+
+interface DirectoryStats {
   total: number;
-  pendientes: number;
-  noAgendo: number;
-  agendados: number;
-  completados: number;
+  active: number;
+  inactive: number;
   optOut: number;
-  pagoRechazado: number;
+  byClassification: Record<string, number>;
+  bySource: Record<string, number>;
 }
 
-type SortField = 'name' | 'email' | 'status' | 'source' | 'mensajes_enviados';
+type SortField = 'full_name' | 'email' | 'status' | 'source' | 'messages_count' | 'classification';
 type SortDirection = 'asc' | 'desc';
 
 const SEARCH_DEBOUNCE_MS = 400;
@@ -93,7 +104,7 @@ export interface LeadsPageProps {
 }
 
 const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }) => {
-  const [leads, setLeads] = useState<Lead[]>([]);
+  const [entries, setEntries] = useState<DirectoryEntry[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -104,6 +115,7 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
   });
 
   const [statusFilter, setStatusFilter] = useState<string>('');
+  const [classificationFilter, setClassificationFilter] = useState<string>('');
   const [sourceFilter, setSourceFilter] = useState<string>('');
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [seedLoading, setSeedLoading] = useState(false);
@@ -111,14 +123,13 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(100);
   const [totalCount, setTotalCount] = useState(0);
-  const [stats, setStats] = useState<LeadStats>({
+  const [stats, setStats] = useState<DirectoryStats>({
     total: 0,
-    pendientes: 0,
-    noAgendo: 0,
-    agendados: 0,
-    completados: 0,
+    active: 0,
+    inactive: 0,
     optOut: 0,
-    pagoRechazado: 0,
+    byClassification: {},
+    bySource: {},
   });
 
   const [sortField, setSortField] = useState<SortField | null>(null);
@@ -128,23 +139,23 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
   const [searchTerm, setSearchTerm] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [newLead, setNewLead] = useState({
+  const [newEntry, setNewEntry] = useState({
     phone: '',
-    name: '',
+    fullName: '',
     email: '',
-    source: 'PANEL' as LeadSource,
+    source: 'PANEL' as string,
   });
 
   const fetchStats = useCallback(async () => {
     try {
-      const result = await leadService.getLeadStats();
+      const result = await directoryService.getStats();
       setStats(result);
     } catch {
       // Stats fallback silencioso
     }
   }, []);
 
-  const fetchLeads = useCallback(async () => {
+  const fetchEntries = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -153,6 +164,7 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
         page,
       };
       if (statusFilter) filters.status = statusFilter;
+      if (classificationFilter) filters.classification = classificationFilter;
       if (sourceFilter) filters.source = sourceFilter;
       if (searchTerm) filters.searchTerm = searchTerm;
       if (sortField) {
@@ -160,52 +172,55 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
         filters.sortDirection = sortDirection;
       }
 
-      const result = await leadService.getLeads(filters as Parameters<typeof leadService.getLeads>[0]);
-      setLeads(result.leads);
+      const result = await directoryService.getEntries(filters as Parameters<typeof directoryService.getEntries>[0]);
+      setEntries(result.entries);
       setTotalCount(result.totalCount);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al cargar leads');
+      setError(err instanceof Error ? err.message : 'Error al cargar el directorio');
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, sourceFilter, page, rowsPerPage, searchTerm, sortField, sortDirection]);
+  }, [statusFilter, classificationFilter, sourceFilter, page, rowsPerPage, searchTerm, sortField, sortDirection]);
 
   useEffect(() => {
     fetchStats();
   }, [fetchStats]);
 
   useEffect(() => {
-    fetchLeads();
-  }, [fetchLeads]);
+    fetchEntries();
+  }, [fetchEntries]);
 
-  const handleCreateLead = async () => {
+  const handleCreateEntry = async () => {
     try {
-      await leadService.createLead({
-        phone: newLead.phone || undefined,
-        name: newLead.name || undefined,
-        email: newLead.email || undefined,
-        source: newLead.source,
+      await directoryService.createEntry({
+        fullName: newEntry.fullName || newEntry.phone || 'Sin nombre',
+        phone: newEntry.phone || undefined,
+        email: newEntry.email || undefined,
+        source: (newEntry.source || 'PANEL') as DirectorySource,
+        classification: 'lead',
+        status: 'active',
+        channels: ['WHATSAPP'],
       });
-      setSnackbar({ open: true, message: 'Lead creado exitosamente', severity: 'success' });
+      setSnackbar({ open: true, message: 'Entrada creada exitosamente en el directorio', severity: 'success' });
       setCreateDialogOpen(false);
-      setNewLead({ phone: '', name: '', email: '', source: 'PANEL' });
-      fetchLeads();
+      setNewEntry({ phone: '', fullName: '', email: '', source: 'PANEL' });
+      fetchEntries();
       fetchStats();
     } catch {
-      setSnackbar({ open: true, message: 'Error al crear lead', severity: 'error' });
+      setSnackbar({ open: true, message: 'Error al crear entrada', severity: 'error' });
     }
   };
 
   const handleSeedAllUsers = async () => {
     setSeedLoading(true);
     try {
-      const result = await leadService.seedAllUsersAsLeads();
+      const result = await directoryService.seedAllUsersAsEntries();
       setSnackbar({
         open: true,
         message: `Seed completado: ${result.created} creados, ${result.skipped} omitidos, ${result.errors} errores`,
         severity: result.errors > 0 ? 'error' : 'success',
       });
-      fetchLeads();
+      fetchEntries();
       fetchStats();
     } catch {
       setSnackbar({ open: true, message: 'Error al ejecutar seed', severity: 'error' });
@@ -225,7 +240,7 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
       }
     } else {
       setSortField(field);
-      setSortDirection(field === 'mensajes_enviados' ? 'desc' : 'asc');
+      setSortDirection(field === 'messages_count' ? 'desc' : 'asc');
     }
   };
 
@@ -248,14 +263,14 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
   };
 
   const toggleSelectAll = () => {
-    if (selectedIds.size === leads.length) {
+    if (selectedIds.size === entries.length) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(leads.map((l) => l.id)));
+      setSelectedIds(new Set(entries.map((e) => e.id)));
     }
   };
 
-  const selectedLeads = leads.filter((l) => selectedIds.has(l.id));
+  const selectedEntries = entries.filter((e) => selectedIds.has(e.id));
 
   const totalPages = Math.ceil(totalCount / rowsPerPage);
 
@@ -265,23 +280,13 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
 
   const kpis = [
     { label: 'Total', value: stats.total, color: 'primary.main' },
-    { label: 'Pendientes', value: stats.pendientes, color: 'warning.main' },
-    { label: 'Agendados', value: stats.agendados, color: 'info.main' },
-    { label: 'Completados', value: stats.completados, color: 'success.main' },
-    { label: 'Pago rechazado', value: stats.pagoRechazado, color: 'error.main' },
+    { label: 'Activos', value: stats.active, color: 'success.main' },
+    { label: 'Inactivos', value: stats.inactive, color: 'text.secondary' },
     { label: 'Opt-out', value: stats.optOut, color: 'error.main' },
   ];
 
   const from = totalCount === 0 ? 0 : page * rowsPerPage + 1;
   const to = Math.min((page + 1) * rowsPerPage, totalCount);
-
-  const sortableColumns: { field: SortField; label: string }[] = [
-    { field: 'name', label: 'Nombre' },
-    { field: 'email', label: 'Email' },
-    { field: 'status', label: 'Estado' },
-    { field: 'source', label: 'Fuente' },
-    { field: 'mensajes_enviados', label: 'Mensajes' },
-  ];
 
   return (
     <Box sx={{ p: embedded ? 0 : { xs: 1, sm: 2, md: 3 } }}>
@@ -293,31 +298,31 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
       >
         {!embedded && (
           <Typography variant="h4" fontWeight={700}>
-            Leads
+            Directorio
           </Typography>
         )}
         <Stack direction="row" spacing={1}>
-          {onOpenInInbox && selectedLeads.length > 0 && (
+          {onOpenInInbox && selectedEntries.length > 0 && (
             <Button
               variant="outlined"
               color="success"
               startIcon={<WhatsAppIcon />}
               size="small"
               onClick={() => {
-                const first = selectedLeads.find((l) => l.phone && l.status !== 'OPT_OUT');
+                const first = selectedEntries.find((e) => e.phone && e.status !== 'opt_out');
                 if (first?.phone) {
-                  onOpenInInbox(first.phone, first.name || undefined);
+                  onOpenInInbox(first.phone, first.fullName || undefined);
                   setSelectedIds(new Set());
                 }
               }}
             >
-              Abrir en inbox ({selectedLeads.filter((l) => l.phone && l.status !== 'OPT_OUT').length})
+              Abrir en inbox ({selectedEntries.filter((e) => e.phone && e.status !== 'opt_out').length})
             </Button>
           )}
-          <Tooltip title="Seed: convertir todos los usuarios a leads">
+          <Tooltip title="Seed: convertir todos los usuarios de la app al directorio">
             <Button
               variant="outlined"
-              startIcon={seedLoading ? <CircularProgress size={18} /> : <SyncIcon />}
+              startIcon={seedLoading ? <CircularProgress size={18} /> : <AddIcon />}
               onClick={handleSeedAllUsers}
               disabled={seedLoading}
               size="small"
@@ -331,14 +336,14 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
             onClick={() => setCreateDialogOpen(true)}
             size="small"
           >
-            Nuevo Lead
+            Nueva entrada
           </Button>
         </Stack>
       </Stack>
 
       <Grid container spacing={2} mb={3}>
         {kpis.map((kpi) => (
-          <Grid item xs={6} sm={4} md={2} key={kpi.label}>
+          <Grid item xs={6} sm={4} md={3} key={kpi.label}>
             <Card>
               <CardContent sx={{ textAlign: 'center', py: 1.5 }}>
                 <Typography variant="h5" fontWeight={700} color={kpi.color}>
@@ -381,12 +386,26 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
               }}
             >
               <MenuItem value="">Todos</MenuItem>
-              <MenuItem value="PENDIENTE">Pendiente</MenuItem>
-              <MenuItem value="NO_AGENDO">No agendó</MenuItem>
-              <MenuItem value="AGENDADO">Agendado</MenuItem>
-              <MenuItem value="COMPLETADO">Completado</MenuItem>
-              <MenuItem value="PAGO_RECHAZADO">Pago rechazado</MenuItem>
-              <MenuItem value="OPT_OUT">Opt-out</MenuItem>
+              <MenuItem value="active">Activo</MenuItem>
+              <MenuItem value="inactive">Inactivo</MenuItem>
+              <MenuItem value="opt_out">Opt-out</MenuItem>
+            </Select>
+          </FormControl>
+          <FormControl size="small" sx={{ minWidth: 150 }}>
+            <InputLabel>Clasificación</InputLabel>
+            <Select
+              value={classificationFilter}
+              label="Clasificación"
+              onChange={(e) => {
+                setClassificationFilter(e.target.value);
+                setPage(0);
+              }}
+            >
+              <MenuItem value="">Todas</MenuItem>
+              <MenuItem value="user">Usuario</MenuItem>
+              <MenuItem value="company">Empresa</MenuItem>
+              <MenuItem value="lead">Lead</MenuItem>
+              <MenuItem value="unknown">Desconocido</MenuItem>
             </Select>
           </FormControl>
           <FormControl size="small" sx={{ minWidth: 150 }}>
@@ -400,16 +419,16 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
               }}
             >
               <MenuItem value="">Todas</MenuItem>
-              <MenuItem value="META_ADS">Meta Ads</MenuItem>
-              <MenuItem value="WHATSAPP_INBOUND">WhatsApp Inbound</MenuItem>
               <MenuItem value="APP_USER">App User</MenuItem>
+              <MenuItem value="WHATSAPP_INBOUND">WhatsApp Inbound</MenuItem>
+              <MenuItem value="META_ADS">Meta Ads</MenuItem>
               <MenuItem value="PANEL">Panel</MenuItem>
               <MenuItem value="REFERIDO">Referido</MenuItem>
               <MenuItem value="ORGANICO">Orgánico</MenuItem>
               <MenuItem value="BROADCAST">Broadcast</MenuItem>
             </Select>
           </FormControl>
-          <IconButton onClick={() => { fetchLeads(); fetchStats(); }}>
+          <IconButton onClick={() => { fetchEntries(); fetchStats(); }}>
             <RefreshIcon />
           </IconButton>
         </Stack>
@@ -433,112 +452,180 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
                 <TableRow>
                   <TableCell padding="checkbox">
                     <Checkbox
-                      indeterminate={selectedIds.size > 0 && selectedIds.size < leads.length}
-                      checked={leads.length > 0 && selectedIds.size === leads.length}
+                      indeterminate={selectedIds.size > 0 && selectedIds.size < entries.length}
+                      checked={entries.length > 0 && selectedIds.size === entries.length}
                       onChange={toggleSelectAll}
                       size="small"
                     />
                   </TableCell>
-                  {sortableColumns.slice(0, 1).map((col) => (
-                    <TableCell key={col.field}>
-                      <TableSortLabel
-                        active={sortField === col.field}
-                        direction={sortField === col.field ? sortDirection : 'asc'}
-                        onClick={() => handleSort(col.field)}
-                      >
-                        {col.label}
-                      </TableSortLabel>
-                    </TableCell>
-                  ))}
+                  <TableCell>
+                    <TableSortLabel
+                      active={sortField === 'full_name'}
+                      direction={sortField === 'full_name' ? sortDirection : 'asc'}
+                      onClick={() => handleSort('full_name')}
+                    >
+                      Cliente
+                    </TableSortLabel>
+                  </TableCell>
                   <TableCell>Teléfono</TableCell>
-                  {sortableColumns.slice(1, 2).map((col) => (
-                    <TableCell key={col.field}>
-                      <TableSortLabel
-                        active={sortField === col.field}
-                        direction={sortField === col.field ? sortDirection : 'asc'}
-                        onClick={() => handleSort(col.field)}
-                      >
-                        {col.label}
-                      </TableSortLabel>
-                    </TableCell>
-                  ))}
-                  {sortableColumns.slice(2, 4).map((col) => (
-                    <TableCell key={col.field}>
-                      <TableSortLabel
-                        active={sortField === col.field}
-                        direction={sortField === col.field ? sortDirection : 'asc'}
-                        onClick={() => handleSort(col.field)}
-                      >
-                        {col.label}
-                      </TableSortLabel>
-                    </TableCell>
-                  ))}
-                  <TableCell>Secuencia</TableCell>
+                  <TableCell>Email</TableCell>
+                  <TableCell>
+                    <TableSortLabel
+                      active={sortField === 'classification'}
+                      direction={sortField === 'classification' ? sortDirection : 'asc'}
+                      onClick={() => handleSort('classification')}
+                    >
+                      Clasificación
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell>
+                    <TableSortLabel
+                      active={sortField === 'source'}
+                      direction={sortField === 'source' ? sortDirection : 'asc'}
+                      onClick={() => handleSort('source')}
+                    >
+                      Fuente
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell>
+                    <TableSortLabel
+                      active={sortField === 'status'}
+                      direction={sortField === 'status' ? sortDirection : 'asc'}
+                      onClick={() => handleSort('status')}
+                    >
+                      Estado
+                    </TableSortLabel>
+                  </TableCell>
                   <TableCell>Canales</TableCell>
-                  {sortableColumns.slice(4).map((col) => (
-                    <TableCell key={col.field}>
-                      <TableSortLabel
-                        active={sortField === col.field}
-                        direction={sortField === col.field ? sortDirection : 'desc'}
-                        onClick={() => handleSort(col.field)}
-                      >
-                        {col.label}
-                      </TableSortLabel>
-                    </TableCell>
-                  ))}
+                  <TableCell>Secuencia</TableCell>
+                  <TableCell>
+                    <TableSortLabel
+                      active={sortField === 'messages_count'}
+                      direction={sortField === 'messages_count' ? sortDirection : 'desc'}
+                      onClick={() => handleSort('messages_count')}
+                    >
+                      Mensajes
+                    </TableSortLabel>
+                  </TableCell>
+                  <TableCell>Último contacto</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {leads.length === 0 ? (
+                {entries.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} align="center">
+                    <TableCell colSpan={11} align="center">
                       <Stack alignItems="center" spacing={1} py={4}>
                         <PeopleIcon sx={{ fontSize: 48, color: 'text.disabled' }} />
                         <Typography color="text.secondary">
-                          {searchTerm ? 'No se encontraron leads con esa búsqueda' : 'No hay leads registrados'}
+                          {searchTerm ? 'No se encontraron resultados en el directorio' : 'No hay entradas en el directorio'}
                         </Typography>
                       </Stack>
                     </TableCell>
                   </TableRow>
                 ) : (
-                  leads.map((lead) => (
-                    <TableRow key={lead.id} hover>
+                  entries.map((entry) => (
+                    <TableRow key={entry.id} hover>
                       <TableCell padding="checkbox">
                         <Checkbox
-                          checked={selectedIds.has(lead.id)}
-                          onChange={() => toggleSelect(lead.id)}
+                          checked={selectedIds.has(entry.id)}
+                          onChange={() => toggleSelect(entry.id)}
                           size="small"
-                          disabled={!lead.phone || lead.status === 'OPT_OUT'}
+                          disabled={!entry.phone || entry.status === 'opt_out'}
                         />
                       </TableCell>
-                      <TableCell>{lead.name || '—'}</TableCell>
-                      <TableCell>{lead.phone || '—'}</TableCell>
-                      <TableCell>{lead.email || '—'}</TableCell>
+                      <TableCell>
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <Box
+                            sx={{
+                              width: 32,
+                              height: 32,
+                              borderRadius: '50%',
+                              bgcolor: 'primary.light',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: 'white',
+                              fontSize: '0.75rem',
+                              fontWeight: 700,
+                              flexShrink: 0,
+                              overflow: 'hidden',
+                            }}
+                          >
+                            {entry.photoUrl ? (
+                              <Box component="img" src={entry.photoUrl} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            ) : (
+                              (entry.fullName?.charAt(0) || '?').toUpperCase()
+                            )}
+                          </Box>
+                          <Typography variant="body2" fontWeight={500}>
+                            {entry.fullName || '—'}
+                          </Typography>
+                        </Stack>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: 13 }}>
+                          {entry.phone || '—'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2">{entry.email || '—'}</Typography>
+                      </TableCell>
                       <TableCell>
                         <Chip
-                          label={STATUS_LABELS[lead.status] || lead.status}
-                          color={STATUS_COLORS[lead.status]}
+                          label={CLASSIFICATION_LABELS[entry.classification] || entry.classification}
+                          color={CLASSIFICATION_CHIP_COLORS[entry.classification] || 'default'}
                           size="small"
                         />
                       </TableCell>
                       <TableCell>
-                        <Chip label={SOURCE_LABELS[lead.source] || lead.source} size="small" variant="outlined" />
+                        <Chip
+                          label={SOURCE_LABELS[entry.source as string] || entry.source || '—'}
+                          size="small"
+                          variant="outlined"
+                        />
                       </TableCell>
                       <TableCell>
-                        {lead.secuencia_activa !== 'NINGUNA' ? (
-                          <Chip label={`${lead.secuencia_activa} (${lead.secuencia_paso})`} size="small" color="info" variant="outlined" />
+                        <Chip
+                          label={STATUS_LABELS[entry.status] || entry.status}
+                          color={STATUS_CHIP_COLORS[entry.status] || 'default'}
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Stack direction="row" spacing={0.5}>
+                          {entry.channels?.map((ch) => (
+                            <Chip
+                              key={ch}
+                              label={ch}
+                              size="small"
+                              variant="outlined"
+                              color={CHANNEL_COLORS[ch] || 'default'}
+                            />
+                          ))}
+                          {(!entry.channels || entry.channels.length === 0) && '—'}
+                        </Stack>
+                      </TableCell>
+                      <TableCell>
+                        {entry.activeSequence !== 'NINGUNA' ? (
+                          <Chip
+                            label={`${entry.activeSequence} (${entry.sequenceStep})`}
+                            size="small"
+                            color="info"
+                            variant="outlined"
+                          />
                         ) : (
                           '—'
                         )}
                       </TableCell>
+                      <TableCell>{entry.messagesCount}</TableCell>
                       <TableCell>
-                        <Stack direction="row" spacing={0.5}>
-                          {lead.channels?.map((ch) => (
-                            <Chip key={ch} label={ch} size="small" variant="outlined" />
-                          ))}
-                        </Stack>
+                        {entry.lastContactAt
+                          ? new Date(entry.lastContactAt).toLocaleDateString('es-CO', {
+                              day: '2-digit',
+                              month: 'short',
+                            })
+                          : '—'}
                       </TableCell>
-                      <TableCell>{lead.mensajes_enviados}</TableCell>
                     </TableRow>
                   ))
                 )}
@@ -589,7 +676,7 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
                 boundaryCount={1}
               />
               <Typography variant="caption" color="text.secondary">
-                {from}–{to} de {totalCount} leads
+                {from}–{to} de {totalCount} entradas
               </Typography>
             </Stack>
           </Box>
@@ -597,34 +684,34 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
       )}
 
       <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Nuevo Lead</DialogTitle>
+        <DialogTitle>Nueva entrada en el directorio</DialogTitle>
         <DialogContent>
           <Stack spacing={2} mt={1}>
             <TextField
-              label="Nombre"
-              value={newLead.name}
-              onChange={(e) => setNewLead({ ...newLead, name: e.target.value })}
+              label="Nombre completo"
+              value={newEntry.fullName}
+              onChange={(e) => setNewEntry({ ...newEntry, fullName: e.target.value })}
               fullWidth
             />
             <TextField
               label="Teléfono"
-              value={newLead.phone}
-              onChange={(e) => setNewLead({ ...newLead, phone: e.target.value })}
+              value={newEntry.phone}
+              onChange={(e) => setNewEntry({ ...newEntry, phone: e.target.value })}
               fullWidth
               placeholder="+57..."
             />
             <TextField
               label="Email"
-              value={newLead.email}
-              onChange={(e) => setNewLead({ ...newLead, email: e.target.value })}
+              value={newEntry.email}
+              onChange={(e) => setNewEntry({ ...newEntry, email: e.target.value })}
               fullWidth
             />
             <FormControl fullWidth>
               <InputLabel>Fuente</InputLabel>
               <Select
-                value={newLead.source}
+                value={newEntry.source}
                 label="Fuente"
-                onChange={(e) => setNewLead({ ...newLead, source: e.target.value as LeadSource })}
+                onChange={(e) => setNewEntry({ ...newEntry, source: e.target.value })}
               >
                 <MenuItem value="PANEL">Panel</MenuItem>
                 <MenuItem value="META_ADS">Meta Ads</MenuItem>
@@ -636,7 +723,7 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setCreateDialogOpen(false)}>Cancelar</Button>
-          <Button variant="contained" onClick={handleCreateLead}>
+          <Button variant="contained" onClick={handleCreateEntry}>
             Crear
           </Button>
         </DialogActions>

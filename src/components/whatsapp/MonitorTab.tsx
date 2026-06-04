@@ -516,7 +516,7 @@ function GeneralMetricsSection({ metrics, loading }: { metrics: GeneralMetrics |
     { label: 'Conversaciones', value: formatNumber(metrics.conversations), icon: <ChatIcon />, color: '#1976d2', bg: '#e3f2fd' },
     { label: 'Mensajes', value: formatNumber(metrics.messages), icon: <TextIcon />, color: '#2e7d32', bg: '#e8f5e9' },
     { label: 'Activas', value: formatNumber(metrics.activeConversations), icon: <ChatIcon />, color: '#00897b', bg: '#e0f2f1' },
-    { label: 'Leads', value: formatNumber(metrics.leads), icon: <PeopleIcon />, color: '#ed6c02', bg: '#fff3e0' },
+    { label: 'Directorio', value: formatNumber(metrics.leads), icon: <PeopleIcon />, color: '#ed6c02', bg: '#fff3e0' },
     { label: 'Clientes', value: formatNumber(metrics.clients), icon: <BusinessIcon />, color: '#7b1fa2', bg: '#f3e5f5' },
     { label: 'Citas', value: formatNumber(metrics.appointments), icon: <CalendarIcon />, color: '#1565c0', bg: '#e3f2fd' },
     { label: 'Assets multimedia', value: formatNumber(metrics.mediaAssets), icon: <PhotoIcon />, color: '#2e7d32', bg: '#e8f5e9' },

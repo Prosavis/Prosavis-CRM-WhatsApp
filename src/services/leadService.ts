@@ -1,3 +1,8 @@
+/**
+ * @deprecated Use `directoryService` instead (`@/services/directoryService`).
+ * This file will be removed in a future release. All new code should use
+ * the `crm_directory` table via `directoryService`.
+ */
 import { supabase } from '@/config/supabase';
 import type { Lead, LeadSource, LeadStatus } from '@/types/lead';
 

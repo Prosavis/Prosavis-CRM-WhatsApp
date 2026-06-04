@@ -230,7 +230,7 @@ export async function getGeneralMetrics(): Promise<GeneralMetrics> {
   ] = await Promise.all([
     safeCount('whatsapp_conversations'),
     safeCount('whatsapp_message_log'),
-    safeCount('crm_leads'),
+    safeCount('crm_directory'),
     safeCount('whatsapp_media_assets'),
     safeCount('crm_clients'),
     safeCount('crm_appointments'),
