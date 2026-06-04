@@ -150,53 +150,64 @@ export async function getStorageStats(): Promise<StorageStats> {
 // ──────────────────────────────────────────────
 
 export async function getHeavyChats(limit = 20): Promise<HeavyChat[]> {
-  // Obtenemos conversaciones con conteo de mensajes y multimedia
-  const { data, error } = await supabase
+  // 1. Obtener las conversaciones más recientes
+  const { data: conversations, error } = await supabase
     .from('whatsapp_conversations')
-    .select(`
-      stable_key,
-      contact_name,
-      contact_phone,
-      last_message_at
-    `)
-    .order('last_message_at', { ascending: false });
+    .select('stable_key, contact_name, contact_phone, last_message_at')
+    .order('last_message_at', { ascending: false, nullsFirst: false })
+    .limit(50);
 
   if (error) throw error;
-  if (!data || data.length === 0) return [];
+  if (!conversations || conversations.length === 0) return [];
 
-  const chats: HeavyChat[] = [];
+  const stableKeys = conversations.map((c) => c.stable_key);
 
-  for (const conv of data) {
-    // Mensajes en esta conversación
-    const { count: msgCount, error: msgErr } = await supabase
-      .from('whatsapp_message_log')
-      .select('*', { count: 'exact', head: true })
-      .eq('conversation_stable_key', conv.stable_key);
+  // 2. BATCH: obtener conteo de mensajes por conversación en UNA SOLA QUERY
+  const { data: allMessages } = await supabase
+    .from('whatsapp_message_log')
+    .select('conversation_stable_key')
+    .in('conversation_stable_key', stableKeys);
 
-    if (msgErr) continue;
+  const msgCountMap = new Map<string, number>();
+  if (allMessages) {
+    for (const msg of allMessages) {
+      const key = msg.conversation_stable_key;
+      msgCountMap.set(key, (msgCountMap.get(key) ?? 0) + 1);
+    }
+  }
 
-    // Assets multimedia asociados a mensajes de esta conversación
-    // Sumamos size_bytes desde whatsapp_media_assets vinculado vía message_log
-    const { data: mediaData } = await supabase
-      .from('whatsapp_media_assets')
-      .select('size_bytes, mime_type')
-      .eq('conversation_stable_key', conv.stable_key);
+  // 3. BATCH: obtener assets multimedia por conversación en UNA SOLA QUERY
+  const { data: allMedia } = await supabase
+    .from('whatsapp_media_assets')
+    .select('conversation_stable_key, size_bytes')
+    .in('conversation_stable_key', stableKeys);
 
-    const mediaCount = mediaData?.length ?? 0;
-    const totalBytes = mediaData?.reduce((sum, m) => sum + (m.size_bytes ?? 0), 0) ?? 0;
+  const mediaByConv = new Map<string, { count: number; bytes: number }>();
+  if (allMedia) {
+    for (const m of allMedia) {
+      const key = m.conversation_stable_key;
+      const prev = mediaByConv.get(key) ?? { count: 0, bytes: 0 };
+      prev.count += 1;
+      prev.bytes += m.size_bytes ?? 0;
+      mediaByConv.set(key, prev);
+    }
+  }
 
-    chats.push({
+  // 4. Ensamblar resultados
+  const chats: HeavyChat[] = conversations.map((conv) => {
+    const media = mediaByConv.get(conv.stable_key) ?? { count: 0, bytes: 0 };
+    return {
       stableKey: conv.stable_key,
       contactName: conv.contact_name,
       contactPhone: conv.contact_phone,
-      messageCount: msgCount ?? 0,
-      mediaCount,
-      totalBytes,
+      messageCount: msgCountMap.get(conv.stable_key) ?? 0,
+      mediaCount: media.count,
+      totalBytes: media.bytes,
       lastMessageAt: conv.last_message_at,
-    });
-  }
+    };
+  });
 
-  // Ordenar por peso total descendente y tomar top N
+  // Ordenar por peso total descendente (más pesados primero) y limitar
   return chats.sort((a, b) => b.totalBytes - a.totalBytes).slice(0, limit);
 }
 
@@ -204,45 +215,65 @@ export async function getHeavyChats(limit = 20): Promise<HeavyChat[]> {
 // Métricas generales
 // ──────────────────────────────────────────────
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function safeCount(table: string, filter?: { column: string; value: any }): Promise<number> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let query = (supabase.from(table as any) as any).select('*', { count: 'exact', head: true });
+    if (filter) {
+      query = query.eq(filter.column, filter.value);
+    }
+    const { count, error } = await query;
+    if (error) {
+      console.warn(`safeCount(${table}):`, error.message);
+      return 0;
+    }
+    return count ?? 0;
+  } catch (e) {
+    console.warn(`safeCount(${table}): exception`, e);
+    return 0;
+  }
+}
+
 export async function getGeneralMetrics(): Promise<GeneralMetrics> {
   const [
-    { count: conversations },
-    { count: messages },
-    { count: leads },
-    { count: mediaAssets },
-    { count: clients },
-    { count: appointments },
-    { count: activeConv },
-    { count: blocklisted },
-    { count: broadcastJobs },
-    { count: tags },
-    { count: adminProfiles },
+    conversations,
+    messages,
+    leads,
+    mediaAssets,
+    clients,
+    appointments,
+    activeConv,
+    blocklisted,
+    broadcastJobs,
+    tags,
+    adminProfiles,
   ] = await Promise.all([
-    supabase.from('whatsapp_conversations').select('*', { count: 'exact', head: true }),
-    supabase.from('whatsapp_message_log').select('*', { count: 'exact', head: true }),
-    supabase.from('crm_leads').select('*', { count: 'exact', head: true }),
-    supabase.from('whatsapp_media_assets').select('*', { count: 'exact', head: true }),
-    supabase.from('crm_clients').select('*', { count: 'exact', head: true }),
-    supabase.from('crm_appointments').select('*', { count: 'exact', head: true }),
-    supabase.from('whatsapp_conversations').select('*', { count: 'exact', head: true }).eq('is_archived', false),
-    supabase.from('whatsapp_blocklist').select('*', { count: 'exact', head: true }),
-    supabase.from('whatsapp_broadcast_jobs').select('*', { count: 'exact', head: true }),
-    supabase.from('whatsapp_chat_tags').select('*', { count: 'exact', head: true }),
-    supabase.from('admin_profiles').select('*', { count: 'exact', head: true }),
+    safeCount('whatsapp_conversations'),
+    safeCount('whatsapp_message_log'),
+    safeCount('crm_leads'),
+    safeCount('whatsapp_media_assets'),
+    safeCount('crm_clients'),
+    safeCount('crm_appointments'),
+    safeCount('whatsapp_conversations', { column: 'is_archived', value: false }),
+    safeCount('whatsapp_blocklist'),
+    safeCount('whatsapp_broadcast_jobs'),
+    safeCount('whatsapp_chat_tags'),
+    safeCount('admin_profiles'),
   ]);
 
   return {
-    conversations: conversations ?? 0,
-    messages: messages ?? 0,
-    leads: leads ?? 0,
-    mediaAssets: mediaAssets ?? 0,
-    clients: clients ?? 0,
-    appointments: appointments ?? 0,
-    activeConversations: activeConv ?? 0,
-    blocklisted: blocklisted ?? 0,
-    broadcastJobs: broadcastJobs ?? 0,
-    tags: tags ?? 0,
-    adminProfiles: adminProfiles ?? 0,
+    conversations,
+    messages,
+    leads,
+    mediaAssets,
+    clients,
+    appointments,
+    activeConversations: activeConv,
+    blocklisted,
+    broadcastJobs,
+    tags,
+    adminProfiles,
   };
 }
 
