@@ -62,80 +62,59 @@ export interface MonitorDashboard {
 }
 
 // ──────────────────────────────────────────────
-// Storage: desglose multimedia desde storage.objects
+// Storage: desglose multimedia via RPC (storage.objects directo)
 // ──────────────────────────────────────────────
 
 const BUCKET_LIMIT = 5 * 1024 * 1024 * 1024; // 5 GB
-
-function classifyMime(mime: string | null): keyof MediaBreakdown {
-  if (!mime) return 'other';
-  if (mime.startsWith('image/')) return 'image';
-  if (mime.startsWith('video/')) return 'video';
-  if (mime.startsWith('audio/')) return 'audio';
-  if (mime.startsWith('application/')) return 'document';
-  if (mime === 'text/plain') return 'text';
-  return 'other';
-}
+const TEXT_MSG_ESTIMATE_BYTES = 2048; // ~2KB por mensaje de texto
 
 function emptyBreakdown(): MediaBreakdown {
   return { image: { count: 0, bytes: 0 }, video: { count: 0, bytes: 0 }, audio: { count: 0, bytes: 0 }, document: { count: 0, bytes: 0 }, text: { count: 0, bytes: 0 }, other: { count: 0, bytes: 0 } };
 }
 
-async function listAllStorageObjects(bucket: string, maxFiles = 2000): Promise<{ name: string; size: number; mimeType: string | null }[]> {
-  const all: { name: string; size: number; mimeType: string | null }[] = [];
-  let offset = 0;
-  const limit = 100;
+export async function getStorageStats(): Promise<StorageStats> {
+  // 1. Stats reales desde storage.objects vía RPC (rápido, preciso)
+  const { data: rpcData, error: rpcError } = await supabase.rpc('get_storage_stats', {
+    p_bucket: 'whatsapp-media',
+  });
 
-  while (true) {
-    const { data, error } = await supabase.storage.from(bucket).list('', {
-      limit,
-      offset,
-      sortBy: { column: 'name', order: 'asc' },
-    });
-    if (error) throw error;
-    if (!data || data.length === 0) break;
+  if (rpcError) throw rpcError;
 
-    for (const item of data) {
-      if (item.metadata && typeof item.metadata === 'object') {
-        const meta = item.metadata as Record<string, unknown>;
-        const size = typeof meta.size === 'number' ? meta.size : 0;
-        const mimeType = typeof meta.mimetype === 'string' ? meta.mimetype : null;
-        all.push({ name: item.name, size, mimeType });
+  const json = rpcData as unknown as {
+    total_objects: number;
+    total_bytes: number;
+    breakdown: Record<string, { count: number; bytes: number }>;
+  };
+
+  const storageTotalObjects = json.total_objects ?? 0;
+  const storageTotalBytes = json.total_bytes ?? 0;
+
+  // Mapear breakdown del RPC al tipo MediaBreakdown
+  const breakdown = emptyBreakdown();
+  if (json.breakdown) {
+    const bd = breakdown as unknown as Record<string, { count: number; bytes: number }>;
+    for (const [key, val] of Object.entries(json.breakdown)) {
+      if (key in bd) {
+        bd[key] = { count: val.count ?? 0, bytes: val.bytes ?? 0 };
       }
     }
-    offset += data.length;
-    if (data.length < limit || all.length >= maxFiles) break;
-  }
-  return all;
-}
-
-export async function getStorageStats(): Promise<StorageStats> {
-  const files = await listAllStorageObjects('whatsapp-media');
-  const breakdown = emptyBreakdown();
-  let totalBytes = 0;
-
-  for (const f of files) {
-    const key = classifyMime(f.mimeType);
-    breakdown[key].count += 1;
-    breakdown[key].bytes += f.size;
-    totalBytes += f.size;
   }
 
-  // Las conversaciones de solo texto no tienen archivos en storage,
-  // pero calculamos un estimado: sumamos 2KB por cada mensaje sin multimedia
-  // desde la tabla de mensajes
+  // 2. Texto plano: mensajes sin storage_path se estiman a 2KB c/u
   const { count: textOnlyMessages } = await supabase
     .from('whatsapp_message_log')
     .select('*', { count: 'exact', head: true })
     .is('storage_path', null);
 
-  const textBytes = (textOnlyMessages ?? 0) * 2048; // ~2KB por mensaje de texto
-  breakdown.text.count = textOnlyMessages ?? 0;
+  const textCount = textOnlyMessages ?? 0;
+  const textBytes = textCount * TEXT_MSG_ESTIMATE_BYTES;
+  breakdown.text.count = textCount;
   breakdown.text.bytes = textBytes;
-  totalBytes += textBytes;
+
+  const totalBytes = storageTotalBytes + textBytes;
 
   return {
-    totalObjects: files.length,
+    totalObjects: storageTotalObjects,
     totalBytes,
     bucketLimit: BUCKET_LIMIT,
     usedPercent: Math.min(100, +(totalBytes / BUCKET_LIMIT * 100).toFixed(1)),
