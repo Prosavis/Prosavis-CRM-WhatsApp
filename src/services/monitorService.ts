@@ -1,6 +1,5 @@
 import { supabase } from '@/config/supabase';
-import { functions } from '@/config/firebase';
-import { httpsCallable } from 'firebase/functions';
+import { getApp } from 'firebase/app';
 
 // ──────────────────────────────────────────────
 // Tipos
@@ -274,16 +273,20 @@ export async function checkConnections(): Promise<ConnectionStatus> {
     };
   }
 
-  // Firebase: intentar llamar a una función de health check
+  // Firebase: verificar que el SDK esté inicializado
   try {
-    const healthCheck = httpsCallable(functions, 'healthCheck');
-    await healthCheck();
-    result.firebase = { status: 'ok' };
+    const app = getApp();
+    if (app && app.options.projectId) {
+      result.firebase = {
+        status: 'ok',
+      };
+    } else {
+      result.firebase = { status: 'error', error: 'Firebase SDK no inicializado' };
+    }
   } catch (e) {
-    // Firebase Functions puede no tener healthCheck; probamos conectividad básica
     result.firebase = {
-      status: 'ok',
-      error: 'Firebase SDK conectado (healthCheck no disponible)',
+      status: 'error',
+      error: e instanceof Error ? e.message : 'Firebase no disponible',
     };
   }
 
