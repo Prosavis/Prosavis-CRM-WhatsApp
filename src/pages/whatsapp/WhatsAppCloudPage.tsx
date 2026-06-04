@@ -76,6 +76,7 @@ import type { WhatsAppInboxMetrics } from '@/utils/whatsappInboxStats';
 const LeadsPage = lazy(() => import('../leads/LeadsPage'));
 const DiscountCodesTab = lazy(() => import('@/components/whatsapp/DiscountCodesTab'));
 const WhatsAppSettingsTab = lazy(() => import('@/components/whatsapp/WhatsAppSettingsTab'));
+const MonitorTab = lazy(() => import('@/components/whatsapp/MonitorTab'));
 
 interface MetricsData {
   period: { from: string; to: string };
@@ -147,7 +148,7 @@ const WhatsAppCloudPage: React.FC = () => {
   const { playNavigation } = useSoundEffects();
   const { registerTabController, unregisterTabController } = useAdminTour();
   const tabParam = searchParams.get('tab');
-  const activeTab = tabParam === 'metrics' ? 1 : tabParam === 'leads' ? 2 : tabParam === 'discounts' ? 3 : tabParam === 'settings' ? 4 : 0;
+  const activeTab = tabParam === 'metrics' ? 1 : tabParam === 'leads' ? 2 : tabParam === 'discounts' ? 3 : tabParam === 'settings' ? 4 : tabParam === 'monitoreo' ? 5 : 0;
 
   const handleMainTabChange = (_: React.SyntheticEvent, value: number) => {
     playNavigation();
@@ -156,12 +157,13 @@ const WhatsAppCloudPage: React.FC = () => {
     else if (value === 1) next.set('tab', 'metrics');
     else if (value === 2) next.set('tab', 'leads');
     else if (value === 3) next.set('tab', 'discounts');
-    else next.set('tab', 'settings');
+    else if (value === 4) next.set('tab', 'settings');
+    else next.set('tab', 'monitoreo');
     setSearchParams(next, { replace: true });
   };
 
   useEffect(() => {
-    const tabLabels = ['', 'metrics', 'leads', 'discounts', 'settings'] as const;
+    const tabLabels = ['', 'metrics', 'leads', 'discounts', 'settings', 'monitoreo'] as const;
     registerTabController('/whatsapp-cloud', {
       setTab: (index: number) => {
         setSearchParams(
@@ -934,6 +936,20 @@ const WhatsAppCloudPage: React.FC = () => {
               }
             >
               <WhatsAppSettingsTab phoneNumberId={phoneNumberId} />
+            </Suspense>
+          </div>
+        )}
+
+        {activeTab === 5 && (
+          <div data-tour="whatsapp-tab-monitoreo">
+            <Suspense
+              fallback={
+                <Box display="flex" justifyContent="center" alignItems="center" minHeight={240}>
+                  <CircularProgress />
+                </Box>
+              }
+            >
+              <MonitorTab />
             </Suspense>
           </div>
         )}
