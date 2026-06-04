@@ -166,7 +166,7 @@ export const leadService = {
   },
 
   async getLeadStats() {
-    const { data, error } = await supabase.from('crm_leads').select('status,opt_out');
+    const { data, error } = await supabase.from('crm_leads').select('status,opt_out').limit(10000);
     if (error) throw error;
     const rows = data ?? [];
     const total = rows.length;

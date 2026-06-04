@@ -22,7 +22,8 @@ Deno.serve(async (req) => {
       .from('whatsapp_message_log')
       .select('direction,status,campaign_type,created_at')
       .eq('hidden_from_panel', false)
-      .gte('created_at', from.toISOString());
+      .gte('created_at', from.toISOString())
+      .limit(100000);
 
     if (body.phoneNumberId) {
       query = query.eq('phone_number_id', body.phoneNumberId);
@@ -72,7 +73,7 @@ Deno.serve(async (req) => {
     const totalFailed = outbound.filter((row) => row.status === 'failed').length;
     const totalResponses = inbound.length;
 
-    const { data: leadRows } = await supabase.from('crm_leads').select('status,opt_out,secuencia_activa');
+    const { data: leadRows } = await supabase.from('crm_leads').select('status,opt_out,secuencia_activa').limit(10000);
     const leads = leadRows ?? [];
     const optOutCount = leads.filter((l) => l.opt_out === true).length;
 

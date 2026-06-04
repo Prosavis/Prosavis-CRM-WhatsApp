@@ -46,6 +46,7 @@ export default defineConfig({
           'vendor-react': ['react', 'react-dom'],
           'vendor-mui': ['@mui/material', '@mui/icons-material', '@emotion/react', '@emotion/styled'],
           'vendor-supabase': ['@supabase/supabase-js'],
+          'vendor-firebase': ['firebase/app', 'firebase/functions'],
         },
       },
     },

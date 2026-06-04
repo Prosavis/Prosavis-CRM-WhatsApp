@@ -33,10 +33,12 @@ import {
   Delete as DeleteIcon,
   DeleteForever as DeleteForeverIcon,
   Add as AddIcon,
+  Edit as EditIcon,
 } from '@mui/icons-material';
 import {
   createDiscountCodeFn,
   listDiscountCodesFn,
+  updateDiscountCodeFn,
   deleteDiscountCodeFn,
   permanentDeleteDiscountCodeFn,
   type DiscountCodeData,
@@ -77,6 +79,16 @@ const DiscountCodesTab: React.FC = () => {
 
   const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<DiscountCodeData | null>(null);
   const [permanentDeleting, setPermanentDeleting] = useState(false);
+
+  const [editTarget, setEditTarget] = useState<DiscountCodeData | null>(null);
+  const [editCode, setEditCode] = useState('');
+  const [editDiscountType, setEditDiscountType] = useState<DiscountCodeType>('fixed_cop');
+  const [editAmount, setEditAmount] = useState<number | ''>('');
+  const [editPercent, setEditPercent] = useState<number | ''>('');
+  const [editMaxRedemptions, setEditMaxRedemptions] = useState<number | ''>(5);
+  const [editDescription, setEditDescription] = useState('');
+  const [editUpdating, setEditUpdating] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   const loadCodes = useCallback(async () => {
     setLoading(true);
@@ -176,6 +188,47 @@ const DiscountCodesTab: React.FC = () => {
       setError(err?.details || err?.message || 'Error eliminando definitivamente');
     } finally {
       setPermanentDeleting(false);
+    }
+  };
+
+  const handleEditOpen = (item: DiscountCodeData) => {
+    setEditTarget(item);
+    setEditCode(item.code);
+    setEditDiscountType(item.discountType ?? 'fixed_cop');
+    setEditAmount(item.discountType === 'fixed_cop' ? item.discountAmountCOP : '');
+    setEditPercent(item.discountType === 'percentage' ? item.discountPercent ?? '' : '');
+    setEditMaxRedemptions(item.maxRedemptions ?? 5);
+    setEditDescription(item.description ?? '');
+    setEditError(null);
+  };
+
+  const handleEditSubmit = async () => {
+    if (!editTarget) return;
+    if (!CODE_REGEX.test(editCode)) return;
+    setEditUpdating(true);
+    setEditError(null);
+    try {
+      const params: Record<string, unknown> = {
+        id: editTarget.id,
+        code: editCode,
+        discountType: editDiscountType,
+        description: editDescription.trim() || null,
+      };
+      if (editDiscountType === 'fixed_cop') {
+        params.discountAmountCOP = editAmount;
+      } else {
+        params.discountPercent = editPercent;
+      }
+      if (typeof editMaxRedemptions === 'number' && editMaxRedemptions >= 1) {
+        params.maxRedemptions = editMaxRedemptions;
+      }
+      await updateDiscountCodeFn(params as any);
+      setEditTarget(null);
+      loadCodes();
+    } catch (err: any) {
+      setEditError(err?.details || err?.message || 'Error actualizando código');
+    } finally {
+      setEditUpdating(false);
     }
   };
 
@@ -460,6 +513,13 @@ const DiscountCodesTab: React.FC = () => {
                           </IconButton>
                         </Tooltip>
                         {item.status === 'active' && (
+                          <Tooltip title="Editar">
+                            <IconButton size="small" color="primary" onClick={() => handleEditOpen(item)}>
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                        {item.status === 'active' && (
                           <Tooltip title="Eliminar">
                             <IconButton
                               size="small"
@@ -545,6 +605,93 @@ const DiscountCodesTab: React.FC = () => {
             startIcon={permanentDeleting ? <CircularProgress size={16} color="inherit" /> : <DeleteForeverIcon />}
           >
             Eliminar definitivamente
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Diálogo: Editar código ── */}
+      <Dialog open={!!editTarget} onClose={() => !editUpdating && setEditTarget(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>Editar código: {editTarget?.code}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              label="Código"
+              value={editCode}
+              onChange={(e) => setEditCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+              inputProps={{ maxLength: 10 }}
+              error={editCode.length > 0 && !CODE_REGEX.test(editCode)}
+              helperText={`${editCode.length}/10 caracteres alfanuméricos`}
+              size="small"
+              fullWidth
+            />
+            <Stack direction="row" spacing={2} alignItems="center">
+              <Typography variant="body2" color="text.secondary">
+                Tipo de descuento
+              </Typography>
+              <ToggleButtonGroup
+                size="small"
+                exclusive
+                value={editDiscountType}
+                onChange={(_, v: DiscountCodeType | null) => {
+                  if (v != null) setEditDiscountType(v);
+                }}
+              >
+                <ToggleButton value="fixed_cop">Monto fijo (COP)</ToggleButton>
+                <ToggleButton value="percentage">Porcentaje (%)</ToggleButton>
+              </ToggleButtonGroup>
+            </Stack>
+            {editDiscountType === 'fixed_cop' ? (
+              <TextField
+                label="Monto (COP)"
+                type="number"
+                value={editAmount}
+                onChange={(e) => setEditAmount(e.target.value ? Number(e.target.value) : '')}
+                size="small"
+                fullWidth
+                error={editAmount !== '' && (typeof editAmount !== 'number' || editAmount <= 0)}
+              />
+            ) : (
+              <TextField
+                label="Porcentaje (1–100)"
+                type="number"
+                value={editPercent}
+                onChange={(e) => setEditPercent(e.target.value ? Number(e.target.value) : '')}
+                size="small"
+                fullWidth
+                inputProps={{ min: 1, max: 100 }}
+                error={editPercent !== '' && (typeof editPercent !== 'number' || editPercent < 1 || editPercent > 100)}
+              />
+            )}
+            <TextField
+              label="Máx. canjes"
+              type="number"
+              size="small"
+              fullWidth
+              value={editMaxRedemptions}
+              onChange={(e) => setEditMaxRedemptions(e.target.value ? Number(e.target.value) : '')}
+              inputProps={{ min: 1 }}
+            />
+            <TextField
+              label="Descripción (opcional)"
+              value={editDescription}
+              onChange={(e) => setEditDescription(e.target.value)}
+              size="small"
+              fullWidth
+            />
+          </Stack>
+          {editError && <Alert severity="error" sx={{ mt: 1.5 }}>{editError}</Alert>}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditTarget(null)} disabled={editUpdating}>
+            Cancelar
+          </Button>
+          <Button
+            onClick={handleEditSubmit}
+            variant="contained"
+            disabled={editUpdating || !CODE_REGEX.test(editCode)}
+            startIcon={editUpdating ? <CircularProgress size={16} color="inherit" /> : undefined}
+          >
+            Guardar cambios
           </Button>
         </DialogActions>
       </Dialog>
