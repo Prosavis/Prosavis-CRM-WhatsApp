@@ -31,7 +31,7 @@ import PeopleIcon from '@mui/icons-material/People';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SearchIcon from '@mui/icons-material/Search';
 import { directoryService } from '@/services/directoryService';
-import type { DirectoryEntry, DirectoryClassification } from '@/types/lead';
+import type { DirectoryEntry } from '@/types/lead';
 
 // ──────────────────────────────────────────────
 // Constants
@@ -243,7 +243,7 @@ const WhatsAppDirectoryContactsDialog: React.FC<WhatsAppDirectoryContactsDialogP
 
   // ── Render ───────────────────────────────
 
-  const filterChip = (label: string, value: string | undefined, active: boolean, onClick: () => void, color: string) => (
+  const filterChip = (label: string, _value: string | undefined, active: boolean, onClick: () => void, color: string) => (
     <Chip
       label={label}
       size="small"
@@ -303,14 +303,12 @@ const WhatsAppDirectoryContactsDialog: React.FC<WhatsAppDirectoryContactsDialogP
             placeholder="Buscar por nombre, teléfono o email..."
             value={searchInput}
             onChange={(e) => handleSearchChange(e.target.value)}
-            slotProps={{
-              input: {
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon fontSize="small" color="action" />
-                  </InputAdornment>
-                ),
-              },
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" color="action" />
+                </InputAdornment>
+              ),
             }}
             sx={{ flex: '1 1 280px', minWidth: 200 }}
           />
