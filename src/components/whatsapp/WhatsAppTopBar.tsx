@@ -31,6 +31,8 @@ export interface WhatsAppTopBarProps {
   activeTab: number;
   onTabChange: (_: React.SyntheticEvent, value: number) => void;
   inboxTotalContacts: number | null;
+  directoryTotalContacts: number | null;
+  onOpenDirectory: () => void;
   onOpenBulk: () => void;
 }
 
@@ -47,6 +49,8 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
   activeTab,
   onTabChange,
   inboxTotalContacts,
+  directoryTotalContacts,
+  onOpenDirectory,
   onOpenBulk,
 }) => {
   const { mode } = useTheme();
@@ -139,20 +143,22 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
       >
         <WhatsAppInternalContactsButton />
 
-        {inboxTotalContacts !== null && (
-          <Tooltip title="Total de conversaciones en esta línea (incluye archivadas)">
-            <Chip
-              size="small"
-              color="primary"
-              label={`${inboxTotalContacts.toLocaleString('es-CO')} contactos`}
-              sx={{
-                fontWeight: 600,
-                display: { xs: 'none', sm: 'inline-flex' },
-              }}
-              variant="outlined"
-            />
-          </Tooltip>
-        )}
+        <Tooltip title="Abrir directorio de contactos CRM">
+          <Chip
+            size="small"
+            color="primary"
+            icon={<ContactPhoneIcon />}
+            label={`${(directoryTotalContacts ?? inboxTotalContacts ?? 0).toLocaleString('es-CO')} contactos`}
+            onClick={onOpenDirectory}
+            sx={{
+              fontWeight: 600,
+              display: { xs: 'none', sm: 'inline-flex' },
+              cursor: 'pointer',
+              '&:hover': { bgcolor: 'primary.light', color: 'primary.contrastText' },
+            }}
+            variant="outlined"
+          />
+        </Tooltip>
 
         <Tooltip title="Envío masivo WhatsApp">
           <Button
