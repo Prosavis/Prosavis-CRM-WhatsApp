@@ -75,12 +75,12 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      const { data: lead } = await supabase
-        .from('crm_leads')
+      const { data: directoryEntry } = await supabase
+        .from('crm_directory')
         .select('opt_out')
         .eq('phone', phone)
         .maybeSingle();
-      if (lead?.opt_out) {
+      if (directoryEntry?.opt_out) {
         skipped += 1;
         continue;
       }

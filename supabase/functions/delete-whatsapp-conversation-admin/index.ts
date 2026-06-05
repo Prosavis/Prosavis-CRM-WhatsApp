@@ -66,7 +66,7 @@ Deno.serve(async (req) => {
     const stableKeys = collectStableKeys(conversationId, conversation);
     let messagesDeleted = 0;
     let storageFilesDeleted = 0;
-    let leadsDeleted = 0;
+    let entriesDeactivated = 0;
 
     for (const key of stableKeys) {
       const { data: messages, error: msgError } = await supabase
@@ -95,11 +95,11 @@ Deno.serve(async (req) => {
       const phones = stableKeys.filter((key) => /^[0-9]+$/.test(key));
       if (phones.length) {
         const { count, error: leadError } = await supabase
-          .from('crm_leads')
-          .delete({ count: 'exact' })
+          .from('crm_directory')
+          .update({ status: 'inactive', updated_at: new Date().toISOString() })
           .in('phone', phones);
         if (leadError) throw leadError;
-        leadsDeleted = count ?? 0;
+        entriesDeactivated = count ?? 0;
       }
     }
 
@@ -144,7 +144,7 @@ Deno.serve(async (req) => {
       messagesDeleted,
       storageFilesDeleted,
       conversationRemoved: true,
-      leadsDeleted,
+      leadsDeleted: entriesDeactivated,
       metaBlockAttempted,
       metaBlockSuccess,
       ...(metaErrorCode ? { metaErrorCode } : {}),
