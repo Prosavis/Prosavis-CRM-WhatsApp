@@ -1,62 +1,51 @@
 import React from 'react';
-import { Card, CardContent, CardProps, useTheme } from '@mui/material';
+import { Box, useTheme } from '@mui/material';
 import { motion } from 'framer-motion';
 
 type BentoCardProps = {
   children: React.ReactNode;
   animate?: boolean;
   delay?: number;
-  variant?: 'default' | 'kpi' | 'chart';
   onClick?: () => void;
-} & Omit<CardProps, 'onClick'>;
-
-const cardVariants = {
-  hidden: { opacity: 0, y: 16 },
-  visible: (delay: number) => ({
-    opacity: 1,
-    y: 0,
-    transition: { duration: 0.4, delay, ease: [0.16, 1, 0.3, 1] },
-  }),
+  sx?: Record<string, unknown>;
 };
 
-const MotionCard = motion(Card);
+const cubicBezier = [0.16, 1, 0.3, 1] as const;
 
 const BentoCard: React.FC<BentoCardProps> = ({
   children,
   animate = true,
   delay = 0,
-  variant = 'default',
   onClick,
   sx,
-  ...cardProps
 }) => {
   const theme = useTheme();
 
+  const cardSx: Record<string, unknown> = {
+    border: '1px solid',
+    borderColor: theme.palette.divider,
+    borderRadius: '12px',
+    bgcolor: theme.palette.background.paper,
+    p: { xs: 1.5, sm: 2, md: 2.5 },
+    cursor: onClick ? 'pointer' : 'default',
+    transition: 'box-shadow 0.2s ease-out',
+    '&:hover': onClick ? { boxShadow: theme.shadows[2] } : undefined,
+    ...sx,
+  };
+
+  if (!animate) {
+    return <Box sx={cardSx}>{children}</Box>;
+  }
+
   return (
-    <MotionCard
-      variants={animate ? cardVariants : undefined}
-      custom={delay}
-      initial={animate ? 'hidden' : undefined}
-      animate={animate ? 'visible' : undefined}
-      whileHover={animate ? { y: -2, transition: { duration: 0.2 } } : undefined}
-      elevation={0}
-      onClick={onClick}
-      sx={{
-        border: '1px solid',
-        borderColor: 'divider',
-        borderRadius: '12px',
-        bgcolor: 'background.paper',
-        cursor: onClick ? 'pointer' : 'default',
-        transition: 'box-shadow 0.2s ease-out',
-        '&:hover': onClick ? { boxShadow: theme.shadows[2] } : undefined,
-        ...sx,
-      }}
-      {...cardProps}
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, delay, ease: cubicBezier }}
+      whileHover={{ y: -2, transition: { duration: 0.2 } }}
     >
-      <CardContent sx={{ p: { xs: 1.5, sm: 2, md: 2.5 }, '&:last-child': { pb: { xs: 1.5, sm: 2, md: 2.5 } } }}>
-        {children}
-      </CardContent>
-    </MotionCard>
+      <Box sx={cardSx}>{children}</Box>
+    </motion.div>
   );
 };
 
