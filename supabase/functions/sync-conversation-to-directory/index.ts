@@ -104,7 +104,7 @@ Deno.serve(async (req) => {
       last_whatsapp_message_text: safeString(record.last_message_text),
       last_whatsapp_intent: safeString(record.last_intent),
       whatsapp_conversation_id: safeString(record.id) || safeString(record.stable_key),
-      channels: ['whatsapp'],
+      channels: ['WHATSAPP'],
     };
 
     // --- WhatsApp assigned_to ---
@@ -142,8 +142,8 @@ Deno.serve(async (req) => {
     }
 
     // --- Source tracking ---
-    // Siempre incluimos 'whatsapp' como source (se mergea via función upsert)
-    entry.source = 'whatsapp';
+    // Siempre incluimos 'WHATSAPP' como source (se mergea via función upsert)
+    entry.source = 'WHATSAPP';
 
     // --- Ejecutar upsert_directory_entry via RPC ---
     const { data: upsertedId, error: upsertError } = await supabase.rpc(
