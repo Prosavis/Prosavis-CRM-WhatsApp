@@ -65,15 +65,16 @@ export interface MonitorDashboard {
 // Storage: desglose multimedia via RPC (storage.objects directo)
 // ──────────────────────────────────────────────
 
-const BUCKET_LIMIT = 5 * 1024 * 1024 * 1024; // 5 GB
-const TEXT_MSG_ESTIMATE_BYTES = 2048; // ~2KB por mensaje de texto
+// Límite del plan Free de Supabase: 1 GB de Storage
+// Ver https://supabase.com/docs/guides/platform/billing-on-supabase
+const BUCKET_LIMIT = 1 * 1024 * 1024 * 1024; // 1 GB
 
 function emptyBreakdown(): MediaBreakdown {
   return { image: { count: 0, bytes: 0 }, video: { count: 0, bytes: 0 }, audio: { count: 0, bytes: 0 }, document: { count: 0, bytes: 0 }, text: { count: 0, bytes: 0 }, other: { count: 0, bytes: 0 } };
 }
 
 export async function getStorageStats(): Promise<StorageStats> {
-  // 1. Stats reales desde storage.objects vía RPC (rápido, preciso)
+  // Stats reales desde storage.objects vía RPC (rápido, preciso)
   const { data: rpcData, error: rpcError } = await supabase.rpc('get_storage_stats', {
     p_bucket: 'whatsapp-media',
   });
@@ -86,8 +87,8 @@ export async function getStorageStats(): Promise<StorageStats> {
     breakdown: Record<string, { count: number; bytes: number }>;
   };
 
-  const storageTotalObjects = json.total_objects ?? 0;
-  const storageTotalBytes = json.total_bytes ?? 0;
+  const totalObjects = json.total_objects ?? 0;
+  const totalBytes = json.total_bytes ?? 0;
 
   // Mapear breakdown del RPC al tipo MediaBreakdown
   const breakdown = emptyBreakdown();
@@ -100,21 +101,8 @@ export async function getStorageStats(): Promise<StorageStats> {
     }
   }
 
-  // 2. Texto plano: mensajes sin storage_path se estiman a 2KB c/u
-  const { count: textOnlyMessages } = await supabase
-    .from('whatsapp_message_log')
-    .select('*', { count: 'exact', head: true })
-    .is('storage_path', null);
-
-  const textCount = textOnlyMessages ?? 0;
-  const textBytes = textCount * TEXT_MSG_ESTIMATE_BYTES;
-  breakdown.text.count = textCount;
-  breakdown.text.bytes = textBytes;
-
-  const totalBytes = storageTotalBytes + textBytes;
-
   return {
-    totalObjects: storageTotalObjects,
+    totalObjects,
     totalBytes,
     bucketLimit: BUCKET_LIMIT,
     usedPercent: Math.min(100, +(totalBytes / BUCKET_LIMIT * 100).toFixed(1)),
