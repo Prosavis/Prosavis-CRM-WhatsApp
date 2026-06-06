@@ -125,3 +125,8 @@ verify_jwt = false
 
 [functions.log-whatsapp-outbound]
 verify_jwt = false
+
+# Recibe ID token de Firebase (UserConsole). La función valida el token y la
+# propiedad de la cita internamente; el gateway no debe exigir JWT de Supabase.
+[functions.send-appointment-confirmation]
+verify_jwt = false
