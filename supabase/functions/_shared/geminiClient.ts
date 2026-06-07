@@ -1,0 +1,265 @@
+/**
+ * Cliente compartido para Google Gemini API.
+ * Único proveedor de IA para el CRM WhatsApp.
+ * Usa gemini-3.5-flash como modelo por defecto (GA, estable desde mayo 2026).
+ *
+ * Documentación:
+ *   https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash
+ *   https://ai.google.dev/gemini-api/docs/structured-output
+ */
+
+export const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash';
+export const GEMINI_TIMEOUT_MS = 75000;
+export const MAX_INLINE_AUDIO_BYTES = 180 * 1024; // 180 KB — inline; mayor usa asset
+
+/** Lee la API Key de Gemini desde variables de entorno. */
+export function getGeminiApiKey(): string | null {
+  return Deno.env.get('GEMINI_API_KEY')?.trim() || null;
+}
+
+/** Resuelve el modelo desde env o usa el default. */
+export function resolveGeminiModel(envKey: string, fallback: string): string {
+  return Deno.env.get(envKey)?.trim() || fallback;
+}
+
+// ─── Tipos internos para la API de Gemini ────────────────────────────────
+
+interface GeminiPart {
+  text?: string;
+  inlineData?: {
+    mimeType: string;
+    data: string;
+  };
+}
+
+interface GeminiContent {
+  role?: string;
+  parts: GeminiPart[];
+}
+
+interface GeminiGenerateContentRequest {
+  contents: GeminiContent[];
+  systemInstruction?: GeminiContent;
+  generationConfig?: {
+    temperature?: number;
+    maxOutputTokens?: number;
+    topP?: number;
+    topK?: number;
+    stopSequences?: string[];
+    responseMimeType?: string;
+    responseSchema?: Record<string, unknown>;
+  };
+}
+
+interface GeminiGenerateContentResponse {
+  candidates?: Array<{
+    content?: {
+      parts?: GeminiPart[];
+    };
+    finishReason?: string;
+  }>;
+  promptFeedback?: Record<string, unknown>;
+}
+
+// ─── Cliente HTTP ─────────────────────────────────────────────────────────
+
+async function geminiRequest(params: {
+  apiKey: string;
+  model: string;
+  contents: GeminiContent[];
+  systemInstruction?: string;
+  temperature?: number;
+  maxOutputTokens?: number;
+  responseMimeType?: string;
+  responseSchema?: Record<string, unknown>;
+}): Promise<GeminiGenerateContentResponse> {
+  const url = `${GEMINI_BASE_URL}/models/${params.model}:generateContent`;
+
+  const body: GeminiGenerateContentRequest = {
+    contents: params.contents,
+    generationConfig: {
+      temperature: params.temperature ?? 0.4,
+      maxOutputTokens: params.maxOutputTokens ?? 2048,
+    },
+  };
+
+  if (params.systemInstruction) {
+    body.systemInstruction = {
+      parts: [{ text: params.systemInstruction }],
+    };
+  }
+
+  if (params.responseMimeType) {
+    body.generationConfig!.responseMimeType = params.responseMimeType;
+  }
+
+  if (params.responseSchema) {
+    body.generationConfig!.responseSchema = params.responseSchema;
+  }
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': params.apiKey,
+    },
+    signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => '');
+    let message = `Gemini API respondió ${response.status}`;
+    if (errorBody) {
+      try {
+        const parsed = JSON.parse(errorBody);
+        message = parsed.error?.message ?? message;
+      } catch {
+        message = `${message}: ${errorBody.slice(0, 200)}`;
+      }
+    }
+    throw new Error(message);
+  }
+
+  const data = await response.json() as GeminiGenerateContentResponse;
+  return data;
+}
+
+function extractTextFromResponse(data: GeminiGenerateContentResponse): string {
+  const candidate = data.candidates?.[0];
+  if (!candidate) throw new Error('Gemini no devolvió candidatos');
+
+  const parts = candidate.content?.parts;
+  if (!parts?.length) throw new Error('Gemini no devolvió contenido');
+
+  const text = parts.map((p) => p.text ?? '').join('').trim();
+  if (!text) throw new Error('Gemini devolvió contenido vacío');
+
+  return text;
+}
+
+// ─── Funciones públicas ───────────────────────────────────────────────────
+
+/**
+ * Genera texto usando Gemini.
+ * Acepta systemInstruction opcional, temperature y maxOutputTokens.
+ */
+export async function geminiGenerateText(params: {
+  apiKey: string;
+  model?: string;
+  systemInstruction?: string;
+  userText: string;
+  temperature?: number;
+  maxOutputTokens?: number;
+}): Promise<string> {
+  const model = params.model ??
+    resolveGeminiModel('GEMINI_MODEL_REPLY', DEFAULT_GEMINI_MODEL);
+
+  const contents: GeminiContent[] = [
+    { role: 'user', parts: [{ text: params.userText }] },
+  ];
+
+  const data = await geminiRequest({
+    apiKey: params.apiKey,
+    model,
+    contents,
+    systemInstruction: params.systemInstruction,
+    temperature: params.temperature,
+    maxOutputTokens: params.maxOutputTokens,
+  });
+
+  return extractTextFromResponse(data);
+}
+
+/**
+ * Genera JSON estructurado usando Gemini.
+ * Usa response_mime_type: "application/json" para forzar salida JSON válida.
+ */
+export async function geminiGenerateJson<T>(params: {
+  apiKey: string;
+  model?: string;
+  prompt: string;
+  temperature?: number;
+}): Promise<T> {
+  const model = params.model ??
+    resolveGeminiModel('GEMINI_MODEL_JSON', DEFAULT_GEMINI_MODEL);
+
+  const data = await geminiRequest({
+    apiKey: params.apiKey,
+    model,
+    contents: [{ role: 'user', parts: [{ text: params.prompt }] }],
+    temperature: params.temperature ?? 0,
+    responseMimeType: 'application/json',
+  });
+
+  const raw = extractTextFromResponse(data);
+
+  // Gemini ya devuelve JSON válido gracias a responseMimeType,
+  // pero extraemos el primer objeto/array como safety net.
+  const jsonMatch = raw.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+  if (!jsonMatch) throw new Error('Gemini no devolvió JSON válido');
+  return JSON.parse(jsonMatch[0]) as T;
+}
+
+/**
+ * Codifica binarios grandes sin desbordar la pila (evita spread sobre Uint8Array).
+ */
+function bytesToBase64(bytes: Uint8Array): string {
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+/** Normaliza MIME type de audio para Gemini. */
+function audioMimeType(mimeType: string): string {
+  const base = mimeType.split(';')[0].trim().toLowerCase();
+  if (base === 'audio/x-wav' || base === 'audio/wav') return 'audio/wav';
+  if (base === 'audio/mp3' || base === 'audio/mpeg') return 'audio/mpeg';
+  if (base === 'audio/mp4') return 'audio/mp4';
+  if (base === 'audio/aac') return 'audio/aac';
+  // ogg/opus es el formato común de WhatsApp
+  return 'audio/ogg';
+}
+
+/**
+ * Transcribe audio usando Gemini (multimodal).
+ * Descarga el audio de WhatsApp y lo envía a Gemini como inline_data.
+ * Gemini 3.5 Flash soporta entrada de audio nativa.
+ */
+export async function geminiTranscribeAudio(params: {
+  apiKey: string;
+  buffer: Uint8Array;
+  mimeType: string;
+  model?: string;
+}): Promise<string> {
+  const model = params.model ??
+    resolveGeminiModel('GEMINI_MODEL_TRANSCRIBE', DEFAULT_GEMINI_MODEL);
+
+  const mime = audioMimeType(params.mimeType);
+  const audioB64 = bytesToBase64(params.buffer);
+
+  const instruction =
+    'Transcribe este audio de WhatsApp en español de Colombia. ' +
+    'Devuelve solo el texto transcrito; si no se entiende, indica que no fue posible transcribir sin inventar.';
+
+  const data = await geminiRequest({
+    apiKey: params.apiKey,
+    model,
+    contents: [{
+      role: 'user',
+      parts: [
+        { inlineData: { mimeType: mime, data: audioB64 } },
+        { text: instruction },
+      ],
+    }],
+    temperature: 0,
+    maxOutputTokens: 2048,
+  });
+
+  return extractTextFromResponse(data);
+}

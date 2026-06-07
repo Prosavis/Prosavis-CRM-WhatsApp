@@ -2,11 +2,9 @@
 import { requireCrmAdmin } from '../_shared/supabase.ts';
 import { formatError, WHATSAPP_API_VERSION } from '../_shared/whatsappOutbound.ts';
 import {
-  DEFAULT_TRANSCRIBE_MODEL,
-  getNvidiaApiKey,
-  llmTranscribeAudio,
-  resolveNvidiaModel,
-} from '../_shared/llmClient.ts';
+  getGeminiApiKey,
+  geminiTranscribeAudio,
+} from '../_shared/geminiClient.ts';
 
 const MAX_STT_AUDIO_BYTES = 16 * 1024 * 1024;
 
@@ -60,11 +58,9 @@ Deno.serve(async (req) => {
     }
 
     const accessToken = Deno.env.get('WHATSAPP_ACCESS_TOKEN')?.trim();
-    const apiKey = getNvidiaApiKey();
+    const apiKey = getGeminiApiKey();
     if (!accessToken) return jsonResponse({ error: 'WHATSAPP_ACCESS_TOKEN no configurado.' }, 412);
-    if (!apiKey) return jsonResponse({ error: 'NVIDIA_API_KEY no configurada.' }, 412);
-
-    const transcriptionModel = resolveNvidiaModel('NVIDIA_MODEL_TRANSCRIBE', DEFAULT_TRANSCRIBE_MODEL);
+    if (!apiKey) return jsonResponse({ error: 'GEMINI_API_KEY no configurada.' }, 412);
 
     try {
       const media = await downloadWhatsAppMediaBinary(String(row.media_id), accessToken);
@@ -75,17 +71,16 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: 'El audio supera el límite de 16 MB para transcripción.' }, 400);
       }
 
-      const transcript = await llmTranscribeAudio({
+      const transcript = await geminiTranscribeAudio({
         apiKey,
         buffer: media.buffer,
         mimeType: media.mimeType,
-        model: transcriptionModel,
       });
 
       await supabase.from('whatsapp_message_log').update({
         voice_transcription: transcript,
         voice_transcription_at: new Date().toISOString(),
-        voice_transcription_model: transcriptionModel,
+        voice_transcription_model: 'gemini-3.5-flash',
         voice_transcription_mime_type: media.mimeType,
         voice_transcription_bytes: media.buffer.byteLength,
         voice_transcription_status: 'completed',
