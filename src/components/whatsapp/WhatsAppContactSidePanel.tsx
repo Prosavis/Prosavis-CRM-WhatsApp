@@ -1,4 +1,4 @@
-import React, { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -82,7 +82,11 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
 
   const [entryFullName, setEntryFullName] = useState('');
   const [entryEmail, setEntryEmail] = useState('');
+  const [entryPhone, setEntryPhone] = useState('');
   const [entryStatus, setEntryStatus] = useState('active');
+  const [entryClassification, setEntryClassification] = useState('unknown');
+  const [entryTags, setEntryTags] = useState<string[]>([]);
+  const [entryAssignedTo, setEntryAssignedTo] = useState('');
   const [entrySeq, setEntrySeq] = useState('NINGUNA');
   const [entryAddress, setEntryAddress] = useState('');
   const [entryNotes, setEntryNotes] = useState('');
@@ -92,8 +96,10 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
   const [savingUser, setSavingUser] = useState(false);
   const [savingLead, setSavingLead] = useState(false);
   const [savingNotes, setSavingNotes] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
+  const autoSyncDoneRef = useRef(false);
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [aptsLoading, setAptsLoading] = useState(false);
@@ -129,14 +135,22 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
     if (entry) {
       setEntryFullName(entry.fullName || '');
       setEntryEmail(entry.email || '');
+      setEntryPhone(entry.phone || '');
       setEntryStatus(entry.status || 'active');
+      setEntryClassification(entry.classification || 'unknown');
+      setEntryTags(entry.tags || []);
+      setEntryAssignedTo(entry.whatsAppAssignedTo || '');
       setEntrySeq(entry.activeSequence || 'NINGUNA');
       setEntryAddress(entry.address || '');
       setEntryNotes(entry.notes || '');
     } else {
       setEntryFullName('');
       setEntryEmail('');
+      setEntryPhone('');
       setEntryStatus('active');
+      setEntryClassification('unknown');
+      setEntryTags([]);
+      setEntryAssignedTo('');
       setEntrySeq('NINGUNA');
       setEntryAddress('');
       setEntryNotes('');
@@ -177,6 +191,110 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
       cancelled = true;
     };
   }, [user?.id, user?.isProvider]);
+
+  // ── Auto-sync: cuando se abre la conversación, persiste datos WA → directory ──
+  useEffect(() => {
+    if (autoSyncDoneRef.current) return;
+    if (loading) return;
+    const convPhone = conversation.contactPhone || conversation.phone;
+    if (!convPhone) return;
+
+    let cancelled = false;
+    setSyncing(true);
+
+    (async () => {
+      try {
+        if (!entry) {
+          // No existe entry → crear uno automáticamente con datos de la conversación
+          const displayName = conversation.whatsappProfileName || conversation.contactName || convPhone;
+          await directoryService.createEntry({
+            fullName: displayName,
+            displayName: displayName,
+            phone: convPhone,
+            photoUrl: conversation.contactPhotoUrl || undefined,
+            source: 'WHATSAPP_INBOUND',
+            channels: ['WHATSAPP'],
+            status: 'active',
+          });
+          // Refetch para cargar el entry recién creado
+          if (!cancelled) {
+            autoSyncDoneRef.current = true;
+            await refetch();
+          }
+          return;
+        }
+
+        // Entry existe → auto-rellenar campos vacíos desde la conversación
+        const updates: Record<string, unknown> = {};
+
+        // Teléfono: si la conversación tiene teléfono y el entry no
+        const hasPhoneInEntry = entry.phone && entry.phone.trim().length > 0;
+        if (!hasPhoneInEntry && convPhone) {
+          updates.phone = convPhone;
+        }
+
+        // Nombre: si la conversación tiene nombre WA mejor y el entry no tiene nombre
+        const waName = conversation.whatsappProfileName || conversation.contactName;
+        if (waName && (!entry.fullName || entry.fullName.trim().length === 0)) {
+          updates.fullName = waName;
+          updates.displayName = waName;
+        }
+
+        // Foto: si la conversación tiene foto y el entry no
+        if (conversation.contactPhotoUrl && (!entry.photoUrl || entry.photoUrl.trim().length === 0)) {
+          updates.photoUrl = conversation.contactPhotoUrl;
+        }
+
+        // Último mensaje: siempre actualizar
+        if (conversation.lastMessageAt) {
+          updates.lastWhatsAppMessageAt = conversation.lastMessageAt;
+        }
+        if (conversation.lastMessageText) {
+          updates.lastWhatsAppMessageText = conversation.lastMessageText;
+        }
+
+        // No leídos
+        if (typeof conversation.unreadCount === 'number') {
+          updates.unreadWhatsAppCount = conversation.unreadCount;
+        }
+
+        // Estado: si la conversación está archivada o resuelta → inactive
+        if (conversation.isArchived) {
+          updates.status = 'inactive';
+        } else if (conversation.state === 'resolved' && entry.status === 'active') {
+          updates.status = 'inactive';
+        } else if ((conversation.state === 'active' || conversation.state === 'escalated') && entry.status !== 'active') {
+          updates.status = 'active';
+        }
+
+        // Asignado a: si la conversación tiene operador asignado y el entry no
+        if (conversation.assignedTo && (!entry.whatsAppAssignedTo || entry.whatsAppAssignedTo.trim().length === 0)) {
+          updates.whatsAppAssignedTo = conversation.assignedTo;
+        }
+
+        // If there are updates, save and refetch
+        const keys = Object.keys(updates);
+        if (keys.length > 0) {
+          await directoryService.updateEntry(entry.id, updates);
+          if (!cancelled) {
+            autoSyncDoneRef.current = true;
+            await refetch();
+          }
+        } else {
+          autoSyncDoneRef.current = true;
+        }
+      } catch (e) {
+        console.warn('[WhatsAppContactSidePanel] auto-sync error:', e);
+        autoSyncDoneRef.current = true; // No reintentar en cada re-render
+      } finally {
+        if (!cancelled) setSyncing(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [conversation, entry, loading, refetch]);
 
   const dialogUser: User | null = useMemo(() => {
     if (!user) return null;
@@ -253,7 +371,11 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
       await directoryService.updateEntry(entry.id, {
         fullName: entryFullName.trim() || '',
         email: entryEmail.trim() || undefined,
+        phone: entryPhone.trim() || undefined,
         status: entryStatus,
+        classification: entryClassification as DirectoryEntry['classification'],
+        tags: entryTags,
+        whatsAppAssignedTo: entryAssignedTo.trim() || undefined,
         activeSequence: entrySeq,
         address: entryAddress.trim() || undefined,
         notes: entryNotes.trim() || undefined,
@@ -402,12 +524,34 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
 
         {entry ? (
           <>
-            <Typography variant="caption" color="text.secondary" fontWeight={600} display="block" sx={{ mb: 1 }}>
-              Directorio
-            </Typography>
+            <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
+              <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                Directorio
+              </Typography>
+              {syncing && <CircularProgress size={14} sx={{ ml: 1 }} />}
+            </Stack>
             <Stack spacing={1}>
               <TextField label="Nombre" size="small" value={entryFullName} onChange={(e) => setEntryFullName(e.target.value)} fullWidth />
+              <TextField label="Teléfono" size="small" value={entryPhone} onChange={(e) => setEntryPhone(e.target.value)} fullWidth />
               <TextField label="Email" size="small" value={entryEmail} onChange={(e) => setEntryEmail(e.target.value)} fullWidth />
+              {entryTags.length > 0 && (
+                <Stack direction="row" spacing={0.5} flexWrap="wrap">
+                  <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5, lineHeight: '24px' }}>
+                    Tags:
+                  </Typography>
+                  {entryTags.map((tag) => (
+                    <Chip key={tag} label={tag} size="small" variant="outlined" color={tag === 'VIP' ? 'warning' : 'default'} />
+                  ))}
+                </Stack>
+              )}
+              <TextField
+                label="Clasificación"
+                size="small"
+                value={entryClassification}
+                onChange={(e) => setEntryClassification(e.target.value)}
+                fullWidth
+                helperText={entryTags.length > 0 ? `Tags actuales: ${entryTags.join(', ')}` : undefined}
+              />
               <FormControl size="small" fullWidth>
                 <InputLabel>Estado</InputLabel>
                 <Select
@@ -422,6 +566,7 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
                   ))}
                 </Select>
               </FormControl>
+              <TextField label="Asignado a (WhatsApp)" size="small" value={entryAssignedTo} onChange={(e) => setEntryAssignedTo(e.target.value)} fullWidth />
               <FormControl size="small" fullWidth>
                 <InputLabel>Secuencia</InputLabel>
                 <Select
@@ -438,11 +583,55 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
               </FormControl>
               <TextField label="Dirección" size="small" value={entryAddress} onChange={(e) => setEntryAddress(e.target.value)} fullWidth />
               <TextField label="Notas" size="small" value={entryNotes} onChange={(e) => setEntryNotes(e.target.value)} fullWidth multiline minRows={2} />
-              <Button variant="contained" size="small" color="secondary" disabled={savingLead} onClick={() => void handleSaveEntry()} sx={{ textTransform: 'none' }}>
+
+              {/* Info de WhatsApp (solo lectura) */}
+              {(entry.lastWhatsAppMessageText || entry.lastWhatsAppMessageAt || entry.whatsAppAssignedTo) && (
+                <Box sx={{ bgcolor: 'action.hover', borderRadius: 1, p: 1 }}>
+                  <Typography variant="caption" color="text.secondary" fontWeight={600} display="block">
+                    Última actividad WhatsApp
+                  </Typography>
+                  {entry.lastWhatsAppMessageText && (
+                    <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
+                      <strong>Msg:</strong> {entry.lastWhatsAppMessageText.length > 80
+                        ? `${entry.lastWhatsAppMessageText.slice(0, 80)}…`
+                        : entry.lastWhatsAppMessageText}
+                    </Typography>
+                  )}
+                  {entry.lastWhatsAppMessageAt && (
+                    <Typography variant="caption" display="block" color="text.secondary">
+                      <strong>Hora:</strong> {new Date(entry.lastWhatsAppMessageAt).toLocaleString('es-CO')}
+                    </Typography>
+                  )}
+                  {entry.whatsAppAssignedTo && (
+                    <Typography variant="caption" display="block" color="text.secondary">
+                      <strong>Asignado:</strong> {entry.whatsAppAssignedTo}
+                    </Typography>
+                  )}
+                  {entry.unreadWhatsAppCount > 0 && (
+                    <Typography variant="caption" display="block" color="error.main">
+                      <strong>No leídos:</strong> {entry.unreadWhatsAppCount}
+                    </Typography>
+                  )}
+                  {entry.source && (
+                    <Typography variant="caption" display="block" color="text.secondary">
+                      <strong>Fuente:</strong> {entry.source}
+                    </Typography>
+                  )}
+                </Box>
+              )}
+
+              <Button variant="contained" size="small" color="secondary" disabled={savingLead || syncing} onClick={() => void handleSaveEntry()} sx={{ textTransform: 'none' }}>
                 {savingLead ? 'Guardando…' : 'Guardar'}
               </Button>
             </Stack>
           </>
+        ) : syncing ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
+            <CircularProgress size={24} />
+            <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+              Creando entrada en directorio…
+            </Typography>
+          </Box>
         ) : (
           <Typography variant="body2" color="text.secondary">
             No hay entrada en el directorio para este teléfono.
