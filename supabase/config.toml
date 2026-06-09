@@ -130,3 +130,8 @@ verify_jwt = false
 # propiedad de la cita internamente; el gateway no debe exigir JWT de Supabase.
 [functions.send-appointment-confirmation]
 verify_jwt = false
+
+# Autenticación server-to-server vía x-api-key desde Firebase scheduler.
+# El gateway no debe exigir JWT porque el caller no es un usuario de Supabase.
+[functions.send-appointment-reminder]
+verify_jwt = false

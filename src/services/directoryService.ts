@@ -172,7 +172,18 @@ export const directoryService = {
 
     let query = supabase.from('crm_directory').select('*', { count: 'exact' });
 
-    if (filters?.status) query = query.eq('status', filters.status);
+    if (filters?.status === 'active') {
+      query = query.or('status.eq.active,whatsapp_conversation_id.not.is.null').eq('opt_out', false);
+    } else if (filters?.status === 'inactive') {
+      query = query
+        .eq('status', 'inactive')
+        .is('whatsapp_conversation_id', null)
+        .eq('opt_out', false);
+    } else if (filters?.status === 'opt_out') {
+      query = query.or('opt_out.eq.true,status.eq.opt_out');
+    } else if (filters?.status) {
+      query = query.eq('status', filters.status);
+    }
     if (filters?.source) query = query.eq('source', filters.source);
     if (filters?.classification) query = query.eq('classification', filters.classification);
     if (filters?.qualityTag) query = query.eq('quality_tag', filters.qualityTag);
@@ -241,29 +252,39 @@ export const directoryService = {
   },
 
   /**
-   * Get directory statistics.
+   * Get directory statistics (conteos exactos vía PostgREST, sin límite de filas).
    */
   async getStats() {
-    const { data, error } = await supabase
-      .from('crm_directory')
-      .select('status,classification,opt_out,source')
-      .limit(10000);
-    if (error) throw error;
+    const countRows = async (applyFilter?: (query: any) => any) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let query = (supabase.from('crm_directory') as any).select('*', { count: 'exact', head: true });
+      if (applyFilter) {
+        query = applyFilter(query);
+      }
+      const { count, error } = await query;
+      if (error) throw error;
+      return count ?? 0;
+    };
 
-    const rows = data ?? [];
-    const total = rows.length;
-    const active = rows.filter((r) => r.status === 'active').length;
-    const inactive = rows.filter((r) => r.status === 'inactive').length;
-    const optOut = rows.filter((r) => r.opt_out === true).length;
+    const [total, active, inactive, optOut] = await Promise.all([
+      countRows(),
+      countRows((query) =>
+        query.or('status.eq.active,whatsapp_conversation_id.not.is.null').eq('opt_out', false),
+      ),
+      countRows((query) =>
+        query.eq('status', 'inactive').is('whatsapp_conversation_id', null).eq('opt_out', false),
+      ),
+      countRows((query) => query.or('opt_out.eq.true,status.eq.opt_out')),
+    ]);
 
-    const byClassification: Record<string, number> = {};
-    const bySource: Record<string, number> = {};
-    for (const row of rows) {
-      byClassification[row.classification] = (byClassification[row.classification] ?? 0) + 1;
-      if (row.source) bySource[row.source] = (bySource[row.source] ?? 0) + 1;
-    }
-
-    return { total, active, inactive, optOut, byClassification, bySource };
+    return {
+      total,
+      active,
+      inactive,
+      optOut,
+      byClassification: {} as Record<string, number>,
+      bySource: {} as Record<string, number>,
+    };
   },
 
   /**

@@ -12,7 +12,7 @@ import {
   Snackbar,
   Alert,
 } from '@mui/material';
-import ContactsIcon from '@mui/icons-material/Contacts';
+import BusinessIcon from '@mui/icons-material/Business';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import WhatsAppIcon from '@mui/icons-material/WhatsApp';
 import {
@@ -47,14 +47,14 @@ const WhatsAppInternalContactsButton: React.FC = () => {
 
   return (
     <>
-      <Tooltip title="Contactos internos: línea Meta, correos y teléfonos">
+      <Tooltip title="Información de la empresa: línea Meta, correos y teléfonos">
         <IconButton
           size="small"
           onClick={(e) => setAnchorEl(e.currentTarget)}
           sx={{ color: 'primary.main' }}
-          aria-label="Abrir contactos internos"
+          aria-label="Abrir información de la empresa"
         >
-          <ContactsIcon fontSize="small" />
+          <BusinessIcon fontSize="small" />
         </IconButton>
       </Tooltip>
 
@@ -67,7 +67,7 @@ const WhatsAppInternalContactsButton: React.FC = () => {
         slotProps={{ paper: { sx: { maxWidth: 400, p: 1 } } }}
       >
         <Typography variant="subtitle2" fontWeight={700} sx={{ px: 1, pb: 0.5 }}>
-          Contactos internos
+          Información de la empresa
         </Typography>
         <List dense disablePadding>
           {WHATSAPP_INTERNAL_CONTACTS.map((c) => {

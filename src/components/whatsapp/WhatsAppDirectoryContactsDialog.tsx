@@ -32,6 +32,12 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import SearchIcon from '@mui/icons-material/Search';
 import { directoryService } from '@/services/directoryService';
 import type { DirectoryEntry } from '@/types/lead';
+import {
+  DIRECTORY_STATUS_LABELS,
+  DIRECTORY_STATUS_SUMMARY,
+  getDirectoryEffectiveStatus,
+  getDirectoryStatusTooltip,
+} from '@/utils/directoryContactStatus';
 
 // ──────────────────────────────────────────────
 // Constants
@@ -55,12 +61,6 @@ const STATUS_CHIP_COLORS: Record<string, 'default' | 'success' | 'error' | 'warn
   active: 'success',
   inactive: 'default',
   opt_out: 'error',
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  active: 'Activo',
-  inactive: 'Inactivo',
-  opt_out: 'Opt-out',
 };
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -281,10 +281,16 @@ const WhatsAppDirectoryContactsDialog: React.FC<WhatsAppDirectoryContactsDialogP
       <Box sx={{ px: 2, py: 1, bgcolor: 'action.hover' }}>
         <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap">
           <Chip icon={<PeopleIcon />} label={`${stats.total.toLocaleString('es-CO')} total`} size="small" color="primary" variant="outlined" />
-          <Chip label={`${stats.active.toLocaleString('es-CO')} activos`} size="small" color="success" variant="outlined" />
-          <Chip label={`${stats.inactive.toLocaleString('es-CO')} inactivos`} size="small" variant="outlined" />
+          <Tooltip title={DIRECTORY_STATUS_SUMMARY.active} arrow>
+            <Chip label={`${stats.active.toLocaleString('es-CO')} activos`} size="small" color="success" variant="outlined" />
+          </Tooltip>
+          <Tooltip title={DIRECTORY_STATUS_SUMMARY.inactive} arrow>
+            <Chip label={`${stats.inactive.toLocaleString('es-CO')} inactivos`} size="small" variant="outlined" />
+          </Tooltip>
           {stats.optOut > 0 && (
-            <Chip label={`${stats.optOut} opt-out`} size="small" color="error" variant="outlined" />
+            <Tooltip title={DIRECTORY_STATUS_SUMMARY.opt_out} arrow>
+              <Chip label={`${stats.optOut} opt-out`} size="small" color="error" variant="outlined" />
+            </Tooltip>
           )}
           <Box sx={{ flex: 1 }} />
           <Tooltip title="Actualizar">
@@ -345,13 +351,19 @@ const WhatsAppDirectoryContactsDialog: React.FC<WhatsAppDirectoryContactsDialogP
             {/* Estado */}
             <Stack direction="row" spacing={0.5} alignItems="center">
               <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>Estado:</Typography>
-              {['', ...Object.keys(STATUS_LABELS)].map((key) => {
-                const label = key ? STATUS_LABELS[key] : 'Todos';
+              {(['', 'active', 'inactive', 'opt_out'] as const).map((key) => {
+                const label = key ? DIRECTORY_STATUS_LABELS[key] : 'Todos';
                 const color = key ? (STATUS_CHIP_COLORS[key] ?? 'default') : 'default';
-                return filterChip(label, key, statusFilter === key, () => {
+                const chip = filterChip(label, key, statusFilter === key, () => {
                   setStatusFilter(key);
                   setPage(0);
                 }, color as string);
+                if (!key) return chip;
+                return (
+                  <Tooltip key={key} title={DIRECTORY_STATUS_SUMMARY[key]} arrow>
+                    <span>{chip}</span>
+                  </Tooltip>
+                );
               })}
             </Stack>
 
@@ -448,7 +460,10 @@ const WhatsAppDirectoryContactsDialog: React.FC<WhatsAppDirectoryContactsDialogP
                 </TableRow>
               )}
 
-              {entries.map((entry) => (
+              {entries.map((entry) => {
+                const effectiveStatus = getDirectoryEffectiveStatus(entry);
+
+                return (
                 <TableRow key={entry.id} hover sx={{ '&:last-child td': { borderBottom: 0 } }}>
                   {/* Nombre */}
                   <TableCell>
@@ -523,12 +538,14 @@ const WhatsAppDirectoryContactsDialog: React.FC<WhatsAppDirectoryContactsDialogP
 
                   {/* Estado */}
                   <TableCell>
-                    <Chip
-                      label={STATUS_LABELS[entry.status] ?? entry.status}
-                      size="small"
-                      color={STATUS_CHIP_COLORS[entry.status] as 'success' | 'default' | 'error' | undefined}
-                      variant={entry.status === 'active' ? 'filled' : 'outlined'}
-                    />
+                    <Tooltip title={getDirectoryStatusTooltip(entry)} arrow>
+                      <Chip
+                        label={DIRECTORY_STATUS_LABELS[effectiveStatus]}
+                        size="small"
+                        color={STATUS_CHIP_COLORS[effectiveStatus] as 'success' | 'default' | 'error' | undefined}
+                        variant={effectiveStatus === 'active' ? 'filled' : 'outlined'}
+                      />
+                    </Tooltip>
                   </TableCell>
 
                   {/* Tags */}
@@ -556,7 +573,8 @@ const WhatsAppDirectoryContactsDialog: React.FC<WhatsAppDirectoryContactsDialogP
                     </Typography>
                   </TableCell>
                 </TableRow>
-              ))}
+                );
+              })}
             </TableBody>
           </Table>
         </TableContainer>

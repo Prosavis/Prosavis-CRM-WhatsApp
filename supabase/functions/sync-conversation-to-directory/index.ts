@@ -90,7 +90,7 @@ Deno.serve(async (req) => {
     // --- Buscar entry existente en crm_directory por phone ---
     const { data: existingEntry } = await supabase
       .from('crm_directory')
-      .select('id, display_name, photo_url, unread_whatsapp_count')
+      .select('id, display_name, photo_url, unread_whatsapp_count, opt_out, status')
       .eq('phone', phone)
       .maybeSingle();
 
@@ -144,6 +144,13 @@ Deno.serve(async (req) => {
     // --- Source tracking ---
     // Siempre incluimos 'WHATSAPP' como source (se mergea via función upsert)
     entry.source = 'WHATSAPP';
+
+    // Conversación en inbox → contacto activo (salvo opt-out)
+    const isOptOut =
+      existingEntry?.opt_out === true || existingEntry?.status === 'opt_out';
+    if (!isOptOut) {
+      entry.status = 'active';
+    }
 
     // --- Ejecutar upsert_directory_entry via RPC ---
     const { data: upsertedId, error: upsertError } = await supabase.rpc(

@@ -96,7 +96,11 @@ Deno.serve(async (req) => {
       if (phones.length) {
         const { count, error: leadError } = await supabase
           .from('crm_directory')
-          .update({ status: 'inactive', updated_at: new Date().toISOString() })
+          .update({
+            status: 'inactive',
+            whatsapp_conversation_id: null,
+            updated_at: new Date().toISOString(),
+          })
           .in('phone', phones);
         if (leadError) throw leadError;
         entriesDeactivated = count ?? 0;
@@ -138,6 +142,17 @@ Deno.serve(async (req) => {
       .delete()
       .eq('stable_key', conversationId);
     if (deleteConvError) throw deleteConvError;
+
+    const conversationIds = stableKeys.filter(Boolean);
+    if (conversationIds.length) {
+      await supabase
+        .from('crm_directory')
+        .update({
+          whatsapp_conversation_id: null,
+          updated_at: new Date().toISOString(),
+        })
+        .in('whatsapp_conversation_id', conversationIds);
+    }
 
     return jsonResponse({
       success: true,
