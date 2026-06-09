@@ -22,6 +22,7 @@ interface ConversationRecord {
   last_intent?: string;
   unread_count?: number;
   state?: string;
+  is_archived?: boolean;
 }
 
 function safeString(value: unknown): string | null {
@@ -79,7 +80,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // --- Construir display_name ---
+    // --- Construir display_name y full_name ---
     const waProfileName = safeString(record.whatsapp_profile_name);
     const contactName = safeString(record.contact_name);
     const displayName = waProfileName || contactName;
@@ -108,10 +109,9 @@ Deno.serve(async (req) => {
     };
 
     // --- WhatsApp assigned_to ---
+    // Always sync assigned_to: set to uuid or null
     const assignedTo = safeString(record.assigned_to);
-    if (assignedTo) {
-      entry.whatsapp_assigned_to = assignedTo;
-    }
+    entry.whatsapp_assigned_to = assignedTo;
 
     // --- Unread count logic ---
     if (isActive) {
@@ -145,10 +145,13 @@ Deno.serve(async (req) => {
     // Siempre incluimos 'WHATSAPP' como source (se mergea via función upsert)
     entry.source = 'WHATSAPP';
 
-    // Conversación en inbox → contacto activo (salvo opt-out)
+    // --- Status logic ---
+    // Prioridad: archived → inactive, opt_out → opt_out, active conversation → active
     const isOptOut =
       existingEntry?.opt_out === true || existingEntry?.status === 'opt_out';
-    if (!isOptOut) {
+    if (record.is_archived === true) {
+      entry.status = 'inactive';
+    } else if (!isOptOut) {
       entry.status = 'active';
     }
 
