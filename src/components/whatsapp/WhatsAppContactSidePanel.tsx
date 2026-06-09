@@ -35,6 +35,43 @@ const UserDetailsDialog = React.lazy(() => import('../common/UserDetailsDialog')
 
 const ENTRY_STATUSES = ['active', 'inactive', 'opt_out'];
 const SEQUENCES = ['NINGUNA', 'SEGUIMIENTO', 'REBOOKING'];
+const AUTO_SAVE_MS = 800;
+
+function normalizePhoneInput(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  return trimmed.startsWith('+') ? trimmed : `+${trimmed.replace(/^\+/, '')}`;
+}
+
+type EntryDraftSnapshot = {
+  fullName: string;
+  email: string;
+  phone: string;
+  status: string;
+  classification: string;
+  assignedTo: string;
+  sequence: string;
+  address: string;
+  notes: string;
+};
+
+function entryDraftFromEntry(entry: DirectoryEntry): EntryDraftSnapshot {
+  return {
+    fullName: (entry.fullName || '').trim(),
+    email: (entry.email || '').trim(),
+    phone: (entry.phone || '').trim(),
+    status: entry.status || 'active',
+    classification: entry.classification || 'unknown',
+    assignedTo: (entry.whatsAppAssignedTo || '').trim(),
+    sequence: entry.activeSequence || 'NINGUNA',
+    address: (entry.address || '').trim(),
+    notes: (entry.notes || '').trim(),
+  };
+}
+
+function entryDraftKey(snapshot: EntryDraftSnapshot): string {
+  return JSON.stringify(snapshot);
+}
 
 function statusLabel(s: string): string {
   const map: Record<string, string> = {
@@ -58,15 +95,11 @@ function appointmentRole(apt: Appointment, userId: string): string {
 interface WhatsAppContactSidePanelProps {
   conversation: WhatsAppConversation;
   contact: WhatsAppContactContextValue;
-  canShowTemplates: boolean;
-  onBackToTemplates: () => void;
 }
 
 const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
   conversation,
   contact,
-  canShowTemplates,
-  onBackToTemplates,
 }) => {
   const { user, directoryEntry, lead, refetch, loading } = contact;
   // Use directoryEntry as primary, fall back to lead for backward compat
@@ -94,12 +127,13 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
   const [adminNotes, setAdminNotes] = useState(conversation.adminNotes || '');
 
   const [savingUser, setSavingUser] = useState(false);
-  const [savingLead, setSavingLead] = useState(false);
   const [savingNotes, setSavingNotes] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [okMsg, setOkMsg] = useState<string | null>(null);
   const autoSyncDoneRef = useRef(false);
+  const hydratingRef = useRef(true);
+  const lastPersistedNotesRef = useRef((conversation.adminNotes || '').trim());
+  const lastPersistedEntryKeyRef = useRef<string | null>(null);
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [aptsLoading, setAptsLoading] = useState(false);
@@ -107,7 +141,9 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
   const [dialogOpen, setDialogOpen] = useState(false);
 
   useEffect(() => {
-    setAdminNotes(conversation.adminNotes || '');
+    const notes = conversation.adminNotes || '';
+    setAdminNotes(notes);
+    lastPersistedNotesRef.current = notes.trim();
   }, [conversation.id, conversation.adminNotes]);
 
   useEffect(() => {
@@ -132,6 +168,7 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
   }, [user]);
 
   useEffect(() => {
+    hydratingRef.current = true;
     if (entry) {
       setEntryFullName(entry.fullName || '');
       setEntryEmail(entry.email || '');
@@ -143,6 +180,7 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
       setEntrySeq(entry.activeSequence || 'NINGUNA');
       setEntryAddress(entry.address || '');
       setEntryNotes(entry.notes || '');
+      lastPersistedEntryKeyRef.current = entryDraftKey(entryDraftFromEntry(entry));
     } else {
       setEntryFullName('');
       setEntryEmail('');
@@ -154,8 +192,21 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
       setEntrySeq('NINGUNA');
       setEntryAddress('');
       setEntryNotes('');
+      lastPersistedEntryKeyRef.current = null;
     }
+    const timer = window.setTimeout(() => {
+      hydratingRef.current = false;
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [entry]);
+
+  useEffect(() => {
+    hydratingRef.current = true;
+    const timer = window.setTimeout(() => {
+      hydratingRef.current = false;
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [conversation.id, user?.id]);
 
   useEffect(() => {
     const uid = user?.id;
@@ -198,6 +249,7 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
   // ── Resetear flag cuando cambia la conversación ──
   useEffect(() => {
     autoSyncDoneRef.current = false;
+    setSyncing(false);
   }, [conversation.id]);
 
   // ── Auto-sync: persiste datos WA → directory cuando se abre la conversación ──
@@ -296,8 +348,7 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
         console.warn('[WhatsAppContactSidePanel] auto-sync error:', e);
         autoSyncDoneRef.current = true; // No reintentar en cada re-render
       } finally {
-        // Solo la generación más reciente puede desactivar el spinner
-        if (!cancelled && gen === syncGenRef.current) {
+        if (gen === syncGenRef.current) {
           setSyncing(false);
         }
       }
@@ -306,7 +357,7 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [conversation.id, entry, loading, refetch]);
+  }, [conversation.id, entry?.id, loading, refetch]);
 
   const dialogUser: User | null = useMemo(() => {
     if (!user) return null;
@@ -332,93 +383,161 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
     [conversation.id],
   );
 
-  const handleSaveUser = async () => {
+  const persistUser = useCallback(async () => {
     if (!user) return;
-    setError(null);
-    setOkMsg(null);
+
+    const payload: Record<string, string> = {};
+    const trimmedName = userName.trim();
+    const trimmedPhone = normalizePhoneInput(userPhone);
+    const trimmedPhoto = userPhotoUrl.trim();
+    const trimmedBio = userBio.trim();
+    const trimmedDept = userDept.trim();
+    const trimmedCity = userCity.trim();
+    const trimmedAddress = userAddress.trim();
+
+    if (trimmedName && trimmedName !== (user.name || '').trim()) payload.name = trimmedName;
+    if (trimmedPhone && trimmedPhone !== normalizePhoneInput(user.phoneNumber || '')) {
+      payload.phoneNumber = trimmedPhone;
+    }
+    if (trimmedPhoto !== (user.photoUrl || '').trim()) payload.photoUrl = trimmedPhoto;
+    if (trimmedBio !== (user.bio || '').trim()) payload.bio = trimmedBio;
+    if (trimmedDept !== (user.department || '').trim()) payload.department = trimmedDept;
+    if (trimmedCity !== (user.city || '').trim()) payload.city = trimmedCity;
+    if (trimmedAddress !== (user.address || '').trim()) payload.address = trimmedAddress;
+
+    if (Object.keys(payload).length === 0) return;
+
     setSavingUser(true);
     try {
-      const payload: Record<string, string> = {};
-      if (userName.trim()) payload.name = userName.trim();
-      if (userPhone.trim()) {
-        const p = userPhone.trim().startsWith('+') ? userPhone.trim() : `+${userPhone.trim().replace(/^\+/, '')}`;
-        payload.phoneNumber = p;
-      }
-      if (userPhotoUrl.trim()) payload.photoUrl = userPhotoUrl.trim();
-      if (userBio.trim()) payload.bio = userBio.trim();
-      if (userDept.trim()) payload.department = userDept.trim();
-      if (userCity.trim()) payload.city = userCity.trim();
-      if (userAddress.trim()) payload.address = userAddress.trim();
-
-      if (Object.keys(payload).length === 0) {
-        setOkMsg('Sin cambios para guardar');
-        return;
-      }
-
       await updateUserProfileViaFunction(payload, user.id);
-      if (userName.trim().length >= 2) {
-        await syncConversationName(userName.trim());
+      if (trimmedName.length >= 2) {
+        await syncConversationName(trimmedName);
       }
-      if (userPhotoUrl.trim()) {
+      if (trimmedPhoto) {
         await patchWhatsAppConversationAdmin({
           conversationId: conversation.id,
-          patch: { contactPhotoUrl: userPhotoUrl.trim() },
+          patch: { contactPhotoUrl: trimmedPhoto },
         });
       }
-      setOkMsg('Usuario actualizado');
-      await refetch();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Error al guardar usuario');
     } finally {
       setSavingUser(false);
     }
-  };
+  }, [
+    conversation.id,
+    syncConversationName,
+    user,
+    userAddress,
+    userBio,
+    userCity,
+    userDept,
+    userName,
+    userPhone,
+    userPhotoUrl,
+  ]);
 
-  const handleSaveEntry = async () => {
+  const currentEntryDraft = useCallback((): EntryDraftSnapshot => ({
+    fullName: entryFullName.trim(),
+    email: entryEmail.trim(),
+    phone: entryPhone.trim(),
+    status: entryStatus,
+    classification: entryClassification,
+    assignedTo: entryAssignedTo.trim(),
+    sequence: entrySeq,
+    address: entryAddress.trim(),
+    notes: entryNotes.trim(),
+  }), [
+    entryAddress,
+    entryAssignedTo,
+    entryClassification,
+    entryEmail,
+    entryFullName,
+    entryNotes,
+    entryPhone,
+    entrySeq,
+    entryStatus,
+  ]);
+
+  const persistEntry = useCallback(async () => {
     if (!entry) return;
-    setError(null);
-    setOkMsg(null);
-    setSavingLead(true);
+
+    const draft = currentEntryDraft();
+    const draftKey = entryDraftKey(draft);
+    if (draftKey === lastPersistedEntryKeyRef.current) return;
+
     try {
       await directoryService.updateEntry(entry.id, {
-        fullName: entryFullName.trim() || '',
-        email: entryEmail.trim() || undefined,
-        phone: entryPhone.trim() || undefined,
-        status: entryStatus,
-        classification: entryClassification as DirectoryEntry['classification'],
+        fullName: draft.fullName || '',
+        email: draft.email || undefined,
+        phone: draft.phone || undefined,
+        status: draft.status,
+        classification: draft.classification as DirectoryEntry['classification'],
         tags: entryTags,
-        whatsAppAssignedTo: entryAssignedTo.trim() || undefined,
-        activeSequence: entrySeq,
-        address: entryAddress.trim() || undefined,
-        notes: entryNotes.trim() || undefined,
+        whatsAppAssignedTo: draft.assignedTo || undefined,
+        activeSequence: draft.sequence,
+        address: draft.address || undefined,
+        notes: draft.notes || undefined,
       });
-      const canonical = entryFullName.trim();
-      if (canonical.length >= 2) await syncConversationName(canonical);
-      setOkMsg('Entrada actualizada');
-      await refetch();
+      lastPersistedEntryKeyRef.current = draftKey;
+      if (draft.fullName.length >= 2) await syncConversationName(draft.fullName);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Error al guardar entrada');
-    } finally {
-      setSavingLead(false);
     }
-  };
+  }, [currentEntryDraft, entry, entryTags, syncConversationName]);
 
-  const handleSaveNotes = async () => {
-    setError(null);
-    setOkMsg(null);
+  const persistNotes = useCallback(async () => {
+    const trimmed = adminNotes.trim();
+    if (trimmed === lastPersistedNotesRef.current) return;
+
     setSavingNotes(true);
     try {
       await patchWhatsAppConversationAdmin({
         conversationId: conversation.id,
-        patch: { adminNotes: adminNotes.trim() || null },
+        patch: { adminNotes: trimmed || null },
       });
-      setOkMsg('Notas guardadas');
+      lastPersistedNotesRef.current = trimmed;
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Error al guardar notas');
     } finally {
       setSavingNotes(false);
     }
-  };
+  }, [adminNotes, conversation.id]);
+
+  useEffect(() => {
+    if (hydratingRef.current || loading) return;
+    const timer = window.setTimeout(() => {
+      void persistNotes();
+    }, AUTO_SAVE_MS);
+    return () => window.clearTimeout(timer);
+  }, [adminNotes, loading, persistNotes]);
+
+  useEffect(() => {
+    if (hydratingRef.current || !user || loading) return;
+    const timer = window.setTimeout(() => {
+      void persistUser();
+    }, AUTO_SAVE_MS);
+    return () => window.clearTimeout(timer);
+  }, [
+    loading,
+    persistUser,
+    user,
+    userAddress,
+    userBio,
+    userCity,
+    userDept,
+    userName,
+    userPhone,
+    userPhotoUrl,
+  ]);
+
+  useEffect(() => {
+    if (hydratingRef.current || !entry || loading || syncing) return;
+    const timer = window.setTimeout(() => {
+      void persistEntry();
+    }, AUTO_SAVE_MS);
+    return () => window.clearTimeout(timer);
+  }, [currentEntryDraft, entry, loading, persistEntry, syncing]);
 
   return (
     <Box
@@ -464,15 +583,13 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
             {error}
           </Alert>
         )}
-        {okMsg && (
-          <Alert severity="success" sx={{ mb: 1 }} onClose={() => setOkMsg(null)}>
-            {okMsg}
-          </Alert>
-        )}
 
-        <Typography variant="caption" color="text.secondary" fontWeight={600}>
-          Notas de la conversación
-        </Typography>
+        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+          <Typography variant="caption" color="text.secondary" fontWeight={600}>
+            Notas de la conversación
+          </Typography>
+          {savingNotes && <CircularProgress size={12} />}
+        </Stack>
         <TextField
           fullWidth
           multiline
@@ -481,26 +598,20 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
           value={adminNotes}
           onChange={(e) => setAdminNotes(e.target.value)}
           placeholder="Visibles solo en panel (admin)"
-          sx={{ mt: 0.5, mb: 1, bgcolor: 'background.paper' }}
+          sx={{ mt: 0.5, mb: 2, bgcolor: 'background.paper' }}
         />
-        <Button
-          variant="outlined"
-          size="small"
-          disabled={savingNotes}
-          onClick={() => void handleSaveNotes()}
-          sx={{ mb: 2, textTransform: 'none' }}
-        >
-          {savingNotes ? 'Guardando…' : 'Guardar notas'}
-        </Button>
 
         <Divider sx={{ my: 1 }} />
 
         {user ? (
           <>
             <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-              <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                Usuario vinculado
-              </Typography>
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                  Usuario vinculado
+                </Typography>
+                {savingUser && <CircularProgress size={12} />}
+              </Stack>
               <Button size="small" onClick={() => setDialogOpen(true)} sx={{ textTransform: 'none' }}>
                 Ficha completa
               </Button>
@@ -519,9 +630,6 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
               <TextField label="Departamento" size="small" value={userDept} onChange={(e) => setUserDept(e.target.value)} fullWidth />
               <TextField label="Ciudad" size="small" value={userCity} onChange={(e) => setUserCity(e.target.value)} fullWidth />
               <TextField label="Dirección" size="small" value={userAddress} onChange={(e) => setUserAddress(e.target.value)} fullWidth multiline minRows={2} />
-              <Button variant="contained" size="small" disabled={savingUser} onClick={() => void handleSaveUser()} sx={{ textTransform: 'none' }}>
-                {savingUser ? 'Guardando…' : 'Guardar usuario'}
-              </Button>
             </Stack>
           </>
         ) : (
@@ -538,7 +646,6 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
               <Typography variant="caption" color="text.secondary" fontWeight={600}>
                 Directorio
               </Typography>
-              {syncing && <CircularProgress size={14} sx={{ ml: 1 }} />}
             </Stack>
             <Stack spacing={1}>
               <TextField label="Nombre" size="small" value={entryFullName} onChange={(e) => setEntryFullName(e.target.value)} fullWidth />
@@ -629,10 +736,6 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
                   )}
                 </Box>
               )}
-
-              <Button variant="contained" size="small" color="secondary" disabled={savingLead || syncing} onClick={() => void handleSaveEntry()} sx={{ textTransform: 'none' }}>
-                {savingLead ? 'Guardando…' : 'Guardar'}
-              </Button>
             </Stack>
           </>
         ) : syncing ? (

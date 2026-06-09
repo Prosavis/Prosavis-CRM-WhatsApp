@@ -642,8 +642,6 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
           <WhatsAppContactSidePanel
             conversation={selectedConversation}
             contact={contactCtx}
-            canShowTemplates={canShowTemplates}
-            onBackToTemplates={() => setRightPanel('templates')}
           />
         )}
       </Box>
