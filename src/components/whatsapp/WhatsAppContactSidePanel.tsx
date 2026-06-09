@@ -192,13 +192,22 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
     };
   }, [user?.id, user?.isProvider]);
 
-  // ── Auto-sync: cuando se abre la conversación, persiste datos WA → directory ──
+  // ── Generación: controla que solo el último auto-sync marque syncing=false ──
+  const syncGenRef = useRef(0);
+
+  // ── Resetear flag cuando cambia la conversación ──
+  useEffect(() => {
+    autoSyncDoneRef.current = false;
+  }, [conversation.id]);
+
+  // ── Auto-sync: persiste datos WA → directory cuando se abre la conversación ──
   useEffect(() => {
     if (autoSyncDoneRef.current) return;
     if (loading) return;
     const convPhone = conversation.contactPhone || conversation.phone;
     if (!convPhone) return;
 
+    const gen = ++syncGenRef.current;
     let cancelled = false;
     setSyncing(true);
 
@@ -272,7 +281,7 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
           updates.whatsAppAssignedTo = conversation.assignedTo;
         }
 
-        // If there are updates, save and refetch
+        // Si hay cambios, guardar y recargar
         const keys = Object.keys(updates);
         if (keys.length > 0) {
           await directoryService.updateEntry(entry.id, updates);
@@ -287,14 +296,17 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
         console.warn('[WhatsAppContactSidePanel] auto-sync error:', e);
         autoSyncDoneRef.current = true; // No reintentar en cada re-render
       } finally {
-        if (!cancelled) setSyncing(false);
+        // Solo la generación más reciente puede desactivar el spinner
+        if (!cancelled && gen === syncGenRef.current) {
+          setSyncing(false);
+        }
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [conversation, entry, loading, refetch]);
+  }, [conversation.id, entry, loading, refetch]);
 
   const dialogUser: User | null = useMemo(() => {
     if (!user) return null;
@@ -425,19 +437,17 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
       }}
     >
       <Box sx={{ p: 1.5, borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
-          <Typography variant="subtitle2" fontWeight={600}>
-            Ficha cliente
-          </Typography>
-          {canShowTemplates && (
-            <Button size="small" onClick={onBackToTemplates} sx={{ textTransform: 'none' }}>
-              Plantillas
-            </Button>
-          )}
-        </Stack>
+        <Typography variant="subtitle2" fontWeight={600}>
+          Ficha cliente
+        </Typography>
         {conversation.whatsappProfileName && (
           <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
             Perfil WA: {conversation.whatsappProfileName}
+          </Typography>
+        )}
+        {conversation.contactPhone && (
+          <Typography variant="caption" color="text.secondary" display="block">
+            {conversation.contactPhone}
           </Typography>
         )}
       </Box>
