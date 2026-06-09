@@ -18,6 +18,7 @@ import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
 import DialogTitle from '@mui/material/DialogTitle';
 import FormControl from '@mui/material/FormControl';
+import FormControlLabel from '@mui/material/FormControlLabel';
 import Grid from '@mui/material/Grid';
 import IconButton from '@mui/material/IconButton';
 import InputAdornment from '@mui/material/InputAdornment';
@@ -28,6 +29,7 @@ import Paper from '@mui/material/Paper';
 import Select from '@mui/material/Select';
 import Snackbar from '@mui/material/Snackbar';
 import Stack from '@mui/material/Stack';
+import Switch from '@mui/material/Switch';
 import Table from '@mui/material/Table';
 import TableBody from '@mui/material/TableBody';
 import TableCell from '@mui/material/TableCell';
@@ -40,6 +42,8 @@ import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { directoryService } from '@/services/directoryService';
+import DirectoryEntryDrawer from '@/components/directory/DirectoryEntryDrawer';
+import DirectoryEditDialog from '@/components/directory/DirectoryEditDialog';
 import type { DirectoryEntry, DirectorySource } from '@/types/lead';
 
 const CLASSIFICATION_CHIP_COLORS: Record<string, 'default' | 'primary' | 'info' | 'warning'> = {
@@ -117,8 +121,14 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [classificationFilter, setClassificationFilter] = useState<string>('');
   const [sourceFilter, setSourceFilter] = useState<string>('');
+  const [phoneNull, setPhoneNull] = useState<boolean>(false);
+  const [emailNull, setEmailNull] = useState<boolean>(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [seedLoading, setSeedLoading] = useState(false);
+  const [selectedEntry, setSelectedEntry] = useState<DirectoryEntry | null>(null);
+  const [editEntry, setEditEntry] = useState<DirectoryEntry | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
 
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(100);
@@ -166,6 +176,8 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
       if (statusFilter) filters.status = statusFilter;
       if (classificationFilter) filters.classification = classificationFilter;
       if (sourceFilter) filters.source = sourceFilter;
+      if (phoneNull) filters.phone_null = true;
+      if (emailNull) filters.email_null = true;
       if (searchTerm) filters.searchTerm = searchTerm;
       if (sortField) {
         filters.sortField = sortField;
@@ -180,7 +192,7 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, classificationFilter, sourceFilter, page, rowsPerPage, searchTerm, sortField, sortDirection]);
+  }, [statusFilter, classificationFilter, sourceFilter, phoneNull, emailNull, page, rowsPerPage, searchTerm, sortField, sortDirection]);
 
   useEffect(() => {
     fetchStats();
@@ -428,6 +440,26 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
               <MenuItem value="BROADCAST">Broadcast</MenuItem>
             </Select>
           </FormControl>
+          <FormControlLabel
+            control={
+              <Switch
+                size="small"
+                checked={phoneNull}
+                onChange={(e) => { setPhoneNull(e.target.checked); setPage(0); }}
+              />
+            }
+            label="Sin teléfono"
+          />
+          <FormControlLabel
+            control={
+              <Switch
+                size="small"
+                checked={emailNull}
+                onChange={(e) => { setEmailNull(e.target.checked); setPage(0); }}
+              />
+            }
+            label="Sin email"
+          />
           <IconButton onClick={() => { fetchEntries(); fetchStats(); }}>
             <RefreshIcon />
           </IconButton>
@@ -524,7 +556,15 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
                   </TableRow>
                 ) : (
                   entries.map((entry) => (
-                    <TableRow key={entry.id} hover>
+                    <TableRow
+                      key={entry.id}
+                      hover
+                      sx={{ cursor: 'pointer' }}
+                      onDoubleClick={() => {
+                        setSelectedEntry(entry);
+                        setDrawerOpen(true);
+                      }}
+                    >
                       <TableCell padding="checkbox">
                         <Checkbox
                           checked={selectedIds.has(entry.id)}
@@ -738,6 +778,36 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
           {snackbar.message}
         </Alert>
       </Snackbar>
+
+      {selectedEntry && (
+        <DirectoryEntryDrawer
+          open={drawerOpen}
+          entry={selectedEntry}
+          onClose={() => setDrawerOpen(false)}
+          onEdit={(entry: DirectoryEntry) => {
+            setDrawerOpen(false);
+            setEditEntry(entry);
+            setTimeout(() => setEditDialogOpen(true), 300);
+          }}
+        />
+      )}
+
+      {editEntry && (
+        <DirectoryEditDialog
+          open={editDialogOpen}
+          entry={editEntry}
+          onClose={() => {
+            setEditDialogOpen(false);
+            setEditEntry(null);
+          }}
+          onSaved={() => {
+            setEditDialogOpen(false);
+            setEditEntry(null);
+            fetchEntries();
+            fetchStats();
+          }}
+        />
+      )}
     </Box>
   );
 };

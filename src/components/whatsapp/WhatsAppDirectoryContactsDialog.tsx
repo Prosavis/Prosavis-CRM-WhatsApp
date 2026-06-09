@@ -7,11 +7,13 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  FormControlLabel,
   IconButton,
   InputAdornment,
   LinearProgress,
   Pagination,
   Stack,
+  Switch,
   Table,
   TableBody,
   TableCell,
@@ -31,6 +33,8 @@ import PeopleIcon from '@mui/icons-material/People';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SearchIcon from '@mui/icons-material/Search';
 import { directoryService } from '@/services/directoryService';
+import DirectoryEntryDrawer from '@/components/directory/DirectoryEntryDrawer';
+import DirectoryEditDialog from '@/components/directory/DirectoryEditDialog';
 import type { DirectoryEntry } from '@/types/lead';
 import {
   DIRECTORY_STATUS_LABELS,
@@ -143,7 +147,15 @@ const WhatsAppDirectoryContactsDialog: React.FC<WhatsAppDirectoryContactsDialogP
   const [classificationFilter, setClassificationFilter] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [sourceFilter, setSourceFilter] = useState<string>('');
+  const [phoneNull, setPhoneNull] = useState(false);
+  const [emailNull, setEmailNull] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
+
+  // Drawer & edit dialog
+  const [selectedEntry, setSelectedEntry] = useState<DirectoryEntry | null>(null);
+  const [editEntry, setEditEntry] = useState<DirectoryEntry | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
 
   // Pagination
   const [page, setPage] = useState(0);
@@ -178,6 +190,8 @@ const WhatsAppDirectoryContactsDialog: React.FC<WhatsAppDirectoryContactsDialogP
         classification: classificationFilter || undefined,
         status: statusFilter || undefined,
         source: sourceFilter || undefined,
+        phoneNull: phoneNull || undefined,
+        emailNull: emailNull || undefined,
         sortField: sortField || undefined,
         sortDirection,
       });
@@ -188,7 +202,7 @@ const WhatsAppDirectoryContactsDialog: React.FC<WhatsAppDirectoryContactsDialogP
     } finally {
       setLoading(false);
     }
-  }, [page, searchTerm, classificationFilter, statusFilter, sourceFilter, sortField, sortDirection]);
+  }, [page, searchTerm, classificationFilter, statusFilter, sourceFilter, phoneNull, emailNull, sortField, sortDirection]);
 
   // ── Effects ──────────────────────────────
 
@@ -231,6 +245,8 @@ const WhatsAppDirectoryContactsDialog: React.FC<WhatsAppDirectoryContactsDialogP
     setClassificationFilter('');
     setStatusFilter('');
     setSourceFilter('');
+    setPhoneNull(false);
+    setEmailNull(false);
     setPage(0);
   };
 
@@ -380,6 +396,29 @@ const WhatsAppDirectoryContactsDialog: React.FC<WhatsAppDirectoryContactsDialogP
                 }, 'default');
               })}
             </Stack>
+
+            <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
+
+            <FormControlLabel
+              control={
+                <Switch
+                  size="small"
+                  checked={phoneNull}
+                  onChange={(e) => { setPhoneNull(e.target.checked); setPage(0); }}
+                />
+              }
+              label={<Typography variant="caption">Sin teléfono</Typography>}
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  size="small"
+                  checked={emailNull}
+                  onChange={(e) => { setEmailNull(e.target.checked); setPage(0); }}
+                />
+              }
+              label={<Typography variant="caption">Sin email</Typography>}
+            />
           </Stack>
         )}
       </Box>
@@ -464,7 +503,15 @@ const WhatsAppDirectoryContactsDialog: React.FC<WhatsAppDirectoryContactsDialogP
                 const effectiveStatus = getDirectoryEffectiveStatus(entry);
 
                 return (
-                <TableRow key={entry.id} hover sx={{ '&:last-child td': { borderBottom: 0 } }}>
+                <TableRow
+                  key={entry.id}
+                  hover
+                  sx={{ '&:last-child td': { borderBottom: 0 }, cursor: 'pointer' }}
+                  onDoubleClick={() => {
+                    setSelectedEntry(entry);
+                    setDrawerOpen(true);
+                  }}
+                >
                   {/* Nombre */}
                   <TableCell>
                     <Stack direction="row" spacing={1.5} alignItems="center">
@@ -598,6 +645,37 @@ const WhatsAppDirectoryContactsDialog: React.FC<WhatsAppDirectoryContactsDialogP
             />
           </Stack>
         </Box>
+      )}
+
+      {/* ── Drawer & Edit Dialog ───────────── */}
+      {selectedEntry && (
+        <DirectoryEntryDrawer
+          open={drawerOpen}
+          entry={selectedEntry}
+          onClose={() => setDrawerOpen(false)}
+          onEdit={(entry: DirectoryEntry) => {
+            setDrawerOpen(false);
+            setEditEntry(entry);
+            setTimeout(() => setEditDialogOpen(true), 300);
+          }}
+        />
+      )}
+
+      {editEntry && (
+        <DirectoryEditDialog
+          open={editDialogOpen}
+          entry={editEntry}
+          onClose={() => {
+            setEditDialogOpen(false);
+            setEditEntry(null);
+          }}
+          onSaved={() => {
+            setEditDialogOpen(false);
+            setEditEntry(null);
+            fetchEntries();
+            fetchStats();
+          }}
+        />
       )}
     </Dialog>
   );

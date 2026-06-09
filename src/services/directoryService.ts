@@ -162,6 +162,8 @@ export const directoryService = {
     searchTerm?: string;
     sortField?: string;
     sortDirection?: 'asc' | 'desc';
+    phoneNull?: boolean;
+    emailNull?: boolean;
   }) {
     const limit = filters?.limit ?? 25;
     const page = filters?.page ?? 0;
@@ -195,6 +197,8 @@ export const directoryService = {
         `full_name.ilike.${term},phone.ilike.${term},email.ilike.${term},display_name.ilike.${term}`,
       );
     }
+    if (filters?.phoneNull) query = query.is('phone', null);
+    if (filters?.emailNull) query = query.is('email', null);
 
     query = query.order(sortField, { ascending }).range(from, to);
 
