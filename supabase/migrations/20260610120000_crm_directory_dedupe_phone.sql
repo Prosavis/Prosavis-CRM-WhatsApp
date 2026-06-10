@@ -254,7 +254,7 @@ WHERE d.id = dupes.id;
 -- =============================================================================
 
 DROP INDEX IF EXISTS uq_directory_phone;
-CREATE UNIQUE INDEX uq_directory_phone_key
+CREATE UNIQUE INDEX IF NOT EXISTS uq_directory_phone_key
   ON crm_directory (phone_key)
   WHERE phone_key IS NOT NULL;
 

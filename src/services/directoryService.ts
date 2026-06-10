@@ -136,10 +136,17 @@ export const directoryService = {
   },
 
   /**
-   * Update an existing entry in crm_directory.
+   * Update an existing entry via upsert_directory_entry (merge por phone_key/email).
+   * Evita duplicados al añadir teléfono o al sincronizar desde WhatsApp.
    */
   async updateEntry(entryId: string, data: Partial<DirectoryEntry>) {
-    const row = toDbEntry(data);
+    const existing = await this.getEntryById(entryId);
+    if (!existing) {
+      throw new Error(`Directorio: entrada no encontrada (${entryId})`);
+    }
+
+    const merged: Partial<DirectoryEntry> = { ...existing, ...data };
+    const row = toDbEntry(merged);
     if (row.phone && typeof row.phone === 'string') {
       row.phone =
         normalizeDirectoryPhoneE164(row.phone) ?? row.phone;
@@ -147,12 +154,13 @@ export const directoryService = {
     if (row.email && typeof row.email === 'string') {
       row.email = row.email.trim().toLowerCase();
     }
-    const { error } = await supabase
-      .from('crm_directory')
-      .update(row)
-      .eq('id', entryId);
+
+    const { data: id, error } = await supabase.rpc('upsert_directory_entry', {
+      p_entry: row,
+      p_overwrite_classification: false,
+    });
     if (error) throw error;
-    return { success: true };
+    return { id: id as string, success: true };
   },
 
   /** Busca entradas por teléfono (variantes E.164 / dígitos). */
