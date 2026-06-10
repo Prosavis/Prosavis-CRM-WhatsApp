@@ -29,6 +29,7 @@ createRoot(document.getElementById('root')!).render(
             <FaviconUpdater />
             <App />
             <Toaster position="top-right" />
+            <Analytics />
           </AuthProvider>
         </BrowserRouter>
       </QueryClientProvider>
