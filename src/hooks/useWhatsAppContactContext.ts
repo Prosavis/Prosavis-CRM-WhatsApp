@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/config/supabase';
 import type { WhatsAppConversation } from '@/services/whatsappService';
 import type { DirectoryEntry } from '@/types/lead';
+import { directoryPhoneLookupVariants } from '@/utils/directoryPhone';
 import { normalizeWhatsAppPanelPhone } from '@/utils/whatsappPhone';
 
 export interface ContactPanelUser {
@@ -103,19 +104,26 @@ export function useWhatsAppContactContext(
       );
 
       if (phone) {
-        // Query crm_directory instead of crm_leads
-        const { data: dirRow } = await supabase
+        const phoneVariants = directoryPhoneLookupVariants(phone);
+        const lookupPhones =
+          phoneVariants.length > 0 ? phoneVariants : [phone];
+
+        const { data: dirRows } = await supabase
           .from('crm_directory')
           .select('*')
-          .eq('phone', phone)
-          .maybeSingle();
+          .in('phone', lookupPhones)
+          .order('updated_at', { ascending: false })
+          .limit(5);
+        const dirRow = dirRows?.[0] ?? null;
         setDirectoryEntry(dirRow ? mapDirectoryRow(dirRow) : null);
 
-        const { data: profile } = await supabase
+        const { data: profileRows } = await supabase
           .from('crm_contact_profiles')
           .select('*')
-          .eq('phone', phone)
-          .maybeSingle();
+          .in('phone', lookupPhones)
+          .order('updated_at', { ascending: false })
+          .limit(1);
+        const profile = profileRows?.[0] ?? null;
 
         if (profile) {
           const meta = (profile.metadata ?? {}) as Record<string, unknown>;

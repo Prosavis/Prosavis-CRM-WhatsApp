@@ -162,6 +162,7 @@ export interface Database {
           display_name: string | null;
           email: string | null;
           phone: string | null;
+          phone_key: string | null;
           photo_url: string | null;
           address: string | null;
           notes: string | null;

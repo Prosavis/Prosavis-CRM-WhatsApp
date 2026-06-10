@@ -9,6 +9,7 @@ import {
   assertMetaSendEnabled,
   persistOutboundLog,
 } from '../_shared/whatsappOutbound.ts';
+import { directoryPhoneLookupVariants } from '../_shared/directoryPhone.ts';
 import { getStableKeyFromRecipient, normalizePhone, resolveRecipient } from '../_shared/whatsappIdentity.ts';
 
 const BULK_CONFIRM_PHRASE = 'CONFIRMAR_ENVIO_MASIVO';
@@ -75,11 +76,14 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      const { data: directoryEntry } = await supabase
+      const phoneVariants = directoryPhoneLookupVariants(phone);
+      const lookupPhones = phoneVariants.length > 0 ? phoneVariants : [phone];
+      const { data: directoryRows } = await supabase
         .from('crm_directory')
         .select('opt_out')
-        .eq('phone', phone)
-        .maybeSingle();
+        .in('phone', lookupPhones)
+        .limit(1);
+      const directoryEntry = directoryRows?.[0] ?? null;
       if (directoryEntry?.opt_out) {
         skipped += 1;
         continue;

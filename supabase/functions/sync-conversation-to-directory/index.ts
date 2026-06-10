@@ -1,4 +1,9 @@
 import { corsHeaders } from '../_shared/cors.ts';
+import {
+  directoryPhoneKey,
+  directoryPhoneLookupVariants,
+  normalizeDirectoryPhoneE164,
+} from '../_shared/directoryPhone.ts';
 import { getServiceClient } from '../_shared/supabase.ts';
 
 interface WebhookPayload {
@@ -71,14 +76,15 @@ Deno.serve(async (req) => {
     const record = payload.record as ConversationRecord;
     const supabase = getServiceClient();
 
-    // --- Resolver phone ---
-    const phone = safeString(record.contact_phone) || safeString(record.phone);
-    if (!phone) {
+    // --- Resolver phone (E.164 canónico) ---
+    const rawPhone = safeString(record.contact_phone) || safeString(record.phone);
+    if (!rawPhone) {
       return new Response(JSON.stringify({ error: 'Falta phone/contact_phone en el record.' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
+    const phone = normalizeDirectoryPhoneE164(rawPhone) ?? rawPhone;
 
     // --- Construir display_name y full_name ---
     const waProfileName = safeString(record.whatsapp_profile_name);
@@ -88,14 +94,31 @@ Deno.serve(async (req) => {
     // --- Determinar si la conversación está activa ---
     const isActive = record.state === 'active';
 
-    // --- Buscar entry existente en crm_directory por phone ---
-    const { data: existingEntry } = await supabase
-      .from('crm_directory')
-      .select('id, display_name, photo_url, unread_whatsapp_count, opt_out, status')
-      .eq('phone', phone)
-      .maybeSingle();
+    // --- Buscar entry existente (phone_key canónico, luego variantes legacy) ---
+    const phoneKey = directoryPhoneKey(rawPhone);
+    let existingEntry: Record<string, unknown> | null = null;
+
+    if (phoneKey) {
+      const { data: byKey } = await supabase
+        .from('crm_directory')
+        .select('id, display_name, photo_url, unread_whatsapp_count, opt_out, status')
+        .eq('phone_key', phoneKey)
+        .limit(1);
+      existingEntry = byKey?.[0] ?? null;
+    }
+
+    if (!existingEntry) {
+      const phoneVariants = directoryPhoneLookupVariants(rawPhone);
+      const { data: byPhone } = await supabase
+        .from('crm_directory')
+        .select('id, display_name, photo_url, unread_whatsapp_count, opt_out, status')
+        .in('phone', phoneVariants.length > 0 ? phoneVariants : [phone])
+        .limit(1);
+      existingEntry = byPhone?.[0] ?? null;
+    }
 
     // --- Construir el JSONB para upsert_directory_entry ---
+    // phone ya está normalizado a E.164 (línea 92: normalizeDirectoryPhoneE164)
     const entry: Record<string, unknown> = {
       full_name: displayName || phone,
       display_name: displayName,

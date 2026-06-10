@@ -266,7 +266,14 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
     (async () => {
       try {
         if (!entry) {
-          // No existe entry → crear uno automáticamente con datos de la conversación
+          const existing = await directoryService.findByPhone(convPhone);
+          if (existing.length > 0) {
+            if (!cancelled) {
+              autoSyncDoneRef.current = true;
+              await refetch();
+            }
+            return;
+          }
           const displayName = conversation.whatsappProfileName || conversation.contactName || convPhone;
           await directoryService.createEntry({
             fullName: displayName,

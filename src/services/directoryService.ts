@@ -1,6 +1,11 @@
 import { supabase } from '@/config/supabase';
 import type { DirectoryEntry, DirectoryClassification } from '@/types/lead';
 import type { Database } from '@/types/database';
+import {
+  directoryPhoneKey,
+  directoryPhoneLookupVariants,
+  normalizeDirectoryPhoneE164,
+} from '@/utils/directoryPhone';
 
 type DirectoryRow = Database['public']['Tables']['crm_directory']['Row'];
 
@@ -113,25 +118,77 @@ export const directoryService = {
    * Create a new entry in crm_directory.
    */
   async createEntry(data: Partial<DirectoryEntry>) {
-    const { data: row, error } = await supabase
-      .from('crm_directory')
-      .insert(toDbEntry(data))
-      .select('id')
-      .single();
+    const row = toDbEntry(data);
+    if (row.phone && typeof row.phone === 'string') {
+      row.phone =
+        normalizeDirectoryPhoneE164(row.phone) ?? row.phone;
+    }
+    if (row.email && typeof row.email === 'string') {
+      row.email = row.email.trim().toLowerCase();
+    }
+
+    const { data: id, error } = await supabase.rpc('upsert_directory_entry', {
+      p_entry: row,
+      p_overwrite_classification: false,
+    });
     if (error) throw error;
-    return { id: row.id as string, success: true };
+    return { id: id as string, success: true };
   },
 
   /**
    * Update an existing entry in crm_directory.
    */
   async updateEntry(entryId: string, data: Partial<DirectoryEntry>) {
+    const row = toDbEntry(data);
+    if (row.phone && typeof row.phone === 'string') {
+      row.phone =
+        normalizeDirectoryPhoneE164(row.phone) ?? row.phone;
+    }
+    if (row.email && typeof row.email === 'string') {
+      row.email = row.email.trim().toLowerCase();
+    }
     const { error } = await supabase
       .from('crm_directory')
-      .update(toDbEntry(data))
+      .update(row)
       .eq('id', entryId);
     if (error) throw error;
     return { success: true };
+  },
+
+  /** Busca entradas por teléfono (variantes E.164 / dígitos). */
+  async findByPhone(phone: string): Promise<DirectoryEntry[]> {
+    const key = directoryPhoneKey(phone);
+    const variants = directoryPhoneLookupVariants(phone);
+    if (!key && variants.length === 0) return [];
+
+    const rows: DirectoryRow[] = [];
+
+    if (key) {
+      const { data, error } = await supabase
+        .from('crm_directory')
+        .select('*')
+        .eq('phone_key', key);
+      if (error) throw error;
+      rows.push(...((data ?? []) as DirectoryRow[]));
+    }
+
+    if (rows.length === 0 && variants.length > 0) {
+      const { data, error } = await supabase
+        .from('crm_directory')
+        .select('*')
+        .in('phone', variants);
+      if (error) throw error;
+      rows.push(...((data ?? []) as DirectoryRow[]));
+    }
+
+    const seen = new Set<string>();
+    return rows
+      .filter((row) => {
+        if (seen.has(row.id)) return false;
+        seen.add(row.id);
+        return true;
+      })
+      .map((row) => mapRowToEntry(row));
   },
 
   /**
