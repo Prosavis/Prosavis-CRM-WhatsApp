@@ -2,6 +2,8 @@
 import { requireCrmAdmin } from '../_shared/supabase.ts';
 import {
   assertMetaSendEnabled,
+  buildTemplateDisplayBody,
+  ensureConversation,
   formatError,
   getGraphCredentials,
   isRecipientBlocked,
@@ -20,21 +22,6 @@ function validateE164ishPhone(input: string): string {
   return normalized;
 }
 
-function buildDisplayBody(templateName: string, components?: Array<Record<string, unknown>>): string {
-  if (!components?.length) return `[Plantilla] ${templateName}`;
-  const chunks: string[] = [];
-  for (const component of components) {
-    const parameters = Array.isArray(component.parameters) ? component.parameters : [];
-    const texts = parameters
-      .map((p) => (p && typeof p === 'object' && (p as { type?: string }).type === 'text'
-        ? String((p as { text?: string }).text ?? '').trim()
-        : ''))
-      .filter(Boolean);
-    if (texts.length) chunks.push(texts.join(' '));
-  }
-  return chunks.length ? `[Plantilla ${templateName}] ${chunks.join('\n')}` : `[Plantilla] ${templateName}`;
-}
-
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -49,7 +36,7 @@ Deno.serve(async (req) => {
     const phoneNumberId = body.phoneNumberId ? String(body.phoneNumberId).trim() : undefined;
     const displayMessageBody = body.displayMessageBody
       ? String(body.displayMessageBody).trim()
-      : buildDisplayBody(templateName, components);
+      : buildTemplateDisplayBody(templateName, components);
 
     if (!recipientPhone || !templateName) {
       return jsonResponse({ error: 'Se requieren recipientPhone y templateName.' }, 400);
@@ -80,6 +67,9 @@ Deno.serve(async (req) => {
 
     const stableKey = getStableKeyFromRecipient(phone);
     const recipient = resolveRecipient(phone);
+
+    await ensureConversation(supabase, stableKey, normalizePhone(phone), graph.phoneNumberId);
+
     const persisted = await persistOutboundLog(
       supabase,
       {

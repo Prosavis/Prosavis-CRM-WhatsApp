@@ -1,6 +1,7 @@
 import type { DirectoryEntry } from '@/types/lead';
 import type { WhatsAppTemplateSummary } from '@/services/whatsappService';
 import {
+  buildDisplayMessageBody,
   buildTemplateSendComponents,
   type WhatsAppTemplateSendComponent,
 } from '@/utils/whatsappTemplateHelpers';
@@ -63,6 +64,7 @@ export function buildTemplatePayload(message: BulkMessageState): {
   templateName?: string;
   templateLanguage?: string;
   templateComponents?: WhatsAppTemplateSendComponent[];
+  displayMessageBody?: string;
 } {
   if (message.mode !== 'template' || !message.selectedTemplate) return {};
   const components = buildTemplateSendComponents(
@@ -74,5 +76,10 @@ export function buildTemplatePayload(message: BulkMessageState): {
     templateName: message.selectedTemplate.name,
     templateLanguage: message.selectedTemplate.language,
     templateComponents: components.length > 0 ? components : undefined,
+    displayMessageBody: buildDisplayMessageBody(
+      message.selectedTemplate,
+      message.headerValues,
+      message.bodyValues,
+    ),
   };
 }

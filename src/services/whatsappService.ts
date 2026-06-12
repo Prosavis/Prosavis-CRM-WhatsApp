@@ -768,6 +768,7 @@ export async function bulkWhatsAppSend(params: {
     type: 'header' | 'body';
     parameters: Array<{ type: 'text'; text: string }>;
   }>;
+  displayMessageBody?: string;
   richBody?: string;
   phoneNumberId?: string;
   confirmation: string;

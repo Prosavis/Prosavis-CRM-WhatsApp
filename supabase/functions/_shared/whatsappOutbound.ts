@@ -297,22 +297,48 @@ export async function sendToMeta(params: {
   };
 }
 
+export function buildTemplateDisplayBody(
+  templateName: string,
+  components?: Array<Record<string, unknown>>,
+): string {
+  if (!components?.length) return `[Plantilla] ${templateName}`;
+  const chunks: string[] = [];
+  for (const component of components) {
+    const parameters = Array.isArray(component.parameters) ? component.parameters : [];
+    const texts = parameters
+      .map((p) =>
+        p && typeof p === 'object' && (p as { type?: string }).type === 'text'
+          ? String((p as { text?: string }).text ?? '').trim()
+          : '',
+      )
+      .filter(Boolean);
+    if (texts.length) chunks.push(texts.join(' '));
+  }
+  return chunks.length ? `[Plantilla ${templateName}] ${chunks.join('\n')}` : `[Plantilla] ${templateName}`;
+}
+
 export async function ensureConversation(
   supabase: SupabaseClient,
   stableKey: string,
   recipientPhone: string,
   phoneNumberId: string,
+  contactName?: string | null,
 ) {
-  const { error } = await supabase.from('whatsapp_conversations').upsert(
-    {
-      stable_key: stableKey,
-      phone: stableKey,
-      contact_phone: recipientPhone,
-      phone_number_id: phoneNumberId || null,
-      state: 'active',
-    },
-    { onConflict: 'stable_key' },
-  );
+  const row: Record<string, unknown> = {
+    stable_key: stableKey,
+    phone: stableKey,
+    contact_phone: recipientPhone,
+    phone_number_id: phoneNumberId || null,
+    state: 'active',
+  };
+  const trimmedName = contactName?.trim();
+  if (trimmedName) {
+    row.contact_name = trimmedName;
+  }
+
+  const { error } = await supabase.from('whatsapp_conversations').upsert(row, {
+    onConflict: 'stable_key',
+  });
   if (error) throw error;
 }
 
@@ -485,6 +511,7 @@ export async function sendTextOutbound(
     agentUid: string;
     campaignType?: string;
     templateName?: string;
+    contactName?: string | null;
   },
 ): Promise<SendMediaOutboundResult> {
   assertMetaSendEnabled();
@@ -498,7 +525,13 @@ export async function sendTextOutbound(
   const recipient = resolveRecipient(params.to);
   const recipientPhone = recipient.phone ? normalizePhone(recipient.phone) : stableKey;
 
-  await ensureConversation(supabase, stableKey, recipientPhone, graph.phoneNumberId);
+  await ensureConversation(
+    supabase,
+    stableKey,
+    recipientPhone,
+    graph.phoneNumberId,
+    params.contactName,
+  );
 
   const metaResult = await sendToMeta({
     to: params.to,

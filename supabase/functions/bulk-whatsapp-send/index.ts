@@ -1,13 +1,16 @@
 ﻿import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { requireCrmAdmin } from '../_shared/supabase.ts';
 import {
+  assertMetaSendEnabled,
+  buildTemplateDisplayBody,
+  ensureConversation,
   formatError,
+  getGraphCredentials,
   isRecipientBlocked,
+  persistOutboundLog,
   sendTextOutbound,
   sendToMeta,
-  getGraphCredentials,
-  assertMetaSendEnabled,
-  persistOutboundLog,
+  updateConversationPreview,
 } from '../_shared/whatsappOutbound.ts';
 import { directoryPhoneLookupVariants } from '../_shared/directoryPhone.ts';
 import { getStableKeyFromRecipient, normalizePhone, resolveRecipient } from '../_shared/whatsappIdentity.ts';
@@ -35,7 +38,13 @@ Deno.serve(async (req) => {
     if (recipients.length > 500) return jsonResponse({ error: 'Máximo 500 destinatarios por envío.' }, 400);
 
     const isTemplateMode = Boolean(body.templateName);
+    const templateName = body.templateName ? String(body.templateName).trim() : '';
+    const templateLanguage = body.templateLanguage ? String(body.templateLanguage) : 'es_CO';
+    const templateComponents = body.templateComponents as Array<Record<string, unknown>> | undefined;
     const richBody = body.richBody ? String(body.richBody).trim() : '';
+    const displayMessageBodyFromClient = body.displayMessageBody
+      ? String(body.displayMessageBody).trim()
+      : '';
     if (!isTemplateMode && !richBody) {
       return jsonResponse({ error: 'Se requiere templateName o richBody.' }, 400);
     }
@@ -91,20 +100,34 @@ Deno.serve(async (req) => {
 
       try {
         if (isTemplateMode) {
+          const displayMessageBody =
+            displayMessageBodyFromClient ||
+            buildTemplateDisplayBody(templateName, templateComponents);
+
           const metaResult = await sendToMeta({
             to: phone,
             phoneNumberId: graph.phoneNumberId,
             accessToken: graph.accessToken,
-            templateName: String(body.templateName),
-            templateLanguage: body.templateLanguage ? String(body.templateLanguage) : 'es_CO',
-            templateComponents: body.templateComponents,
-            messageBody: `[Plantilla] ${body.templateName}`,
+            templateName,
+            templateLanguage,
+            templateComponents,
+            messageBody: displayMessageBody,
             requirePhone: true,
           });
 
           const stableKey = getStableKeyFromRecipient(phone);
           const resolved = resolveRecipient(phone);
-          await persistOutboundLog(
+          const contactName = recipient.name ? String(recipient.name).trim() : null;
+
+          await ensureConversation(
+            supabase,
+            stableKey,
+            phone,
+            graph.phoneNumberId,
+            contactName,
+          );
+
+          const persisted = await persistOutboundLog(
             supabase,
             {
               conversation_stable_key: stableKey,
@@ -112,10 +135,10 @@ Deno.serve(async (req) => {
               recipient_bsuid: resolved.bsuid ?? null,
               direction: 'outbound',
               sender_type: 'agent',
-              message_body: `[Plantilla] ${body.templateName}`,
+              message_body: displayMessageBody,
               status: metaResult.status,
               wa_message_id: metaResult.waMessageId,
-              template_name: String(body.templateName),
+              template_name: templateName,
               campaign_type: 'BULK_PANEL',
               phone_number_id: graph.phoneNumberId,
               error_message: metaResult.errorMessage ?? null,
@@ -123,6 +146,16 @@ Deno.serve(async (req) => {
             },
             user.id,
           );
+
+          const createdAt = persisted.createdAt ?? new Date().toISOString();
+          await updateConversationPreview(
+            supabase,
+            stableKey,
+            displayMessageBody,
+            metaResult.status,
+            createdAt,
+          );
+
           if (metaResult.status === 'sent') sent += 1;
           else failed += 1;
         } else {
@@ -133,6 +166,7 @@ Deno.serve(async (req) => {
             agentUid: user.id,
             campaignType: 'BULK_PANEL',
             templateName: 'bulk_rich',
+            contactName: recipient.name ? String(recipient.name).trim() : null,
           });
           if (result.success) sent += 1;
           else failed += 1;
