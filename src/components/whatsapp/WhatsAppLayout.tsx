@@ -579,15 +579,6 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
             selectedId={selectedConversation?.id ?? null}
             onSelect={handleConversationSelect}
             loading={loading}
-            selectedResolved={
-              selectedConversation
-                ? {
-                    conversationId: selectedConversation.id,
-                    displayName: contactCtx.displayName ?? '',
-                    photoUrl: contactCtx.photoUrl,
-                  }
-                : undefined
-            }
             tags={tags}
             onManageTags={() => setTagManagerOpen(true)}
             onNewContact={() => setNewContactOpen(true)}

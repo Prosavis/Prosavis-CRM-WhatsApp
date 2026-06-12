@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/config/supabase';
 import type { WhatsAppConversation } from '@/services/whatsappService';
 import type { DirectoryEntry } from '@/types/lead';
+import { pickContactPhotoUrl } from '@/utils/contactAvatar';
 import { directoryPhoneLookupVariants } from '@/utils/directoryPhone';
 import { normalizeWhatsAppPanelPhone } from '@/utils/whatsappPhone';
 
@@ -162,7 +163,10 @@ export function useWhatsAppContactContext(
     conversation?.whatsappProfileName ??
     user?.displayName ??
     user?.name;
-  const photoUrl = conversation?.contactPhotoUrl ?? user?.photoUrl ?? user?.photoURL;
+  const photoUrl = pickContactPhotoUrl(
+    user?.photoUrl ?? user?.photoURL,
+    conversation?.contactPhotoUrl,
+  );
 
   return {
     directoryEntry,

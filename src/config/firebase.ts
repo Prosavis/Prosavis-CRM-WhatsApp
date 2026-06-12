@@ -1,7 +1,7 @@
 // Configuración de Firebase para CRM-WhatsApp
-// Solo incluye Functions para llamar a Cloud Functions de descuentos
 import { initializeApp } from 'firebase/app';
 import { getFunctions } from 'firebase/functions';
+import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -21,4 +21,5 @@ if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
 
 const app = initializeApp(firebaseConfig);
 export const functions = getFunctions(app, 'us-central1');
+export const storage = getStorage(app);
 export default app;

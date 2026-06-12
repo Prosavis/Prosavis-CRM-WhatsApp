@@ -15,13 +15,13 @@ import {
   Typography,
   useMediaQuery,
   useTheme,
-  alpha,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { ContactAvatar } from '@/components/common/ContactAvatar';
 import type { DirectoryEntry } from '@/types/lead';
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -72,13 +72,6 @@ function fmtList(values: string[] | undefined | null): string {
 function truncate(value: string, max = 18): string {
   if (value.length <= max) return value;
   return `${value.slice(0, max)}…`;
-}
-
-function initials(name: string): string {
-  if (!name?.trim()) return '?';
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
-  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
 }
 
 // ── Labels ───────────────────────────────────────────────────────────────
@@ -239,24 +232,13 @@ const DirectoryEntryDrawer: React.FC<DirectoryEntryDrawerProps> = ({
           py: 2.5,
         }}
       >
-        <Box
-          sx={{
-            width: 72,
-            height: 72,
-            borderRadius: '50%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            bgcolor: alpha(theme.palette.primary.main, 0.12),
-            color: theme.palette.primary.main,
-            fontWeight: 700,
-            fontSize: '1.5rem',
-            mb: 1.5,
-            lineHeight: 1,
-          }}
-        >
-          {initials(entry.fullName)}
-        </Box>
+        <ContactAvatar
+          displayName={entry.fullName}
+          phone={entry.phone}
+          photoUrl={entry.photoUrl}
+          size={72}
+          sx={{ mb: 1.5, fontSize: '1.5rem' }}
+        />
 
         <Typography variant="h5" fontWeight={700} align="center" sx={{ mb: 1 }}>
           {entry.fullName}

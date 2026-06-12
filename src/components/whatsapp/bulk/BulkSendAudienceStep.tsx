@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
-  Avatar,
   Box,
   Button,
   Checkbox,
@@ -31,6 +30,7 @@ import PeopleIcon from '@mui/icons-material/People';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SearchIcon from '@mui/icons-material/Search';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import { ContactAvatar } from '@/components/common/ContactAvatar';
 import { directoryService, type DirectoryBulkFilters } from '@/services/directoryService';
 import type { DirectoryEntry } from '@/types/lead';
 import { downloadDirectoryCsv } from '@/utils/exportDirectoryCsv';
@@ -66,24 +66,6 @@ const STATUS_CHIP_COLORS: Record<string, 'default' | 'success' | 'error' | 'warn
 
 const SEARCH_DEBOUNCE_MS = 350;
 const ROWS_PER_PAGE = 50;
-
-function getInitials(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? '')
-    .join('');
-}
-
-function getAvatarColor(name: string): string {
-  const colors = ['#1976d2', '#388e3c', '#d32f2f', '#f57c00', '#7b1fa2', '#00796b', '#c2185b', '#455a64'];
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return colors[Math.abs(hash) % colors.length];
-}
 
 export interface BulkSendAudienceStepProps {
   selectedIds: Set<string>;
@@ -429,9 +411,12 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
                     </TableCell>
                     <TableCell>
                       <Stack direction="row" spacing={1} alignItems="center">
-                        <Avatar sx={{ width: 28, height: 28, fontSize: '0.75rem', bgcolor: getAvatarColor(name) }}>
-                          {getInitials(name)}
-                        </Avatar>
+                        <ContactAvatar
+                          displayName={name}
+                          phone={entry.phone}
+                          photoUrl={entry.photoUrl}
+                          size={28}
+                        />
                         <Typography variant="body2" fontWeight={500} noWrap>
                           {name}
                         </Typography>

@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Avatar,
   Box,
   Chip,
   Dialog,
@@ -33,6 +32,7 @@ import PeopleIcon from '@mui/icons-material/People';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SearchIcon from '@mui/icons-material/Search';
 import { directoryService } from '@/services/directoryService';
+import { ContactAvatar } from '@/components/common/ContactAvatar';
 import DirectoryEntryDrawer from '@/components/directory/DirectoryEntryDrawer';
 import DirectoryEditDialog from '@/components/directory/DirectoryEditDialog';
 import type { DirectoryEntry } from '@/types/lead';
@@ -90,28 +90,6 @@ interface DirectoryStats {
   optOut: number;
   byClassification: Record<string, number>;
   bySource: Record<string, number>;
-}
-
-// ──────────────────────────────────────────────
-// Helpers
-// ──────────────────────────────────────────────
-
-function getInitials(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? '')
-    .join('');
-}
-
-function getAvatarColor(name: string): string {
-  const colors = ['#1976d2', '#388e3c', '#d32f2f', '#f57c00', '#7b1fa2', '#00796b', '#c2185b', '#455a64'];
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return colors[Math.abs(hash) % colors.length];
 }
 
 // ──────────────────────────────────────────────
@@ -515,18 +493,12 @@ const WhatsAppDirectoryContactsDialog: React.FC<WhatsAppDirectoryContactsDialogP
                   {/* Nombre */}
                   <TableCell>
                     <Stack direction="row" spacing={1.5} alignItems="center">
-                      <Avatar
-                        src={entry.photoUrl}
-                        sx={{
-                          width: 36,
-                          height: 36,
-                          bgcolor: getAvatarColor(entry.fullName),
-                          fontSize: '0.8rem',
-                          fontWeight: 700,
-                        }}
-                      >
-                        {getInitials(entry.fullName)}
-                      </Avatar>
+                      <ContactAvatar
+                        displayName={entry.fullName}
+                        phone={entry.phone}
+                        photoUrl={entry.photoUrl}
+                        size={36}
+                      />
                       <Box>
                         <Typography variant="body2" fontWeight={600}>
                           {entry.fullName}

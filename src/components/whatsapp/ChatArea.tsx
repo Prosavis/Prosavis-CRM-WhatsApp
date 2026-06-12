@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import {
   Box,
   Typography,
-  Avatar,
   IconButton,
   CircularProgress,
   Chip,
@@ -79,6 +78,8 @@ import {
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import EditIcon from '@mui/icons-material/Edit';
 import BookingAssistantDrawer from './BookingAssistantDrawer';
+import { ContactAvatar } from '@/components/common/ContactAvatar';
+import { pickContactPhotoUrl } from '@/utils/contactAvatar';
 import { getLastInboundAt } from '@/utils/whatsappTemplateSuggestions';
 
 interface ChatAreaProps {
@@ -983,9 +984,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           </>
         ) : (
           <>
-            <Avatar src={headerPhotoUrl || conversation.contactPhotoUrl || undefined} sx={{ bgcolor: '#25D366', width: 40, height: 40 }}>
-              {displayName.charAt(0).toUpperCase()}
-            </Avatar>
+            <ContactAvatar
+              displayName={displayName}
+              phone={conversation.contactPhone || conversation.phone}
+              photoUrl={pickContactPhotoUrl(headerPhotoUrl, conversation.contactPhotoUrl)}
+              size={40}
+            />
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography variant="subtitle1" fontWeight={600} noWrap>{displayName}</Typography>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>

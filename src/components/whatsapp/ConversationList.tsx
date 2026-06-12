@@ -7,7 +7,6 @@ import {
   ListItemButton,
   ListItemAvatar,
   ListItemText,
-  Avatar,
   Badge,
   Typography,
   Chip,
@@ -44,6 +43,12 @@ import type {
   WhatsAppAdminPresence,
 } from '@/services/whatsappService';
 import OutboundPreviewTicks from './OutboundPreviewTicks';
+import { ContactAvatar } from '@/components/common/ContactAvatar';
+import {
+  getDirectoryMetaForConversation,
+  useDirectoryContactMeta,
+} from '@/hooks/useDirectoryContactMeta';
+import { pickContactPhotoUrl } from '@/utils/contactAvatar';
 import {
   isWhatsAppConversationLastActiveWithin24h,
   type WhatsAppTabCounts,
@@ -56,11 +61,6 @@ interface ConversationListProps {
   selectedId: string | null;
   onSelect: (conversation: WhatsAppConversation) => void;
   loading?: boolean;
-  selectedResolved?: {
-    conversationId: string;
-    displayName: string;
-    photoUrl?: string;
-  };
   tags?: WhatsAppTag[];
   onManageTags?: () => void;
   onNewContact?: () => void;
@@ -96,14 +96,6 @@ function summarizePeerPresences(peers: WhatsAppAdminPresence[]): {
   return { text: `${formatNames(viewing)} ${verb}`, typing: false };
 }
 
-function getInitials(name?: string, phone?: string): string {
-  if (name) {
-    return name.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
-  }
-  if (phone) return phone.slice(-2);
-  return '?';
-}
-
 function formatRelativeTime(date?: Date): string {
   if (!date) return '';
   const now = new Date();
@@ -115,12 +107,6 @@ function formatRelativeTime(date?: Date): string {
   if (diffDays < 7) return date.toLocaleDateString('es-CO', { weekday: 'short' });
   return date.toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
-
-const STATE_COLORS: Record<string, string> = {
-  active: '#25D366',
-  escalated: '#ff9800',
-  resolved: '#9e9e9e',
-};
 
 interface InboxFilterTabLabelProps {
   label: string;
@@ -213,7 +199,6 @@ const ConversationList: React.FC<ConversationListProps> = ({
   selectedId,
   onSelect,
   loading,
-  selectedResolved,
   tags = [],
   onManageTags,
   onNewContact,
@@ -243,6 +228,8 @@ const ConversationList: React.FC<ConversationListProps> = ({
     conversation: WhatsAppConversation;
   } | null>(null);
   const [assignTagsAnchor, setAssignTagsAnchor] = useState<null | HTMLElement>(null);
+
+  const directoryMetaByPhoneKey = useDirectoryContactMeta(conversations);
 
   const tagMap = useMemo(() => {
     const map = new Map<string, WhatsAppTag>();
@@ -649,11 +636,15 @@ const ConversationList: React.FC<ConversationListProps> = ({
 
       <List sx={{ flex: 1, overflow: 'auto', py: 0 }}>
         {filtered.map((conv) => {
-          const useResolved = selectedResolved?.conversationId === conv.id;
-          const rowName = useResolved
-            ? selectedResolved.displayName
-            : conv.contactName || conv.contactPhone || conv.phone || conv.id;
-          const rowPhoto = useResolved ? selectedResolved.photoUrl : conv.contactPhotoUrl;
+          const dirMeta = getDirectoryMetaForConversation(conv, directoryMetaByPhoneKey);
+          const rowPhone = conv.contactPhone || conv.phone;
+          const rowName =
+            conv.contactName ||
+            conv.whatsappProfileName ||
+            dirMeta?.displayName ||
+            rowPhone ||
+            conv.id;
+          const rowPhoto = pickContactPhotoUrl(dirMeta?.photoUrl, conv.contactPhotoUrl);
           const convTags = (conv.tagIds || []).map((id) => tagMap.get(id)).filter(Boolean) as WhatsAppTag[];
           const isUnread = conv.unreadCount > 0 || conv.crmForceUnread;
           const peers = presenceByConversationId?.[conv.id] || [];
@@ -692,12 +683,12 @@ const ConversationList: React.FC<ConversationListProps> = ({
                   invisible={!isUnread}
                   variant={conv.crmForceUnread && conv.unreadCount === 0 ? 'dot' : 'standard'}
                 >
-                  <Avatar
-                    src={rowPhoto || undefined}
-                    sx={{ bgcolor: STATE_COLORS[conv.state] || '#dfe5e7', width: 48, height: 48, fontSize: 16 }}
-                  >
-                    {getInitials(rowName, conv.contactPhone || conv.phone)}
-                  </Avatar>
+                  <ContactAvatar
+                    displayName={rowName}
+                    phone={rowPhone}
+                    photoUrl={rowPhoto}
+                    size={48}
+                  />
                 </Badge>
               </ListItemAvatar>
               <ListItemText
