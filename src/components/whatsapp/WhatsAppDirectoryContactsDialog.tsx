@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Badge,
   Box,
+  Button,
   Chip,
   Dialog,
   DialogContent,
@@ -31,10 +33,13 @@ import FilterListIcon from '@mui/icons-material/FilterList';
 import PeopleIcon from '@mui/icons-material/People';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SearchIcon from '@mui/icons-material/Search';
+import TroubleshootIcon from '@mui/icons-material/Troubleshoot';
 import { directoryService } from '@/services/directoryService';
+import { directoryMonitorService } from '@/services/directoryMonitorService';
 import { ContactAvatar } from '@/components/common/ContactAvatar';
 import DirectoryEntryDrawer from '@/components/directory/DirectoryEntryDrawer';
 import DirectoryEditDialog from '@/components/directory/DirectoryEditDialog';
+import DirectoryMonitorPanel from '@/components/directory/DirectoryMonitorPanel';
 import type { DirectoryEntry } from '@/types/lead';
 import {
   DIRECTORY_STATUS_LABELS,
@@ -142,6 +147,10 @@ const WhatsAppDirectoryContactsDialog: React.FC<WhatsAppDirectoryContactsDialogP
   const [sortField, setSortField] = useState<SortField>('full_name');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
+  // Monitoreo (orquestador de calidad del directorio)
+  const [showMonitor, setShowMonitor] = useState(false);
+  const [issueOpenTotal, setIssueOpenTotal] = useState(0);
+
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Fetch stats ──────────────────────────
@@ -150,6 +159,15 @@ const WhatsAppDirectoryContactsDialog: React.FC<WhatsAppDirectoryContactsDialogP
     try {
       const result = await directoryService.getStats();
       setStats(result);
+    } catch {
+      // Silencio
+    }
+  }, []);
+
+  const fetchIssueCount = useCallback(async () => {
+    try {
+      const result = await directoryMonitorService.getIssueStats();
+      setIssueOpenTotal(result.openTotal);
     } catch {
       // Silencio
     }
@@ -187,8 +205,9 @@ const WhatsAppDirectoryContactsDialog: React.FC<WhatsAppDirectoryContactsDialogP
   useEffect(() => {
     if (open) {
       fetchStats();
+      fetchIssueCount();
     }
-  }, [open, fetchStats]);
+  }, [open, fetchStats, fetchIssueCount]);
 
   useEffect(() => {
     if (open) {
@@ -287,14 +306,42 @@ const WhatsAppDirectoryContactsDialog: React.FC<WhatsAppDirectoryContactsDialogP
             </Tooltip>
           )}
           <Box sx={{ flex: 1 }} />
+          <Tooltip title="Revisa inconsistencias del directorio (sin nombre, duplicados, teléfonos inválidos) y sugerencias de IA. Solo disponible en este CRM.">
+            <Badge badgeContent={issueOpenTotal} color="error" max={999}>
+              <Button
+                size="small"
+                variant={showMonitor ? 'contained' : 'outlined'}
+                color="warning"
+                startIcon={<TroubleshootIcon fontSize="small" />}
+                onClick={() => setShowMonitor((prev) => !prev)}
+              >
+                {showMonitor ? 'Ver contactos' : 'Monitoreo del contacto'}
+              </Button>
+            </Badge>
+          </Tooltip>
           <Tooltip title="Actualizar">
-            <IconButton size="small" onClick={() => { fetchStats(); fetchEntries(); }}>
+            <IconButton size="small" onClick={() => { fetchStats(); fetchEntries(); fetchIssueCount(); }}>
               <RefreshIcon fontSize="small" />
             </IconButton>
           </Tooltip>
         </Stack>
       </Box>
 
+      {/* ── Monitoreo del directorio (orquestador de calidad) ── */}
+      {showMonitor && (
+        <DialogContent sx={{ p: 2, overflow: 'auto' }}>
+          <DirectoryMonitorPanel
+            onDirectoryChanged={() => {
+              fetchStats();
+              fetchEntries();
+              fetchIssueCount();
+            }}
+          />
+        </DialogContent>
+      )}
+
+      {!showMonitor && (
+      <>
       {/* ── Search bar ─────────────────────── */}
       <Box sx={{ px: 2, py: 1.5 }}>
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
@@ -617,6 +664,8 @@ const WhatsAppDirectoryContactsDialog: React.FC<WhatsAppDirectoryContactsDialogP
             />
           </Stack>
         </Box>
+      )}
+      </>
       )}
 
       {/* ── Drawer & Edit Dialog ───────────── */}
