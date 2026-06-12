@@ -7,10 +7,14 @@ import {
   Chip,
   Collapse,
   Divider,
+  FormControl,
   FormControlLabel,
   IconButton,
   InputAdornment,
+  InputLabel,
   LinearProgress,
+  MenuItem,
+  Select,
   Stack,
   Switch,
   Table,
@@ -29,9 +33,10 @@ import FilterListIcon from '@mui/icons-material/FilterList';
 import PeopleIcon from '@mui/icons-material/People';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SearchIcon from '@mui/icons-material/Search';
+import SortIcon from '@mui/icons-material/Sort';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { ContactAvatar } from '@/components/common/ContactAvatar';
-import { directoryService, type DirectoryBulkFilters } from '@/services/directoryService';
+import { directoryService } from '@/services/directoryService';
 import type { DirectoryEntry } from '@/types/lead';
 import { downloadDirectoryCsv } from '@/utils/exportDirectoryCsv';
 import {
@@ -39,7 +44,16 @@ import {
   DIRECTORY_STATUS_SUMMARY,
   getDirectoryEffectiveStatus,
 } from '@/utils/directoryContactStatus';
-import { BULK_SEND_MAX_RECIPIENTS } from './bulkSendTypes';
+import { formatRelativeTime } from '@/utils/date';
+import {
+  BULK_DIRECTORY_DEFAULT_SORT_DIRECTION,
+  BULK_DIRECTORY_DEFAULT_SORT_FIELD,
+  BULK_DIRECTORY_SORT_LABELS,
+  BULK_SEND_MAX_RECIPIENTS,
+  defaultBulkSortDirection,
+  type BulkDirectorySortDirection,
+  type BulkDirectorySortField,
+} from './bulkSendTypes';
 
 const CLASSIFICATION_LABELS: Record<string, string> = {
   user: 'Usuario',
@@ -98,9 +112,15 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
   const [includeOptOut, setIncludeOptOut] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [manualExpanded, setManualExpanded] = useState(false);
+  const [sortField, setSortField] = useState<BulkDirectorySortField>(
+    BULK_DIRECTORY_DEFAULT_SORT_FIELD,
+  );
+  const [sortDirection, setSortDirection] = useState<BulkDirectorySortDirection>(
+    BULK_DIRECTORY_DEFAULT_SORT_DIRECTION,
+  );
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const bulkFilters = useMemo<DirectoryBulkFilters>(
+  const bulkFilters = useMemo(
     () => ({
       searchTerm: searchTerm || undefined,
       classification: classificationFilter || undefined,
@@ -109,10 +129,19 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
       includeOptOut,
       limit: ROWS_PER_PAGE,
       page,
-      sortField: 'full_name',
-      sortDirection: 'asc',
+      sortField,
+      sortDirection,
     }),
-    [searchTerm, classificationFilter, statusFilter, sourceFilter, includeOptOut, page],
+    [
+      searchTerm,
+      classificationFilter,
+      statusFilter,
+      sourceFilter,
+      includeOptOut,
+      page,
+      sortField,
+      sortDirection,
+    ],
   );
 
   const fetchEntries = useCallback(async () => {
@@ -188,6 +217,8 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
         status: statusFilter || undefined,
         source: sourceFilter || undefined,
         includeOptOut,
+        sortField,
+        sortDirection,
       });
       const nextIds = new Set(selectedIds);
       const nextEntriesMap = new Map(selectedEntries.map((e) => [e.id, e]));
@@ -208,7 +239,24 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
     downloadDirectoryCsv(toExport, 'directorio-envio-masivo.csv');
   };
 
+  const handleSortFieldChange = (field: BulkDirectorySortField) => {
+    setSortField(field);
+    setSortDirection(defaultBulkSortDirection(field));
+    setPage(0);
+  };
+
+  const toggleSortDirection = () => {
+    setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    setPage(0);
+  };
+
+  const sortDirectionLabel = sortDirection === 'asc' ? 'Ascendente' : 'Descendente';
   const hasFilters = Boolean(searchTerm || classificationFilter || statusFilter || sourceFilter);
+  const sortOptions: BulkDirectorySortField[] = [
+    'last_whatsapp_message_at',
+    'full_name',
+    'created_at',
+  ];
   const totalPages = Math.max(1, Math.ceil(totalCount / ROWS_PER_PAGE));
   const overLimit = recipientCount > BULK_SEND_MAX_RECIPIENTS;
 
@@ -270,6 +318,34 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
             >
               <FilterListIcon />
             </IconButton>
+          </Tooltip>
+        </Stack>
+
+        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ mb: 1 }}>
+          <FormControl size="small" sx={{ minWidth: 220 }}>
+            <InputLabel id="bulk-sort-field-label">Ordenar por</InputLabel>
+            <Select
+              labelId="bulk-sort-field-label"
+              label="Ordenar por"
+              value={sortField}
+              onChange={(e) => handleSortFieldChange(e.target.value as BulkDirectorySortField)}
+            >
+              {sortOptions.map((field) => (
+                <MenuItem key={field} value={field}>
+                  {BULK_DIRECTORY_SORT_LABELS[field]}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <Tooltip title={`Invertir orden (${sortDirectionLabel})`}>
+            <Chip
+              icon={<SortIcon />}
+              label={sortDirectionLabel}
+              size="small"
+              variant="outlined"
+              onClick={toggleSortDirection}
+              sx={{ cursor: 'pointer' }}
+            />
           </Tooltip>
         </Stack>
 
@@ -378,12 +454,13 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
                 <TableCell sx={{ fontWeight: 700 }}>Teléfono</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Tipo</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Estado</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Último mensaje</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {entries.length === 0 && !loading && (
                 <TableRow>
-                  <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
                     <Typography color="text.secondary">
                       No hay contactos con teléfono para los filtros actuales.
                     </Typography>
@@ -441,6 +518,28 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
                         color={STATUS_CHIP_COLORS[effectiveStatus]}
                         variant="outlined"
                       />
+                    </TableCell>
+                    <TableCell>
+                      {entry.lastWhatsAppMessageAt ? (
+                        <Tooltip
+                          title={
+                            entry.lastWhatsAppMessageText
+                              ? entry.lastWhatsAppMessageText.length > 120
+                                ? `${entry.lastWhatsAppMessageText.slice(0, 120)}…`
+                                : entry.lastWhatsAppMessageText
+                              : 'Sin vista previa del mensaje'
+                          }
+                          arrow
+                        >
+                          <Typography variant="body2" color="text.secondary" noWrap>
+                            {formatRelativeTime(new Date(entry.lastWhatsAppMessageAt))}
+                          </Typography>
+                        </Tooltip>
+                      ) : (
+                        <Typography variant="body2" color="text.disabled">
+                          Sin conversación
+                        </Typography>
+                      )}
                     </TableCell>
                   </TableRow>
                 );

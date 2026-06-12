@@ -9,6 +9,31 @@ import {
 export const BULK_SEND_MAX_RECIPIENTS = 500;
 export const BULK_CONFIRM_PHRASE = 'CONFIRMAR_ENVIO_MASIVO';
 
+export type BulkDirectorySortField =
+  | 'last_whatsapp_message_at'
+  | 'full_name'
+  | 'created_at';
+
+export type BulkDirectorySortDirection = 'asc' | 'desc';
+
+export const BULK_DIRECTORY_DEFAULT_SORT_FIELD: BulkDirectorySortField =
+  'last_whatsapp_message_at';
+export const BULK_DIRECTORY_DEFAULT_SORT_DIRECTION: BulkDirectorySortDirection = 'asc';
+
+export const BULK_DIRECTORY_SORT_LABELS: Record<BulkDirectorySortField, string> = {
+  last_whatsapp_message_at: 'Último mensaje (inbox)',
+  full_name: 'Nombre',
+  created_at: 'Fecha de registro',
+};
+
+/** Dirección por defecto al elegir un campo de ordenamiento. */
+export function defaultBulkSortDirection(
+  field: BulkDirectorySortField,
+): BulkDirectorySortDirection {
+  if (field === 'created_at') return 'desc';
+  return 'asc';
+}
+
 export interface BulkRecipient {
   phone: string;
   name?: string;

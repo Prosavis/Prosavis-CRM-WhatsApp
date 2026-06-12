@@ -1,4 +1,10 @@
 import { supabase } from '@/config/supabase';
+import {
+  BULK_DIRECTORY_DEFAULT_SORT_DIRECTION,
+  BULK_DIRECTORY_DEFAULT_SORT_FIELD,
+  type BulkDirectorySortDirection,
+  type BulkDirectorySortField,
+} from '@/components/whatsapp/bulk/bulkSendTypes';
 import type { DirectoryEntry, DirectoryClassification } from '@/types/lead';
 import type { Database } from '@/types/database';
 import {
@@ -117,9 +123,14 @@ export type DirectoryBulkFilters = {
   includeOptOut?: boolean;
   limit?: number;
   page?: number;
-  sortField?: string;
-  sortDirection?: 'asc' | 'desc';
+  sortField?: BulkDirectorySortField;
+  sortDirection?: BulkDirectorySortDirection;
 };
+
+const BULK_TIMESTAMP_SORT_FIELDS = new Set<BulkDirectorySortField>([
+  'last_whatsapp_message_at',
+  'created_at',
+]);
 
 function isValidBulkPhone(phone: string | undefined): boolean {
   if (!phone) return false;
@@ -321,8 +332,8 @@ export const directoryService = {
     const page = filters?.page ?? 0;
     const from = page * limit;
     const to = from + limit - 1;
-    const sortField = filters?.sortField ?? 'full_name';
-    const ascending = filters?.sortDirection !== 'desc';
+    const sortField = filters?.sortField ?? BULK_DIRECTORY_DEFAULT_SORT_FIELD;
+    const ascending = (filters?.sortDirection ?? BULK_DIRECTORY_DEFAULT_SORT_DIRECTION) === 'asc';
 
     const includeOptOut = filters?.includeOptOut === true;
 
@@ -354,7 +365,13 @@ export const directoryService = {
       );
     }
 
-    query = query.order(sortField, { ascending }).range(from, to);
+    if (BULK_TIMESTAMP_SORT_FIELDS.has(sortField)) {
+      query = query.order(sortField, { ascending, nullsFirst: false });
+    } else {
+      query = query.order(sortField, { ascending });
+    }
+
+    query = query.range(from, to);
 
     const { data, error, count } = await query;
     if (error) throw error;
@@ -388,8 +405,8 @@ export const directoryService = {
         ...filters,
         limit: pageSize,
         page,
-        sortField: filters?.sortField ?? 'full_name',
-        sortDirection: filters?.sortDirection ?? 'asc',
+        sortField: filters?.sortField ?? BULK_DIRECTORY_DEFAULT_SORT_FIELD,
+        sortDirection: filters?.sortDirection ?? BULK_DIRECTORY_DEFAULT_SORT_DIRECTION,
       });
 
       for (const entry of result.entries) {
