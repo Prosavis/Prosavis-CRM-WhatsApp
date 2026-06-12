@@ -89,6 +89,7 @@ function mapMessageRow(row: MessageRow): WhatsAppMessage {
     storageUrl: row.storage_url ?? undefined,
     caption: row.caption ?? undefined,
     status: row.status,
+    errorMessage: row.error_message ?? undefined,
     waMessageId: row.wa_message_id ?? undefined,
     intent: row.intent ?? undefined,
     templateName: row.template_name ?? undefined,
@@ -182,6 +183,7 @@ export interface WhatsAppMessage {
   storageUrl?: string;
   caption?: string;
   status: string;
+  errorMessage?: string;
   waMessageId?: string;
   intent?: string;
   templateName?: string;

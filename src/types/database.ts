@@ -259,22 +259,6 @@ export interface Database {
         };
         Update: Partial<Database['public']['Tables']['crm_discount_codes']['Row']>;
       };
-      crm_contact_profiles: {
-        Row: {
-          id: string;
-          phone: string | null;
-          user_id: string | null;
-          display_name: string | null;
-          photo_url: string | null;
-          email: string | null;
-          notes: string | null;
-          metadata: Json;
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: Partial<Database['public']['Tables']['crm_contact_profiles']['Row']>;
-        Update: Partial<Database['public']['Tables']['crm_contact_profiles']['Row']>;
-      };
       whatsapp_chat_tags: {
         Row: {
           id: string;

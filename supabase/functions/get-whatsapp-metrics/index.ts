@@ -5,7 +5,33 @@ interface MessageLogRow {
   direction: 'inbound' | 'outbound';
   status: string;
   campaign_type: string | null;
+  template_name: string | null;
+  conversation_stable_key: string | null;
   created_at: string;
+}
+
+interface OutboundBucket {
+  sent: number;
+  delivered: number;
+  read: number;
+  failed: number;
+  outboundOk: number;
+  total: number;
+}
+
+function emptyBucket(): OutboundBucket {
+  return { sent: 0, delivered: 0, read: 0, failed: 0, outboundOk: 0, total: 0 };
+}
+
+function accumulate(bucket: OutboundBucket, status: string): void {
+  bucket.total += 1;
+  if (status === 'failed') bucket.failed += 1;
+  if (status === 'read') bucket.read += 1;
+  if (status === 'delivered') bucket.delivered += 1;
+  if (['sent', 'delivered', 'read'].includes(status)) {
+    bucket.sent += 1;
+    bucket.outboundOk += 1;
+  }
 }
 
 Deno.serve(async (req) => {
@@ -20,7 +46,7 @@ Deno.serve(async (req) => {
 
     let query = supabase
       .from('whatsapp_message_log')
-      .select('direction,status,campaign_type,created_at')
+      .select('direction,status,campaign_type,template_name,conversation_stable_key,created_at')
       .eq('hidden_from_panel', false)
       .gte('created_at', from.toISOString())
       .limit(100000);
@@ -35,30 +61,30 @@ Deno.serve(async (req) => {
     const rows = (data ?? []) as MessageLogRow[];
     const outbound = rows.filter((row) => row.direction === 'outbound');
     const inbound = rows.filter((row) => row.direction === 'inbound');
-    const byCampaign: Record<string, {
-      sent: number;
-      delivered: number;
-      read: number;
-      failed: number;
-      outboundOk: number;
-    }> = {};
+
+    // Agrupado por campaña (campaign_type del log de salida).
+    const byCampaign: Record<string, OutboundBucket> = {};
+    // Agrupado por plantilla de Meta accionada.
+    const byTemplate: Record<string, OutboundBucket> = {};
+    // Clasificación por tipo de mensaje: sesión (ventana 24h) vs plantilla/campaña.
+    const byKind: { session: OutboundBucket; template: OutboundBucket } = {
+      session: emptyBucket(),
+      template: emptyBucket(),
+    };
 
     for (const row of outbound) {
-      const key = row.campaign_type || 'OTHER';
-      byCampaign[key] ??= {
-        sent: 0,
-        delivered: 0,
-        read: 0,
-        failed: 0,
-        outboundOk: 0,
-      };
+      const campaignKey = row.campaign_type || 'OTHER';
+      byCampaign[campaignKey] ??= emptyBucket();
+      accumulate(byCampaign[campaignKey], row.status);
 
-      if (row.status === 'failed') byCampaign[key].failed += 1;
-      if (row.status === 'read') byCampaign[key].read += 1;
-      if (row.status === 'delivered') byCampaign[key].delivered += 1;
-      if (['sent', 'delivered', 'read'].includes(row.status)) {
-        byCampaign[key].sent += 1;
-        byCampaign[key].outboundOk += 1;
+      const isTemplate = !!row.template_name;
+      if (isTemplate) {
+        const tplKey = row.template_name as string;
+        byTemplate[tplKey] ??= emptyBucket();
+        accumulate(byTemplate[tplKey], row.status);
+        accumulate(byKind.template, row.status);
+      } else {
+        accumulate(byKind.session, row.status);
       }
     }
 
@@ -73,7 +99,32 @@ Deno.serve(async (req) => {
     const totalFailed = outbound.filter((row) => row.status === 'failed').length;
     const totalResponses = inbound.length;
 
-    const { data: directoryRows } = await supabase.from('crm_directory').select('classification,opt_out,active_sequence').limit(10000);
+    // Tasa de respuesta real: contactos únicos que respondieron / contactos únicos
+    // a los que se envió (por conversación), expresada en porcentaje 0-100.
+    const outboundContacts = new Set(
+      outbound
+        .filter((row) => ['sent', 'delivered', 'read'].includes(row.status))
+        .map((row) => row.conversation_stable_key)
+        .filter((key): key is string => !!key),
+    );
+    const respondedContacts = new Set(
+      inbound
+        .map((row) => row.conversation_stable_key)
+        .filter((key): key is string => !!key),
+    );
+    let respondedAndContacted = 0;
+    for (const key of respondedContacts) {
+      if (outboundContacts.has(key)) respondedAndContacted += 1;
+    }
+    const responseRate =
+      outboundContacts.size > 0
+        ? Math.round((respondedAndContacted / outboundContacts.size) * 1000) / 10
+        : 0;
+
+    const { data: directoryRows } = await supabase
+      .from('crm_directory')
+      .select('classification,opt_out,active_sequence,pending_appointments_count')
+      .limit(10000);
     const entries = directoryRows ?? [];
     const optOutCount = entries.filter((e) => e.opt_out === true).length;
 
@@ -85,15 +136,19 @@ Deno.serve(async (req) => {
       reachedDevice,
       totalFailed,
       totalResponses,
-      responseRate: totalSent > 0 ? totalResponses / totalSent : 0,
+      responseRate,
+      uniqueContactsMessaged: outboundContacts.size,
+      uniqueContactsResponded: respondedAndContacted,
       optOutCount,
       byCampaign,
+      byTemplate,
+      byKind,
       leads: {
         total: entries.length,
         enSeguimiento: entries.filter((e) => e.active_sequence === 'SEGUIMIENTO').length,
         enRebooking: entries.filter((e) => e.active_sequence === 'REBOOKING').length,
         optOut: optOutCount,
-        agendados: entries.filter((e) => e.status === 'AGENDADO').length,
+        agendados: entries.filter((e) => (e.pending_appointments_count ?? 0) > 0).length,
       },
     });
   } catch (error) {

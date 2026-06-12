@@ -1,4 +1,6 @@
 import { supabase } from '@/config/supabase';
+import { directoryService } from '@/services/directoryService';
+import type { DirectoryEntry } from '@/types/lead';
 
 export async function updateUserProfileViaFunction(
   payload: Record<string, string>,
@@ -9,27 +11,46 @@ export async function updateUserProfileViaFunction(
     throw new Error('Teléfono inválido para actualizar perfil.');
   }
 
-  const metadata: Record<string, string> = {};
-  if (payload.department?.trim()) metadata.department = payload.department.trim();
-  if (payload.city?.trim()) metadata.city = payload.city.trim();
-  if (payload.bio?.trim()) metadata.bio = payload.bio.trim();
+  const name = payload.name?.trim() || payload.displayName?.trim() || undefined;
+  const photoUrl = payload.photoUrl?.trim() || payload.photoURL?.trim() || undefined;
+  const email = payload.email?.trim() || undefined;
+  const notes = payload.bio?.trim() || undefined;
+  const address = payload.address?.trim() || undefined;
 
-  const { error } = await supabase.from('crm_contact_profiles').upsert({
-    phone: phoneDigits,
-    user_id: userId,
-    display_name: payload.name?.trim() || payload.displayName?.trim() || null,
-    photo_url: payload.photoUrl?.trim() || payload.photoURL?.trim() || null,
-    email: payload.email?.trim() || null,
-    notes: payload.bio?.trim() || payload.address?.trim() || null,
-    metadata,
-  });
+  const metadataPatch: Record<string, unknown> = {};
+  if (payload.department?.trim()) metadataPatch.department = payload.department.trim();
+  if (payload.city?.trim()) metadataPatch.city = payload.city.trim();
 
-  if (error) throw error;
+  // Centralizado en crm_directory (fuente única de contactos).
+  const existing = (await directoryService.findByPhone(phoneDigits))[0] ?? null;
+  const mergedMetadata = {
+    ...(existing?.metadata ?? {}),
+    ...metadataPatch,
+  };
+
+  const patch: Partial<DirectoryEntry> = {
+    phone: payload.phoneNumber?.trim() || phoneDigits,
+    appUserId: userId,
+    ...(name !== undefined ? { displayName: name } : {}),
+    ...(photoUrl !== undefined ? { photoUrl } : {}),
+    ...(email !== undefined ? { email } : {}),
+    ...(notes !== undefined ? { notes } : {}),
+    ...(address !== undefined ? { address } : {}),
+    ...(Object.keys(mergedMetadata).length > 0 ? { metadata: mergedMetadata } : {}),
+  };
+
+  if (existing) {
+    await directoryService.updateEntry(existing.id, patch);
+  } else {
+    await directoryService.createEntry({
+      fullName: name ?? '',
+      ...patch,
+    });
+  }
 
   const convPatch: Record<string, string | null> = {};
-  const name = payload.name?.trim() || payload.displayName?.trim();
   if (name) convPatch.contact_name = name;
-  if (payload.photoUrl?.trim()) convPatch.contact_photo_url = payload.photoUrl.trim();
+  if (photoUrl) convPatch.contact_photo_url = photoUrl;
 
   if (Object.keys(convPatch).length > 0) {
     const { error: convError } = await supabase

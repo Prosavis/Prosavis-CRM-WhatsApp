@@ -374,45 +374,6 @@ export type Database = {
         }
         Relationships: []
       }
-      crm_contact_profiles: {
-        Row: {
-          address: string | null
-          created_at: string
-          email: string | null
-          full_name: string | null
-          id: string
-          notes: string | null
-          phone: string | null
-          photo_url: string | null
-          tags: string[] | null
-          updated_at: string
-        }
-        Insert: {
-          address?: string | null
-          created_at?: string
-          email?: string | null
-          full_name?: string | null
-          id?: string
-          notes?: string | null
-          phone?: string | null
-          photo_url?: string | null
-          tags?: string[] | null
-          updated_at?: string
-        }
-        Update: {
-          address?: string | null
-          created_at?: string
-          email?: string | null
-          full_name?: string | null
-          id?: string
-          notes?: string | null
-          phone?: string | null
-          photo_url?: string | null
-          tags?: string[] | null
-          updated_at?: string
-        }
-        Relationships: []
-      }
       crm_discount_codes: {
         Row: {
           code: string

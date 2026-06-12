@@ -79,6 +79,15 @@ const DiscountCodesTab = lazy(() => import('@/components/whatsapp/DiscountCodesT
 const WhatsAppSettingsTab = lazy(() => import('@/components/whatsapp/WhatsAppSettingsTab'));
 const MonitorTab = lazy(() => import('@/components/whatsapp/MonitorTab'));
 
+interface OutboundBucket {
+  sent: number;
+  delivered: number;
+  read: number;
+  failed: number;
+  outboundOk: number;
+  total?: number;
+}
+
 interface MetricsData {
   period: { from: string; to: string };
   totalSent: number;
@@ -89,13 +98,14 @@ interface MetricsData {
   totalResponses: number;
   responseRate: number;
   optOutCount: number;
-  byCampaign: Record<string, {
-    sent: number;
-    delivered: number;
-    read: number;
-    failed: number;
-    outboundOk: number;
-  }>;
+  uniqueContactsMessaged?: number;
+  uniqueContactsResponded?: number;
+  byCampaign: Record<string, OutboundBucket>;
+  byTemplate?: Record<string, OutboundBucket>;
+  byKind?: {
+    session: OutboundBucket;
+    template: OutboundBucket;
+  };
   leads: {
     total: number;
     enSeguimiento: number;
@@ -282,6 +292,7 @@ const WhatsAppCloudPage: React.FC = () => {
         intent: row.intent,
         createdAt: row.createdAt,
         waMessageId: row.waMessageId,
+        errorMessage: row.errorMessage,
         campaignType: row.campaignType,
       }));
       setLogs(mapped);
@@ -520,7 +531,7 @@ const WhatsAppCloudPage: React.FC = () => {
             <DialogTitle>Limpiar registro de mensajes</DialogTitle>
             <DialogContent>
               <DialogContentText component="div" sx={{ mb: 2 }}>
-                Se eliminarán filas de la colección <strong>whatsapp_message_log</strong> en Firestore. Las métricas y la
+                Se eliminarán filas de la tabla <strong>whatsapp_message_log</strong> en Supabase. Las métricas y la
                 tabla de esta pestaña se basan en esos datos; al borrarlos, los contadores quedarán en cero (salvo el
                 directorio, que no se toca).
               </DialogContentText>
@@ -726,6 +737,88 @@ const WhatsAppCloudPage: React.FC = () => {
             </Card>
           )}
 
+          {/* Por tipo de mensaje: sesión (ventana 24h) vs plantilla/campaña */}
+          {metrics?.byKind && (
+            <Card elevation={0} sx={{ mb: 3, border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
+              <CardContent>
+                <Typography variant="subtitle1" fontWeight={600} gutterBottom>
+                  Por tipo de mensaje
+                </Typography>
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Tipo</TableCell>
+                        <TableCell align="right">Enviados (sin fallos)</TableCell>
+                        <TableCell align="right">Entregados</TableCell>
+                        <TableCell align="right">Leídos</TableCell>
+                        <TableCell align="right">Fallidos</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {([
+                        ['Sesión 24h', metrics.byKind.session],
+                        ['Plantilla / campaña', metrics.byKind.template],
+                      ] as const).map(([label, data]) => (
+                        <TableRow key={label} hover>
+                          <TableCell>
+                            <Chip
+                              size="small"
+                              label={label}
+                              color={label.startsWith('Sesión') ? 'info' : 'secondary'}
+                              variant="outlined"
+                            />
+                          </TableCell>
+                          <TableCell align="right">{data.outboundOk}</TableCell>
+                          <TableCell align="right">{data.delivered}</TableCell>
+                          <TableCell align="right">{data.read}</TableCell>
+                          <TableCell align="right">{data.failed}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Por plantilla de Meta accionada */}
+          {metrics?.byTemplate && Object.keys(metrics.byTemplate).length > 0 && (
+            <Card elevation={0} sx={{ mb: 3, border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
+              <CardContent>
+                <Typography variant="subtitle1" fontWeight={600} gutterBottom>
+                  Por plantilla (Meta)
+                </Typography>
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Plantilla</TableCell>
+                        <TableCell align="right">Enviados (sin fallos)</TableCell>
+                        <TableCell align="right">Entregados</TableCell>
+                        <TableCell align="right">Leídos</TableCell>
+                        <TableCell align="right">Fallidos</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {Object.entries(metrics.byTemplate).map(([name, data]) => (
+                        <TableRow key={name} hover>
+                          <TableCell>
+                            <Chip size="small" label={name} variant="outlined" color="secondary" />
+                          </TableCell>
+                          <TableCell align="right">{data.outboundOk}</TableCell>
+                          <TableCell align="right">{data.delivered}</TableCell>
+                          <TableCell align="right">{data.read}</TableCell>
+                          <TableCell align="right">{data.failed}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Logs de mensajes */}
           <Card data-tour="whatsapp-metrics-logs" elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
             <CardContent>
@@ -794,7 +887,8 @@ const WhatsAppCloudPage: React.FC = () => {
                         >
                           <TableCell sx={{ fontWeight: 600 }}>Fecha</TableCell>
                           <TableCell sx={{ fontWeight: 600 }}>Destinatario</TableCell>
-                          <TableCell sx={{ fontWeight: 600 }}>Template / Tipo</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>Plantilla</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>Tipo</TableCell>
                           <TableCell sx={{ fontWeight: 600 }}>Estado</TableCell>
                           <TableCell sx={{ fontWeight: 600 }}>Dirección</TableCell>
                           <TableCell sx={{ fontWeight: 600 }}>Campaña</TableCell>
@@ -811,6 +905,15 @@ const WhatsAppCloudPage: React.FC = () => {
                               {log.recipientPhone || log.recipientBsuid || '—'}
                             </TableCell>
                             <TableCell>{log.templateName || '—'}</TableCell>
+                            <TableCell>
+                              {log.direction === 'inbound' ? (
+                                '—'
+                              ) : log.templateName ? (
+                                <Chip label="Plantilla" size="small" variant="outlined" color="secondary" />
+                              ) : (
+                                <Chip label="Sesión 24h" size="small" variant="outlined" color="info" />
+                              )}
+                            </TableCell>
                             <TableCell>
                               <Chip
                                 label={log.status}
@@ -833,7 +936,7 @@ const WhatsAppCloudPage: React.FC = () => {
                         ))}
                         {paginatedLogs.length === 0 && (
                           <TableRow>
-                            <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
+                            <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
                               <Typography color="text.secondary">
                                 No se encontraron mensajes
                               </Typography>

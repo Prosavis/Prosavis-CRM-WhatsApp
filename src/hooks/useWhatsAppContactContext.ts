@@ -117,30 +117,29 @@ export function useWhatsAppContactContext(
         const dirRow = dirRows?.[0] ?? null;
         setDirectoryEntry(dirRow ? mapDirectoryRow(dirRow) : null);
 
-        const { data: profileRows } = await supabase
-          .from('crm_contact_profiles')
-          .select('*')
-          .in('phone', lookupPhones)
-          .order('updated_at', { ascending: false })
-          .limit(1);
-        const profile = profileRows?.[0] ?? null;
-
-        if (profile) {
-          const meta = (profile.metadata ?? {}) as Record<string, unknown>;
-          const dName = profile.display_name ?? undefined;
+        if (dirRow) {
+          const meta = (dirRow.metadata ?? {}) as Record<string, unknown>;
+          const dName =
+            (dirRow.display_name as string | null) ??
+            (dirRow.full_name as string | null) ??
+            undefined;
+          const dirPhone = (dirRow.phone as string | null) ?? phone;
+          const dirNotes = (dirRow.notes as string | null) ?? undefined;
+          const dirAddress = (dirRow.address as string | null) ?? undefined;
           setUser({
-            id: String(profile.user_id ?? profile.phone ?? phone),
+            id: String(dirRow.app_user_id ?? dirRow.phone ?? phone),
             name: dName,
             displayName: dName,
-            email: profile.email ?? undefined,
-            photoURL: profile.photo_url ?? undefined,
-            photoUrl: profile.photo_url ?? undefined,
-            phoneNumber: profile.phone ?? phone,
-            bio: profile.notes ?? undefined,
+            email: (dirRow.email as string | null) ?? undefined,
+            photoURL: (dirRow.photo_url as string | null) ?? undefined,
+            photoUrl: (dirRow.photo_url as string | null) ?? undefined,
+            phoneNumber: dirPhone,
+            bio: dirNotes ?? (meta.bio != null ? String(meta.bio) : undefined),
             department: meta.department != null ? String(meta.department) : undefined,
             city: meta.city != null ? String(meta.city) : undefined,
-            address: profile.notes ?? (meta.address != null ? String(meta.address) : undefined),
-            isProvider: Boolean(meta.isProvider),
+            address: dirAddress ?? (meta.address != null ? String(meta.address) : undefined),
+            isProvider:
+              Boolean(dirRow.provider_id) || Boolean(meta.isProvider),
           });
         } else {
           setUser(null);
