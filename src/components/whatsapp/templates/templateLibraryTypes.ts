@@ -9,7 +9,7 @@ import type { WhatsAppTemplateSuggestionContext } from '@/utils/whatsappTemplate
 
 export type TemplateLibraryMode = 'inbox' | 'bulk' | 'booking';
 
-export type TemplateLibraryTab = 'favorites' | 'meta' | 'prosavis' | 'crm';
+export type TemplateLibraryTab = 'favorites' | 'templates';
 
 export type MetaCategoryFilter = 'ALL' | 'UTILITY' | 'MARKETING' | 'AUTHENTICATION';
 

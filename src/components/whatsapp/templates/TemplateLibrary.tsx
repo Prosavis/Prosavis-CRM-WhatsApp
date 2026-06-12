@@ -11,9 +11,6 @@ import {
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import {
-  WHATSAPP_TEMPLATE_SECTIONS,
-} from '@/constants/whatsappTemplateSections';
-import {
   createWhatsAppTemplatePreset,
   sendWhatsAppTemplateMessageAdmin,
   updateWhatsAppSnippet,
@@ -200,93 +197,57 @@ const TemplateLibrary: React.FC<TemplateLibraryProps> = (props) => {
   );
 
   const panelWidth = compact ? '100%' : { xs: '100%', md: 400 };
-  const sectionChips = useMemo(() => {
-    if (library.activeTab === 'meta') {
-      return library.metaCategorySections.map((section) => ({
-        key: section.key,
-        label: section.label,
-        count:
-          section.key === 'ALL'
-            ? library.filteredTemplates.length
-            : library.filteredTemplates.filter(
-                (template) => (template.category || '').toUpperCase() === section.key,
-              ).length,
-      }));
-    }
-    if (library.activeTab === 'prosavis') {
-      return [
-        { key: 'ALL', label: 'Todas', count: library.filteredTemplates.length },
-        ...WHATSAPP_TEMPLATE_SECTIONS.map((section) => ({
+  const sectionChips = useMemo(
+    () =>
+      library.metaCategorySections
+        .map((section) => ({
           key: section.key,
           label: section.label,
-          count: library.proSavisGroups.find((group) => group.key === section.key)?.templates.length ?? 0,
-        })).filter((section) => section.count > 0),
-      ];
-    }
-    return [];
-  }, [library]);
-
-  const activeSectionKey =
-    library.activeTab === 'meta'
-      ? library.metaCategory
-      : library.prosavisSection;
+          count: library.categoryCounts[section.key] ?? 0,
+        }))
+        .filter((section) => section.key === 'ALL' || section.count > 0),
+    [library.categoryCounts, library.metaCategorySections],
+  );
 
   const renderTemplateGroups = () => {
-    if (library.activeTab === 'meta') {
-      const groups =
-        library.metaCategory === 'ALL'
-          ? library.metaGroups
-          : library.metaGroups.filter((group) => group.key === library.metaCategory);
-      return groups.map((group) => (
-        <Box key={group.key} sx={{ mb: 2 }}>
-          <Typography variant="caption" fontWeight={700} display="block" sx={{ mb: 0.75 }}>
-            {group.label}
-          </Typography>
-          {group.templates.map((template) => (
-            <MetaTemplateCard
-              key={templateKey(template)}
-              template={template}
-              selected={
-                props.mode === 'bulk' &&
-                props.selectedTemplate?.name === template.name &&
-                props.selectedTemplate?.language === template.language
-              }
-              onClick={() => openTemplateEditor(template)}
-            />
-          ))}
-        </Box>
-      ));
-    }
-
-    if (library.activeTab === 'prosavis') {
-      const groups =
-        library.prosavisSection === 'ALL'
-          ? library.proSavisGroups
-          : library.proSavisGroups.filter((group) => group.key === library.prosavisSection);
-      return groups.map((group) => (
-        <Box key={group.key} sx={{ mb: 2 }}>
-          <Typography variant="caption" fontWeight={700} display="block">
-            {group.label}
-          </Typography>
-          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.75 }}>
-            {group.description}
-          </Typography>
-          {group.templates.map((template) => (
-            <MetaTemplateCard
-              key={templateKey(template)}
-              template={template}
-              onClick={() => openTemplateEditor(template)}
-            />
-          ))}
-        </Box>
-      ));
-    }
-
-    return null;
+    const groups =
+      library.metaCategory === 'ALL'
+        ? library.metaGroups
+        : library.metaGroups.filter((group) => group.key === library.metaCategory);
+    return groups.map((group) => (
+      <Box key={group.key} sx={{ mb: 2 }}>
+        <Typography
+          variant="overline"
+          color="text.secondary"
+          display="block"
+          sx={{ letterSpacing: 0.6, lineHeight: 2 }}
+        >
+          {group.label}
+        </Typography>
+        {group.templates.map((template) => (
+          <MetaTemplateCard
+            key={templateKey(template)}
+            template={template}
+            selected={
+              props.mode === 'bulk' &&
+              props.selectedTemplate?.name === template.name &&
+              props.selectedTemplate?.language === template.language
+            }
+            onClick={() => openTemplateEditor(template)}
+          />
+        ))}
+      </Box>
+    ));
   };
 
   const favoritesContent = (
     <Box>
+      {library.presetsError && (
+        <Alert severity="warning" variant="outlined" sx={{ mb: 1.5 }}>
+          No se pudieron cargar los pre-rellenos del equipo.
+        </Alert>
+      )}
+
       {library.filteredPresets.length > 0 && (
         <Box sx={{ mb: 2 }}>
           <Typography variant="caption" fontWeight={700} display="block" sx={{ mb: 0.75 }}>
@@ -409,20 +370,28 @@ const TemplateLibrary: React.FC<TemplateLibraryProps> = (props) => {
             <Tabs
               value={library.activeTab}
               onChange={(_, value: TemplateLibraryTab) => library.setActiveTab(value)}
-              variant="scrollable"
-              scrollButtons="auto"
-              sx={{ minHeight: 36, mb: 1, '& .MuiTab-root': { minHeight: 36, py: 0.5, textTransform: 'none' } }}
+              variant="fullWidth"
+              sx={{
+                minHeight: 38,
+                mb: 1,
+                '& .MuiTab-root': {
+                  minHeight: 38,
+                  py: 0.5,
+                  textTransform: 'none',
+                  fontWeight: 600,
+                },
+              }}
             >
               <Tab value="favorites" label="Favoritos" />
-              <Tab value="prosavis" label="ProSavis" />
-              <Tab value="meta" label="Meta" />
-              <Tab value="crm" label="CRM" />
+              <Tab value="templates" label="Plantillas" />
             </Tabs>
 
             <TextField
               fullWidth
               size="small"
-              placeholder="Buscar plantilla o atajo..."
+              placeholder={
+                library.activeTab === 'favorites' ? 'Buscar favorito...' : 'Buscar plantilla...'
+              }
               value={library.search}
               onChange={(event) => library.setSearch(event.target.value)}
               InputProps={{
@@ -437,9 +406,9 @@ const TemplateLibrary: React.FC<TemplateLibraryProps> = (props) => {
           </Box>
 
           <Box sx={{ flex: 1, overflow: 'auto', px: 1.5, pb: 1.5 }}>
-            {library.error && (
+            {library.metaError && (
               <Alert severity="error" sx={{ mb: 1 }}>
-                {library.error}
+                {library.metaError}
               </Alert>
             )}
 
@@ -447,38 +416,24 @@ const TemplateLibrary: React.FC<TemplateLibraryProps> = (props) => {
               <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
                 <CircularProgress size={28} />
               </Box>
+            ) : library.activeTab === 'favorites' ? (
+              favoritesContent
             ) : (
               <>
-                {(library.activeTab === 'meta' || library.activeTab === 'prosavis') && (
-                  <TemplateSectionChips
-                    sections={sectionChips}
-                    activeKey={activeSectionKey}
-                    onChange={(key) => {
-                      if (library.activeTab === 'meta') {
-                        library.setMetaCategory(key as typeof library.metaCategory);
-                      } else {
-                        library.setProsavisSection(key);
-                      }
-                    }}
-                  />
+                <TemplateSectionChips
+                  sections={sectionChips}
+                  activeKey={library.metaCategory}
+                  onChange={(key) =>
+                    library.setMetaCategory(key as typeof library.metaCategory)
+                  }
+                />
+                {library.filteredTemplates.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    No hay plantillas que coincidan con la búsqueda.
+                  </Typography>
+                ) : (
+                  renderTemplateGroups()
                 )}
-
-                {library.activeTab === 'favorites' && favoritesContent}
-                {library.activeTab === 'crm' && (
-                  <SnippetLibraryList
-                    snippets={library.filteredSnippets}
-                    onInsert={handleInsertSnippet}
-                    onTogglePin={onSnippetsChanged ? handleToggleSnippetPin : undefined}
-                  />
-                )}
-                {(library.activeTab === 'meta' || library.activeTab === 'prosavis') &&
-                  (library.filteredTemplates.length === 0 ? (
-                    <Typography variant="body2" color="text.secondary">
-                      No hay plantillas que coincidan con la búsqueda.
-                    </Typography>
-                  ) : (
-                    renderTemplateGroups()
-                  ))}
               </>
             )}
           </Box>

@@ -5,7 +5,6 @@ import {
   type WhatsAppTemplatePreset,
   type WhatsAppTemplateSummary,
 } from '@/services/whatsappService';
-import { resolveWhatsAppTemplatePanelSection } from '@/constants/whatsappTemplateSections';
 import { previewTextForList } from '@/utils/whatsappTemplateHelpers';
 import { getTemplateDisplayName } from './templateDisplayNames';
 import { useMetaTemplates } from './useMetaTemplates';
@@ -19,7 +18,6 @@ export function useTemplateLibrary(wabaId: string | undefined, snippets: WhatsAp
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<TemplateLibraryTab>('favorites');
   const [metaCategory, setMetaCategory] = useState<MetaCategoryFilter>('ALL');
-  const [prosavisSection, setProsavisSection] = useState<string | 'ALL'>('ALL');
 
   const loadPresets = useCallback(async () => {
     setPresetsLoading(true);
@@ -66,22 +64,17 @@ export function useTemplateLibrary(wabaId: string | undefined, snippets: WhatsAp
     [search],
   );
 
+  const searchedTemplates = useMemo(
+    () => meta.templates.filter(matchesSearch),
+    [matchesSearch, meta.templates],
+  );
+
   const filteredTemplates = useMemo(() => {
-    let list = meta.templates.filter(matchesSearch);
-    if (activeTab === 'meta' && metaCategory !== 'ALL') {
-      list = list.filter((template) => {
-        const category = (template.category || '').toUpperCase();
-        return category === metaCategory;
-      });
-    }
-    if (activeTab === 'prosavis' && prosavisSection !== 'ALL') {
-      list = list.filter(
-        (template) =>
-          resolveWhatsAppTemplatePanelSection(template.name, template.category) === prosavisSection,
-      );
-    }
-    return list;
-  }, [activeTab, matchesSearch, meta.templates, metaCategory, prosavisSection]);
+    if (metaCategory === 'ALL') return searchedTemplates;
+    return searchedTemplates.filter(
+      (template) => (template.category || '').toUpperCase() === metaCategory,
+    );
+  }, [metaCategory, searchedTemplates]);
 
   const filteredSnippets = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -108,15 +101,19 @@ export function useTemplateLibrary(wabaId: string | undefined, snippets: WhatsAp
     });
   }, [favoritePresets, meta.templateByKey, search]);
 
-  const proSavisGroups = useMemo(
-    () => meta.groupByProSavis(filteredTemplates),
-    [filteredTemplates, meta],
-  );
-
   const metaGroups = useMemo(
     () => meta.groupByMetaCategory(filteredTemplates),
     [filteredTemplates, meta],
   );
+
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = { ALL: searchedTemplates.length };
+    for (const template of searchedTemplates) {
+      const key = (template.category || '').toUpperCase() || 'UTILITY';
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    return counts;
+  }, [searchedTemplates]);
 
   const resolveTemplate = useCallback(
     (templateName: string, templateLanguage: string) =>
@@ -131,22 +128,21 @@ export function useTemplateLibrary(wabaId: string | undefined, snippets: WhatsAp
     presetsError,
     reloadPresets: loadPresets,
     loading: meta.loading || presetsLoading,
-    error: meta.error || presetsError,
+    metaError: meta.error,
     search,
     setSearch,
     activeTab,
     setActiveTab,
     metaCategory,
     setMetaCategory,
-    prosavisSection,
-    setProsavisSection,
+    searchedTemplates,
     filteredTemplates,
     filteredSnippets,
     filteredPresets,
     pinnedSnippets,
     favoritePresets,
-    proSavisGroups,
     metaGroups,
+    categoryCounts,
     resolveTemplate,
     metaCategorySections: meta.metaCategorySections,
   };
