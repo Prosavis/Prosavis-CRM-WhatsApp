@@ -109,6 +109,24 @@ function toDbEntry(data: Partial<DirectoryEntry>): Record<string, unknown> {
   return row;
 }
 
+export type DirectoryBulkFilters = {
+  status?: string;
+  source?: string;
+  classification?: string;
+  searchTerm?: string;
+  includeOptOut?: boolean;
+  limit?: number;
+  page?: number;
+  sortField?: string;
+  sortDirection?: 'asc' | 'desc';
+};
+
+function isValidBulkPhone(phone: string | undefined): boolean {
+  if (!phone) return false;
+  const digits = phone.replace(/\D/g, '');
+  return digits.length >= 10 && digits.length <= 15;
+}
+
 // ──────────────────────────────────────────────
 // Service
 // ──────────────────────────────────────────────
@@ -293,6 +311,98 @@ export const directoryService = {
       .limit(20);
     if (error) throw error;
     return (data ?? []).map((row) => mapRowToEntry(row as DirectoryRow));
+  },
+
+  /**
+   * Paginated directory entries for bulk send (phone required, opt_out excluded by default).
+   */
+  async getEntriesForBulk(filters?: DirectoryBulkFilters) {
+    const limit = filters?.limit ?? 50;
+    const page = filters?.page ?? 0;
+    const from = page * limit;
+    const to = from + limit - 1;
+    const sortField = filters?.sortField ?? 'full_name';
+    const ascending = filters?.sortDirection !== 'desc';
+
+    const includeOptOut = filters?.includeOptOut === true;
+
+    let query = supabase.from('crm_directory').select('*', { count: 'exact' }).not('phone', 'is', null);
+
+    if (!includeOptOut) {
+      query = query.eq('opt_out', false).neq('status', 'opt_out');
+    }
+
+    if (filters?.status === 'active') {
+      query = query.or('status.eq.active,whatsapp_conversation_id.not.is.null');
+      if (!includeOptOut) query = query.eq('opt_out', false);
+    } else if (filters?.status === 'inactive') {
+      query = query.eq('status', 'inactive').is('whatsapp_conversation_id', null);
+      if (!includeOptOut) query = query.eq('opt_out', false);
+    } else if (filters?.status === 'opt_out') {
+      query = query.or('opt_out.eq.true,status.eq.opt_out');
+    } else if (filters?.status) {
+      query = query.eq('status', filters.status);
+    }
+
+    if (filters?.source) query = query.eq('source', filters.source);
+    if (filters?.classification) query = query.eq('classification', filters.classification);
+
+    if (filters?.searchTerm?.trim()) {
+      const term = `%${filters.searchTerm.trim()}%`;
+      query = query.or(
+        `full_name.ilike.${term},phone.ilike.${term},email.ilike.${term},display_name.ilike.${term}`,
+      );
+    }
+
+    query = query.order(sortField, { ascending }).range(from, to);
+
+    const { data, error, count } = await query;
+    if (error) throw error;
+
+    const entries = (data ?? [])
+      .map((row) => mapRowToEntry(row as DirectoryRow))
+      .filter((entry) => isValidBulkPhone(entry.phone));
+
+    return {
+      entries,
+      count: entries.length,
+      totalCount: count ?? entries.length,
+    };
+  },
+
+  /**
+   * Fetch all directory entries matching bulk filters (for "select all filtered").
+   */
+  async fetchAllEntriesForBulk(
+    filters?: Omit<DirectoryBulkFilters, 'limit' | 'page'>,
+    options?: { pageSize?: number; maxPages?: number; maxEntries?: number },
+  ): Promise<DirectoryEntry[]> {
+    const pageSize = options?.pageSize ?? 500;
+    const maxPages = options?.maxPages ?? 200;
+    const maxEntries = options?.maxEntries ?? 10_000;
+    const seen = new Set<string>();
+    const results: DirectoryEntry[] = [];
+
+    for (let page = 0; page < maxPages; page++) {
+      const result = await this.getEntriesForBulk({
+        ...filters,
+        limit: pageSize,
+        page,
+        sortField: filters?.sortField ?? 'full_name',
+        sortDirection: filters?.sortDirection ?? 'asc',
+      });
+
+      for (const entry of result.entries) {
+        if (!entry.phone || seen.has(entry.id)) continue;
+        seen.add(entry.id);
+        results.push(entry);
+        if (results.length >= maxEntries) return results;
+      }
+
+      if (result.entries.length < pageSize) break;
+    }
+
+    return results;
   },
 
   /**

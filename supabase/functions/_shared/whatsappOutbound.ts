@@ -21,6 +21,12 @@ export const MAX_BATCH_ATTACHMENTS = 10;
 export const MAX_BATCH_BYTES = 100 * 1024 * 1024;
 export const BATCH_ALLOWED_MEDIA: MediaType[] = ['image', 'audio', 'video', 'document'];
 
+/** Limpia archivado al reactivar una conversación por mensaje o reacción. */
+export const UNARCHIVE_CONVERSATION_PATCH = {
+  is_archived: false,
+  archived_at: null,
+} as const;
+
 export interface GraphCredentials {
   accessToken: string;
   phoneNumberId: string;
@@ -366,6 +372,7 @@ export async function updateConversationPreview(
       last_message_direction: 'outbound',
       last_message_outbound_status: status,
       unread_count: 0,
+      ...UNARCHIVE_CONVERSATION_PATCH,
     })
     .eq('stable_key', stableKey);
 

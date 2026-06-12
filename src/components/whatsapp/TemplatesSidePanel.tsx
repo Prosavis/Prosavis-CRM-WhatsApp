@@ -3,12 +3,10 @@ import {
   Alert,
   Box,
   Button,
-  Chip,
   CircularProgress,
   Collapse,
   Divider,
   TextField,
-  Tooltip,
   Typography,
 } from '@mui/material';
 import {
@@ -22,6 +20,9 @@ import {
   resolveWhatsAppTemplatePanelSection,
   type WhatsAppTemplatePanelSection,
 } from '@/constants/whatsappTemplateSections';
+import WhatsAppTemplateCategoryChip, {
+  resolveTemplateCategory,
+} from '@/components/whatsapp/WhatsAppTemplateCategoryChip';
 import {
   buildDisplayMessageBody,
   buildTemplateSendComponents,
@@ -31,12 +32,6 @@ import {
 } from '@/utils/whatsappTemplateHelpers';
 
 type TemplateCategoryKey = 'UTILITY' | 'MARKETING' | 'AUTHENTICATION' | 'UNKNOWN';
-
-function resolveTemplateCategory(raw: string | undefined): TemplateCategoryKey {
-  const u = (raw || '').toUpperCase().trim();
-  if (u === 'UTILITY' || u === 'MARKETING' || u === 'AUTHENTICATION') return u;
-  return 'UNKNOWN';
-}
 
 function categorySortOrder(key: TemplateCategoryKey): number {
   switch (key) {
@@ -49,64 +44,6 @@ function categorySortOrder(key: TemplateCategoryKey): number {
     default:
       return 3;
   }
-}
-
-function TemplateCategoryChip({ category }: { category?: string }) {
-  const key = resolveTemplateCategory(category);
-  const specs: Record<
-    TemplateCategoryKey,
-    { label: string; tooltip: string; sx: Record<string, string | number> }
-  > = {
-    UTILITY: {
-      label: 'Utilidad',
-      tooltip:
-        'Conversaciones de servicio al cliente o actualizaciones sobre un pedido o cuenta. Suele tener costo distinto al de marketing.',
-      sx: {
-        bgcolor: '#e8f5e9',
-        color: '#1b5e20',
-        fontWeight: 600,
-        border: '1px solid #a5d6a7',
-      },
-    },
-    MARKETING: {
-      label: 'Marketing',
-      tooltip:
-        'Promociones, ofertas o mensajes proactivos. Meta cobra estas conversaciones con tarifa de marketing.',
-      sx: {
-        bgcolor: '#fff3e0',
-        color: '#e65100',
-        fontWeight: 600,
-        border: '1px solid #ffcc80',
-      },
-    },
-    AUTHENTICATION: {
-      label: 'Autenticación',
-      tooltip:
-        'Códigos de un solo uso o verificación (p. ej. OTP). Reglas y costos específicos de Meta.',
-      sx: {
-        bgcolor: '#e3f2fd',
-        color: '#0d47a1',
-        fontWeight: 600,
-        border: '1px solid #90caf9',
-      },
-    },
-    UNKNOWN: {
-      label: 'Sin categoría',
-      tooltip: 'Meta no devolvió categoría en la API; revisa en el administrador de Meta.',
-      sx: {
-        bgcolor: '#f5f5f5',
-        color: '#616161',
-        fontWeight: 600,
-        border: '1px solid #e0e0e0',
-      },
-    },
-  };
-  const s = specs[key];
-  return (
-    <Tooltip title={s.tooltip} arrow placement="top">
-      <Chip label={s.label} size="small" sx={{ height: 22, fontSize: '0.7rem', ...s.sx }} />
-    </Tooltip>
-  );
 }
 
 interface TemplatesSidePanelProps {
@@ -340,7 +277,7 @@ const TemplatesSidePanel: React.FC<TemplatesSidePanelProps> = ({
                         >
                           {t.name}
                         </Typography>
-                        <TemplateCategoryChip category={t.category} />
+                        <WhatsAppTemplateCategoryChip category={t.category} />
                       </Box>
                       <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 0.75 }}>
                         <Box sx={BUBBLE_PREVIEW_SX}>

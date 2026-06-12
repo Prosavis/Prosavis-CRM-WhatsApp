@@ -9,6 +9,7 @@ import {
   metaErrorMessage,
   persistOutboundLog,
   sendToMeta,
+  UNARCHIVE_CONVERSATION_PATCH,
 } from '../_shared/whatsappOutbound.ts';
 import { getStableKeyFromRecipient, normalizePhone, resolveRecipient } from '../_shared/whatsappIdentity.ts';
 
@@ -79,6 +80,14 @@ Deno.serve(async (req) => {
         ? 'Meta no permite reaccionar a este mensaje. Puede ser muy antiguo o no existir.'
         : metaErrorMessage(metaResult.payload) ?? 'No se pudo enviar la reacción.';
       return jsonResponse({ error: message }, 500);
+    }
+
+    const { error: unarchiveError } = await supabase
+      .from('whatsapp_conversations')
+      .update(UNARCHIVE_CONVERSATION_PATCH)
+      .eq('stable_key', stableKey);
+    if (unarchiveError) {
+      console.error('send-whatsapp-reaction unarchive failed', unarchiveError);
     }
 
     return jsonResponse({

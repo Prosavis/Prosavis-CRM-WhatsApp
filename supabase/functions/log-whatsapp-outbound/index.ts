@@ -1,5 +1,6 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { getServiceClient } from '../_shared/supabase.ts';
+import { UNARCHIVE_CONVERSATION_PATCH } from '../_shared/whatsappOutbound.ts';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -93,6 +94,7 @@ Deno.serve(async (req) => {
         last_message_direction: 'outbound',
         last_message_outbound_status: 'sent',
         unread_count: 0,
+        ...UNARCHIVE_CONVERSATION_PATCH,
       })
       .eq('stable_key', stableKey);
 

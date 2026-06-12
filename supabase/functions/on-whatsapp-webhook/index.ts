@@ -7,6 +7,7 @@ import {
   OUTBOUND_META_SIGNED_URL_EXPIRES_SECONDS,
   persistToWhatsAppBucket,
 } from '../_shared/whatsappMediaStorage.ts';
+import { UNARCHIVE_CONVERSATION_PATCH } from '../_shared/whatsappOutbound.ts';
 
 const encoder = new TextEncoder();
 type JsonRecord = Record<string, unknown>;
@@ -340,6 +341,7 @@ async function processInboundMessage(params: {
         last_message_outbound_status: null,
         unread_count: unreadCount,
         phone_number_id: phoneNumberId,
+        ...UNARCHIVE_CONVERSATION_PATCH,
       },
       { onConflict: 'stable_key' },
     );

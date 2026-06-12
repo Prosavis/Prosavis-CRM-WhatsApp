@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo, lazy, Suspense } from 'react';
+import React, { useEffect, useState, useCallback, lazy, Suspense } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAdminTour } from '@/context/AdminTourContext';
 import {
@@ -49,27 +49,18 @@ import {
   NavigateNext as NavigateNextIcon,
   DoneAll as DoneAllIcon,
   DeleteSweep as DeleteSweepIcon,
-  Chat as ChatIcon,
-  People as PeopleIcon,
-  Hub as HubIcon,
 } from '@mui/icons-material';
-import Stepper from '@mui/material/Stepper';
-import Step from '@mui/material/Step';
-import StepLabel from '@mui/material/StepLabel';
 import WhatsAppLayout from '@/components/whatsapp/WhatsAppLayout';
 import WhatsAppTopBar from '@/components/whatsapp/WhatsAppTopBar';
 import WhatsAppDirectoryContactsDialog from '@/components/whatsapp/WhatsAppDirectoryContactsDialog';
+import WhatsAppBulkSendDialog from '@/components/whatsapp/bulk/WhatsAppBulkSendDialog';
 import { WHATSAPP_CLOUD_PRODUCTION } from '@/constants/whatsappCloudAccounts';
 import useSoundEffects from '@/hooks/useSoundEffects';
 import {
-  bulkWhatsAppSend,
-  listWhatsAppMessageTemplates,
   ensureWhatsAppConversationFromLead,
-  fetchConversationPhoneNumbersForBulk,
   getWhatsAppMetrics,
   listWhatsAppMessageLog,
   purgeWhatsAppMessageLog,
-  type WhatsAppTemplateSummary,
 } from '@/services/whatsappService';
 import { directoryService } from '@/services/directoryService';
 import type { WhatsAppInboxMetrics } from '@/utils/whatsappInboxStats';
@@ -211,19 +202,6 @@ const WhatsAppCloudPage: React.FC = () => {
   const [purgeError, setPurgeError] = useState<string | null>(null);
 
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [bulkStep, setBulkStep] = useState(0);
-  const [bulkRecipients, setBulkRecipients] = useState('');
-  const [bulkMode, setBulkMode] = useState<'template' | 'text'>('template');
-  const [bulkText, setBulkText] = useState('');
-  const [bulkTemplates, setBulkTemplates] = useState<WhatsAppTemplateSummary[]>([]);
-  const [bulkSelectedTemplate, setBulkSelectedTemplate] = useState('');
-  const [bulkConfirmPhrase, setBulkConfirmPhrase] = useState('');
-  const [bulkLoading, setBulkLoading] = useState(false);
-  const [bulkResult, setBulkResult] = useState<{ sent: number; failed: number; skipped: number } | null>(null);
-  const [bulkError, setBulkError] = useState<string | null>(null);
-  const [bulkRecipientSource, setBulkRecipientSource] = useState<'manual' | 'system'>('manual');
-  const [bulkImportLoading, setBulkImportLoading] = useState<'inbox' | 'leads' | 'union' | null>(null);
-  const [bulkImportError, setBulkImportError] = useState<string | null>(null);
 
   const focusPhone = searchParams.get('focusPhone') || undefined;
 
@@ -337,104 +315,6 @@ const WhatsAppCloudPage: React.FC = () => {
 
   const hasActiveFilters = searchTerm !== '' || statusFilter !== 'all';
 
-  const handleOpenBulk = useCallback(async () => {
-    setBulkOpen(true);
-    setBulkStep(0);
-    setBulkRecipients('');
-    setBulkRecipientSource('manual');
-    setBulkImportLoading(null);
-    setBulkImportError(null);
-    setBulkMode('template');
-    setBulkText('');
-    setBulkSelectedTemplate('');
-    setBulkConfirmPhrase('');
-    setBulkResult(null);
-    setBulkError(null);
-    if (wabaId) {
-      try {
-        const templates = await listWhatsAppMessageTemplates(wabaId);
-        setBulkTemplates(templates.filter((t) => t.status === 'APPROVED'));
-      } catch {
-        setBulkTemplates([]);
-      }
-    }
-  }, []);
-
-  const parsedRecipients = useMemo(() => {
-    return bulkRecipients
-      .split(/[\n,;]+/)
-      .map((line) => line.trim())
-      .filter((line) => /\d{10,15}/.test(line.replace(/\D/g, '')))
-      .map((line) => ({ phone: line.replace(/\D/g, '') }));
-  }, [bulkRecipients]);
-
-  const handleBulkLoadInbox = useCallback(async () => {
-    setBulkImportLoading('inbox');
-    setBulkImportError(null);
-    try {
-      const phones = await fetchConversationPhoneNumbersForBulk(phoneNumberId);
-      setBulkRecipients(phones.join('\n'));
-    } catch (e) {
-      setBulkImportError((e as Error).message || 'No se pudieron cargar las conversaciones del Inbox');
-    } finally {
-      setBulkImportLoading(null);
-    }
-  }, []);
-
-  const handleBulkLoadLeads = useCallback(async () => {
-    setBulkImportLoading('leads');
-    setBulkImportError(null);
-    try {
-      const phones = await directoryService.fetchAllPhonesForBulk();
-      setBulkRecipients(phones.join('\n'));
-    } catch (e) {
-      setBulkImportError((e as Error).message || 'No se pudieron cargar las entradas del directorio');
-    } finally {
-      setBulkImportLoading(null);
-    }
-  }, []);
-
-  const handleBulkLoadUnion = useCallback(async () => {
-    setBulkImportLoading('union');
-    setBulkImportError(null);
-    try {
-      const [inboxPhones, dirPhones] = await Promise.all([
-        fetchConversationPhoneNumbersForBulk(phoneNumberId),
-        directoryService.fetchAllPhonesForBulk(),
-      ]);
-      setBulkRecipients([...new Set([...inboxPhones, ...dirPhones])].join('\n'));
-    } catch (e) {
-      setBulkImportError((e as Error).message || 'Error al combinar Inbox y directorio');
-    } finally {
-      setBulkImportLoading(null);
-    }
-  }, []);
-
-  const handleBulkSend = useCallback(async () => {
-    setBulkLoading(true);
-    setBulkError(null);
-    try {
-      const result = await bulkWhatsAppSend({
-        recipients: parsedRecipients,
-        ...(bulkMode === 'template' && bulkSelectedTemplate
-          ? {
-              templateName: bulkSelectedTemplate,
-              templateLanguage: 'es_CO',
-            }
-          : {}),
-        ...(bulkMode === 'text' ? { richBody: bulkText } : {}),
-        phoneNumberId,
-        confirmation: 'CONFIRMAR_ENVIO_MASIVO',
-      });
-      setBulkResult(result);
-      setBulkStep(3);
-    } catch (err: unknown) {
-      setBulkError((err as Error)?.message || 'Error al enviar');
-    } finally {
-      setBulkLoading(false);
-    }
-  }, [parsedRecipients, bulkMode, bulkSelectedTemplate, bulkText]);
-
   type PageNumberItem = number | 'start-ellipsis' | 'end-ellipsis';
 
   const getPageNumbers = (): PageNumberItem[] => {
@@ -462,7 +342,7 @@ const WhatsAppCloudPage: React.FC = () => {
         inboxTotalContacts={inboxTotalContacts}
         directoryTotalContacts={directoryTotalContacts}
         onOpenDirectory={() => setDirectoryDialogOpen(true)}
-        onOpenBulk={handleOpenBulk}
+        onOpenBulk={() => setBulkOpen(true)}
       />
 
       <Box sx={{ px: { xs: 0.5, sm: 0 } }}>
@@ -1073,223 +953,14 @@ const WhatsAppCloudPage: React.FC = () => {
         )}
       </Box>
 
-      <Dialog open={bulkOpen} onClose={() => !bulkLoading && setBulkOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Envío masivo WhatsApp</DialogTitle>
-        <DialogContent>
-          <Stepper activeStep={bulkStep} sx={{ mb: 3, mt: 1 }}>
-            <Step><StepLabel>Destinatarios</StepLabel></Step>
-            <Step><StepLabel>Mensaje</StepLabel></Step>
-            <Step><StepLabel>Confirmar</StepLabel></Step>
-            <Step><StepLabel>Resultado</StepLabel></Step>
-          </Stepper>
-
-          {bulkStep === 0 && (
-            <Box>
-              <RadioGroup
-                row
-                value={bulkRecipientSource}
-                onChange={(e) => {
-                  setBulkRecipientSource(e.target.value as 'manual' | 'system');
-                  setBulkImportError(null);
-                }}
-                sx={{ mb: 2 }}
-              >
-                <FormControlLabel value="manual" control={<Radio />} label="Pegar o escribir" />
-                <FormControlLabel value="system" control={<Radio />} label="Cargar desde el sistema" />
-              </RadioGroup>
-
-              {bulkRecipientSource === 'system' && (
-                <Box sx={{ mb: 2 }}>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-                    Importa números del Inbox de WhatsApp (esta línea), de todo el directorio con teléfono, o la unión de
-                    ambos sin duplicados. El resultado rellena el cuadro de abajo; puedes editarlo antes de continuar.
-                  </Typography>
-                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} flexWrap="wrap">
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      startIcon={
-                        bulkImportLoading === 'inbox' ? (
-                          <CircularProgress size={16} color="inherit" />
-                        ) : (
-                          <ChatIcon />
-                        )
-                      }
-                      disabled={bulkImportLoading !== null}
-                      onClick={handleBulkLoadInbox}
-                      sx={{ textTransform: 'none' }}
-                    >
-                      Inbox WhatsApp
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      startIcon={
-                        bulkImportLoading === 'leads' ? (
-                          <CircularProgress size={16} color="inherit" />
-                        ) : (
-                          <PeopleIcon />
-                        )
-                      }
-                      disabled={bulkImportLoading !== null}
-                      onClick={handleBulkLoadLeads}
-                      sx={{ textTransform: 'none' }}
-                    >
-                      Directorio (teléfono)
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      startIcon={
-                        bulkImportLoading === 'union' ? (
-                          <CircularProgress size={16} color="inherit" />
-                        ) : (
-                          <HubIcon />
-                        )
-                      }
-                      disabled={bulkImportLoading !== null}
-                      onClick={handleBulkLoadUnion}
-                      sx={{ textTransform: 'none' }}
-                    >
-                      Inbox + directorio (únicos)
-                    </Button>
-                  </Stack>
-                  {bulkImportError && (
-                    <Alert severity="error" sx={{ mt: 1.5 }}>
-                      {bulkImportError}
-                    </Alert>
-                  )}
-                </Box>
-              )}
-
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                {bulkRecipientSource === 'manual'
-                  ? 'Pega los números (uno por línea o separados por coma). Formato: 573001234567'
-                  : 'Lista de destinatarios (puedes pegar, importar con los botones o combinar ambos).'}
-              </Typography>
-              <TextField
-                fullWidth
-                multiline
-                rows={8}
-                placeholder={'573001234567\n573009876543\n...'}
-                value={bulkRecipients}
-                onChange={(e) => setBulkRecipients(e.target.value)}
-              />
-              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                {parsedRecipients.length} números válidos detectados
-              </Typography>
-            </Box>
-          )}
-
-          {bulkStep === 1 && (
-            <Box>
-              <RadioGroup
-                row
-                value={bulkMode}
-                onChange={(e) => setBulkMode(e.target.value as 'template' | 'text')}
-                sx={{ mb: 2 }}
-              >
-                <FormControlLabel value="template" control={<Radio />} label="Plantilla Meta" />
-                <FormControlLabel value="text" control={<Radio />} label="Texto libre" />
-              </RadioGroup>
-              {bulkMode === 'template' ? (
-                <FormControl fullWidth>
-                  <InputLabel>Plantilla</InputLabel>
-                  <Select
-                    value={bulkSelectedTemplate}
-                    label="Plantilla"
-                    onChange={(e) => setBulkSelectedTemplate(e.target.value)}
-                  >
-                    {bulkTemplates.map((t) => (
-                      <MenuItem key={`${t.name}-${t.language}`} value={t.name}>
-                        {t.name} ({t.language})
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              ) : (
-                <TextField
-                  fullWidth
-                  multiline
-                  rows={5}
-                  placeholder="Escribe el mensaje que recibirán todos los destinatarios..."
-                  value={bulkText}
-                  onChange={(e) => setBulkText(e.target.value)}
-                />
-              )}
-            </Box>
-          )}
-
-          {bulkStep === 2 && (
-            <Box>
-              <Alert severity="warning" sx={{ mb: 2 }}>
-                Estás a punto de enviar un mensaje a <strong>{parsedRecipients.length}</strong> destinatarios.
-                {bulkMode === 'template'
-                  ? ` Plantilla: ${bulkSelectedTemplate}`
-                  : ` Texto libre (${bulkText.length} caracteres)`}
-              </Alert>
-              <Typography variant="body2" sx={{ mb: 2 }}>
-                Línea: {botLabel} ({phoneDisplay})
-              </Typography>
-              <TextField
-                fullWidth
-                label="Confirmación"
-                placeholder="CONFIRMAR_ENVIO_MASIVO"
-                value={bulkConfirmPhrase}
-                onChange={(e) => setBulkConfirmPhrase(e.target.value)}
-                helperText="Escribe: CONFIRMAR_ENVIO_MASIVO"
-              />
-              {bulkError && <Alert severity="error" sx={{ mt: 2 }}>{bulkError}</Alert>}
-            </Box>
-          )}
-
-          {bulkStep === 3 && bulkResult && (
-            <Box sx={{ textAlign: 'center', py: 3 }}>
-              <Typography variant="h5" fontWeight={700} color="success.main" gutterBottom>
-                Envío completado
-              </Typography>
-              <Stack direction="row" spacing={2} justifyContent="center" sx={{ mt: 2 }}>
-                <Chip label={`Enviados: ${bulkResult.sent}`} color="success" />
-                <Chip label={`Fallidos: ${bulkResult.failed}`} color="error" />
-                <Chip label={`Omitidos: ${bulkResult.skipped}`} color="default" />
-              </Stack>
-            </Box>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setBulkOpen(false)} disabled={bulkLoading}>
-            {bulkStep === 3 ? 'Cerrar' : 'Cancelar'}
-          </Button>
-          {bulkStep > 0 && bulkStep < 3 && (
-            <Button onClick={() => setBulkStep((s) => s - 1)} disabled={bulkLoading}>
-              Atrás
-            </Button>
-          )}
-          {bulkStep < 2 && (
-            <Button
-              variant="contained"
-              onClick={() => setBulkStep((s) => s + 1)}
-              disabled={
-                (bulkStep === 0 && parsedRecipients.length === 0) ||
-                (bulkStep === 1 && bulkMode === 'template' && !bulkSelectedTemplate) ||
-                (bulkStep === 1 && bulkMode === 'text' && !bulkText.trim())
-              }
-            >
-              Siguiente
-            </Button>
-          )}
-          {bulkStep === 2 && (
-            <Button
-              variant="contained"
-              color="warning"
-              onClick={handleBulkSend}
-              disabled={bulkLoading || bulkConfirmPhrase !== 'CONFIRMAR_ENVIO_MASIVO'}
-            >
-              {bulkLoading ? <CircularProgress size={22} color="inherit" /> : 'Enviar a todos'}
-            </Button>
-          )}
-        </DialogActions>
-      </Dialog>
+      <WhatsAppBulkSendDialog
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        wabaId={wabaId}
+        phoneNumberId={phoneNumberId}
+        botLabel={botLabel}
+        phoneDisplay={phoneDisplay}
+      />
 
       <WhatsAppDirectoryContactsDialog
         open={directoryDialogOpen}
