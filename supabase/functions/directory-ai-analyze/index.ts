@@ -9,11 +9,10 @@
 //  - Los teléfonos sugeridos se validan/normalizan a E.164 con la utilidad compartida.
 //
 // Cobertura total de la tabla:
-//  - Cada invocación procesa un lote de issues abiertos PENDIENTES de análisis
-//    (ai_analyzed_at IS NULL) y los marca al terminar. Devuelve `remaining` para que
-//    el frontend repita hasta cubrir cientos/miles de contactos sin re-analizar.
-//  - El trabajo se trocea en sub-lotes pequeños por llamada a Gemini para no truncar
-//    la respuesta JSON ni exceder el tiempo de la función.
+//  - Cada invocación procesa un lote PEQUEÑO de issues abiertos PENDIENTES de análisis
+//    (ai_analyzed_at IS NULL) con UNA sola llamada a Gemini, y los marca al terminar.
+//    Devuelve `remaining` para que el frontend repita hasta cubrir cientos/miles de
+//    contactos sin re-analizar y sin exceder el límite de 150s del worker.
 
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { requireCrmAdmin } from '../_shared/supabase.ts';
@@ -29,11 +28,10 @@ import { normalizeDirectoryPhoneE164 } from '../_shared/directoryPhone.ts';
 const ANALYSIS_MODEL = resolveGeminiModel('GEMINI_MODEL_DIRECTORY_ANALYSIS', 'gemini-3.5-pro');
 
 // Cuántos issues procesar por invocación (el frontend repite hasta remaining=0).
-const DEFAULT_MAX_ISSUES_PER_RUN = 60;
-const MAX_ISSUES_PER_RUN = 200;
-// Tamaño de sub-lote por llamada a Gemini (evita truncamiento y timeouts).
-const DEFAULT_BATCH_SIZE = 20;
-const MAX_BATCH_SIZE = 40;
+// CRÍTICO: cada invocación hace UNA sola llamada a Gemini sobre este lote para
+// mantenernos muy por debajo del límite de 150s/worker (WORKER_RESOURCE_LIMIT).
+const DEFAULT_MAX_ISSUES_PER_RUN = 12;
+const MAX_ISSUES_PER_RUN = 25;
 
 const DUPLICATE_ISSUE_TYPES = ['duplicate_phone', 'duplicate_email', 'duplicate_name'];
 
@@ -105,12 +103,8 @@ Deno.serve(async (req) => {
     const requestedType = typeof body.issueType === 'string' ? body.issueType.trim() : '';
     const reanalyze = body.reanalyze === true;
     const maxIssues = Math.max(
-      10,
-      Math.min(Number(body.limit) || DEFAULT_MAX_ISSUES_PER_RUN, MAX_ISSUES_PER_RUN),
-    );
-    const batchSize = Math.max(
       5,
-      Math.min(Number(body.batchSize) || DEFAULT_BATCH_SIZE, MAX_BATCH_SIZE),
+      Math.min(Number(body.limit) || DEFAULT_MAX_ISSUES_PER_RUN, MAX_ISSUES_PER_RUN),
     );
 
     // Modelo efectivo de esta invocación (puede degradar a flash si el pro no existe).
@@ -387,18 +381,16 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── 5. Procesar en sub-lotes (contactos y grupos de duplicados) ──────────
+    // ── 5. Una sola llamada a Gemini por invocación ──────────────────────────
+    // Combina contactos + grupos de duplicados del lote en un único prompt. Esto
+    // garantiza ≤1 llamada (≤~75s) por worker y evita WORKER_RESOURCE_LIMIT.
+    // El frontend repite hasta agotar `remaining`.
     const entriesToAnalyze = [...issueByEntry.keys()]
       .map((id) => entryById.get(id))
       .filter((e): e is DirectoryRow => !!e);
 
-    for (const entriesChunk of chunk(entriesToAnalyze, batchSize)) {
-      const result = await analyzeBatch(buildPrompt(entriesChunk, []));
-      await processResult(result);
-    }
-
-    for (const dupChunk of chunk(dupGroups, batchSize)) {
-      const result = await analyzeBatch(buildPrompt([], dupChunk));
+    if (entriesToAnalyze.length > 0 || dupGroups.length > 0) {
+      const result = await analyzeBatch(buildPrompt(entriesToAnalyze, dupGroups));
       await processResult(result);
     }
 
