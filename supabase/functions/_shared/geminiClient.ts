@@ -131,12 +131,25 @@ function extractTextFromResponse(data: GeminiGenerateContentResponse): string {
   if (!candidate) throw new Error('Gemini no devolvió candidatos');
 
   const parts = candidate.content?.parts;
-  if (!parts?.length) throw new Error('Gemini no devolvió contenido');
+  if (!parts?.length) {
+    const reason = candidate.finishReason;
+    if (reason && reason !== 'STOP') {
+      throw new Error(`Gemini no devolvió contenido (finishReason: ${reason})`);
+    }
+    throw new Error('Gemini no devolvió contenido');
+  }
 
   const text = parts.map((p) => p.text ?? '').join('').trim();
   if (!text) throw new Error('Gemini devolvió contenido vacío');
 
   return text;
+}
+
+/** Quita fences de markdown (```json ... ```) que algunos modelos añaden. */
+function stripCodeFences(text: string): string {
+  const trimmed = text.trim();
+  const fenceMatch = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  return fenceMatch ? fenceMatch[1].trim() : trimmed;
 }
 
 // ─── Funciones públicas ───────────────────────────────────────────────────
@@ -181,6 +194,7 @@ export async function geminiGenerateJson<T>(params: {
   model?: string;
   prompt: string;
   temperature?: number;
+  maxOutputTokens?: number;
 }): Promise<T> {
   const model = params.model ??
     resolveGeminiModel('GEMINI_MODEL_JSON', DEFAULT_GEMINI_MODEL);
@@ -190,16 +204,35 @@ export async function geminiGenerateJson<T>(params: {
     model,
     contents: [{ role: 'user', parts: [{ text: params.prompt }] }],
     temperature: params.temperature ?? 0,
+    // Salida JSON puede ser extensa; los modelos con "thinking" también
+    // consumen tokens de salida. Un presupuesto holgado evita truncamientos.
+    maxOutputTokens: params.maxOutputTokens ?? 8192,
     responseMimeType: 'application/json',
   });
 
-  const raw = extractTextFromResponse(data);
+  const finishReason = data.candidates?.[0]?.finishReason;
+  const raw = stripCodeFences(extractTextFromResponse(data));
 
-  // Gemini ya devuelve JSON válido gracias a responseMimeType,
-  // pero extraemos el primer objeto/array como safety net.
-  const jsonMatch = raw.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
-  if (!jsonMatch) throw new Error('Gemini no devolvió JSON válido');
-  return JSON.parse(jsonMatch[0]) as T;
+  // Con responseMimeType=application/json el texto ya debería ser JSON puro.
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    // Safety net: extraer el primer objeto/array bien formado.
+    const jsonMatch = raw.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+    if (jsonMatch) {
+      try {
+        return JSON.parse(jsonMatch[0]) as T;
+      } catch {
+        // cae al throw de abajo
+      }
+    }
+    const truncated = finishReason === 'MAX_TOKENS'
+      ? ' (respuesta truncada por MAX_TOKENS; reduce el lote o sube maxOutputTokens)'
+      : finishReason && finishReason !== 'STOP'
+        ? ` (finishReason: ${finishReason})`
+        : '';
+    throw new Error(`Gemini no devolvió JSON válido${truncated}: ${raw.slice(0, 200)}`);
+  }
 }
 
 /**

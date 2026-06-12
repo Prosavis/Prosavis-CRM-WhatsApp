@@ -13,8 +13,8 @@ import { requireCrmAdmin } from '../_shared/supabase.ts';
 import { getGeminiApiKey, geminiGenerateJson, DEFAULT_GEMINI_MODEL } from '../_shared/geminiClient.ts';
 import { normalizeDirectoryPhoneE164 } from '../_shared/directoryPhone.ts';
 
-const MAX_ENTRIES = 50;
-const MAX_DUP_GROUPS = 25;
+const MAX_ENTRIES = 30;
+const MAX_DUP_GROUPS = 15;
 const DUPLICATE_ISSUE_TYPES = ['duplicate_phone', 'duplicate_email', 'duplicate_name'];
 
 interface DirectoryRow {
@@ -179,7 +179,12 @@ Deno.serve(async (req) => {
       'CONTACTOS:\n' + JSON.stringify(compactEntries) + '\n\n' +
       'GRUPOS_DUPLICADOS:\n' + JSON.stringify(compactDupGroups);
 
-    const result = await geminiGenerateJson<GeminiResult>({ apiKey, prompt, temperature: 0 });
+    const result = await geminiGenerateJson<GeminiResult>({
+      apiKey,
+      prompt,
+      temperature: 0,
+      maxOutputTokens: 8192,
+    });
 
     // ── 5. Validar y mapear a sugerencias (filtrado server-side) ─────────────
     let created = 0;
