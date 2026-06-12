@@ -330,6 +330,7 @@ export async function ensureConversation(
     contact_phone: recipientPhone,
     phone_number_id: phoneNumberId || null,
     state: 'active',
+    ...UNARCHIVE_CONVERSATION_PATCH,
   };
   const trimmedName = contactName?.trim();
   if (trimmedName) {
