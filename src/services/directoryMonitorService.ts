@@ -237,17 +237,25 @@ export const directoryMonitorService = {
 
   // ── IA (Gemini) ───────────────────────────────────────────────────────────
 
-  /** Lanza el análisis con IA (Edge Function). La IA solo propone sugerencias. */
+  /**
+   * Lanza una pasada de análisis con IA (Edge Function). La IA solo propone sugerencias.
+   * Procesa un lote de issues pendientes y devuelve `remaining`; para cubrir toda la
+   * tabla, usa `analyzeAllWithAI` que itera hasta agotar los pendientes.
+   */
   async analyzeWithAI(params?: {
     issueType?: DirectoryIssueType;
     entryIds?: string[];
     limit?: number;
+    batchSize?: number;
+    reanalyze?: boolean;
   }): Promise<AIAnalyzeResult> {
     const { data, error } = await supabase.functions.invoke<AIAnalyzeResult>('directory-ai-analyze', {
       body: {
         issueType: params?.issueType,
         entryIds: params?.entryIds,
         limit: params?.limit,
+        batchSize: params?.batchSize,
+        reanalyze: params?.reanalyze,
       },
     });
     if (error) {
@@ -260,7 +268,42 @@ export const directoryMonitorService = {
       }
       throw error;
     }
-    return data ?? { analyzed: 0, created: 0, summary: '' };
+    return data ?? { analyzed: 0, created: 0, summary: '', remaining: 0 };
+  },
+
+  /**
+   * Recorre TODA la tabla: invoca el análisis por lotes hasta que no queden issues
+   * pendientes (`remaining === 0`). Informa el progreso vía callback.
+   */
+  async analyzeAllWithAI(
+    params?: { issueType?: DirectoryIssueType; reanalyze?: boolean },
+    onProgress?: (p: { analyzedTotal: number; createdTotal: number; remaining: number; model?: string }) => void,
+  ): Promise<AIAnalyzeResult> {
+    let analyzedTotal = 0;
+    let createdTotal = 0;
+    let lastSummary = '';
+    let model: string | undefined;
+    const MAX_PASSES = 500; // salvaguarda anti-bucle (miles de issues)
+
+    for (let pass = 0; pass < MAX_PASSES; pass += 1) {
+      const result = await this.analyzeWithAI({
+        issueType: params?.issueType,
+        // 'reanalyze' solo en la primera pasada: reabre el cursor para toda la tabla.
+        reanalyze: params?.reanalyze && pass === 0,
+      });
+      analyzedTotal += result.analyzed;
+      createdTotal += result.created;
+      lastSummary = result.summary || lastSummary;
+      model = result.model ?? model;
+      const remaining = result.remaining ?? 0;
+      onProgress?.({ analyzedTotal, createdTotal, remaining, model });
+
+      // Fin: sin pendientes, o el lote no avanzó (evita bucles).
+      if (remaining <= 0 || result.analyzed === 0) {
+        return { analyzed: analyzedTotal, created: createdTotal, summary: lastSummary, remaining, model };
+      }
+    }
+    return { analyzed: analyzedTotal, created: createdTotal, summary: lastSummary, remaining: 0, model };
   },
 
   /** Conteos de sugerencias por tipo y estado. */

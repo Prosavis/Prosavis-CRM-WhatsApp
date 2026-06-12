@@ -194,6 +194,10 @@ export interface AIAnalyzeResult {
   analyzed: number;
   created: number;
   summary: string;
+  /** Issues abiertos aún pendientes de análisis IA (para iterar hasta cubrir todo). */
+  remaining?: number;
+  /** Modelo de Gemini realmente usado en la pasada. */
+  model?: string;
 }
 
 // ──────────────────────────────────────────────

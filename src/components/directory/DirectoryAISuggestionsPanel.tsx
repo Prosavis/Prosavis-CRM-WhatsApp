@@ -100,6 +100,7 @@ const DirectoryAISuggestionsPanel: React.FC<DirectoryAISuggestionsPanelProps> = 
   const [suggestions, setSuggestions] = useState<DirectoryAISuggestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeProgress, setAnalyzeProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [typeFilter, setTypeFilter] = useState<AISuggestionType | null>(null);
@@ -162,15 +163,29 @@ const DirectoryAISuggestionsPanel: React.FC<DirectoryAISuggestionsPanelProps> = 
 
   const handleAnalyze = async () => {
     setAnalyzing(true);
+    setAnalyzeProgress('Analizando toda la tabla…');
     setError(null);
     try {
-      const result = await directoryMonitorService.analyzeWithAI({ limit: 50 });
-      notify(`Análisis completado: ${result.created} sugerencia(s) sobre ${result.analyzed} contacto(s)`, 'success');
+      const result = await directoryMonitorService.analyzeAllWithAI(undefined, (p) => {
+        setAnalyzeProgress(
+          p.remaining > 0
+            ? `Analizando… ${p.createdTotal} sugerencia(s), quedan ${p.remaining}`
+            : `Finalizando… ${p.createdTotal} sugerencia(s)`,
+        );
+        // Refresco ligero de contadores entre pasadas.
+        fetchStats();
+      });
+      notify(
+        `Análisis completo: ${result.created} sugerencia(s) sobre ${result.analyzed} inconsistencia(s)` +
+          (result.model ? ` · modelo ${result.model}` : ''),
+        'success',
+      );
       refreshAll();
     } catch (err) {
       notify(err instanceof Error ? err.message : 'No se pudo ejecutar el análisis con IA', 'error');
     } finally {
       setAnalyzing(false);
+      setAnalyzeProgress(null);
     }
   };
 
@@ -221,15 +236,22 @@ const DirectoryAISuggestionsPanel: React.FC<DirectoryAISuggestionsPanelProps> = 
             Gemini propone arreglos legibles. Nada se aplica sin tu aprobación.
           </Typography>
         </Box>
-        <Button
-          variant="contained"
-          color="secondary"
-          startIcon={analyzing ? <CircularProgress size={16} color="inherit" /> : <AutoAwesomeIcon />}
-          onClick={handleAnalyze}
-          disabled={analyzing}
-        >
-          {analyzing ? 'Analizando…' : 'Analizar con IA'}
-        </Button>
+        <Stack alignItems={{ xs: 'flex-start', sm: 'flex-end' }} spacing={0.5}>
+          <Button
+            variant="contained"
+            color="secondary"
+            startIcon={analyzing ? <CircularProgress size={16} color="inherit" /> : <AutoAwesomeIcon />}
+            onClick={handleAnalyze}
+            disabled={analyzing}
+          >
+            {analyzing ? 'Analizando…' : 'Analizar toda la tabla con IA'}
+          </Button>
+          {analyzeProgress && (
+            <Typography variant="caption" color="text.secondary">
+              {analyzeProgress}
+            </Typography>
+          )}
+        </Stack>
       </Stack>
 
       {summary && (
@@ -437,6 +459,8 @@ const DirectoryAISuggestionsPanel: React.FC<DirectoryAISuggestionsPanelProps> = 
                 <MenuItem value={10}>10</MenuItem>
                 <MenuItem value={25}>25</MenuItem>
                 <MenuItem value={50}>50</MenuItem>
+                <MenuItem value={100}>100</MenuItem>
+                <MenuItem value={200}>200</MenuItem>
               </Select>
             </FormControl>
             <Stack alignItems="center" spacing={0.5}>
