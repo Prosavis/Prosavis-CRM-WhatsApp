@@ -31,8 +31,10 @@ Deno.serve(async (req) => {
     const { supabase } = await requireCrmAdmin(req);
     const { data, error } = await supabase
       .from('whatsapp_snippets')
-      .select('id,shortcut,label,title,body')
+      .select('id,shortcut,label,title,body,is_pinned,sort_order')
       .eq('is_active', true)
+      .order('is_pinned', { ascending: false })
+      .order('sort_order', { ascending: true })
       .order('shortcut', { ascending: true });
 
     if (error) throw error;
@@ -45,6 +47,8 @@ Deno.serve(async (req) => {
           shortcut: row.shortcut,
           label: row.label,
           body: row.body,
+          isPinned: false,
+          sortOrder: 0,
         })),
       });
     }
@@ -55,6 +59,8 @@ Deno.serve(async (req) => {
         shortcut: row.shortcut ?? row.title,
         label: row.label ?? row.title,
         body: row.body,
+        isPinned: Boolean(row.is_pinned),
+        sortOrder: typeof row.sort_order === 'number' ? row.sort_order : 0,
       })),
     });
   } catch (error) {

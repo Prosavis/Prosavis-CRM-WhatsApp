@@ -971,6 +971,22 @@ export interface WhatsAppSnippet {
   shortcut: string;
   label: string;
   body: string;
+  isPinned?: boolean;
+  sortOrder?: number;
+}
+
+export interface WhatsAppTemplatePreset {
+  id: string;
+  presetLabel: string;
+  templateName: string;
+  templateLanguage: string;
+  headerValues: string[];
+  bodyValues: string[];
+  sectionKey?: string | null;
+  isFavorite: boolean;
+  sortOrder: number;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export async function listWhatsAppSnippets(): Promise<WhatsAppSnippet[]> {
@@ -996,9 +1012,87 @@ export async function createWhatsAppSnippet(
 
 export async function updateWhatsAppSnippet(
   snippetId: string,
-  patch: { shortcut?: string; label?: string; body?: string },
+  patch: {
+    shortcut?: string;
+    label?: string;
+    body?: string;
+    isPinned?: boolean;
+    sortOrder?: number;
+  },
 ): Promise<{ success: boolean }> {
   return invokeFn<{ success: boolean }>('update-whatsapp-snippet', { snippetId, ...patch });
+}
+
+function mapTemplatePresetRow(row: Record<string, unknown>): WhatsAppTemplatePreset {
+  const headerRaw = row.header_values ?? row.headerValues;
+  const bodyRaw = row.body_values ?? row.bodyValues;
+  const headerValues = Array.isArray(headerRaw)
+    ? headerRaw.map((v: unknown) => String(v ?? ''))
+    : [];
+  const bodyValues = Array.isArray(bodyRaw)
+    ? bodyRaw.map((v: unknown) => String(v ?? ''))
+    : [];
+
+  return {
+    id: String(row.id),
+    presetLabel: String(row.preset_label ?? row.presetLabel ?? ''),
+    templateName: String(row.template_name ?? row.templateName ?? ''),
+    templateLanguage: String(row.template_language ?? row.templateLanguage ?? 'es_CO'),
+    headerValues,
+    bodyValues,
+    sectionKey:
+      row.section_key === null || row.sectionKey === null
+        ? null
+        : String(row.section_key ?? row.sectionKey ?? '') || null,
+    isFavorite: Boolean(row.is_favorite ?? row.isFavorite ?? true),
+    sortOrder: typeof row.sort_order === 'number' ? row.sort_order : Number(row.sortOrder ?? 0),
+    createdAt: row.created_at ? String(row.created_at) : undefined,
+    updatedAt: row.updated_at ? String(row.updated_at) : undefined,
+  };
+}
+
+export async function listWhatsAppTemplatePresets(): Promise<WhatsAppTemplatePreset[]> {
+  const data = await invokeFn<{ presets?: Record<string, unknown>[]; error?: string }>(
+    'list-whatsapp-template-presets',
+    {},
+  );
+  if (data.error) throw new Error(data.error);
+  return (data.presets ?? []).map(mapTemplatePresetRow);
+}
+
+export async function createWhatsAppTemplatePreset(input: {
+  presetLabel: string;
+  templateName: string;
+  templateLanguage: string;
+  headerValues: string[];
+  bodyValues: string[];
+  sectionKey?: string | null;
+  isFavorite?: boolean;
+  sortOrder?: number;
+}): Promise<{ success: boolean; id: string }> {
+  return invokeFn<{ success: boolean; id: string }>('create-whatsapp-template-preset', input);
+}
+
+export async function updateWhatsAppTemplatePreset(
+  presetId: string,
+  patch: Partial<{
+    presetLabel: string;
+    templateName: string;
+    templateLanguage: string;
+    headerValues: string[];
+    bodyValues: string[];
+    sectionKey: string | null;
+    isFavorite: boolean;
+    sortOrder: number;
+  }>,
+): Promise<{ success: boolean }> {
+  return invokeFn<{ success: boolean }>('update-whatsapp-template-preset', { presetId, ...patch });
+}
+
+export async function deleteWhatsAppTemplatePreset(
+  presetId: string,
+): Promise<{ success: boolean }> {
+  return invokeFn<{ success: boolean }>('delete-whatsapp-template-preset', { presetId });
 }
 
 export async function deleteWhatsAppSnippet(

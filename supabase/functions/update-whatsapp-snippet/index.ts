@@ -37,6 +37,8 @@ Deno.serve(async (req) => {
       patch.title = body.label.trim();
     }
     if (typeof body.body === 'string' && body.body.trim()) patch.body = body.body.trim();
+    if (typeof body.isPinned === 'boolean') patch.is_pinned = body.isPinned;
+    if (Number.isFinite(Number(body.sortOrder))) patch.sort_order = Number(body.sortOrder);
 
     if (!Object.keys(patch).length) {
       return jsonResponse({ error: 'No hay campos para actualizar.' }, 400);

@@ -31,12 +31,12 @@ import {
   type BookingContextData,
   type WhatsAppTemplateSummary,
 } from '@/services/whatsappService';
+import MetaTemplateEditor from '@/components/whatsapp/templates/MetaTemplateEditor';
+import TemplateLibrary from '@/components/whatsapp/templates/TemplateLibrary';
 import {
   buildDisplayMessageBody,
   buildTemplateSendComponents,
   countSlotsForTemplate,
-  getExampleValues,
-  previewTextForList,
 } from '@/utils/whatsappTemplateHelpers';
 import {
   isWithinMetaSessionWindow,
@@ -101,14 +101,6 @@ function formatCOP(amount: number): string {
   }).format(amount);
 }
 
-function metaCategoryLabel(category?: string): string {
-  const normalized = (category || '').toUpperCase().trim();
-  if (normalized === 'UTILITY') return 'Utilidad Meta';
-  if (normalized === 'MARKETING') return 'Marketing Meta';
-  if (normalized === 'AUTHENTICATION') return 'Autenticación Meta';
-  return 'Categoría Meta no disponible';
-}
-
 const BookingAssistantDrawer: React.FC<BookingAssistantDrawerProps> = ({
   open,
   onClose,
@@ -143,6 +135,7 @@ const BookingAssistantDrawer: React.FC<BookingAssistantDrawerProps> = ({
   const [templateSendLoading, setTemplateSendLoading] = useState(false);
   const [templateSendError, setTemplateSendError] = useState<string | null>(null);
   const [templateSentOk, setTemplateSentOk] = useState(false);
+  const [templateLibraryOpen, setTemplateLibraryOpen] = useState(false);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -317,19 +310,18 @@ const BookingAssistantDrawer: React.FC<BookingAssistantDrawerProps> = ({
   const MIN_REASONABLE_AMOUNT_COP = 10000;
   const amountTooLow =
     Number.isFinite(parsedAmount) && parsedAmount > 0 && parsedAmount < MIN_REASONABLE_AMOUNT_COP;
-  const templateSlots = templateSuggestion
-    ? countSlotsForTemplate(templateSuggestion.template)
-    : { header: 0, body: 0 };
-  const templateHeaderExamples = templateSuggestion
-    ? getExampleValues(templateSuggestion.template.components, 'HEADER')
-    : [];
-  const templateBodyExamples = templateSuggestion
-    ? getExampleValues(templateSuggestion.template.components, 'BODY')
-    : [];
-  const canSendSuggestedTemplate =
-    Boolean(templateSuggestion && recipientPhone && phoneNumberId) && !templateSendLoading;
+  const suggestionContext = useMemo(
+    () => ({
+      bookingContext,
+      conversationDisplayName,
+      lastInboundAt,
+      lastMessageDirection,
+    }),
+    [bookingContext, conversationDisplayName, lastInboundAt, lastMessageDirection],
+  );
 
   return (
+    <>
     <Drawer
       anchor="right"
       open={open}
@@ -622,126 +614,41 @@ const BookingAssistantDrawer: React.FC<BookingAssistantDrawerProps> = ({
               )}
 
               {templateSuggestion && (
-                <Box
-                  sx={{
-                    border: '1px solid',
-                    borderColor: 'divider',
-                    borderRadius: 1,
-                    p: 1.5,
-                    mb: 2,
-                    bgcolor: 'background.paper',
-                  }}
-                >
-                  <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" mb={1}>
-                    <Typography variant="caption" fontWeight={700}>
-                      {templateSuggestion.template.name}
-                    </Typography>
-                    <Chip
-                      label={metaCategoryLabel(templateSuggestion.template.category)}
-                      size="small"
-                      sx={{ height: 20, fontSize: '0.65rem' }}
-                    />
-                  </Stack>
-                  <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-                    {templateSuggestion.reason}
-                  </Typography>
-
-                  <Box
-                    sx={{
-                      bgcolor: '#d9fdd3',
-                      borderRadius: 2,
-                      px: 1.5,
-                      py: 0.75,
-                      mb: 1.5,
-                      boxShadow: '0 1px 0.5px rgba(11,20,26,.13)',
+                <Box sx={{ mb: 2 }}>
+                  <MetaTemplateEditor
+                    mode="booking"
+                    template={templateSuggestion.template}
+                    values={{ header: templateHeaderValues, body: templateBodyValues }}
+                    onValuesChange={(values) => {
+                      setTemplateHeaderValues(values.header);
+                      setTemplateBodyValues(values.body);
                     }}
-                  >
-                    <Typography
-                      variant="body2"
-                      sx={{
-                        whiteSpace: 'pre-wrap',
-                        wordBreak: 'break-word',
-                        color: '#111b21',
-                        lineHeight: 1.4,
-                        fontSize: '0.8125rem',
-                      }}
-                    >
-                      {previewTextForList(templateSuggestion.template)}
-                    </Typography>
-                  </Box>
-
-                  {templateSlots.header > 0 && (
-                    <Box sx={{ mb: 1 }}>
-                      <Typography variant="caption" fontWeight={600} display="block" gutterBottom>
-                        Encabezado
-                      </Typography>
-                      {Array.from({ length: templateSlots.header }).map((_, index) => (
-                        <TextField
-                          key={`suggested-header-${index}`}
-                          fullWidth
-                          size="small"
-                          sx={{ mb: 1 }}
-                          label={`Variable {{${index + 1}}}`}
-                          helperText={templateHeaderExamples[index] ? `Ej: ${templateHeaderExamples[index]}` : undefined}
-                          value={templateHeaderValues[index] || ''}
-                          onChange={(event) => {
-                            const next = [...templateHeaderValues];
-                            next[index] = event.target.value;
-                            setTemplateHeaderValues(next);
-                          }}
-                        />
-                      ))}
-                    </Box>
-                  )}
-
-                  {templateSlots.body > 0 && (
-                    <Box sx={{ mb: 1 }}>
-                      <Typography variant="caption" fontWeight={600} display="block" gutterBottom>
-                        Variables
-                      </Typography>
-                      {Array.from({ length: templateSlots.body }).map((_, index) => (
-                        <TextField
-                          key={`suggested-body-${index}`}
-                          fullWidth
-                          size="small"
-                          sx={{ mb: 1 }}
-                          label={`Variable {{${index + 1}}}`}
-                          helperText={templateBodyExamples[index] ? `Ej: ${templateBodyExamples[index]}` : undefined}
-                          value={templateBodyValues[index] || ''}
-                          onChange={(event) => {
-                            const next = [...templateBodyValues];
-                            next[index] = event.target.value;
-                            setTemplateBodyValues(next);
-                          }}
-                        />
-                      ))}
-                    </Box>
-                  )}
-
-                  {templateSendError && (
-                    <Alert severity="error" sx={{ mb: 1 }}>
-                      {templateSendError}
-                    </Alert>
-                  )}
+                    showBackButton={false}
+                    suggestionReason={templateSuggestion.reason}
+                    sending={templateSendLoading}
+                    sendError={templateSendError}
+                    onSend={
+                      recipientPhone && phoneNumberId
+                        ? () => void handleSendSuggestedTemplate()
+                        : undefined
+                    }
+                    onApplyDraft={onUseSuggestion}
+                  />
                   {templateSentOk && (
-                    <Alert severity="success" sx={{ mb: 1 }}>
+                    <Alert severity="success" sx={{ mt: 1 }}>
                       Plantilla enviada correctamente.
                     </Alert>
                   )}
-
-                  <Button
-                    fullWidth
-                    variant="contained"
-                    disabled={!canSendSuggestedTemplate}
-                    onClick={() => void handleSendSuggestedTemplate()}
-                    sx={{
-                      bgcolor: '#7c3aed',
-                      '&:hover': { bgcolor: '#6d28d9' },
-                      textTransform: 'none',
-                    }}
-                  >
-                    {templateSendLoading ? <CircularProgress size={20} color="inherit" /> : 'Enviar con esta plantilla'}
-                  </Button>
+                  {wabaId && (
+                    <Button
+                      fullWidth
+                      variant="outlined"
+                      sx={{ mt: 1, textTransform: 'none' }}
+                      onClick={() => setTemplateLibraryOpen(true)}
+                    >
+                      Ver biblioteca completa
+                    </Button>
+                  )}
                 </Box>
               )}
             </>
@@ -784,6 +691,37 @@ const BookingAssistantDrawer: React.FC<BookingAssistantDrawerProps> = ({
         </Box>
       </Box>
     </Drawer>
+
+    {wabaId && (
+      <Drawer
+        anchor="right"
+        open={templateLibraryOpen}
+        onClose={() => setTemplateLibraryOpen(false)}
+        PaperProps={{ sx: { width: { xs: '100%', sm: 420 }, p: 0 } }}
+      >
+        <TemplateLibrary
+          mode="booking"
+          compact
+          wabaId={wabaId}
+          phoneNumberId={phoneNumberId}
+          recipientPhone={recipientPhone}
+          onApplyDraft={(text) => {
+            onUseSuggestion(text);
+            setTemplateLibraryOpen(false);
+          }}
+          suggestionContext={suggestionContext}
+          bookingContext={bookingContext}
+          initialTemplate={templateSuggestion?.template ?? null}
+          initialValues={
+            templateSuggestion
+              ? { header: templateHeaderValues, body: templateBodyValues }
+              : undefined
+          }
+          suggestionReason={templateSuggestion?.reason ?? null}
+        />
+      </Drawer>
+    )}
+    </>
   );
 };
 

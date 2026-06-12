@@ -33,6 +33,8 @@ import SaveIcon from '@mui/icons-material/Save';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import BusinessIcon from '@mui/icons-material/Business';
 import TextSnippetIcon from '@mui/icons-material/TextSnippet';
+import StarIcon from '@mui/icons-material/Star';
+import PushPinIcon from '@mui/icons-material/PushPin';
 import {
   getWhatsAppBusinessProfile,
   updateWhatsAppBusinessProfile,
@@ -40,9 +42,13 @@ import {
   createWhatsAppSnippet,
   updateWhatsAppSnippet as updateSnippetSvc,
   deleteWhatsAppSnippet as deleteSnippetSvc,
+  listWhatsAppTemplatePresets,
+  deleteWhatsAppTemplatePreset,
   type WhatsAppBusinessProfile,
   type WhatsAppSnippet,
+  type WhatsAppTemplatePreset,
 } from '@/services/whatsappService';
+import { getTemplateDisplayName } from '@/components/whatsapp/templates/templateDisplayNames';
 import useSoundEffects from '@/hooks/useSoundEffects';
 import {
   areSoundsEnabled,
@@ -77,6 +83,10 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
   const [snippetBody, setSnippetBody] = useState('');
   const [snippetSaving, setSnippetSaving] = useState(false);
   const [snippetError, setSnippetError] = useState<string | null>(null);
+
+  const [presets, setPresets] = useState<WhatsAppTemplatePreset[]>([]);
+  const [presetsLoading, setPresetsLoading] = useState(true);
+  const [presetsError, setPresetsError] = useState<string | null>(null);
 
   const { setEnabled: setSoundsEnabled, setVolume: setSoundVolume, playClick } = useSoundEffects();
   const [soundsOn, setSoundsOn] = useState(() => areSoundsEnabled());
@@ -115,10 +125,25 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
     }
   }, []);
 
+  const loadPresets = useCallback(async () => {
+    setPresetsLoading(true);
+    setPresetsError(null);
+    try {
+      const result = await listWhatsAppTemplatePresets();
+      setPresets(result);
+    } catch (err: unknown) {
+      setPresetsError((err as Error)?.message || 'Error al cargar pre-rellenos');
+      setPresets([]);
+    } finally {
+      setPresetsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadProfile();
     loadSnippets();
-  }, [loadProfile, loadSnippets]);
+    loadPresets();
+  }, [loadProfile, loadSnippets, loadPresets]);
 
   const handleSaveProfile = async () => {
     setProfileSaving(true);
@@ -191,6 +216,24 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
       await loadSnippets();
     } catch (err) {
       console.error('Error deleting snippet:', err);
+    }
+  };
+
+  const handleToggleSnippetPin = async (snippet: WhatsAppSnippet) => {
+    try {
+      await updateSnippetSvc(snippet.id, { isPinned: !snippet.isPinned });
+      await loadSnippets();
+    } catch (err) {
+      console.error('Error updating snippet pin:', err);
+    }
+  };
+
+  const handleDeletePreset = async (presetId: string) => {
+    try {
+      await deleteWhatsAppTemplatePreset(presetId);
+      await loadPresets();
+    } catch (err) {
+      console.error('Error deleting preset:', err);
     }
   };
 
@@ -360,10 +403,81 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
                         }
                       />
                       <ListItemSecondaryAction>
+                        <IconButton
+                          size="small"
+                          color={s.isPinned ? 'primary' : 'default'}
+                          onClick={() => void handleToggleSnippetPin(s)}
+                          aria-label={s.isPinned ? 'Quitar de favoritos' : 'Anclar en favoritos'}
+                        >
+                          <PushPinIcon fontSize="small" />
+                        </IconButton>
                         <IconButton size="small" onClick={() => openSnippetEdit(s)}>
                           <EditIcon fontSize="small" />
                         </IconButton>
                         <IconButton size="small" onClick={() => handleDeleteSnippet(s.id)} color="error">
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </ListItemSecondaryAction>
+                    </ListItem>
+                  ))}
+                </List>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12}>
+          <Card elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1 }}>
+                <StarIcon color="primary" />
+                <Typography variant="h6" fontWeight={600}>
+                  Pre-rellenos del equipo
+                </Typography>
+              </Box>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Favoritos compartidos de plantillas Meta. Se crean desde la biblioteca de mensajes al chatear.
+              </Typography>
+              <Divider sx={{ mb: 1 }} />
+              {presetsError && (
+                <Alert severity="error" sx={{ mb: 2 }}>
+                  {presetsError}
+                </Alert>
+              )}
+              {presetsLoading ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                  <CircularProgress />
+                </Box>
+              ) : presets.length === 0 ? (
+                <Typography color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
+                  Aún no hay pre-rellenos guardados para el equipo.
+                </Typography>
+              ) : (
+                <List disablePadding>
+                  {presets.map((preset) => (
+                    <ListItem key={preset.id} divider sx={{ px: 0 }}>
+                      <ListItemText
+                        primary={
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                            <Typography variant="body2" fontWeight={600}>
+                              {preset.presetLabel}
+                            </Typography>
+                            <Chip label="Equipo" size="small" color="primary" variant="outlined" />
+                          </Box>
+                        }
+                        secondary={
+                          <Typography variant="caption" color="text.secondary">
+                            {getTemplateDisplayName(preset.templateName)} · {preset.templateLanguage}
+                          </Typography>
+                        }
+                      />
+                      <ListItemSecondaryAction>
+                        <IconButton
+                          size="small"
+                          color="error"
+                          onClick={() => void handleDeletePreset(preset.id)}
+                          aria-label="Eliminar pre-relleno"
+                        >
                           <DeleteIcon fontSize="small" />
                         </IconButton>
                       </ListItemSecondaryAction>

@@ -114,6 +114,18 @@ verify_jwt = false
 [functions.delete-whatsapp-snippet]
 verify_jwt = false
 
+[functions.list-whatsapp-template-presets]
+verify_jwt = false
+
+[functions.create-whatsapp-template-preset]
+verify_jwt = false
+
+[functions.update-whatsapp-template-preset]
+verify_jwt = false
+
+[functions.delete-whatsapp-template-preset]
+verify_jwt = false
+
 [functions.get-whatsapp-business-profile]
 verify_jwt = false
 
@@ -134,4 +146,7 @@ verify_jwt = false
 # Autenticación server-to-server vía x-api-key desde Firebase scheduler.
 # El gateway no debe exigir JWT porque el caller no es un usuario de Supabase.
 [functions.send-appointment-reminder]
+verify_jwt = false
+
+[functions.directory-ai-analyze]
 verify_jwt = false

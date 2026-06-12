@@ -13,7 +13,7 @@ type DirectoryRow = Database['public']['Tables']['crm_directory']['Row'];
 // Mapping helpers
 // ──────────────────────────────────────────────
 
-function mapRowToEntry(row: DirectoryRow): DirectoryEntry {
+export function mapRowToEntry(row: DirectoryRow): DirectoryEntry {
   return {
     id: row.id,
     fullName: row.full_name,

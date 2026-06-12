@@ -109,6 +109,94 @@ export interface DirectoryEntry {
 }
 
 // ──────────────────────────────────────────────
+// Directory quality monitoring (crm_directory_issues)
+// ──────────────────────────────────────────────
+
+export type DirectoryIssueType =
+  | 'missing_name'
+  | 'invalid_name'
+  | 'emoji_name'
+  | 'missing_phone'
+  | 'invalid_phone'
+  | 'duplicate_phone'
+  | 'duplicate_email'
+  | 'duplicate_name';
+
+export type DirectoryIssueSeverity = 'warning' | 'error';
+export type DirectoryIssueStatus = 'open' | 'dismissed' | 'resolved';
+
+export interface DirectoryIssue {
+  id: string;
+  entryId?: string;
+  relatedEntryIds: string[];
+  issueType: DirectoryIssueType;
+  severity: DirectoryIssueSeverity;
+  status: DirectoryIssueStatus;
+  details: Record<string, unknown>;
+  detectedAt: string;
+  updatedAt: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
+  resolution?: string;
+  /** Entrada principal vinculada al issue (cargada por el servicio). */
+  entry?: DirectoryEntry | null;
+}
+
+export interface DirectoryIssueStats {
+  openTotal: number;
+  dismissedTotal: number;
+  byType: Partial<Record<DirectoryIssueType, number>>;
+}
+
+// ──────────────────────────────────────────────
+// AI suggestions (crm_directory_ai_suggestions, Gemini)
+// La IA solo PROPONE; el humano aplica desde la UI.
+// ──────────────────────────────────────────────
+
+export type AISuggestionType =
+  | 'name_cleanup'
+  | 'phone_fix'
+  | 'tag_suggestion'
+  | 'merge'
+  | 'summary';
+
+export type AISuggestionStatus = 'open' | 'applied' | 'dismissed';
+
+export interface DirectoryAISuggestion {
+  id: string;
+  entryId?: string;
+  issueId?: string;
+  suggestionType: AISuggestionType;
+  field?: string;
+  currentValue: Record<string, unknown>;
+  suggestedValue: Record<string, unknown>;
+  confidence?: number;
+  reason?: string;
+  relatedEntryIds: string[];
+  status: AISuggestionStatus;
+  model?: string;
+  createdAt: string;
+  updatedAt: string;
+  appliedAt?: string;
+  appliedBy?: string;
+  /** Entrada principal vinculada (cargada por el servicio). */
+  entry?: DirectoryEntry | null;
+}
+
+export interface AISuggestionStats {
+  openTotal: number;
+  appliedTotal: number;
+  dismissedTotal: number;
+  byType: Partial<Record<AISuggestionType, number>>;
+}
+
+export interface AIAnalyzeResult {
+  analyzed: number;
+  created: number;
+  summary: string;
+}
+
+// ──────────────────────────────────────────────
 // Backward compatibility: Lead = DirectoryEntry
 // ──────────────────────────────────────────────
 /** @deprecated Use DirectoryEntry instead. */

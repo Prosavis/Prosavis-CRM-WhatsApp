@@ -223,15 +223,22 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     }
   }, []);
 
+  const loadSnippets = useCallback(async () => {
+    try {
+      const result = await listWhatsAppSnippets();
+      setSnippets(result);
+    } catch (err) {
+      console.error('Error loading snippets:', err);
+    }
+  }, []);
+
   useEffect(() => {
     loadTags();
   }, [loadTags]);
 
   useEffect(() => {
-    listWhatsAppSnippets()
-      .then(setSnippets)
-      .catch((err) => console.error('Error loading snippets:', err));
-  }, []);
+    void loadSnippets();
+  }, [loadSnippets]);
 
   useEffect(() => {
     if (loading) return;
@@ -626,6 +633,16 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
             phoneNumberId={phoneNumberId}
             recipientPhone={recipientPhoneForTemplates}
             onApplyDraftToComposer={setComposerDraft}
+            snippets={snippets}
+            onSnippetsChanged={loadSnippets}
+            conversationStableKey={selectedConversation.phone || selectedConversation.id}
+            conversationDisplayName={contactCtx.displayName ?? undefined}
+            lastInboundAt={
+              selectedConversation.lastMessageDirection === 'inbound'
+                ? selectedConversation.lastMessageAt ?? null
+                : null
+            }
+            lastMessageDirection={selectedConversation.lastMessageDirection}
           />
         )}
 

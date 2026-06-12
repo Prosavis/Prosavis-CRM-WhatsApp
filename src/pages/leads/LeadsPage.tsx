@@ -3,12 +3,15 @@ import FilterListIcon from '@mui/icons-material/FilterList';
 import PeopleIcon from '@mui/icons-material/People';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SearchIcon from '@mui/icons-material/Search';
+import TroubleshootIcon from '@mui/icons-material/Troubleshoot';
 import WhatsAppIcon from '@mui/icons-material/WhatsApp';
 
 import Alert from '@mui/material/Alert';
+import Badge from '@mui/material/Badge';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
+import CardActionArea from '@mui/material/CardActionArea';
 import Checkbox from '@mui/material/Checkbox';
 import CardContent from '@mui/material/CardContent';
 import Chip from '@mui/material/Chip';
@@ -42,8 +45,10 @@ import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { directoryService } from '@/services/directoryService';
+import { directoryMonitorService } from '@/services/directoryMonitorService';
 import DirectoryEntryDrawer from '@/components/directory/DirectoryEntryDrawer';
 import DirectoryEditDialog from '@/components/directory/DirectoryEditDialog';
+import DirectoryMonitorPanel from '@/components/directory/DirectoryMonitorPanel';
 import type { DirectoryEntry, DirectorySource } from '@/types/lead';
 
 const CLASSIFICATION_CHIP_COLORS: Record<string, 'default' | 'primary' | 'info' | 'warning'> = {
@@ -145,6 +150,9 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
   const [sortField, setSortField] = useState<SortField | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
+  const [showMonitor, setShowMonitor] = useState(false);
+  const [issueOpenTotal, setIssueOpenTotal] = useState(0);
+
   const [searchInput, setSearchInput] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -162,6 +170,12 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
       setStats(result);
     } catch {
       // Stats fallback silencioso
+    }
+    try {
+      const issueStats = await directoryMonitorService.getIssueStats();
+      setIssueOpenTotal(issueStats.openTotal);
+    } catch {
+      // Issue stats fallback silencioso
     }
   }, []);
 
@@ -355,7 +369,7 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
 
       <Grid container spacing={2} mb={3}>
         {kpis.map((kpi) => (
-          <Grid item xs={6} sm={4} md={3} key={kpi.label}>
+          <Grid item xs={6} sm={4} md={2.4} key={kpi.label}>
             <Card>
               <CardContent sx={{ textAlign: 'center', py: 1.5 }}>
                 <Typography variant="h5" fontWeight={700} color={kpi.color}>
@@ -368,8 +382,43 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
             </Card>
           </Grid>
         ))}
+        <Grid item xs={12} sm={4} md={2.4}>
+          <Card
+            sx={{
+              height: '100%',
+              border: 1,
+              borderColor: showMonitor ? 'warning.main' : 'divider',
+              bgcolor: showMonitor ? 'warning.50' : undefined,
+            }}
+          >
+            <CardActionArea
+              onClick={() => setShowMonitor((prev) => !prev)}
+              sx={{ height: '100%' }}
+            >
+              <CardContent sx={{ textAlign: 'center', py: 1.5 }}>
+                <Badge badgeContent={issueOpenTotal} color="error" max={999}>
+                  <TroubleshootIcon color={showMonitor ? 'warning' : 'action'} />
+                </Badge>
+                <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                  Monitoreo del contacto
+                </Typography>
+              </CardContent>
+            </CardActionArea>
+          </Card>
+        </Grid>
       </Grid>
 
+      {showMonitor && (
+        <DirectoryMonitorPanel
+          onDirectoryChanged={() => {
+            fetchEntries();
+            fetchStats();
+          }}
+        />
+      )}
+
+      {!showMonitor && (
+      <>
       <Paper sx={{ p: 2, mb: 2 }}>
         <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
           <TextField
@@ -721,6 +770,8 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
             </Stack>
           </Box>
         </Paper>
+      )}
+      </>
       )}
 
       <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} maxWidth="sm" fullWidth>
