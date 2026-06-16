@@ -356,9 +356,20 @@ export const directoryMonitorService = {
       });
       const ctx = (error as { context?: Response }).context;
       if (ctx) {
-        const payload = await ctx.json().catch(() => null);
-        if (payload && typeof payload === 'object' && 'error' in payload) {
-          throw new Error(String((payload as { error: unknown }).error));
+        const raw = await ctx.text().catch(() => '');
+        if (raw) {
+          let parsedError: string | null = null;
+          try {
+            const payload = JSON.parse(raw) as { error?: unknown };
+            if (payload && typeof payload === 'object' && 'error' in payload) {
+              parsedError = String(payload.error);
+            }
+          } catch {
+            parsedError = raw.slice(0, 500);
+          }
+          if (parsedError) {
+            throw new Error(`HTTP ${ctx.status}: ${parsedError}`);
+          }
         }
       }
       throw error;
@@ -399,9 +410,11 @@ export const directoryMonitorService = {
     let analyzedTotal = 0;
     let createdTotal = 0;
     let failedBatchesTotal = 0;
+    let consecutiveFailures = 0;
     let lastSummary = '';
     let model: string | undefined;
     const MAX_PASSES = 500;
+    const MAX_CONSECUTIVE_FAILURES = 3;
 
     logDirectoryAI('analyze_all_start', { issueType: params?.issueType, reanalyze: params?.reanalyze });
 
@@ -413,12 +426,16 @@ export const directoryMonitorService = {
           batchSize: 5,
           reanalyze: params?.reanalyze && pass === 0,
         });
+        consecutiveFailures = 0;
       } catch (err) {
         failedBatchesTotal += 1;
+        consecutiveFailures += 1;
+        const message = err instanceof Error ? err.message : String(err);
         logDirectoryAI('pass_failed', {
           pass: pass + 1,
           failedBatchesTotal,
-          error: err instanceof Error ? err.message : String(err),
+          consecutiveFailures,
+          error: message,
         });
         onProgress?.({
           analyzedTotal,
@@ -427,6 +444,19 @@ export const directoryMonitorService = {
           model,
           failedBatches: failedBatchesTotal,
         });
+        // Circuit breaker: si la función falla repetidamente (p.ej. 500 persistente),
+        // abortamos con el mensaje real en lugar de martillar cientos de pasadas.
+        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+          logDirectoryAI('analyze_all_aborted', {
+            passes: pass + 1,
+            consecutiveFailures,
+            failedBatchesTotal,
+            error: message,
+          });
+          throw new Error(
+            `El análisis con IA falló ${consecutiveFailures} veces seguidas y se detuvo. Último error: ${message}`,
+          );
+        }
         const remainingGuess = await supabase
           .from('crm_directory_issues')
           .select('id', { count: 'exact', head: true })

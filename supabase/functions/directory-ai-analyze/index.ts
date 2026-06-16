@@ -2,6 +2,7 @@
 // sobre crm_directory, a partir de los issues abiertos del orquestador.
 
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
+import { formatError } from '../_shared/errors.ts';
 import { requireCrmAdmin } from '../_shared/supabase.ts';
 import {
   getGeminiApiKey,
@@ -264,7 +265,7 @@ Deno.serve(async (req) => {
     issueQuery = issueQuery.order('detected_at', { ascending: true }).limit(maxIssues);
 
     const { data: issuesData, error: issuesError } = await issueQuery;
-    if (issuesError) throw issuesError;
+    if (issuesError) throw new Error(formatError(issuesError));
     const issues = (issuesData ?? []) as IssueRow[];
 
     async function countRemaining(): Promise<number> {
@@ -326,7 +327,7 @@ Deno.serve(async (req) => {
         .from('crm_directory')
         .select('id, full_name, phone, phone_key, email, tags, source')
         .in('id', idsChunk);
-      if (dirError) throw dirError;
+      if (dirError) throw new Error(formatError(dirError));
       for (const e of (dirData ?? []) as DirectoryRow[]) entryById.set(e.id, e);
     }
 
@@ -341,7 +342,7 @@ Deno.serve(async (req) => {
         .from('whatsapp_conversations')
         .select('id, contact_name, whatsapp_profile_name, phone_key')
         .in('phone_key', keysChunk);
-      if (waError) throw waError;
+      if (waError) throw new Error(formatError(waError));
       for (const row of (waData ?? []) as WaConversationRow[]) {
         if (row.phone_key) waByPhoneKey.set(row.phone_key, row);
       }
@@ -351,7 +352,7 @@ Deno.serve(async (req) => {
       .from('whatsapp_chat_tags')
       .select('name')
       .eq('archived', false);
-    if (tagsError) throw tagsError;
+    if (tagsError) throw new Error(formatError(tagsError));
     const allowedTags = (tagsData ?? [])
       .map((t: { name: string }) => t.name)
       .filter((n): n is string => typeof n === 'string' && n.trim() !== '');
@@ -427,7 +428,7 @@ Deno.serve(async (req) => {
         p_related: params.related,
         p_model: modelUsed,
       });
-      if (error) throw error;
+      if (error) throw new Error(formatError(error));
       created += 1;
     }
 
@@ -636,7 +637,7 @@ Deno.serve(async (req) => {
           .from('crm_directory_issues')
           .update({ ai_analyzed_at: stampedAt })
           .in('id', idsChunk);
-        if (stampError) throw stampError;
+        if (stampError) throw new Error(formatError(stampError));
       }
     }
 
@@ -696,7 +697,7 @@ Deno.serve(async (req) => {
     });
   } catch (error) {
     if (error instanceof Response) return error;
-    const message = error instanceof Error ? error.message : 'Error desconocido';
+    const message = formatError(error);
     logAnalysis('invoke_fatal', { error: message });
     if (isGeminiMaxTokensError(error) || message.includes('MAX_TOKENS')) {
       return jsonResponse({
