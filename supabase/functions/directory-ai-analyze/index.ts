@@ -256,11 +256,24 @@ Deno.serve(async (req) => {
       }
     }
 
+    // reanalyze: limpia ai_analyzed_at de los issues abiertos para reprocesar toda la
+    // tabla por lotes (analyzeAllWithAI envía reanalyze solo en la primera pasada).
+    if (reanalyze) {
+      let resetQuery = supabase
+        .from('crm_directory_issues')
+        .update({ ai_analyzed_at: null })
+        .eq('status', 'open')
+        .not('ai_analyzed_at', 'is', null);
+      if (requestedType) resetQuery = resetQuery.eq('issue_type', requestedType);
+      const { error: resetError } = await resetQuery;
+      if (resetError) throw new Error(formatError(resetError));
+    }
+
     let issueQuery = supabase
       .from('crm_directory_issues')
       .select('id, entry_id, related_entry_ids, issue_type, details')
-      .eq('status', 'open');
-    if (!reanalyze) issueQuery = issueQuery.is('ai_analyzed_at', null);
+      .eq('status', 'open')
+      .is('ai_analyzed_at', null);
     if (requestedType) issueQuery = issueQuery.eq('issue_type', requestedType);
     issueQuery = issueQuery.order('detected_at', { ascending: true }).limit(maxIssues);
 
@@ -280,7 +293,7 @@ Deno.serve(async (req) => {
     }
 
     if (issues.length === 0) {
-      const remaining = reanalyze ? 0 : await countRemaining();
+      const remaining = await countRemaining();
       logAnalysis('no_issues', { remaining });
       return jsonResponse({
         analyzed: 0,
@@ -391,11 +404,17 @@ Deno.serve(async (req) => {
         'Eres un asistente experto en calidad de datos para un CRM de Prosavis (Colombia). ' +
         'Devuelve JSON con summary (máx. 300 caracteres), suggestions y duplicates.\n\n' +
         'Reglas:\n' +
-        '- name_cleanup: corrige emojis, capitalización, espacios. Si name_wa_mismatch, propone full_name CRM y contact_name para WhatsApp (mismo valor legible). Si está bien, omite el campo.\n' +
-        '- phone_fix: E.164 colombiano (+57…). Si no se puede inferir, omite.\n' +
+        '- name_cleanup: produce un nombre humano legible para full_name. Corrige emojis, símbolos, ' +
+        'capitalización y espacios (ej. "Pao Muñoz ♥️" → "Pao Muñoz", "🍄YENNY💝" → "Yenny"). ' +
+        'Si full_name NO es usable (solo emojis/símbolos, una sola letra, o son dígitos/un teléfono), ' +
+        'DERIVA el nombre desde, en orden: contact_name, whatsapp_profile_name (limpiándolos), o la ' +
+        'parte local del email (ej. "mariahenao815@gmail.com" → "Maria Henao", "jhonny1987meneses@icloud.com" → "Jhonny Meneses"). ' +
+        'Solo si NO existe ninguna fuente para un nombre real (sin email y con texto puramente simbólico), omite name_cleanup. ' +
+        'Si hay name_wa_mismatch, propone full_name (CRM) y contact_name (WhatsApp) con el mismo valor legible.\n' +
+        '- phone_fix: E.164 colombiano (+57…). NUNCA inventes números; si no hay teléfono en los datos, omite.\n' +
         buildTagsPromptSection(allowedTags) +
         '- duplicates: is_same_person solo si es la misma persona. reason máx. 120 caracteres.\n' +
-        '- confidence: 0..1. No inventes nombres sin datos.\n\n' +
+        '- confidence: 0..1. No inventes datos que no estén presentes.\n\n' +
         'CONTACTOS:\n' + JSON.stringify(compactEntries) + '\n\n' +
         'GRUPOS_DUPLICADOS:\n' + JSON.stringify(compactDupGroups)
       );
@@ -641,7 +660,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    const remaining = reanalyze ? 0 : await countRemaining();
+    const remaining = await countRemaining();
     const entriesAnalyzed = new Set(
       uniqueStamped.flatMap((id) => {
         const issue = issues.find((i) => i.id === id);

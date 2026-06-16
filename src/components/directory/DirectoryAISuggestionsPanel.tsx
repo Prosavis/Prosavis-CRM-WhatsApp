@@ -168,7 +168,7 @@ const DirectoryAISuggestionsPanel: React.FC<DirectoryAISuggestionsPanelProps> = 
     setError(null);
     setPartialFailures(0);
     try {
-      const result = await directoryMonitorService.analyzeAllWithAI(undefined, (p) => {
+      const result = await directoryMonitorService.analyzeAllWithAI({ reanalyze: true }, (p) => {
         setAnalyzeProgress(
           p.remaining > 0
             ? `Analizando… ${p.createdTotal} sugerencia(s), quedan ${p.remaining}`
