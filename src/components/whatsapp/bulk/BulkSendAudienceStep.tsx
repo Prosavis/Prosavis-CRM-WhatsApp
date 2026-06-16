@@ -129,7 +129,7 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
   const [waTags, setWaTags] = useState<WhatsAppTag[]>([]);
   const [showDirectoryTagFilters, setShowDirectoryTagFilters] = useState(false);
   const [includeOptOut, setIncludeOptOut] = useState(false);
-  const [showFilters, setShowFilters] = useState(false);
+  const [showFilters, setShowFilters] = useState(true);
   const [manualExpanded, setManualExpanded] = useState(initialManualExpanded);
   const [sortField, setSortField] = useState<BulkDirectorySortField>(
     BULK_DIRECTORY_DEFAULT_SORT_FIELD,
@@ -342,7 +342,7 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
         </Alert>
       )}
       <Box sx={{ display: 'flex', flexDirection: { xs: 'column', lg: 'row' }, gap: 2, minHeight: 0, flex: 1 }}>
-      <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+      <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ mb: 1.5 }}>
           <Chip icon={<PeopleIcon />} label={`${totalCount.toLocaleString('es-CO')} con teléfono`} size="small" variant="outlined" />
           <Chip
@@ -373,16 +373,16 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
             }}
             sx={{ flex: '1 1 240px', minWidth: 180 }}
           />
-          <Tooltip title="Filtros">
-            <IconButton
-              size="small"
-              onClick={() => setShowFilters(!showFilters)}
-              color={hasFilters ? 'primary' : 'default'}
-              aria-label="Filtros"
-            >
-              <FilterListIcon />
-            </IconButton>
-          </Tooltip>
+          <Button
+            size="small"
+            variant={showFilters ? 'contained' : 'outlined'}
+            color={hasFilters ? 'primary' : 'inherit'}
+            startIcon={<FilterListIcon />}
+            onClick={() => setShowFilters((prev) => !prev)}
+            sx={{ textTransform: 'none', flexShrink: 0 }}
+          >
+            {showFilters ? 'Ocultar filtros' : 'Filtros avanzados'}
+          </Button>
         </Stack>
 
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ mb: 1 }}>
@@ -413,8 +413,27 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
           </Tooltip>
         </Stack>
 
-        <Collapse in={showFilters}>
-          <Stack spacing={1.5} sx={{ mb: 1.5, p: 1.5, borderRadius: 1, bgcolor: 'action.hover' }}>
+        <Collapse in={showFilters} unmountOnExit={false}>
+          <Stack
+            spacing={1.5}
+            sx={{
+              mb: 1.5,
+              p: 1.5,
+              borderRadius: 1,
+              bgcolor: 'action.hover',
+              border: 1,
+              borderColor: 'divider',
+              maxHeight: { xs: 360, md: 320 },
+              overflowY: 'auto',
+              flexShrink: 0,
+            }}
+          >
+            <Typography variant="subtitle2" fontWeight={700}>
+              Filtros avanzados
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              Incluye o excluye contactos por tags de WhatsApp, tipo, calidad, estado y origen antes de seleccionar.
+            </Typography>
             {advancedFilterSummary.length > 0 && (
               <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                 {advancedFilterSummary.map((label) => (
@@ -506,7 +525,7 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
           </Alert>
         )}
 
-        <TableContainer sx={{ flex: 1, border: 1, borderColor: 'divider', borderRadius: 1 }}>
+        <TableContainer sx={{ flex: 1, minHeight: 0, border: 1, borderColor: 'divider', borderRadius: 1, overflow: 'auto' }}>
           <Table size="small" stickyHeader>
             <TableHead>
               <TableRow>
