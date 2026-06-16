@@ -22,6 +22,10 @@ import type {
 
 type DirectoryRow = Database['public']['Tables']['crm_directory']['Row'];
 
+function logDirectoryAI(event: string, data?: Record<string, unknown>): void {
+  console.info(`[directory-ai] ${event}`, data ?? '');
+}
+
 interface IssueRow {
   id: string;
   entry_id: string | null;
@@ -329,6 +333,13 @@ export const directoryMonitorService = {
     batchSize?: number;
     reanalyze?: boolean;
   }): Promise<AIAnalyzeResult> {
+    logDirectoryAI('invoke', {
+      issueType: params?.issueType,
+      batchSize: params?.batchSize,
+      limit: params?.limit,
+      reanalyze: params?.reanalyze,
+    });
+    const started = Date.now();
     const { data, error } = await supabase.functions.invoke<AIAnalyzeResult>('directory-ai-analyze', {
       body: {
         issueType: params?.issueType,
@@ -339,6 +350,10 @@ export const directoryMonitorService = {
       },
     });
     if (error) {
+      logDirectoryAI('invoke_error', {
+        elapsedMs: Date.now() - started,
+        message: error.message,
+      });
       const ctx = (error as { context?: Response }).context;
       if (ctx) {
         const payload = await ctx.json().catch(() => null);
@@ -348,7 +363,23 @@ export const directoryMonitorService = {
       }
       throw error;
     }
-    return data ?? { analyzed: 0, created: 0, summary: '', remaining: 0 };
+    const result = data ?? { analyzed: 0, created: 0, summary: '', remaining: 0 };
+    logDirectoryAI('invoke_ok', {
+      elapsedMs: Date.now() - started,
+      analyzed: result.analyzed,
+      created: result.created,
+      remaining: result.remaining,
+      model: result.model,
+      modelConfigured: result.modelConfigured,
+      modelOverridden: result.modelOverridden,
+      batchSizeUsed: result.batchSizeUsed,
+      retries: result.retries,
+      failedBatches: result.failedBatches,
+      finishReason: result.finishReason,
+      lastError: result.lastError,
+      partialSuccess: result.partialSuccess,
+    });
+    return result;
   },
 
   /**
@@ -372,6 +403,8 @@ export const directoryMonitorService = {
     let model: string | undefined;
     const MAX_PASSES = 500;
 
+    logDirectoryAI('analyze_all_start', { issueType: params?.issueType, reanalyze: params?.reanalyze });
+
     for (let pass = 0; pass < MAX_PASSES; pass += 1) {
       let result: AIAnalyzeResult;
       try {
@@ -382,6 +415,11 @@ export const directoryMonitorService = {
         });
       } catch (err) {
         failedBatchesTotal += 1;
+        logDirectoryAI('pass_failed', {
+          pass: pass + 1,
+          failedBatchesTotal,
+          error: err instanceof Error ? err.message : String(err),
+        });
         onProgress?.({
           analyzedTotal,
           createdTotal,
@@ -408,6 +446,13 @@ export const directoryMonitorService = {
       onProgress?.({ analyzedTotal, createdTotal, remaining, model, failedBatches: failedBatchesTotal });
 
       if (remaining <= 0 || result.analyzed === 0) {
+        logDirectoryAI('analyze_all_done', {
+          passes: pass + 1,
+          analyzedTotal,
+          createdTotal,
+          failedBatchesTotal,
+          model,
+        });
         return {
           analyzed: analyzedTotal,
           created: createdTotal,

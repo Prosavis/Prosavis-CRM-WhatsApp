@@ -23,6 +23,37 @@ export function resolveGeminiModel(envKey: string, fallback: string): string {
   return Deno.env.get(envKey)?.trim() || fallback;
 }
 
+/**
+ * Modelo para análisis masivo del directorio.
+ * Pro consume tokens de razonamiento interno y trunca JSON largo → forzamos Flash
+ * aunque GEMINI_MODEL_DIRECTORY_ANALYSIS apunte a pro.
+ */
+export function resolveDirectoryAnalysisModel(): {
+  model: string;
+  configured: string | null;
+  overridden: boolean;
+} {
+  const configured = Deno.env.get('GEMINI_MODEL_DIRECTORY_ANALYSIS')?.trim() || null;
+  const isPro = configured != null && /\bpro\b/i.test(configured);
+  if (!configured || isPro) {
+    return {
+      model: DEFAULT_GEMINI_MODEL,
+      configured,
+      overridden: configured != null && configured !== DEFAULT_GEMINI_MODEL,
+    };
+  }
+  return { model: configured, configured, overridden: false };
+}
+
+/** Logs estructurados visibles en Supabase → Edge Functions → Logs. */
+export function geminiLog(
+  scope: string,
+  event: string,
+  data?: Record<string, unknown>,
+): void {
+  console.log(JSON.stringify({ scope, event, ts: new Date().toISOString(), ...data }));
+}
+
 // ─── Tipos internos para la API de Gemini ────────────────────────────────
 
 interface GeminiPart {
@@ -233,10 +264,21 @@ export async function geminiGenerateJsonWithMeta<T>(params: {
   temperature?: number;
   maxOutputTokens?: number;
   responseSchema?: Record<string, unknown>;
+  logScope?: string;
 }): Promise<GeminiJsonResult<T>> {
   const model = params.model ??
     resolveGeminiModel('GEMINI_MODEL_JSON', DEFAULT_GEMINI_MODEL);
+  const scope = params.logScope ?? 'gemini-json';
+  const promptChars = params.prompt.length;
 
+  geminiLog(scope, 'request', {
+    model,
+    promptChars,
+    maxOutputTokens: params.maxOutputTokens ?? 8192,
+    hasSchema: !!params.responseSchema,
+  });
+
+  const started = Date.now();
   const data = await geminiRequest({
     apiKey: params.apiKey,
     model,
@@ -248,15 +290,42 @@ export async function geminiGenerateJsonWithMeta<T>(params: {
   });
 
   const finishReason = data.candidates?.[0]?.finishReason;
-  const raw = stripCodeFences(extractTextFromResponse(data));
+  const elapsedMs = Date.now() - started;
+
+  let raw: string;
+  try {
+    raw = stripCodeFences(extractTextFromResponse(data));
+  } catch (e) {
+    geminiLog(scope, 'extract_failed', {
+      model,
+      finishReason,
+      elapsedMs,
+      error: e instanceof Error ? e.message : String(e),
+    });
+    throw e;
+  }
 
   try {
-    return { data: JSON.parse(raw) as T, finishReason };
+    const parsed = JSON.parse(raw) as T;
+    geminiLog(scope, 'success', {
+      model,
+      finishReason,
+      elapsedMs,
+      responseChars: raw.length,
+    });
+    return { data: parsed, finishReason };
   } catch {
     const jsonMatch = raw.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
     if (jsonMatch) {
       try {
-        return { data: JSON.parse(jsonMatch[0]) as T, finishReason };
+        const parsed = JSON.parse(jsonMatch[0]) as T;
+        geminiLog(scope, 'success_salvaged', {
+          model,
+          finishReason,
+          elapsedMs,
+          responseChars: raw.length,
+        });
+        return { data: parsed, finishReason };
       } catch {
         // cae al throw de abajo
       }
@@ -267,6 +336,13 @@ export async function geminiGenerateJsonWithMeta<T>(params: {
         ? ` (finishReason: ${finishReason})`
         : '';
     const message = `Gemini no devolvió JSON válido${truncated}: ${raw.slice(0, 200)}`;
+    geminiLog(scope, 'parse_failed', {
+      model,
+      finishReason,
+      elapsedMs,
+      responseChars: raw.length,
+      preview: raw.slice(0, 120),
+    });
     if (finishReason === 'MAX_TOKENS') {
       throw new GeminiMaxTokensError(message);
     }

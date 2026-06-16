@@ -199,10 +199,16 @@ export interface AIAnalyzeResult {
   remaining?: number;
   /** Modelo de Gemini realmente usado en la pasada. */
   model?: string;
+  /** Valor de GEMINI_MODEL_DIRECTORY_ANALYSIS en el servidor (si existe). */
+  modelConfigured?: string | null;
+  /** true si el servidor ignoró pro y usó Flash. */
+  modelOverridden?: boolean;
   batchSizeUsed?: number;
   retries?: number;
   failedBatches?: number;
   finishReason?: string;
+  lastError?: string;
+  partialSuccess?: boolean;
 }
 
 // ──────────────────────────────────────────────

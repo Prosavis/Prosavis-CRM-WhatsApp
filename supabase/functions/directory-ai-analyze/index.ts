@@ -6,14 +6,16 @@ import { requireCrmAdmin } from '../_shared/supabase.ts';
 import {
   getGeminiApiKey,
   geminiGenerateJsonWithMeta,
+  geminiLog,
   isGeminiMaxTokensError,
-  resolveGeminiModel,
+  resolveDirectoryAnalysisModel,
   DEFAULT_GEMINI_MODEL,
 } from '../_shared/geminiClient.ts';
 import { normalizeDirectoryPhoneE164 } from '../_shared/directoryPhone.ts';
 
-// Flash por defecto: menos tokens de razonamiento que pro → menos MAX_TOKENS en JSON largo.
-const ANALYSIS_MODEL = resolveGeminiModel('GEMINI_MODEL_DIRECTORY_ANALYSIS', DEFAULT_GEMINI_MODEL);
+const LOG_SCOPE = 'directory-ai-analyze';
+const MODEL_RESOLUTION = resolveDirectoryAnalysisModel();
+const ANALYSIS_MODEL = MODEL_RESOLUTION.model;
 
 const DEFAULT_MAX_ISSUES_PER_RUN = 5;
 const MAX_ISSUES_PER_RUN = 10;
@@ -160,6 +162,10 @@ function buildTagsPromptSection(allowedTags: string[]): string {
   return `- tags: hay ${allowedTags.length} etiquetas en el sistema; sugiere solo nombres ya presentes en tags del contacto o de la lista corta: ${JSON.stringify(allowedTags.slice(0, 40))}…\n`;
 }
 
+function logAnalysis(event: string, data?: Record<string, unknown>): void {
+  geminiLog(LOG_SCOPE, event, data);
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -189,7 +195,24 @@ Deno.serve(async (req) => {
     let batchSizeUsed = maxIssues;
     let lastFinishReason: string | undefined;
 
-    async function analyzeBatch(prompt: string): Promise<GeminiResult> {
+    logAnalysis('invoke_start', {
+      modelUsed,
+      modelConfigured: MODEL_RESOLUTION.configured,
+      modelOverridden: MODEL_RESOLUTION.overridden,
+      maxIssues,
+      requestedType: requestedType || null,
+      reanalyze,
+    });
+
+    if (MODEL_RESOLUTION.overridden) {
+      logAnalysis('model_override', {
+        configured: MODEL_RESOLUTION.configured,
+        using: ANALYSIS_MODEL,
+        reason: 'pro_or_unset_uses_flash_for_directory_batch',
+      });
+    }
+
+    async function analyzeBatch(prompt: string, meta: Record<string, unknown>): Promise<GeminiResult> {
       try {
         const { data, finishReason } = await geminiGenerateJsonWithMeta<GeminiResult>({
           apiKey: geminiKey,
@@ -198,14 +221,24 @@ Deno.serve(async (req) => {
           temperature: 0,
           maxOutputTokens: 8192,
           responseSchema: DIRECTORY_ANALYSIS_SCHEMA,
+          logScope: LOG_SCOPE,
         });
         lastFinishReason = finishReason;
+        logAnalysis('gemini_ok', {
+          ...meta,
+          model: modelUsed,
+          finishReason,
+          suggestions: data.suggestions?.length ?? 0,
+          duplicates: data.duplicates?.length ?? 0,
+        });
         return data;
       } catch (e) {
         const msg = String((e as Error)?.message ?? e);
+        logAnalysis('gemini_error', { ...meta, model: modelUsed, error: msg });
         const modelMissing = /\b404\b|not found|not_found|is not supported|no such model|unsupported/i.test(msg);
         if (modelMissing && modelUsed !== DEFAULT_GEMINI_MODEL) {
           modelUsed = DEFAULT_GEMINI_MODEL;
+          logAnalysis('model_fallback', { fallback: modelUsed });
           const { data, finishReason } = await geminiGenerateJsonWithMeta<GeminiResult>({
             apiKey: geminiKey,
             model: modelUsed,
@@ -213,6 +246,7 @@ Deno.serve(async (req) => {
             temperature: 0,
             maxOutputTokens: 8192,
             responseSchema: DIRECTORY_ANALYSIS_SCHEMA,
+            logScope: LOG_SCOPE,
           });
           lastFinishReason = finishReason;
           return data;
@@ -246,6 +280,7 @@ Deno.serve(async (req) => {
 
     if (issues.length === 0) {
       const remaining = reanalyze ? 0 : await countRemaining();
+      logAnalysis('no_issues', { remaining });
       return jsonResponse({
         analyzed: 0,
         created: 0,
@@ -534,25 +569,46 @@ Deno.serve(async (req) => {
 
       const subsetDupGroups = capDupGroupsForPrompt(dupGroupsForIssues(issueSubset));
       const entriesChunk = entriesForIssues(issueSubset);
+      const prompt = buildPrompt(entriesChunk, subsetDupGroups);
+      const meta = {
+        depth,
+        issues: issueSubset.length,
+        entries: entriesChunk.length,
+        dupGroups: subsetDupGroups.length,
+        promptChars: prompt.length,
+      };
 
       try {
-        const result = await analyzeBatch(buildPrompt(entriesChunk, subsetDupGroups));
+        logAnalysis('subset_start', meta);
+        const result = await analyzeBatch(prompt, meta);
         await processResult(result, subsetDupGroups);
+        logAnalysis('subset_done', { ...meta, stamped: issueSubset.length });
         return issueSubset.map((i) => i.id);
       } catch (e) {
         if (isGeminiMaxTokensError(e) && issueSubset.length > 1 && depth < MAX_SPLIT_DEPTH) {
           retries += 1;
           const mid = Math.ceil(issueSubset.length / 2);
+          logAnalysis('subset_split', { ...meta, retries, left: mid, right: issueSubset.length - mid });
           const left = await processIssueSubset(issueSubset.slice(0, mid), depth + 1);
           const right = await processIssueSubset(issueSubset.slice(mid), depth + 1);
           return [...left, ...right];
         }
+        logAnalysis('subset_failed', {
+          ...meta,
+          error: e instanceof Error ? e.message : String(e),
+        });
         throw e;
       }
     }
 
     batchSizeUsed = computeEffectiveBatchSize(maxIssues, dupGroups.length);
     const issueChunks = chunk(issues, batchSizeUsed);
+    logAnalysis('batch_plan', {
+      issuesLoaded: issues.length,
+      dupGroupsTotal: dupGroups.length,
+      batchSizeUsed,
+      chunkCount: issueChunks.length,
+    });
     const stampedIssueIds: string[] = [];
     let failedBatches = 0;
     let lastBatchError: string | undefined;
@@ -564,6 +620,11 @@ Deno.serve(async (req) => {
       } catch (e) {
         failedBatches += 1;
         lastBatchError = e instanceof Error ? e.message : String(e);
+        logAnalysis('chunk_failed', {
+          chunkIssues: issueChunk.length,
+          failedBatches,
+          error: lastBatchError,
+        });
       }
     }
 
@@ -609,11 +670,22 @@ Deno.serve(async (req) => {
       p_model: modelUsed,
     });
 
+    logAnalysis('invoke_done', {
+      analyzed: uniqueStamped.length,
+      created,
+      remaining,
+      failedBatches,
+      retries,
+      finishReason: lastFinishReason,
+    });
+
     return jsonResponse({
       analyzed: uniqueStamped.length,
       created,
       remaining,
       model: modelUsed,
+      modelConfigured: MODEL_RESOLUTION.configured,
+      modelOverridden: MODEL_RESOLUTION.overridden,
       summary,
       batchSizeUsed,
       retries,
@@ -625,12 +697,15 @@ Deno.serve(async (req) => {
   } catch (error) {
     if (error instanceof Response) return error;
     const message = error instanceof Error ? error.message : 'Error desconocido';
+    logAnalysis('invoke_fatal', { error: message });
     if (isGeminiMaxTokensError(error) || message.includes('MAX_TOKENS')) {
       return jsonResponse({
         analyzed: 0,
         created: 0,
         remaining: -1,
         model: ANALYSIS_MODEL,
+        modelConfigured: MODEL_RESOLUTION.configured,
+        modelOverridden: MODEL_RESOLUTION.overridden,
         summary: 'Lote demasiado grande para Gemini; reintenta (lotes más pequeños).',
         failedBatches: 1,
         lastError: message,
