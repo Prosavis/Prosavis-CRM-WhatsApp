@@ -50,6 +50,11 @@ import {
   VOICE_NOTE_MIME,
   type VoiceRecorderHandle,
 } from '@/services/voiceRecorder';
+import {
+  clearComposerDraft,
+  getComposerDraft,
+  setComposerDraft,
+} from '@/utils/messageComposerDraftStore';
 import { WhatsAppLexicalEditor, type WhatsAppLexicalEditorHandle } from './lexical/WhatsAppLexicalEditor';
 
 type SupportedMediaType = Extract<
@@ -82,6 +87,8 @@ interface MessageInputProps {
     onStatusChange: (id: string, status: PendingAttachmentStatus, error?: string) => void,
   ) => Promise<{ failedClientAttachmentIds: string[] }>;
   disabled?: boolean;
+  /** Clave estable de la conversación (phone || id) para borradores por chat. */
+  conversationKey: string;
   draftText?: string;
   onRequestSuggestion?: (options?: { withContext?: boolean }) => void;
   suggestionLoading?: boolean;
@@ -104,6 +111,7 @@ interface MessageInputProps {
 
 const TYPING_START_DEBOUNCE_MS = 300;
 const TYPING_STOP_DEBOUNCE_MS = 2_500;
+const COMPOSER_DRAFT_DEBOUNCE_MS = 300;
 const COMPOSER_MIN_TEXTAREA_HEIGHT = 72;
 const COMPOSER_MAX_TEXTAREA_HEIGHT = 220;
 const COMPOSER_VERTICAL_PADDING = 16;
@@ -161,6 +169,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   onSendMedia,
   onSendMediaBatch,
   disabled,
+  conversationKey,
   draftText,
   onRequestSuggestion,
   suggestionLoading,
@@ -202,6 +211,34 @@ const MessageInput: React.FC<MessageInputProps> = ({
     video: null,
     document: null,
   });
+
+  const conversationKeyRef = useRef('');
+  const textRef = useRef('');
+  const draftPersistTimeoutRef = useRef<number | null>(null);
+
+  const flushDraftPersist = useCallback(() => {
+    if (draftPersistTimeoutRef.current !== null) {
+      window.clearTimeout(draftPersistTimeoutRef.current);
+      draftPersistTimeoutRef.current = null;
+    }
+    setComposerDraft(conversationKeyRef.current, textRef.current);
+  }, []);
+
+  const scheduleDraftPersist = useCallback((plain: string) => {
+    if (draftPersistTimeoutRef.current !== null) {
+      window.clearTimeout(draftPersistTimeoutRef.current);
+    }
+    draftPersistTimeoutRef.current = window.setTimeout(() => {
+      draftPersistTimeoutRef.current = null;
+      setComposerDraft(conversationKeyRef.current, plain);
+    }, COMPOSER_DRAFT_DEBOUNCE_MS);
+  }, []);
+
+  const applyComposerText = useCallback((value: string) => {
+    lexicalEditorRef.current?.setWhatsAppText(value);
+    setText(value);
+    textRef.current = value;
+  }, []);
 
   // === Typing presence (debounced) ===
   const typingActiveRef = useRef(false);
@@ -254,15 +291,34 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
   const handleLexicalPlainChange = useCallback((plain: string) => {
     setText(plain);
+    textRef.current = plain;
+    scheduleDraftPersist(plain);
     if (plain.length > 0) {
       noteUserTyping();
     } else {
       stopTypingNow();
     }
-  }, [noteUserTyping, stopTypingNow]);
+  }, [noteUserTyping, scheduleDraftPersist, stopTypingNow]);
+
+  useEffect(() => {
+    const prevKey = conversationKeyRef.current;
+    if (prevKey !== conversationKey) {
+      if (prevKey) {
+        flushDraftPersist();
+      }
+      stopTypingNow();
+      applyComposerText(getComposerDraft(conversationKey));
+      conversationKeyRef.current = conversationKey;
+    }
+  }, [conversationKey, applyComposerText, flushDraftPersist, stopTypingNow]);
 
   useEffect(() => {
     return () => {
+      flushDraftPersist();
+      setComposerDraft(conversationKeyRef.current, textRef.current);
+      if (draftPersistTimeoutRef.current !== null) {
+        window.clearTimeout(draftPersistTimeoutRef.current);
+      }
       clearTypingTimeouts();
       if (typingActiveRef.current) {
         typingActiveRef.current = false;
@@ -333,10 +389,11 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
   useEffect(() => {
     if (draftText !== undefined && draftText !== '') {
-      lexicalEditorRef.current?.setWhatsAppText(draftText);
+      applyComposerText(draftText);
+      setComposerDraft(conversationKey, draftText);
       lexicalEditorRef.current?.focus();
     }
-  }, [draftText]);
+  }, [applyComposerText, conversationKey, draftText]);
 
   const clearPendingFile = useCallback((id?: string) => {
     setPendingFiles((prev) => {
@@ -485,6 +542,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
             toast.error('Algunos adjuntos no se enviaron');
           } else {
             lexicalEditorRef.current?.setWhatsAppText('');
+            textRef.current = '';
+            clearComposerDraft(conversationKey);
             clearPendingFile();
             playSuccess();
           }
@@ -492,6 +551,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
           const first = pendingFiles[0];
           await onSendMedia(first.file, first.mediaType, text.trim() || undefined);
           lexicalEditorRef.current?.setWhatsAppText('');
+          textRef.current = '';
+          clearComposerDraft(conversationKey);
           clearPendingFile(first.id);
           playSuccess();
         }
@@ -514,6 +575,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
     try {
       await onSend(trimmed);
       lexicalEditorRef.current?.setWhatsAppText('');
+      textRef.current = '';
+      clearComposerDraft(conversationKey);
       lexicalEditorRef.current?.focus();
       playSuccess();
     } catch (e: unknown) {
@@ -524,7 +587,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
     } finally {
       setSending(false);
     }
-  }, [text, sending, onSend, onSendMedia, onSendMediaBatch, pendingFiles, clearPendingFile, stopTypingNow, playSuccess, playError]);
+  }, [text, sending, onSend, onSendMedia, onSendMediaBatch, pendingFiles, clearPendingFile, conversationKey, stopTypingNow, playSuccess, playError]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {

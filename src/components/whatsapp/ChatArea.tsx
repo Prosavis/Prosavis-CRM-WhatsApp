@@ -1307,6 +1307,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             </Box>
           )}
           <MessageInput
+            conversationKey={stableKey}
             onSend={handleSend}
             onSendMedia={handleSendMedia}
             onSendMediaBatch={handleSendMediaBatch}

@@ -34,6 +34,7 @@ import {
   computeWhatsAppInboxMetrics,
   type WhatsAppInboxMetrics,
 } from '@/utils/whatsappInboxStats';
+import { clearAllComposerDrafts } from '@/utils/messageComposerDraftStore';
 import { areSoundsEnabled, getSoundVolume } from '@/utils/soundPreferences';
 import {
   canShowDesktopNotifications,
@@ -165,6 +166,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   useEffect(() => {
     inboundBaselineReadyRef.current = false;
     inboundPrevSnapshotRef.current = new Map();
+    clearAllComposerDrafts();
     setSelectedConversation(null);
   }, [phoneNumberId]);
 
