@@ -9,6 +9,7 @@ import {
   DialogTitle,
   Divider,
   IconButton,
+  LinearProgress,
   Step,
   StepLabel,
   Stepper,
@@ -18,7 +19,11 @@ import {
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import SendIcon from '@mui/icons-material/Send';
-import { bulkWhatsAppSend } from '@/services/whatsappService';
+import {
+  runBulkWhatsAppSend,
+  retryBulkWhatsAppSend,
+  type BulkSendCounts,
+} from '@/services/whatsappService';
 import type { DirectoryEntry } from '@/types/lead';
 import { countSlotsForTemplate } from '@/utils/whatsappTemplateHelpers';
 import BulkSendAudienceStep from './BulkSendAudienceStep';
@@ -69,8 +74,11 @@ const WhatsAppBulkSendDialog: React.FC<WhatsAppBulkSendDialogProps> = ({
   const [message, setMessage] = useState<BulkMessageState>(INITIAL_MESSAGE);
   const [confirmPhrase, setConfirmPhrase] = useState('');
   const [loading, setLoading] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ sent: number; failed: number; skipped: number } | null>(null);
+  const [progress, setProgress] = useState<BulkSendCounts | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [result, setResult] = useState<BulkSendCounts | null>(null);
 
   const manualPhones = useMemo(() => parseManualPhones(manualPhonesRaw), [manualPhonesRaw]);
   const recipients = useMemo(
@@ -87,12 +95,15 @@ const WhatsAppBulkSendDialog: React.FC<WhatsAppBulkSendDialogProps> = ({
     setMessage(INITIAL_MESSAGE);
     setConfirmPhrase('');
     setError(null);
+    setProgress(null);
+    setJobId(null);
     setResult(null);
     setLoading(false);
+    setRetrying(false);
   }, []);
 
   const handleClose = () => {
-    if (loading) return;
+    if (loading || retrying) return;
     resetState();
     onClose();
   };
@@ -118,21 +129,45 @@ const WhatsAppBulkSendDialog: React.FC<WhatsAppBulkSendDialogProps> = ({
   const handleSend = async () => {
     setLoading(true);
     setError(null);
+    setProgress(null);
     try {
       const templatePayload = buildTemplatePayload(message);
-      const sendResult = await bulkWhatsAppSend({
-        recipients,
-        ...templatePayload,
-        ...(message.mode === 'text' ? { richBody: message.text.trim() } : {}),
-        phoneNumberId,
-        confirmation: BULK_CONFIRM_PHRASE,
-      });
-      setResult(sendResult);
+      const sendResult = await runBulkWhatsAppSend(
+        {
+          recipients,
+          ...templatePayload,
+          ...(message.mode === 'text' ? { richBody: message.text.trim() } : {}),
+          phoneNumberId,
+          confirmation: BULK_CONFIRM_PHRASE,
+        },
+        (chunk) => {
+          setJobId(chunk.jobId);
+          setProgress(chunk.totals);
+        },
+      );
+      setJobId(sendResult.jobId);
+      setResult(sendResult.totals);
       setStep(3);
     } catch (err: unknown) {
       setError((err as Error)?.message || 'Error al enviar');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRetryFailed = async () => {
+    if (!jobId) return;
+    setRetrying(true);
+    setError(null);
+    try {
+      const retryResult = await retryBulkWhatsAppSend(jobId, (chunk) => {
+        setProgress(chunk.totals);
+      });
+      setResult(retryResult.totals);
+    } catch (err: unknown) {
+      setError((err as Error)?.message || 'Error al reintentar');
+    } finally {
+      setRetrying(false);
     }
   };
 
@@ -206,15 +241,36 @@ const WhatsAppBulkSendDialog: React.FC<WhatsAppBulkSendDialogProps> = ({
             error={error}
           />
         )}
+        {step === 2 && loading && progress && (
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="body2" color="text.secondary" gutterBottom>
+              Enviando por lotes… {progress.sent + progress.failed + progress.skipped} de {progress.total}
+              {' · '}Enviados: {progress.sent} · Fallidos: {progress.failed} · Omitidos: {progress.skipped}
+            </Typography>
+            <LinearProgress
+              variant="determinate"
+              value={progress.total > 0
+                ? Math.round(((progress.total - progress.pending) / progress.total) * 100)
+                : 0}
+            />
+          </Box>
+        )}
         {step === 3 && result && (
-          <BulkSendResultStep sent={result.sent} failed={result.failed} skipped={result.skipped} />
+          <BulkSendResultStep
+            sent={result.sent}
+            failed={result.failed}
+            skipped={result.skipped}
+            onRetryFailed={result.failed > 0 ? handleRetryFailed : undefined}
+            retrying={retrying}
+            error={error}
+          />
         )}
       </DialogContent>
 
       <Divider />
 
       <DialogActions sx={{ px: 2, py: 1.5, flexShrink: 0 }}>
-        <Button onClick={handleClose} disabled={loading}>
+        <Button onClick={handleClose} disabled={loading || retrying}>
           {step === 3 ? 'Cerrar' : 'Cancelar'}
         </Button>
         {step > 0 && step < 3 && (

@@ -760,7 +760,23 @@ export async function getProsavisCleaningWompiCheckoutUrl(amountCOP: number): Pr
   }>('get-prosavis-cleaning-wompi-checkout-url', { amountCOP });
 }
 
-export async function bulkWhatsAppSend(params: {
+export interface BulkSendCounts {
+  pending: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+  total: number;
+}
+
+export interface BulkSendChunkResult {
+  jobId: string;
+  status: 'processing' | 'completed';
+  chunkProcessed: number;
+  remaining: number;
+  totals: BulkSendCounts;
+}
+
+export interface BulkWhatsAppSendStartParams {
   recipients: Array<{ phone: string; name?: string }>;
   templateName?: string;
   templateLanguage?: string;
@@ -772,11 +788,59 @@ export async function bulkWhatsAppSend(params: {
   richBody?: string;
   phoneNumberId?: string;
   confirmation: string;
-}): Promise<{ jobId: string; sent: number; failed: number; skipped: number }> {
-  return invokeFn<{ jobId: string; sent: number; failed: number; skipped: number }>(
-    'bulk-whatsapp-send',
-    params,
-  );
+}
+
+/** Crea el job, registra destinatarios y procesa el primer lote. */
+export async function bulkWhatsAppSendStart(
+  params: BulkWhatsAppSendStartParams,
+): Promise<BulkSendChunkResult> {
+  return invokeFn<BulkSendChunkResult>('bulk-whatsapp-send', { action: 'start', ...params });
+}
+
+/** Procesa el siguiente lote de pendientes del job. */
+export async function bulkWhatsAppSendContinue(jobId: string): Promise<BulkSendChunkResult> {
+  return invokeFn<BulkSendChunkResult>('bulk-whatsapp-send', { action: 'continue', jobId });
+}
+
+/** Reabre los fallidos a pendiente y procesa un lote (reintento de los que faltaron). */
+export async function bulkWhatsAppSendRetry(jobId: string): Promise<BulkSendChunkResult> {
+  return invokeFn<BulkSendChunkResult>('bulk-whatsapp-send', { action: 'retry', jobId });
+}
+
+/**
+ * Ejecuta un envío masivo completo iterando lotes hasta agotar pendientes.
+ * Informa progreso tras cada lote vía `onProgress`. Cada lote es una invocación
+ * corta de la Edge Function (muy por debajo del límite de 150s).
+ */
+export async function runBulkWhatsAppSend(
+  params: BulkWhatsAppSendStartParams,
+  onProgress?: (result: BulkSendChunkResult) => void,
+): Promise<BulkSendChunkResult> {
+  let result = await bulkWhatsAppSendStart(params);
+  onProgress?.(result);
+  const MAX_CHUNKS = 1000; // salvaguarda anti-bucle
+  for (let i = 0; i < MAX_CHUNKS && result.remaining > 0; i += 1) {
+    result = await bulkWhatsAppSendContinue(result.jobId);
+    onProgress?.(result);
+    if (result.chunkProcessed === 0 && result.remaining > 0) break; // no avanzó: evita bucle
+  }
+  return result;
+}
+
+/** Reintenta los destinatarios fallidos de un job y continúa hasta terminar. */
+export async function retryBulkWhatsAppSend(
+  jobId: string,
+  onProgress?: (result: BulkSendChunkResult) => void,
+): Promise<BulkSendChunkResult> {
+  let result = await bulkWhatsAppSendRetry(jobId);
+  onProgress?.(result);
+  const MAX_CHUNKS = 1000;
+  for (let i = 0; i < MAX_CHUNKS && result.remaining > 0; i += 1) {
+    result = await bulkWhatsAppSendContinue(jobId);
+    onProgress?.(result);
+    if (result.chunkProcessed === 0 && result.remaining > 0) break;
+  }
+  return result;
 }
 
 export async function ensureWhatsAppConversationFromLead(params: {
