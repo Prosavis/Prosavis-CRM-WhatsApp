@@ -396,6 +396,16 @@ async function processInboundMessage(params: {
   return 'inserted';
 }
 
+function getStatusErrorMessage(status: JsonRecord): string | null {
+  const errors = asArray(status.errors);
+  const first = asRecord(errors[0]);
+  const title = getString(first.title) || getString(first.message);
+  const errorData = asRecord(first.error_data);
+  const details = getString(errorData.details);
+  const message = [title, details].filter(Boolean).join(' — ');
+  return message || null;
+}
+
 async function processStatus(params: {
   supabase: ReturnType<typeof getServiceClient>;
   status: JsonRecord;
@@ -415,14 +425,20 @@ async function processStatus(params: {
   if (existingError) throw existingError;
   if (!existingMessage) return 'missing';
 
+  const isFailure = status === 'failed';
+  const errorMessage = isFailure ? getStatusErrorMessage(params.status) : null;
+
   const rawPayload = {
     ...asRecord(existingMessage.raw_payload),
     latestStatus: params.status,
   };
 
+  const messageUpdate: JsonRecord = { status, raw_payload: rawPayload };
+  if (isFailure && errorMessage) messageUpdate.error_message = errorMessage;
+
   const { error: updateMessageError } = await params.supabase
     .from('whatsapp_message_log')
-    .update({ status, raw_payload: rawPayload })
+    .update(messageUpdate)
     .eq('id', existingMessage.id);
 
   if (updateMessageError) throw updateMessageError;
@@ -434,6 +450,18 @@ async function processStatus(params: {
       .eq('stable_key', existingMessage.conversation_stable_key);
 
     if (updateConversationError) throw updateConversationError;
+  }
+
+  // Reconciliar envíos masivos: un fallo de entrega async debe marcar al
+  // destinatario como 'failed' y recalcular los conteos del job (de lo contrario
+  // el envío reportaría como "enviado" un mensaje que nunca llegó).
+  if (isFailure) {
+    const { error: reconcileError } = await params.supabase.rpc('reconcile_broadcast_on_status', {
+      p_wa_message_id: waMessageId,
+      p_status: status,
+      p_error: errorMessage,
+    });
+    if (reconcileError) throw reconcileError;
   }
 
   return 'updated';

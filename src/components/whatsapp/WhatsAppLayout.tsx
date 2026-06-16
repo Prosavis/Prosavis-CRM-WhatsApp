@@ -71,6 +71,34 @@ function conversationShortLabel(c: WhatsAppConversation): string {
 
 type RightPanelMode = 'none' | 'templates' | 'contact';
 
+async function runBulk(
+  ids: string[],
+  fn: (id: string) => Promise<unknown>,
+): Promise<{ ok: number; fail: number }> {
+  const results = await Promise.allSettled(ids.map((id) => fn(id)));
+  let ok = 0;
+  let fail = 0;
+  for (const r of results) {
+    if (r.status === 'fulfilled') ok += 1;
+    else fail += 1;
+  }
+  return { ok, fail };
+}
+
+function notifyBulkResult(
+  notify: (message: string, severity: 'success' | 'error') => void,
+  label: string,
+  { ok, fail }: { ok: number; fail: number },
+) {
+  if (fail === 0) {
+    notify(`${ok} chat${ok === 1 ? '' : 's'} ${label}`, 'success');
+  } else if (ok === 0) {
+    notify(`No se pudo completar la acción en ${fail} chat${fail === 1 ? '' : 's'}`, 'error');
+  } else {
+    notify(`${ok} ok, ${fail} fallaron`, 'error');
+  }
+}
+
 function conversationMatchesFocusPhone(
   focusPhone: string | undefined,
   c: WhatsAppConversation,
@@ -543,6 +571,85 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     }
   }, [phoneNumberId, notifyAction]);
 
+  const handleBulkAssignTags = useCallback(async (
+    conversationIds: string[],
+    tagIds: string[],
+    mode: 'add' | 'replace',
+  ) => {
+    if (conversationIds.length === 0 || tagIds.length === 0) return;
+    const convById = new Map(conversations.map((c) => [c.id, c]));
+    const result = await runBulk(conversationIds, async (id) => {
+      const conv = convById.get(id);
+      const nextTagIds = mode === 'replace'
+        ? tagIds
+        : [...new Set([...(conv?.tagIds ?? []), ...tagIds])];
+      await assignWhatsAppTags(id, nextTagIds);
+    });
+    notifyBulkResult(notifyAction, 'con tags actualizados', result);
+    if (result.ok > 0) void loadTags();
+  }, [conversations, loadTags, notifyAction]);
+
+  const handleBulkArchive = useCallback(async (conversationIds: string[], archive: boolean) => {
+    if (conversationIds.length === 0) return;
+    const result = await runBulk(conversationIds, async (id) => {
+      await patchWhatsAppConversationAdmin({
+        conversationId: id,
+        patch: { isArchived: archive },
+      });
+    });
+    notifyBulkResult(notifyAction, archive ? 'archivados' : 'desarchivados', result);
+  }, [notifyAction]);
+
+  const handleBulkMarkRead = useCallback(async (conversationIds: string[], read: boolean) => {
+    if (conversationIds.length === 0) return;
+    const convById = new Map(conversations.map((c) => [c.id, c]));
+    const result = await runBulk(conversationIds, async (id) => {
+      const conv = convById.get(id);
+      if (read) {
+        const isUnread = conv && (conv.unreadCount > 0 || conv.crmForceUnread);
+        if (isUnread) {
+          await markAsRead(undefined, id, phoneNumberId);
+        }
+      } else {
+        await patchWhatsAppConversationAdmin({
+          conversationId: id,
+          patch: { crmForceUnread: true },
+        });
+      }
+    });
+    notifyBulkResult(notifyAction, read ? 'marcados como leídos' : 'marcados como no leídos', result);
+  }, [conversations, phoneNumberId, notifyAction]);
+
+  const handleBulkPin = useCallback(async (conversationIds: string[], pin: boolean) => {
+    if (conversationIds.length === 0) return;
+    const result = await runBulk(conversationIds, async (id) => {
+      await patchWhatsAppConversationAdmin({
+        conversationId: id,
+        patch: { isPinned: pin },
+      });
+    });
+    notifyBulkResult(notifyAction, pin ? 'fijados' : 'desfijados', result);
+  }, [notifyAction]);
+
+  const handleBulkDelete = useCallback(async (conversationIds: string[]) => {
+    if (conversationIds.length === 0) return;
+    const confirmed = window.prompt(
+      `Para eliminar definitivamente ${conversationIds.length} conversación${conversationIds.length === 1 ? '' : 'es'}, escribe ${DELETE_WHATSAPP_CONVERSATION_CONFIRM_PHRASE}`,
+    );
+    if (confirmed !== DELETE_WHATSAPP_CONVERSATION_CONFIRM_PHRASE) return;
+    const result = await runBulk(conversationIds, async (id) => {
+      await deleteWhatsAppConversationPermanently(
+        id,
+        DELETE_WHATSAPP_CONVERSATION_CONFIRM_PHRASE,
+        { blockUser: false, deleteLeads: false, phoneNumberId },
+      );
+    });
+    if (selectedConversation && conversationIds.includes(selectedConversation.id) && result.ok > 0) {
+      setSelectedConversation(null);
+    }
+    notifyBulkResult(notifyAction, 'eliminados', result);
+  }, [phoneNumberId, selectedConversation, notifyAction]);
+
   const showRightColumn = Boolean(selectedConversation && rightPanel !== 'none');
 
   return (
@@ -619,6 +726,11 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
             onAssignTags={handleContextAssignTags}
             onDeleteConversation={handleContextDeleteConversation}
             onBlockConversation={handleContextBlockConversation}
+            onBulkAssignTags={handleBulkAssignTags}
+            onBulkArchive={handleBulkArchive}
+            onBulkMarkRead={handleBulkMarkRead}
+            onBulkPin={handleBulkPin}
+            onBulkDelete={handleBulkDelete}
           />
         </Box>
 

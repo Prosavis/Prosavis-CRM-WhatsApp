@@ -20,6 +20,11 @@ import {
   Tooltip,
   Checkbox,
   CircularProgress,
+  Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import SearchIcon from '@mui/icons-material/Search';
@@ -37,6 +42,9 @@ import PushPinOutlinedIcon from '@mui/icons-material/PushPinOutlined';
 import DeleteForeverOutlinedIcon from '@mui/icons-material/DeleteForeverOutlined';
 import BlockIcon from '@mui/icons-material/Block';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import CloseIcon from '@mui/icons-material/Close';
+import CheckBoxOutlinedIcon from '@mui/icons-material/CheckBoxOutlined';
+import SelectAllIcon from '@mui/icons-material/SelectAll';
 import type {
   WhatsAppConversation,
   WhatsAppTag,
@@ -54,6 +62,9 @@ import {
   isWhatsAppConversationLastActiveWithin24h,
   type WhatsAppTabCounts,
 } from '@/utils/whatsappInboxStats';
+import { useLongPress } from '@/hooks/useLongPress';
+
+export type BulkTagMode = 'add' | 'replace';
 
 interface ConversationListProps {
   conversations: WhatsAppConversation[];
@@ -73,6 +84,11 @@ interface ConversationListProps {
   onAssignTags?: (conversation: WhatsAppConversation, tagIds: string[]) => void;
   onDeleteConversation?: (conversation: WhatsAppConversation) => void;
   onBlockConversation?: (conversation: WhatsAppConversation) => void;
+  onBulkAssignTags?: (conversationIds: string[], tagIds: string[], mode: BulkTagMode) => Promise<void>;
+  onBulkArchive?: (conversationIds: string[], archive: boolean) => Promise<void>;
+  onBulkMarkRead?: (conversationIds: string[], read: boolean) => Promise<void>;
+  onBulkPin?: (conversationIds: string[], pin: boolean) => Promise<void>;
+  onBulkDelete?: (conversationIds: string[]) => Promise<void>;
 }
 
 /** Resumen humano para línea secundaria: prioriza "escribiendo" sobre "viendo". */
@@ -210,10 +226,21 @@ const ConversationList: React.FC<ConversationListProps> = ({
   onAssignTags,
   onDeleteConversation,
   onBlockConversation,
+  onBulkAssignTags,
+  onBulkArchive,
+  onBulkMarkRead,
+  onBulkPin,
+  onBulkDelete,
 }) => {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<FilterType>(readStoredInboxFilter);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [bulkTagDialogOpen, setBulkTagDialogOpen] = useState(false);
+  const [bulkTagMode, setBulkTagMode] = useState<BulkTagMode>('add');
+  const [bulkTagSelection, setBulkTagSelection] = useState<string[]>([]);
 
   useEffect(() => {
     try {
@@ -315,6 +342,82 @@ const ConversationList: React.FC<ConversationListProps> = ({
   const contextIsUnread = Boolean(
     contextConversation && (contextConversation.unreadCount > 0 || contextConversation.crmForceUnread),
   );
+
+  const selectedIdList = useMemo(() => [...selectedIds], [selectedIds]);
+
+  const selectedConversations = useMemo(
+    () => conversations.filter((c) => selectedIds.has(c.id)),
+    [conversations, selectedIds],
+  );
+
+  const allFilteredSelected = filtered.length > 0
+    && filtered.every((c) => selectedIds.has(c.id));
+
+  const allSelectedArchived = selectedConversations.length > 0
+    && selectedConversations.every((c) => c.isArchived);
+
+  const allSelectedPinned = selectedConversations.length > 0
+    && selectedConversations.every((c) => c.isPinned);
+
+  const exitSelectionMode = useCallback(() => {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+    setBulkTagDialogOpen(false);
+    setBulkTagSelection([]);
+  }, []);
+
+  const enterSelectionMode = useCallback((conversationId: string) => {
+    setSelectionMode(true);
+    setSelectedIds(new Set([conversationId]));
+  }, []);
+
+  const toggleSelectedId = useCallback((conversationId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(conversationId)) next.delete(conversationId);
+      else next.add(conversationId);
+      return next;
+    });
+  }, []);
+
+  const handleSelectAllFiltered = useCallback(() => {
+    if (allFilteredSelected) {
+      setSelectedIds(new Set());
+      return;
+    }
+    setSelectedIds(new Set(filtered.map((c) => c.id)));
+  }, [allFilteredSelected, filtered]);
+
+  useEffect(() => {
+    if (!selectionMode) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') exitSelectionMode();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectionMode, exitSelectionMode]);
+
+  const runBulkAction = useCallback(async (action: () => Promise<void>) => {
+    if (bulkLoading || selectedIdList.length === 0) return;
+    setBulkLoading(true);
+    try {
+      await action();
+      exitSelectionMode();
+    } finally {
+      setBulkLoading(false);
+    }
+  }, [bulkLoading, selectedIdList.length, exitSelectionMode]);
+
+  const handleApplyBulkTags = useCallback(async () => {
+    if (!onBulkAssignTags || bulkTagSelection.length === 0) return;
+    await runBulkAction(() => onBulkAssignTags(selectedIdList, bulkTagSelection, bulkTagMode));
+  }, [onBulkAssignTags, bulkTagSelection, bulkTagMode, runBulkAction, selectedIdList]);
+
+  const openBulkTagDialog = useCallback(() => {
+    setBulkTagMode('add');
+    setBulkTagSelection([]);
+    setBulkTagDialogOpen(true);
+  }, []);
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', bgcolor: 'background.paper' }}>
@@ -454,6 +557,100 @@ const ConversationList: React.FC<ConversationListProps> = ({
         </Box>
       </Box>
 
+      {selectionMode && (
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 0.5,
+            px: 1,
+            py: 0.75,
+            borderBottom: 1,
+            borderColor: 'divider',
+            bgcolor: (t) => alpha(t.palette.primary.main, 0.08),
+            flexWrap: 'wrap',
+          }}
+        >
+          <Tooltip title="Salir de selección">
+            <IconButton size="small" onClick={exitSelectionMode} disabled={bulkLoading}>
+              <CloseIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Typography variant="body2" sx={{ flex: 1, minWidth: 80, fontWeight: 600 }}>
+            {selectedIds.size} seleccionado{selectedIds.size === 1 ? '' : 's'}
+          </Typography>
+          <Tooltip title={allFilteredSelected ? 'Deseleccionar todos' : 'Seleccionar todos (visibles)'}>
+            <IconButton size="small" onClick={handleSelectAllFiltered} disabled={bulkLoading || filtered.length === 0}>
+              <SelectAllIcon fontSize="small" color={allFilteredSelected ? 'primary' : 'inherit'} />
+            </IconButton>
+          </Tooltip>
+          {onBulkAssignTags && (
+            <Tooltip title="Asignar tags">
+              <IconButton size="small" onClick={openBulkTagDialog} disabled={bulkLoading || selectedIds.size === 0}>
+                <LocalOfferIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+          {onBulkArchive && (
+            <Tooltip title={allSelectedArchived ? 'Desarchivar' : 'Archivar'}>
+              <IconButton
+                size="small"
+                disabled={bulkLoading || selectedIds.size === 0}
+                onClick={() => runBulkAction(() => onBulkArchive(selectedIdList, !allSelectedArchived))}
+              >
+                {allSelectedArchived ? <UnarchiveIcon fontSize="small" /> : <ArchiveIcon fontSize="small" />}
+              </IconButton>
+            </Tooltip>
+          )}
+          {onBulkMarkRead && (
+            <>
+              <Tooltip title="Marcar como leído">
+                <IconButton
+                  size="small"
+                  disabled={bulkLoading || selectedIds.size === 0}
+                  onClick={() => runBulkAction(() => onBulkMarkRead(selectedIdList, true))}
+                >
+                  <MarkChatReadIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Marcar como no leído">
+                <IconButton
+                  size="small"
+                  disabled={bulkLoading || selectedIds.size === 0}
+                  onClick={() => runBulkAction(() => onBulkMarkRead(selectedIdList, false))}
+                >
+                  <MarkChatUnreadIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </>
+          )}
+          {onBulkPin && (
+            <Tooltip title={allSelectedPinned ? 'Desfijar' : 'Fijar arriba'}>
+              <IconButton
+                size="small"
+                disabled={bulkLoading || selectedIds.size === 0}
+                onClick={() => runBulkAction(() => onBulkPin(selectedIdList, !allSelectedPinned))}
+              >
+                {allSelectedPinned ? <PushPinOutlinedIcon fontSize="small" /> : <PushPinIcon fontSize="small" />}
+              </IconButton>
+            </Tooltip>
+          )}
+          {onBulkDelete && (
+            <Tooltip title="Eliminar conversaciones">
+              <IconButton
+                size="small"
+                color="error"
+                disabled={bulkLoading || selectedIds.size === 0}
+                onClick={() => runBulkAction(() => onBulkDelete(selectedIdList))}
+              >
+                <DeleteForeverOutlinedIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+          {bulkLoading && <CircularProgress size={18} sx={{ ml: 0.5 }} />}
+        </Box>
+      )}
+
       <Popover
         anchorEl={tagMenuAnchor}
         open={Boolean(tagMenuAnchor)}
@@ -520,6 +717,16 @@ const ConversationList: React.FC<ConversationListProps> = ({
           contextMenu ? { top: contextMenu.mouseY, left: contextMenu.mouseX } : undefined
         }
       >
+        <MenuItem
+          onClick={() => {
+            if (!contextMenu) return;
+            enterSelectionMode(contextMenu.conversation.id);
+            closeContextMenu();
+          }}
+        >
+          <ListItemIcon><CheckBoxOutlinedIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>Seleccionar</ListItemText>
+        </MenuItem>
         <MenuItem onClick={() => runContextAction(onSelect)}>
           <ListItemIcon><OpenInNewIcon fontSize="small" /></ListItemIcon>
           <ListItemText>Abrir chat</ListItemText>
