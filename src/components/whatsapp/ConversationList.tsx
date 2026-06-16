@@ -846,6 +846,92 @@ const ConversationList: React.FC<ConversationListProps> = ({
         </List>
       </Popover>
 
+      <Dialog
+        open={bulkTagDialogOpen}
+        onClose={() => !bulkLoading && setBulkTagDialogOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Tags para {selectedIds.size} chat{selectedIds.size === 1 ? '' : 's'}</DialogTitle>
+        <DialogContent dividers>
+          <ToggleButtonGroup
+            value={bulkTagMode}
+            exclusive
+            fullWidth
+            size="small"
+            onChange={(_, val: BulkTagMode | null) => {
+              if (val) setBulkTagMode(val);
+            }}
+            sx={{ mb: 2 }}
+          >
+            <ToggleButton value="add">Agregar tags</ToggleButton>
+            <ToggleButton value="replace">Reemplazar tags</ToggleButton>
+          </ToggleButtonGroup>
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+            {bulkTagMode === 'add'
+              ? 'Los tags elegidos se añadirán a los existentes en cada chat.'
+              : 'Todos los chats quedarán solo con los tags elegidos.'}
+          </Typography>
+          <List dense sx={{ py: 0 }}>
+            {tags.length === 0 ? (
+              <ListItemButton
+                onClick={() => {
+                  setBulkTagDialogOpen(false);
+                  onManageTags?.();
+                }}
+              >
+                <ListItemText primary="Crear tags" secondary="No hay tags disponibles" />
+              </ListItemButton>
+            ) : (
+              tags.map((tag) => {
+                const checked = bulkTagSelection.includes(tag.id);
+                return (
+                  <ListItemButton
+                    key={tag.id}
+                    onClick={() => {
+                      setBulkTagSelection((prev) =>
+                        checked ? prev.filter((id) => id !== tag.id) : [...prev, tag.id],
+                      );
+                    }}
+                  >
+                    <Checkbox
+                      checked={checked}
+                      tabIndex={-1}
+                      disableRipple
+                      sx={{ mr: 0.5, p: 0.25, pointerEvents: 'none' }}
+                      size="small"
+                    />
+                    <Box
+                      sx={{
+                        width: 12,
+                        height: 12,
+                        borderRadius: '50%',
+                        bgcolor: tag.color || '#1976d2',
+                        mr: 1,
+                        flexShrink: 0,
+                      }}
+                    />
+                    <ListItemText primary={tag.name} />
+                  </ListItemButton>
+                );
+              })
+            )}
+          </List>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBulkTagDialogOpen(false)} disabled={bulkLoading}>
+            Cancelar
+          </Button>
+          <Button
+            variant="contained"
+            disabled={bulkLoading || bulkTagSelection.length === 0}
+            onClick={() => void handleApplyBulkTags()}
+          >
+            Aplicar
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <List sx={{ flex: 1, overflow: 'auto', py: 0 }}>
         {filtered.map((conv) => {
           const dirMeta = getDirectoryMetaForConversation(conv, directoryMetaByPhoneKey);
