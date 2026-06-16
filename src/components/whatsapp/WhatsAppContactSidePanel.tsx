@@ -1,4 +1,4 @@
-import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -7,11 +7,13 @@ import {
   CircularProgress,
   Divider,
   FormControl,
+  FormControlLabel,
   InputLabel,
   Link as MuiLink,
   MenuItem,
   Select,
   Stack,
+  Switch,
   Table,
   TableBody,
   TableCell,
@@ -22,46 +24,72 @@ import {
 } from '@mui/material';
 import { Link } from 'react-router-dom';
 import type { WhatsAppConversation } from '@/services/whatsappService';
-import { patchWhatsAppConversationAdmin } from '@/services/whatsappService';
+import {
+  patchWhatsAppConversationAdmin,
+  updateAppUserProfile,
+} from '@/services/whatsappService';
 import type { WhatsAppContactContextValue } from '@/hooks/useWhatsAppContactContext';
 import { directoryService } from '@/services/directoryService';
 import { AppointmentService } from '@/services/appointmentService';
 import type { Appointment } from '@/types/appointment';
-import type { DirectoryEntry } from '@/types/lead';
-import type { User } from '@/types';
+import type { DirectoryChannel, DirectoryEntry } from '@/types/lead';
 import { normalizeDirectoryPhoneE164 } from '@/utils/directoryPhone';
 
-const UserDetailsDialog = React.lazy(() => import('../common/UserDetailsDialog'));
-
 const ENTRY_STATUSES = ['active', 'inactive', 'opt_out'];
-const SEQUENCES = ['NINGUNA', 'SEGUIMIENTO', 'REBOOKING'];
-const CRM_AUTO_SAVE_MS = 800;
+const QUALITY_TAGS = ['good', 'standard', 'bad'];
+const SEQUENCES = ['NINGUNA', 'SEGUIMIENTO', 'REBOOKING', 'SEGUIMIENTO_PAGO_RECHAZADO'];
+const SOURCES = [
+  '',
+  'APP_USER',
+  'WHATSAPP_INBOUND',
+  'META_ADS',
+  'REFERIDO',
+  'ORGANICO',
+  'BROADCAST',
+  'PANEL',
+];
+const PAYMENT_STATUSES = ['', 'paid', 'pending'];
+const CHANNEL_OPTIONS: DirectoryChannel[] = ['WHATSAPP', 'IN_APP'];
 
-type ContactDraftSnapshot = {
+interface FormState {
+  // Identidad / perfil
   fullName: string;
+  displayName: string;
   email: string;
   phone: string;
   photoUrl: string;
+  address: string;
   notes: string;
   department: string;
   city: string;
-  address: string;
+  // Perfil WhatsApp / conversacion
+  whatsappProfileName: string;
   adminNotes: string;
-};
-
-type CrmDraftSnapshot = {
-  status: string;
+  // Clasificacion CRM
   classification: string;
-  assignedTo: string;
-  sequence: string;
-};
-
-function contactDraftKey(snapshot: ContactDraftSnapshot): string {
-  return JSON.stringify(snapshot);
-}
-
-function crmDraftKey(snapshot: CrmDraftSnapshot): string {
-  return JSON.stringify(snapshot);
+  qualityTag: string;
+  status: string;
+  source: string;
+  channels: DirectoryChannel[];
+  activeSequence: string;
+  whatsAppAssignedTo: string;
+  optOut: boolean;
+  tags: string[];
+  // Facturacion / servicio
+  paymentStatus: string;
+  pendingAmount: string;
+  pendingAppointmentsCount: string;
+  lastChargedAmount: string;
+  otpRequired: boolean;
+  preferredServiceAddressLine: string;
+  preferredServiceAddressRef: string;
+  // Vinculos
+  appUserId: string;
+  isAppUser: boolean;
+  providerId: string;
+  serviceId: string;
+  // Internas
+  internalNotes: string;
 }
 
 function formatPhoneDisplay(phone: string | null | undefined): string {
@@ -69,30 +97,48 @@ function formatPhoneDisplay(phone: string | null | undefined): string {
   return normalizeDirectoryPhoneE164(phone) ?? phone.trim();
 }
 
-function contactDraftFromSources(
+function numToStr(value: number | null | undefined): string {
+  return value === null || value === undefined || Number.isNaN(value) ? '' : String(value);
+}
+
+function buildFormState(
   entry: DirectoryEntry | null,
   conversation: WhatsAppConversation,
-): ContactDraftSnapshot {
+): FormState {
   const metadata = entry?.metadata ?? {};
   return {
     fullName: (entry?.fullName || '').trim(),
+    displayName: (entry?.displayName || '').trim(),
     email: (entry?.email || '').trim(),
     phone: formatPhoneDisplay(entry?.phone),
     photoUrl: (entry?.photoUrl || '').trim(),
+    address: (entry?.address || '').trim(),
     notes: (entry?.notes || '').trim(),
     department: typeof metadata.department === 'string' ? metadata.department.trim() : '',
     city: typeof metadata.city === 'string' ? metadata.city.trim() : '',
-    address: (entry?.address || '').trim(),
+    whatsappProfileName: (conversation.whatsappProfileName || '').trim(),
     adminNotes: (conversation.adminNotes || '').trim(),
-  };
-}
-
-function crmDraftFromEntry(entry: DirectoryEntry): CrmDraftSnapshot {
-  return {
-    status: entry.status || 'active',
-    classification: entry.classification || 'unknown',
-    assignedTo: (entry.whatsAppAssignedTo || '').trim(),
-    sequence: entry.activeSequence || 'NINGUNA',
+    classification: entry?.classification || 'unknown',
+    qualityTag: entry?.qualityTag || 'standard',
+    status: entry?.status || 'active',
+    source: (entry?.source as string) || '',
+    channels: (entry?.channels as DirectoryChannel[]) || [],
+    activeSequence: entry?.activeSequence || 'NINGUNA',
+    whatsAppAssignedTo: (entry?.whatsAppAssignedTo || '').trim(),
+    optOut: entry?.optOut ?? false,
+    tags: entry?.tags || [],
+    paymentStatus: (entry?.paymentStatus as string) || '',
+    pendingAmount: numToStr(entry?.pendingAmount),
+    pendingAppointmentsCount: numToStr(entry?.pendingAppointmentsCount),
+    lastChargedAmount: numToStr(entry?.lastChargedAmount),
+    otpRequired: entry?.otpRequired ?? false,
+    preferredServiceAddressLine: (entry?.preferredServiceAddressLine || '').trim(),
+    preferredServiceAddressRef: (entry?.preferredServiceAddressRef || '').trim(),
+    appUserId: (entry?.appUserId || '').trim(),
+    isAppUser: entry?.isAppUser ?? false,
+    providerId: (entry?.providerId || '').trim(),
+    serviceId: (entry?.serviceId || '').trim(),
+    internalNotes: (entry?.internalNotes || '').trim(),
   };
 }
 
@@ -115,6 +161,54 @@ function appointmentRole(apt: Appointment, userId: string): string {
   return '—';
 }
 
+function formatDate(value: string | null | undefined): string {
+  if (!value) return '—';
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString('es-CO');
+}
+
+function parseNum(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const n = Number(trimmed);
+  return Number.isNaN(n) ? undefined : n;
+}
+
+interface ReadOnlyRowProps {
+  label: string;
+  value: React.ReactNode;
+}
+
+const ReadOnlyRow: React.FC<ReadOnlyRowProps> = ({ label, value }) => (
+  <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1 }}>
+    <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
+      {label}
+    </Typography>
+    <Typography
+      variant="caption"
+      sx={{ textAlign: 'right', wordBreak: 'break-word', maxWidth: '70%' }}
+    >
+      {value || '—'}
+    </Typography>
+  </Box>
+);
+
+interface SectionTitleProps {
+  children: React.ReactNode;
+}
+
+const SectionTitle: React.FC<SectionTitleProps> = ({ children }) => (
+  <Typography
+    variant="caption"
+    color="text.secondary"
+    fontWeight={600}
+    display="block"
+    sx={{ mb: 1, textTransform: 'uppercase', letterSpacing: 0.5 }}
+  >
+    {children}
+  </Typography>
+);
+
 interface WhatsAppContactSidePanelProps {
   conversation: WhatsAppConversation;
   contact: WhatsAppContactContextValue;
@@ -127,21 +221,8 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
   const { user, directoryEntry, lead, refetch, loading } = contact;
   const entry: DirectoryEntry | null = directoryEntry ?? lead;
 
-  const [fullName, setFullName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [photoUrl, setPhotoUrl] = useState('');
-  const [notes, setNotes] = useState('');
-  const [department, setDepartment] = useState('');
-  const [city, setCity] = useState('');
-  const [address, setAddress] = useState('');
-  const [adminNotes, setAdminNotes] = useState('');
-
-  const [entryStatus, setEntryStatus] = useState('active');
-  const [entryClassification, setEntryClassification] = useState('unknown');
-  const [entryTags, setEntryTags] = useState<string[]>([]);
-  const [entryAssignedTo, setEntryAssignedTo] = useState('');
-  const [entrySeq, setEntrySeq] = useState('NINGUNA');
+  const [form, setForm] = useState<FormState>(() => buildFormState(entry, conversation));
+  const [savedSnapshot, setSavedSnapshot] = useState<string>('');
 
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -152,67 +233,23 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
     conversationId: '',
     entryId: null,
   });
-  const [lastSavedSnapshot, setLastSavedSnapshot] = useState<string | null>(null);
-  const lastPersistedCrmKeyRef = useRef<string | null>(null);
+  const syncGenRef = useRef(0);
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [aptsLoading, setAptsLoading] = useState(false);
-  const [dialogOpen, setDialogOpen] = useState(false);
 
-  const currentContactDraft = useCallback((): ContactDraftSnapshot => ({
-    fullName: fullName.trim(),
-    email: email.trim(),
-    phone: phone.trim(),
-    photoUrl: photoUrl.trim(),
-    notes: notes.trim(),
-    department: department.trim(),
-    city: city.trim(),
-    address: address.trim(),
-    adminNotes: adminNotes.trim(),
-  }), [address, adminNotes, city, department, email, fullName, notes, phone, photoUrl]);
-
-  const currentCrmDraft = useCallback((): CrmDraftSnapshot => ({
-    status: entryStatus,
-    classification: entryClassification,
-    assignedTo: entryAssignedTo.trim(),
-    sequence: entrySeq,
-  }), [entryAssignedTo, entryClassification, entrySeq, entryStatus]);
-
-  const isDirty = useMemo(() => {
-    if (!lastSavedSnapshot) return false;
-    return contactDraftKey(currentContactDraft()) !== lastSavedSnapshot;
-  }, [currentContactDraft, lastSavedSnapshot]);
+  const setField = useCallback(
+    <K extends keyof FormState>(key: K, value: FormState[K]) => {
+      setForm((prev) => ({ ...prev, [key]: value }));
+    },
+    [],
+  );
 
   const hydrateForm = useCallback(
     (targetEntry: DirectoryEntry | null, conv: WhatsAppConversation) => {
-      const contactSnapshot = contactDraftFromSources(targetEntry, conv);
-      setFullName(contactSnapshot.fullName);
-      setEmail(contactSnapshot.email);
-      setPhone(contactSnapshot.phone);
-      setPhotoUrl(contactSnapshot.photoUrl);
-      setNotes(contactSnapshot.notes);
-      setDepartment(contactSnapshot.department);
-      setCity(contactSnapshot.city);
-      setAddress(contactSnapshot.address);
-      setAdminNotes(contactSnapshot.adminNotes);
-      setLastSavedSnapshot(contactDraftKey(contactSnapshot));
-
-      if (targetEntry) {
-        const crmSnapshot = crmDraftFromEntry(targetEntry);
-        setEntryStatus(crmSnapshot.status);
-        setEntryClassification(crmSnapshot.classification);
-        setEntryAssignedTo(crmSnapshot.assignedTo);
-        setEntrySeq(crmSnapshot.sequence);
-        setEntryTags(targetEntry.tags || []);
-        lastPersistedCrmKeyRef.current = crmDraftKey(crmSnapshot);
-      } else {
-        setEntryStatus('active');
-        setEntryClassification('unknown');
-        setEntryAssignedTo('');
-        setEntrySeq('NINGUNA');
-        setEntryTags([]);
-        lastPersistedCrmKeyRef.current = null;
-      }
+      const next = buildFormState(targetEntry, conv);
+      setForm(next);
+      setSavedSnapshot(JSON.stringify(next));
     },
     [],
   );
@@ -231,6 +268,12 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- guarded by hydratedIdsRef; solo conv/entry id
   }, [conversation.id, entry, entry?.id, hydrateForm]);
 
+  const isDirty = useMemo(() => {
+    if (!savedSnapshot) return false;
+    return JSON.stringify(form) !== savedSnapshot;
+  }, [form, savedSnapshot]);
+
+  // Citas del usuario vinculado
   useEffect(() => {
     const uid = user?.id;
     if (!uid) {
@@ -266,13 +309,12 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
     };
   }, [user?.id, user?.isProvider]);
 
-  const syncGenRef = useRef(0);
-
   useEffect(() => {
     autoSyncDoneRef.current = false;
     setSyncing(false);
   }, [conversation.id]);
 
+  // Auto-sync: crea/actualiza la entrada de directorio una vez por conversacion.
   useEffect(() => {
     if (autoSyncDoneRef.current) return;
     if (loading) return;
@@ -294,7 +336,8 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
             }
             return;
           }
-          const displayName = conversation.whatsappProfileName || conversation.contactName || convPhone;
+          const displayName =
+            conversation.whatsappProfileName || conversation.contactName || convPhone;
           await directoryService.createEntry({
             fullName: displayName,
             displayName: displayName,
@@ -377,18 +420,15 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional narrow deps
   }, [conversation.id, entry?.id, loading, refetch]);
 
-  const dialogUser: User | null = useMemo(() => {
-    if (!user) return null;
-    return {
-      id: user.id,
-      email: user.email || '—',
-      name: user.name,
-      photoUrl: user.photoUrl,
-      phoneNumber: user.phoneNumber,
-    } as User;
-  }, [user]);
+  const applyVerifiedName = useCallback(() => {
+    setForm((prev) => {
+      const name = prev.fullName.trim();
+      if (!name) return prev;
+      return { ...prev, displayName: name, whatsappProfileName: name };
+    });
+  }, []);
 
-  const handleSaveContact = useCallback(async () => {
+  const handleSave = useCallback(async () => {
     if (!entry) return;
 
     setSaving(true);
@@ -396,11 +436,9 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
     setSaveSuccess(false);
 
     try {
-      const draft = currentContactDraft();
       let normalizedPhone: string | undefined;
-
-      if (draft.phone) {
-        const normalized = normalizeDirectoryPhoneE164(draft.phone);
+      if (form.phone.trim()) {
+        const normalized = normalizeDirectoryPhoneE164(form.phone.trim());
         if (!normalized) {
           setError('Teléfono inválido. Usa formato internacional, ej. +573001234567');
           return;
@@ -409,91 +447,104 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
       }
 
       const metadata = { ...(entry.metadata ?? {}) };
-      if (draft.department) metadata.department = draft.department;
+      if (form.department.trim()) metadata.department = form.department.trim();
       else delete metadata.department;
-      if (draft.city) metadata.city = draft.city;
+      if (form.city.trim()) metadata.city = form.city.trim();
       else delete metadata.city;
 
-      await directoryService.updateEntry(entry.id, {
-        fullName: draft.fullName || '',
-        displayName: draft.fullName || undefined,
-        email: draft.email || undefined,
+      const directoryPayload: Partial<DirectoryEntry> = {
+        fullName: form.fullName.trim() || '',
+        displayName: form.displayName.trim() || form.fullName.trim() || undefined,
+        email: form.email.trim() || undefined,
         phone: normalizedPhone,
-        photoUrl: draft.photoUrl || undefined,
-        address: draft.address || undefined,
-        notes: draft.notes || undefined,
+        photoUrl: form.photoUrl.trim() || undefined,
+        address: form.address.trim() || undefined,
+        notes: form.notes.trim() || undefined,
+        classification: form.classification.trim() as DirectoryEntry['classification'],
+        qualityTag: form.qualityTag as DirectoryEntry['qualityTag'],
+        status: form.status,
+        source: form.source || undefined,
+        channels: form.channels,
+        activeSequence: form.activeSequence,
+        whatsAppAssignedTo: form.whatsAppAssignedTo.trim() || undefined,
+        optOut: form.optOut,
+        tags: form.tags,
+        paymentStatus: form.paymentStatus || undefined,
+        otpRequired: form.otpRequired,
+        preferredServiceAddressLine: form.preferredServiceAddressLine.trim() || undefined,
+        preferredServiceAddressRef: form.preferredServiceAddressRef.trim() || undefined,
+        appUserId: form.appUserId.trim() || undefined,
+        isAppUser: form.isAppUser,
+        providerId: form.providerId.trim() || undefined,
+        serviceId: form.serviceId.trim() || undefined,
+        internalNotes: form.internalNotes.trim() || undefined,
         metadata,
-      });
+      };
 
+      const pendingAmount = parseNum(form.pendingAmount);
+      if (pendingAmount !== undefined) directoryPayload.pendingAmount = pendingAmount;
+      const pendingAppointmentsCount = parseNum(form.pendingAppointmentsCount);
+      if (pendingAppointmentsCount !== undefined) {
+        directoryPayload.pendingAppointmentsCount = pendingAppointmentsCount;
+      }
+      const lastChargedAmount = parseNum(form.lastChargedAmount);
+      if (lastChargedAmount !== undefined) directoryPayload.lastChargedAmount = lastChargedAmount;
+
+      await directoryService.updateEntry(entry.id, directoryPayload);
+
+      const contactName = (form.displayName.trim() || form.fullName.trim());
       await patchWhatsAppConversationAdmin({
         conversationId: conversation.id,
         patch: {
-          contactName: draft.fullName.length >= 2 ? draft.fullName : undefined,
-          contactPhotoUrl: draft.photoUrl || null,
-          adminNotes: draft.adminNotes || null,
+          contactName: contactName.length >= 2 ? contactName : undefined,
+          contactPhotoUrl: form.photoUrl.trim() || null,
+          whatsappProfileName: form.whatsappProfileName.trim() || null,
+          adminNotes: form.adminNotes.trim() || null,
         },
       });
 
-      const savedDraft: ContactDraftSnapshot = {
-        ...draft,
-        phone: normalizedPhone ?? draft.phone,
+      // Write-back al usuario de la App (Firestore users/{uid}) cuando aplique.
+      const appUid = form.appUserId.trim() || entry.appUserId;
+      if (appUid) {
+        try {
+          await updateAppUserProfile({
+            uid: appUid,
+            name: form.fullName.trim() || form.displayName.trim() || undefined,
+            email: form.email.trim() || undefined,
+            photoUrl: form.photoUrl.trim() || undefined,
+          });
+        } catch (e) {
+          console.warn('[WhatsAppContactSidePanel] write-back Firebase error:', e);
+          setError(
+            'Directorio y WhatsApp actualizados, pero no se pudo escribir en el usuario de la App: ' +
+              (e instanceof Error ? e.message : String(e)),
+          );
+        }
+      }
+
+      const savedForm: FormState = {
+        ...form,
+        phone: normalizedPhone ?? form.phone,
       };
-      setLastSavedSnapshot(contactDraftKey(savedDraft));
-      if (normalizedPhone) setPhone(normalizedPhone);
+      setForm(savedForm);
+      setSavedSnapshot(JSON.stringify(savedForm));
       setSaveSuccess(true);
+      await refetch();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Error al guardar contacto');
+      setError(e instanceof Error ? e.message : 'Error al guardar la ficha');
     } finally {
       setSaving(false);
     }
-  }, [conversation.id, currentContactDraft, entry]);
+  }, [conversation.id, entry, form, refetch]);
 
-  const persistCrmFields = useCallback(async () => {
-    if (!entry) return;
-
-    const draft = currentCrmDraft();
-    const draftKey = crmDraftKey(draft);
-    if (draftKey === lastPersistedCrmKeyRef.current) return;
-
-    try {
-      await directoryService.updateEntry(entry.id, {
-        status: draft.status,
-        classification: draft.classification as DirectoryEntry['classification'],
-        tags: entryTags,
-        whatsAppAssignedTo: draft.assignedTo || undefined,
-        activeSequence: draft.sequence,
-      });
-      lastPersistedCrmKeyRef.current = draftKey;
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Error al guardar campos CRM');
-    }
-  }, [currentCrmDraft, entry, entryTags]);
-
-  useEffect(() => {
-    if (!entry || loading || syncing) return;
-    const timer = window.setTimeout(() => {
-      void persistCrmFields();
-    }, CRM_AUTO_SAVE_MS);
-    return () => window.clearTimeout(timer);
-  }, [
-    entry,
-    entryAssignedTo,
-    entryClassification,
-    entrySeq,
-    entryStatus,
-    loading,
-    persistCrmFields,
-    syncing,
-  ]);
-
-  const hasLinkedAppUser = Boolean(user?.id || entry?.appUserId);
+  const hasLinkedAppUser = Boolean(user?.id || entry?.appUserId || form.appUserId.trim());
 
   return (
     <Box
       sx={{
-        width: 340,
-        minWidth: 280,
-        maxWidth: 380,
+        width: 360,
+        minWidth: 300,
+        maxWidth: 400,
         flexShrink: 0,
         display: 'flex',
         flexDirection: 'column',
@@ -542,32 +593,55 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
         {entry ? (
           <>
             {hasLinkedAppUser && (
-              <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1.5 }}>
-                <Chip label="Usuario app vinculado" size="small" color="primary" variant="outlined" />
-                {user && (
-                  <Button size="small" onClick={() => setDialogOpen(true)} sx={{ textTransform: 'none' }}>
-                    Ficha completa
-                  </Button>
-                )}
-              </Stack>
+              <Chip
+                label="Usuario app vinculado"
+                size="small"
+                color="primary"
+                variant="outlined"
+                sx={{ mb: 1.5 }}
+              />
             )}
 
-            <Typography variant="caption" color="text.secondary" fontWeight={600} display="block" sx={{ mb: 1 }}>
-              Contacto
-            </Typography>
+            {/* === Perfil WhatsApp / override === */}
+            <SectionTitle>Perfil WhatsApp</SectionTitle>
             <Stack spacing={1}>
               <TextField
-                label="Nombre"
+                label="Nombre de perfil WhatsApp"
                 size="small"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
+                value={form.whatsappProfileName}
+                onChange={(e) => setField('whatsappProfileName', e.target.value)}
+                fullWidth
+                helperText="Se sobrescribe el nombre mostrado del contacto"
+              />
+              <Button size="small" variant="outlined" onClick={applyVerifiedName} sx={{ alignSelf: 'flex-start', textTransform: 'none' }}>
+                Aplicar nombre verificado
+              </Button>
+            </Stack>
+
+            <Divider sx={{ my: 2 }} />
+
+            {/* === Identidad === */}
+            <SectionTitle>Identidad</SectionTitle>
+            <Stack spacing={1}>
+              <TextField
+                label="Nombre completo"
+                size="small"
+                value={form.fullName}
+                onChange={(e) => setField('fullName', e.target.value)}
+                fullWidth
+              />
+              <TextField
+                label="Nombre a mostrar"
+                size="small"
+                value={form.displayName}
+                onChange={(e) => setField('displayName', e.target.value)}
                 fullWidth
               />
               <TextField
                 label="Teléfono"
                 size="small"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                value={form.phone}
+                onChange={(e) => setField('phone', e.target.value)}
                 fullWidth
                 placeholder="+573001234567"
                 helperText="Formato internacional, ej. +573001234567"
@@ -575,22 +649,22 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
               <TextField
                 label="Email"
                 size="small"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                value={form.email}
+                onChange={(e) => setField('email', e.target.value)}
                 fullWidth
               />
               <TextField
                 label="Foto URL"
                 size="small"
-                value={photoUrl}
-                onChange={(e) => setPhotoUrl(e.target.value)}
+                value={form.photoUrl}
+                onChange={(e) => setField('photoUrl', e.target.value)}
                 fullWidth
               />
               <TextField
                 label="Bio / Notas"
                 size="small"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
+                value={form.notes}
+                onChange={(e) => setField('notes', e.target.value)}
                 fullWidth
                 multiline
                 minRows={2}
@@ -598,22 +672,22 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
               <TextField
                 label="Departamento"
                 size="small"
-                value={department}
-                onChange={(e) => setDepartment(e.target.value)}
+                value={form.department}
+                onChange={(e) => setField('department', e.target.value)}
                 fullWidth
               />
               <TextField
                 label="Ciudad"
                 size="small"
-                value={city}
-                onChange={(e) => setCity(e.target.value)}
+                value={form.city}
+                onChange={(e) => setField('city', e.target.value)}
                 fullWidth
               />
               <TextField
                 label="Dirección"
                 size="small"
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
+                value={form.address}
+                onChange={(e) => setField('address', e.target.value)}
                 fullWidth
                 multiline
                 minRows={2}
@@ -622,36 +696,114 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
 
             <Divider sx={{ my: 2 }} />
 
-            <Typography variant="caption" color="text.secondary" fontWeight={600} display="block" sx={{ mb: 1 }}>
-              CRM
-            </Typography>
+            {/* === Clasificación CRM === */}
+            <SectionTitle>Clasificación CRM</SectionTitle>
             <Stack spacing={1}>
-              {entryTags.length > 0 && (
-                <Stack direction="row" spacing={0.5} flexWrap="wrap">
+              {form.tags.length > 0 && (
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                   <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5, lineHeight: '24px' }}>
                     Tags:
                   </Typography>
-                  {entryTags.map((tag) => (
+                  {form.tags.map((tag) => (
                     <Chip key={tag} label={tag} size="small" variant="outlined" color={tag === 'VIP' ? 'warning' : 'default'} />
                   ))}
                 </Stack>
               )}
               <TextField
+                label="Tags (separados por coma)"
+                size="small"
+                value={form.tags.join(', ')}
+                onChange={(e) =>
+                  setField(
+                    'tags',
+                    e.target.value
+                      .split(',')
+                      .map((t) => t.trim())
+                      .filter(Boolean),
+                  )
+                }
+                fullWidth
+              />
+              <TextField
                 label="Clasificación"
                 size="small"
-                value={entryClassification}
-                onChange={(e) => setEntryClassification(e.target.value)}
+                value={form.classification}
+                onChange={(e) => setField('classification', e.target.value)}
                 fullWidth
-                helperText={entryTags.length > 0 ? `Tags actuales: ${entryTags.join(', ')}` : undefined}
               />
+              <FormControl size="small" fullWidth>
+                <InputLabel>Calidad</InputLabel>
+                <Select
+                  label="Calidad"
+                  value={form.qualityTag}
+                  onChange={(e) => setField('qualityTag', e.target.value)}
+                >
+                  {QUALITY_TAGS.map((q) => (
+                    <MenuItem key={q} value={q}>
+                      {q}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
               <FormControl size="small" fullWidth>
                 <InputLabel>Estado</InputLabel>
                 <Select
                   label="Estado"
-                  value={entryStatus}
-                  onChange={(e) => setEntryStatus(e.target.value)}
+                  value={form.status}
+                  onChange={(e) => setField('status', e.target.value)}
                 >
                   {ENTRY_STATUSES.map((s) => (
+                    <MenuItem key={s} value={s}>
+                      {s}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl size="small" fullWidth>
+                <InputLabel>Fuente</InputLabel>
+                <Select
+                  label="Fuente"
+                  value={form.source}
+                  onChange={(e) => setField('source', e.target.value)}
+                >
+                  {SOURCES.map((s) => (
+                    <MenuItem key={s || 'none'} value={s}>
+                      {s || '—'}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl size="small" fullWidth>
+                <InputLabel>Canales</InputLabel>
+                <Select
+                  label="Canales"
+                  multiple
+                  value={form.channels}
+                  onChange={(e) =>
+                    setField(
+                      'channels',
+                      (typeof e.target.value === 'string'
+                        ? e.target.value.split(',')
+                        : e.target.value) as DirectoryChannel[],
+                    )
+                  }
+                  renderValue={(selected) => (selected as string[]).join(', ')}
+                >
+                  {CHANNEL_OPTIONS.map((c) => (
+                    <MenuItem key={c} value={c}>
+                      {c}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl size="small" fullWidth>
+                <InputLabel>Secuencia</InputLabel>
+                <Select
+                  label="Secuencia"
+                  value={form.activeSequence}
+                  onChange={(e) => setField('activeSequence', e.target.value)}
+                >
+                  {SEQUENCES.map((s) => (
                     <MenuItem key={s} value={s}>
                       {s}
                     </MenuItem>
@@ -661,83 +813,212 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
               <TextField
                 label="Asignado a (WhatsApp)"
                 size="small"
-                value={entryAssignedTo}
-                onChange={(e) => setEntryAssignedTo(e.target.value)}
+                value={form.whatsAppAssignedTo}
+                onChange={(e) => setField('whatsAppAssignedTo', e.target.value)}
                 fullWidth
               />
-              <FormControl size="small" fullWidth>
-                <InputLabel>Secuencia</InputLabel>
-                <Select
-                  label="Secuencia"
-                  value={entrySeq}
-                  onChange={(e) => setEntrySeq(e.target.value)}
-                >
-                  {SEQUENCES.map((s) => (
-                    <MenuItem key={s} value={s}>
-                      {s}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-
-              {(entry.lastWhatsAppMessageText || entry.lastWhatsAppMessageAt || entry.whatsAppAssignedTo) && (
-                <Box sx={{ bgcolor: 'action.hover', borderRadius: 1, p: 1 }}>
-                  <Typography variant="caption" color="text.secondary" fontWeight={600} display="block">
-                    Última actividad WhatsApp
-                  </Typography>
-                  {entry.lastWhatsAppMessageText && (
-                    <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
-                      <strong>Msg:</strong>{' '}
-                      {entry.lastWhatsAppMessageText.length > 80
-                        ? `${entry.lastWhatsAppMessageText.slice(0, 80)}…`
-                        : entry.lastWhatsAppMessageText}
-                    </Typography>
-                  )}
-                  {entry.lastWhatsAppMessageAt && (
-                    <Typography variant="caption" display="block" color="text.secondary">
-                      <strong>Hora:</strong> {new Date(entry.lastWhatsAppMessageAt).toLocaleString('es-CO')}
-                    </Typography>
-                  )}
-                  {entry.whatsAppAssignedTo && (
-                    <Typography variant="caption" display="block" color="text.secondary">
-                      <strong>Asignado:</strong> {entry.whatsAppAssignedTo}
-                    </Typography>
-                  )}
-                  {entry.unreadWhatsAppCount > 0 && (
-                    <Typography variant="caption" display="block" color="error.main">
-                      <strong>No leídos:</strong> {entry.unreadWhatsAppCount}
-                    </Typography>
-                  )}
-                  {entry.source && (
-                    <Typography variant="caption" display="block" color="text.secondary">
-                      <strong>Fuente:</strong> {entry.source}
-                    </Typography>
-                  )}
-                </Box>
-              )}
+              <FormControlLabel
+                control={
+                  <Switch
+                    size="small"
+                    checked={form.optOut}
+                    onChange={(e) => setField('optOut', e.target.checked)}
+                  />
+                }
+                label={<Typography variant="body2">Opt-out (no contactar)</Typography>}
+              />
             </Stack>
 
             <Divider sx={{ my: 2 }} />
 
-            <Typography variant="caption" color="text.secondary" fontWeight={600} display="block" sx={{ mb: 0.5 }}>
-              Notas de la conversación
-            </Typography>
-            <TextField
-              fullWidth
-              multiline
-              minRows={2}
-              size="small"
-              value={adminNotes}
-              onChange={(e) => setAdminNotes(e.target.value)}
-              placeholder="Visibles solo en panel (admin)"
-              sx={{ mb: 2, bgcolor: 'background.paper' }}
-            />
+            {/* === Facturación / servicio === */}
+            <SectionTitle>Facturación y servicio</SectionTitle>
+            <Stack spacing={1}>
+              <FormControl size="small" fullWidth>
+                <InputLabel>Estado de pago</InputLabel>
+                <Select
+                  label="Estado de pago"
+                  value={form.paymentStatus}
+                  onChange={(e) => setField('paymentStatus', e.target.value)}
+                >
+                  {PAYMENT_STATUSES.map((p) => (
+                    <MenuItem key={p || 'none'} value={p}>
+                      {p || '—'}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <TextField
+                label="Monto pendiente"
+                size="small"
+                type="number"
+                value={form.pendingAmount}
+                onChange={(e) => setField('pendingAmount', e.target.value)}
+                fullWidth
+              />
+              <TextField
+                label="Citas pendientes"
+                size="small"
+                type="number"
+                value={form.pendingAppointmentsCount}
+                onChange={(e) => setField('pendingAppointmentsCount', e.target.value)}
+                fullWidth
+              />
+              <TextField
+                label="Último monto cobrado"
+                size="small"
+                type="number"
+                value={form.lastChargedAmount}
+                onChange={(e) => setField('lastChargedAmount', e.target.value)}
+                fullWidth
+              />
+              <FormControlLabel
+                control={
+                  <Switch
+                    size="small"
+                    checked={form.otpRequired}
+                    onChange={(e) => setField('otpRequired', e.target.checked)}
+                  />
+                }
+                label={<Typography variant="body2">Requiere OTP</Typography>}
+              />
+              <TextField
+                label="Dirección de servicio preferida"
+                size="small"
+                value={form.preferredServiceAddressLine}
+                onChange={(e) => setField('preferredServiceAddressLine', e.target.value)}
+                fullWidth
+                multiline
+                minRows={2}
+              />
+              <TextField
+                label="Ref. dirección de servicio"
+                size="small"
+                value={form.preferredServiceAddressRef}
+                onChange={(e) => setField('preferredServiceAddressRef', e.target.value)}
+                fullWidth
+              />
+            </Stack>
+
+            <Divider sx={{ my: 2 }} />
+
+            {/* === Vínculos === */}
+            <SectionTitle>Vínculos</SectionTitle>
+            <Stack spacing={1}>
+              <TextField
+                label="App user ID (Firebase uid)"
+                size="small"
+                value={form.appUserId}
+                onChange={(e) => setField('appUserId', e.target.value)}
+                fullWidth
+                helperText="Si está presente, el nombre/email/foto se escriben en users/{uid}"
+              />
+              <FormControlLabel
+                control={
+                  <Switch
+                    size="small"
+                    checked={form.isAppUser}
+                    onChange={(e) => setField('isAppUser', e.target.checked)}
+                  />
+                }
+                label={<Typography variant="body2">Es usuario de la App</Typography>}
+              />
+              <TextField
+                label="Provider ID"
+                size="small"
+                value={form.providerId}
+                onChange={(e) => setField('providerId', e.target.value)}
+                fullWidth
+              />
+              <TextField
+                label="Service ID"
+                size="small"
+                value={form.serviceId}
+                onChange={(e) => setField('serviceId', e.target.value)}
+                fullWidth
+              />
+            </Stack>
+
+            <Divider sx={{ my: 2 }} />
+
+            {/* === Notas internas === */}
+            <SectionTitle>Notas internas</SectionTitle>
+            <Stack spacing={1}>
+              <TextField
+                label="Notas internas (directorio)"
+                size="small"
+                value={form.internalNotes}
+                onChange={(e) => setField('internalNotes', e.target.value)}
+                fullWidth
+                multiline
+                minRows={2}
+              />
+              <TextField
+                label="Notas de la conversación"
+                size="small"
+                value={form.adminNotes}
+                onChange={(e) => setField('adminNotes', e.target.value)}
+                fullWidth
+                multiline
+                minRows={2}
+                placeholder="Visibles solo en panel (admin)"
+              />
+            </Stack>
+
+            <Divider sx={{ my: 2 }} />
+
+            {/* === Auditoría (solo lectura) === */}
+            <SectionTitle>Auditoría</SectionTitle>
+            <Stack spacing={0.5} sx={{ bgcolor: 'action.hover', borderRadius: 1, p: 1, mb: 2 }}>
+              <ReadOnlyRow label="ID directorio" value={entry.id} />
+              <ReadOnlyRow label="Creado" value={formatDate(entry.createdAt)} />
+              <ReadOnlyRow label="Actualizado" value={formatDate(entry.updatedAt)} />
+              <ReadOnlyRow label="Última sincronización" value={formatDate(entry.lastSyncedAt)} />
+              <ReadOnlyRow label="Primer contacto" value={formatDate(entry.firstContactAt)} />
+              <ReadOnlyRow label="Último contacto" value={formatDate(entry.lastContactAt)} />
+              <ReadOnlyRow label="Mensajes" value={entry.messagesCount} />
+              <ReadOnlyRow label="No leídos WA" value={entry.unreadWhatsAppCount} />
+              <ReadOnlyRow label="Paso de secuencia" value={entry.sequenceStep} />
+              <ReadOnlyRow label="Último msg WA" value={formatDate(entry.lastWhatsAppMessageAt)} />
+              {entry.lastWhatsAppMessageText && (
+                <ReadOnlyRow
+                  label="Texto último WA"
+                  value={
+                    entry.lastWhatsAppMessageText.length > 60
+                      ? `${entry.lastWhatsAppMessageText.slice(0, 60)}…`
+                      : entry.lastWhatsAppMessageText
+                  }
+                />
+              )}
+              {entry.lastWhatsAppIntent && (
+                <ReadOnlyRow label="Intent WA" value={entry.lastWhatsAppIntent} />
+              )}
+              {entry.lastResponseText && (
+                <ReadOnlyRow
+                  label="Última respuesta"
+                  value={
+                    entry.lastResponseText.length > 60
+                      ? `${entry.lastResponseText.slice(0, 60)}…`
+                      : entry.lastResponseText
+                  }
+                />
+              )}
+              {entry.lastResponseAt && (
+                <ReadOnlyRow label="Hora respuesta" value={formatDate(entry.lastResponseAt)} />
+              )}
+              {entry.appointmentId && (
+                <ReadOnlyRow label="Cita vinculada" value={entry.appointmentId} />
+              )}
+              {entry.whatsAppConversationId && (
+                <ReadOnlyRow label="Conversación WA" value={entry.whatsAppConversationId} />
+              )}
+            </Stack>
 
             <Button
               variant="contained"
               fullWidth
               disabled={!isDirty || saving}
-              onClick={() => void handleSaveContact()}
+              onClick={() => void handleSave()}
               startIcon={saving ? <CircularProgress size={16} color="inherit" /> : undefined}
             >
               {saving ? 'Guardando…' : 'Guardar cambios'}
@@ -821,12 +1102,6 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
           </Table>
         )}
       </Box>
-
-      {dialogUser && (
-        <Suspense fallback={null}>
-          <UserDetailsDialog open={dialogOpen} onClose={() => setDialogOpen(false)} user={dialogUser} />
-        </Suspense>
-      )}
     </Box>
   );
 };

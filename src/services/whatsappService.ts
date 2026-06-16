@@ -420,6 +420,25 @@ export async function patchWhatsAppConversationAdmin(params: {
   });
 }
 
+/**
+ * Sobrescribe el perfil del usuario de la App (Firestore users/{uid}) con datos
+ * verificados manualmente desde la ficha del CRM. El trigger Firebase
+ * onUserWriteSyncDirectory re-sincroniza el cambio a crm_directory.
+ */
+export async function updateAppUserProfile(params: {
+  uid: string;
+  name?: string;
+  email?: string;
+  photoUrl?: string;
+}): Promise<{ success: boolean; updated: boolean }> {
+  return invokeFn<{ success: boolean; updated: boolean }>('update-app-user-profile', {
+    uid: params.uid,
+    ...(params.name !== undefined ? { name: params.name } : {}),
+    ...(params.email !== undefined ? { email: params.email } : {}),
+    ...(params.photoUrl !== undefined ? { photoUrl: params.photoUrl } : {}),
+  });
+}
+
 export async function sendMessage(
   to: string,
   text: string,
