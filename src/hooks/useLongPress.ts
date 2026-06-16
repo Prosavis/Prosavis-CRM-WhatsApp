@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, type PointerEvent as ReactPointerEvent } from 'react';
 
 export interface UseLongPressOptions {
   delay?: number;
@@ -6,10 +6,10 @@ export interface UseLongPressOptions {
 }
 
 export interface LongPressHandlers {
-  onPointerDown: (e: React.PointerEvent) => void;
-  onPointerUp: (e: React.PointerEvent) => void;
-  onPointerLeave: (e: React.PointerEvent) => void;
-  onPointerCancel: (e: React.PointerEvent) => void;
+  onPointerDown: (e: ReactPointerEvent) => void;
+  onPointerUp: (e: ReactPointerEvent) => void;
+  onPointerLeave: (e: ReactPointerEvent) => void;
+  onPointerCancel: (e: ReactPointerEvent) => void;
   /** Returns true if the click should be suppressed (long-press just fired). */
   shouldSuppressClick: () => boolean;
 }
@@ -27,7 +27,7 @@ export function useLongPress({ delay = 500, onLongPress }: UseLongPressOptions):
   }, []);
 
   const onPointerDown = useCallback(
-    (e: React.PointerEvent) => {
+    (e: ReactPointerEvent) => {
       if (e.button !== 0) return;
       didLongPressRef.current = false;
       pointerIdRef.current = e.pointerId;
@@ -41,7 +41,7 @@ export function useLongPress({ delay = 500, onLongPress }: UseLongPressOptions):
   );
 
   const onPointerUp = useCallback(
-    (e: React.PointerEvent) => {
+    (e: ReactPointerEvent) => {
       if (pointerIdRef.current !== null && e.pointerId !== pointerIdRef.current) return;
       clearTimer();
       pointerIdRef.current = null;
@@ -50,7 +50,7 @@ export function useLongPress({ delay = 500, onLongPress }: UseLongPressOptions):
   );
 
   const onPointerLeave = useCallback(
-    (e: React.PointerEvent) => {
+    (e: ReactPointerEvent) => {
       if (pointerIdRef.current !== null && e.pointerId !== pointerIdRef.current) return;
       clearTimer();
       pointerIdRef.current = null;
@@ -59,7 +59,7 @@ export function useLongPress({ delay = 500, onLongPress }: UseLongPressOptions):
   );
 
   const onPointerCancel = useCallback(
-    (e: React.PointerEvent) => {
+    (e: ReactPointerEvent) => {
       if (pointerIdRef.current !== null && e.pointerId !== pointerIdRef.current) return;
       clearTimer();
       pointerIdRef.current = null;

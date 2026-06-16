@@ -209,6 +209,187 @@ function readStoredInboxFilter(): FilterType {
   return 'last24h';
 }
 
+interface ConversationRowProps {
+  conv: WhatsAppConversation;
+  rowName: string;
+  rowPhone: string | undefined;
+  rowPhoto: string | undefined;
+  convTags: WhatsAppTag[];
+  isUnread: boolean;
+  peerSummary: ReturnType<typeof summarizePeerPresences> | null;
+  selectionMode: boolean;
+  bulkSelected: boolean;
+  chatSelected: boolean;
+  onOpenChat: () => void;
+  onEnterSelection: () => void;
+  onToggleBulkSelect: () => void;
+  onContextMenu: (event: React.MouseEvent) => void;
+}
+
+const ConversationRow: React.FC<ConversationRowProps> = ({
+  conv,
+  rowName,
+  rowPhone,
+  rowPhoto,
+  convTags,
+  isUnread,
+  peerSummary,
+  selectionMode,
+  bulkSelected,
+  chatSelected,
+  onOpenChat,
+  onEnterSelection,
+  onToggleBulkSelect,
+  onContextMenu,
+}) => {
+  const longPress = useLongPress({ onLongPress: onEnterSelection });
+
+  const handleClick = () => {
+    if (longPress.shouldSuppressClick()) return;
+    if (selectionMode) {
+      onToggleBulkSelect();
+      return;
+    }
+    onOpenChat();
+  };
+
+  return (
+    <ListItemButton
+      selected={selectionMode ? bulkSelected : chatSelected}
+      onClick={handleClick}
+      onContextMenu={selectionMode ? undefined : onContextMenu}
+      onPointerDown={selectionMode ? undefined : longPress.onPointerDown}
+      onPointerUp={selectionMode ? undefined : longPress.onPointerUp}
+      onPointerLeave={selectionMode ? undefined : longPress.onPointerLeave}
+      onPointerCancel={selectionMode ? undefined : longPress.onPointerCancel}
+      sx={{
+        py: 1.5,
+        px: 2,
+        borderBottom: 1,
+        borderColor: 'divider',
+        touchAction: 'manipulation',
+        '&.Mui-selected': { bgcolor: 'action.selected' },
+      }}
+    >
+      {selectionMode && (
+        <Checkbox
+          checked={bulkSelected}
+          tabIndex={-1}
+          disableRipple
+          inputProps={{ 'aria-label': `Seleccionar ${rowName}` }}
+          sx={{ mr: 1, p: 0.25, pointerEvents: 'none' }}
+          size="small"
+        />
+      )}
+      <ListItemAvatar>
+        <Badge
+          badgeContent={conv.crmForceUnread && conv.unreadCount === 0 ? ' ' : conv.unreadCount}
+          color="success"
+          max={99}
+          invisible={!isUnread}
+          variant={conv.crmForceUnread && conv.unreadCount === 0 ? 'dot' : 'standard'}
+        >
+          <ContactAvatar
+            displayName={rowName}
+            phone={rowPhone}
+            photoUrl={rowPhoto}
+            size={48}
+          />
+        </Badge>
+      </ListItemAvatar>
+      <ListItemText
+        primaryTypographyProps={{ component: 'div' }}
+        secondaryTypographyProps={{ component: 'div' }}
+        primary={
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0, flex: 1 }}>
+              {conv.isPinned && <PushPinIcon sx={{ fontSize: 14, color: 'text.secondary', transform: 'rotate(45deg)' }} />}
+              <Typography variant="body1" fontWeight={isUnread ? 600 : 400} noWrap>
+                {rowName}
+              </Typography>
+            </Box>
+            <Typography
+              variant="caption"
+              sx={{ color: isUnread ? 'success.main' : 'text.secondary', whiteSpace: 'nowrap', ml: 1 }}
+            >
+              {formatRelativeTime(conv.lastMessageAt)}
+            </Typography>
+          </Box>
+        }
+        secondary={
+          <Box>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 0.5 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0, flex: 1 }}>
+                {conv.lastMessageDirection === 'outbound' && (
+                  <Box sx={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+                    <OutboundPreviewTicks status={conv.lastMessageOutboundStatus} />
+                  </Box>
+                )}
+                <Typography
+                  variant="body2"
+                  noWrap
+                  sx={{
+                    color: 'text.secondary',
+                    fontWeight: conv.unreadCount > 0 ? 500 : 400,
+                    minWidth: 0,
+                  }}
+                >
+                  {conv.lastMessageText || 'Sin mensajes'}
+                </Typography>
+              </Box>
+              {conv.isPinned && (
+                <PushPinIcon sx={{ fontSize: 14, color: 'text.secondary', ml: 0.5, flexShrink: 0, transform: 'rotate(45deg)' }} />
+              )}
+            </Box>
+            {convTags.length > 0 && (
+              <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5, flexWrap: 'wrap' }}>
+                {convTags.slice(0, 3).map((tag) => (
+                  <Chip
+                    key={tag.id}
+                    label={tag.name}
+                    size="small"
+                    sx={{
+                      height: 18,
+                      fontSize: '0.65rem',
+                      bgcolor: tag.color || '#1976d2',
+                      color: '#fff',
+                    }}
+                  />
+                ))}
+                {convTags.length > 3 && (
+                  <Typography variant="caption" color="text.secondary">
+                    +{convTags.length - 3}
+                  </Typography>
+                )}
+              </Box>
+            )}
+            {peerSummary && (
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 0.5,
+                  mt: 0.5,
+                  color: peerSummary.typing ? 'success.main' : 'info.main',
+                }}
+              >
+                {peerSummary.typing ? (
+                  <EditIcon sx={{ fontSize: 12 }} />
+                ) : (
+                  <VisibilityIcon sx={{ fontSize: 12 }} />
+                )}
+                <Typography variant="caption" sx={{ fontWeight: 500, lineHeight: 1.2 }} noWrap>
+                  {peerSummary.text}
+                </Typography>
+              </Box>
+            )}
+          </Box>
+        }
+      />
+    </ListItemButton>
+  );
+};
+
 const ConversationList: React.FC<ConversationListProps> = ({
   conversations,
   tabCounts,
@@ -945,15 +1126,26 @@ const ConversationList: React.FC<ConversationListProps> = ({
           });
           const rowPhoto = pickContactPhotoUrl(dirMeta?.photoUrl, conv.contactPhotoUrl);
           const convTags = (conv.tagIds || []).map((id) => tagMap.get(id)).filter(Boolean) as WhatsAppTag[];
-          const isUnread = conv.unreadCount > 0 || conv.crmForceUnread;
+          const isUnread = Boolean(conv.unreadCount > 0 || conv.crmForceUnread);
           const peers = presenceByConversationId?.[conv.id] || [];
           const peerSummary = summarizePeerPresences(peers);
 
           return (
-            <ListItemButton
+            <ConversationRow
               key={conv.id}
-              selected={conv.id === selectedId}
-              onClick={() => onSelect(conv)}
+              conv={conv}
+              rowName={rowName}
+              rowPhone={rowPhone}
+              rowPhoto={rowPhoto}
+              convTags={convTags}
+              isUnread={isUnread}
+              peerSummary={peerSummary}
+              selectionMode={selectionMode}
+              bulkSelected={selectedIds.has(conv.id)}
+              chatSelected={conv.id === selectedId}
+              onOpenChat={() => onSelect(conv)}
+              onEnterSelection={() => enterSelectionMode(conv.id)}
+              onToggleBulkSelect={() => toggleSelectedId(conv.id)}
               onContextMenu={(event) => {
                 event.preventDefault();
                 setContextMenu(
@@ -966,132 +1158,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
                     : null,
                 );
               }}
-              sx={{
-                py: 1.5,
-                px: 2,
-                borderBottom: 1,
-                borderColor: 'divider',
-                '&.Mui-selected': { bgcolor: 'action.selected' },
-              }}
-            >
-              <ListItemAvatar>
-                <Badge
-                  badgeContent={conv.crmForceUnread && conv.unreadCount === 0 ? ' ' : conv.unreadCount}
-                  color="success"
-                  max={99}
-                  invisible={!isUnread}
-                  variant={conv.crmForceUnread && conv.unreadCount === 0 ? 'dot' : 'standard'}
-                >
-                  <ContactAvatar
-                    displayName={rowName}
-                    phone={rowPhone}
-                    photoUrl={rowPhoto}
-                    size={48}
-                  />
-                </Badge>
-              </ListItemAvatar>
-              <ListItemText
-                primaryTypographyProps={{ component: 'div' }}
-                secondaryTypographyProps={{ component: 'div' }}
-                primary={
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0, flex: 1 }}>
-                      {conv.isPinned && <PushPinIcon sx={{ fontSize: 14, color: 'text.secondary', transform: 'rotate(45deg)' }} />}
-                      <Typography variant="body1" fontWeight={isUnread ? 600 : 400} noWrap>
-                        {rowName}
-                      </Typography>
-                    </Box>
-                    <Typography
-                      variant="caption"
-                      sx={{ color: isUnread ? 'success.main' : 'text.secondary', whiteSpace: 'nowrap', ml: 1 }}
-                    >
-                      {formatRelativeTime(conv.lastMessageAt)}
-                    </Typography>
-                  </Box>
-                }
-                secondary={
-                  <Box>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 0.5 }}>
-                      <Box
-                        sx={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 0.5,
-                          minWidth: 0,
-                          flex: 1,
-                        }}
-                      >
-                        {conv.lastMessageDirection === 'outbound' && (
-                          <Box sx={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
-                            <OutboundPreviewTicks status={conv.lastMessageOutboundStatus} />
-                          </Box>
-                        )}
-                        <Typography
-                          variant="body2"
-                          noWrap
-                          sx={{
-                            color: 'text.secondary',
-                            fontWeight: conv.unreadCount > 0 ? 500 : 400,
-                            minWidth: 0,
-                          }}
-                        >
-                          {conv.lastMessageText || 'Sin mensajes'}
-                        </Typography>
-                      </Box>
-                      {conv.isPinned && (
-                        <PushPinIcon sx={{ fontSize: 14, color: 'text.secondary', ml: 0.5, flexShrink: 0, transform: 'rotate(45deg)' }} />
-                      )}
-                    </Box>
-                    {convTags.length > 0 && (
-                      <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5, flexWrap: 'wrap' }}>
-                        {convTags.slice(0, 3).map((tag) => (
-                          <Chip
-                            key={tag.id}
-                            label={tag.name}
-                            size="small"
-                            sx={{
-                              height: 18,
-                              fontSize: '0.65rem',
-                              bgcolor: tag.color || '#1976d2',
-                              color: '#fff',
-                            }}
-                          />
-                        ))}
-                        {convTags.length > 3 && (
-                          <Typography variant="caption" color="text.secondary">
-                            +{convTags.length - 3}
-                          </Typography>
-                        )}
-                      </Box>
-                    )}
-                    {peerSummary && (
-                      <Box
-                        sx={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 0.5,
-                          mt: 0.5,
-                          color: peerSummary.typing ? 'success.main' : 'info.main',
-                        }}
-                      >
-                        {peerSummary.typing ? (
-                          <EditIcon sx={{ fontSize: 12 }} />
-                        ) : (
-                          <VisibilityIcon sx={{ fontSize: 12 }} />
-                        )}
-                        <Typography
-                          variant="caption"
-                          sx={{ fontWeight: 500, lineHeight: 1.2 }}
-                          noWrap
-                        >
-                          {peerSummary.text}
-                        </Typography>
-                      </Box>
-                    )}
-                  </Box>
-                }
-              />
-            </ListItemButton>
+            />
           );
         })}
 
