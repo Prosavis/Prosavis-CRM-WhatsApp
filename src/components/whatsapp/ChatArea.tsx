@@ -41,7 +41,9 @@ import PushPinIcon from '@mui/icons-material/PushPin';
 import PushPinOutlinedIcon from '@mui/icons-material/PushPinOutlined';
 import MarkChatUnreadIcon from '@mui/icons-material/MarkChatUnread';
 import ReplyIcon from '@mui/icons-material/Reply';
+import ForwardIcon from '@mui/icons-material/Forward';
 import MessageBubble, { type MessageReaction } from './MessageBubble';
+import ForwardMessageDialog from './ForwardMessageDialog';
 import MessageInput, {
   type PendingAttachmentForSend,
   type PendingAttachmentStatus,
@@ -78,6 +80,8 @@ import {
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import EditIcon from '@mui/icons-material/Edit';
 import BookingAssistantDrawer from './BookingAssistantDrawer';
+import type { ForwardWhatsAppResult } from '@/services/forwardWhatsAppMessage';
+import { isForwardableMessage } from '@/services/forwardWhatsAppMessage';
 import { ContactAvatar } from '@/components/common/ContactAvatar';
 import { pickContactPhotoUrl } from '@/utils/contactAvatar';
 import { getLastInboundAt } from '@/utils/whatsappTemplateSuggestions';
@@ -250,6 +254,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [forwardDialogOpen, setForwardDialogOpen] = useState(false);
+  const [messagesToForward, setMessagesToForward] = useState<WhatsAppMessage[]>([]);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -860,6 +866,51 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     setReplyToMessage(msg);
   }, []);
 
+  const handleForwardSingle = useCallback((msg: WhatsAppMessage) => {
+    setMessagesToForward([msg]);
+    setForwardDialogOpen(true);
+  }, []);
+
+  const handleForwardBulk = useCallback(() => {
+    const selected = messages
+      .filter((msg) => selectedIds.has(msg.id))
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+    const forwardable = selected.filter(isForwardableMessage);
+    if (forwardable.length === 0) {
+      setSnack({
+        open: true,
+        message: 'Ninguno de los mensajes seleccionados se puede reenviar',
+        severity: 'error',
+      });
+      return;
+    }
+    setMessagesToForward(forwardable);
+    setForwardDialogOpen(true);
+  }, [messages, selectedIds]);
+
+  const handleForwarded = useCallback((result: ForwardWhatsAppResult) => {
+    if (result.sent > 0) {
+      const skippedNote = result.skipped > 0 ? ` (${result.skipped} omitido(s))` : '';
+      const failedNote = result.failed > 0 ? ` · ${result.failed} fallido(s)` : '';
+      setSnack({
+        open: true,
+        message: `${result.sent} mensaje(s) reenviado(s)${skippedNote}${failedNote}`,
+        severity: result.failed > 0 ? 'error' : 'success',
+      });
+      if (result.failed === 0) {
+        setSelectionMode(false);
+        setSelectedIds(new Set());
+        setForwardDialogOpen(false);
+        setMessagesToForward([]);
+      }
+    }
+  }, []);
+
+  const handleCloseForwardDialog = useCallback(() => {
+    setForwardDialogOpen(false);
+    setMessagesToForward([]);
+  }, []);
+
   const handleReact = useCallback((msg: WhatsAppMessage, emoji: string) => {
     if (!msg.waMessageId) {
       setSnack({ open: true, message: 'Este mensaje no tiene ID de WhatsApp para reaccionar', severity: 'error' });
@@ -972,6 +1023,14 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             <Typography variant="subtitle2" sx={{ flex: 1 }}>
               {selectedIds.size} seleccionado(s)
             </Typography>
+            <Button
+              size="small"
+              startIcon={<ForwardIcon />}
+              disabled={selectedIds.size === 0}
+              onClick={handleForwardBulk}
+            >
+              Reenviar
+            </Button>
             <Button
               size="small"
               color="error"
@@ -1172,6 +1231,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                   onToggleSelect={handleToggleSelect}
                   onDelete={handleDeleteSingle}
                   onReply={handleReply}
+                  onForward={handleForwardSingle}
                   reactions={msg.waMessageId ? reactionsByTarget.get(msg.waMessageId) || [] : []}
                   currentAgentReactionEmoji={msg.waMessageId ? currentAgentReactionByTarget.get(msg.waMessageId) : undefined}
                   reacting={msg.waMessageId ? Boolean(pendingReactions[msg.waMessageId]) : false}
@@ -1543,6 +1603,15 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           </Button>
         </DialogActions>
       </Dialog>
+
+      <ForwardMessageDialog
+        open={forwardDialogOpen}
+        onClose={handleCloseForwardDialog}
+        messages={messagesToForward}
+        sourceConversationId={conversation.id}
+        phoneNumberId={phoneNumberId}
+        onForwarded={handleForwarded}
+      />
 
       {/* Snackbar */}
       <Snackbar

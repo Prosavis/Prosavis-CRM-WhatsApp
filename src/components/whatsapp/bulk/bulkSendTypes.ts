@@ -39,6 +39,166 @@ export function defaultBulkSortDirection(
   return 'asc';
 }
 
+/** Modo de filtrado por tags (WhatsApp o directorio). */
+export type BulkAudienceTagFilterMode = 'include_any' | 'include_all' | 'exclude_any';
+
+export type BulkAudienceListFilterMode = 'include' | 'exclude';
+
+export const BULK_AUDIENCE_TAG_FILTER_LABELS: Record<BulkAudienceTagFilterMode, string> = {
+  include_any: 'Incluir (cualquiera)',
+  include_all: 'Incluir (todos)',
+  exclude_any: 'Excluir',
+};
+
+export const BULK_QUALITY_TAG_LABELS: Record<string, string> = {
+  good: 'Buena',
+  standard: 'Estándar',
+  bad: 'Mala',
+};
+
+export const BULK_CLASSIFICATION_OPTIONS = ['user', 'company', 'lead', 'unknown'] as const;
+
+export const BULK_CLASSIFICATION_LABELS: Record<string, string> = {
+  user: 'Usuario',
+  company: 'Empresa',
+  lead: 'Lead',
+  unknown: 'Desconocido',
+};
+
+export interface BulkAudienceAdvancedFilters {
+  waTagIds: string[];
+  waTagMode: BulkAudienceTagFilterMode;
+  directoryTags: string[];
+  directoryTagMode: BulkAudienceTagFilterMode;
+  classifications: string[];
+  classificationMode: BulkAudienceListFilterMode;
+  qualityTags: string[];
+  qualityTagMode: BulkAudienceListFilterMode;
+}
+
+export const DEFAULT_BULK_AUDIENCE_ADVANCED_FILTERS: BulkAudienceAdvancedFilters = {
+  waTagIds: [],
+  waTagMode: 'include_any',
+  directoryTags: [],
+  directoryTagMode: 'include_any',
+  classifications: [],
+  classificationMode: 'include',
+  qualityTags: [],
+  qualityTagMode: 'include',
+};
+
+import type { WhatsAppTag } from '@/services/whatsappService';
+
+export function advancedFiltersToBulkParams(advanced: BulkAudienceAdvancedFilters) {
+  const waTags =
+    advanced.waTagIds.length > 0
+      ? {
+          includeWaTagIds:
+            advanced.waTagMode === 'exclude_any' ? undefined : advanced.waTagIds,
+          excludeWaTagIds:
+            advanced.waTagMode === 'exclude_any' ? advanced.waTagIds : undefined,
+          waTagMatchAll: advanced.waTagMode === 'include_all',
+        }
+      : {};
+
+  const directoryTags =
+    advanced.directoryTags.length > 0
+      ? {
+          includeDirectoryTags:
+            advanced.directoryTagMode === 'exclude_any'
+              ? undefined
+              : advanced.directoryTags,
+          excludeDirectoryTags:
+            advanced.directoryTagMode === 'exclude_any'
+              ? advanced.directoryTags
+              : undefined,
+          directoryTagMatchAll: advanced.directoryTagMode === 'include_all',
+        }
+      : {};
+
+  const classifications =
+    advanced.classifications.length > 0
+      ? {
+          includeClassifications:
+            advanced.classificationMode === 'include'
+              ? advanced.classifications
+              : undefined,
+          excludeClassifications:
+            advanced.classificationMode === 'exclude'
+              ? advanced.classifications
+              : undefined,
+        }
+      : {};
+
+  const qualityTags =
+    advanced.qualityTags.length > 0
+      ? {
+          includeQualityTags:
+            advanced.qualityTagMode === 'include' ? advanced.qualityTags : undefined,
+          excludeQualityTags:
+            advanced.qualityTagMode === 'exclude' ? advanced.qualityTags : undefined,
+        }
+      : {};
+
+  return { ...waTags, ...directoryTags, ...classifications, ...qualityTags };
+}
+
+export function summarizeBulkAdvancedFilters(
+  advanced: BulkAudienceAdvancedFilters,
+  waTags: WhatsAppTag[],
+): string[] {
+  const parts: string[] = [];
+  const waTagMap = new Map(waTags.map((t) => [t.id, t.name]));
+
+  if (advanced.waTagIds.length > 0) {
+    const names = advanced.waTagIds.map((id) => waTagMap.get(id) ?? id).join(', ');
+    const prefix =
+      advanced.waTagMode === 'exclude_any'
+        ? 'Excluye tags WA'
+        : advanced.waTagMode === 'include_all'
+          ? 'Tags WA (todos)'
+          : 'Tags WA';
+    parts.push(`${prefix}: ${names}`);
+  }
+
+  if (advanced.directoryTags.length > 0) {
+    const prefix =
+      advanced.directoryTagMode === 'exclude_any'
+        ? 'Excluye etiquetas'
+        : advanced.directoryTagMode === 'include_all'
+          ? 'Etiquetas (todas)'
+          : 'Etiquetas';
+    parts.push(`${prefix}: ${advanced.directoryTags.join(', ')}`);
+  }
+
+  if (advanced.classifications.length > 0) {
+    const labels = advanced.classifications
+      .map((c) => BULK_CLASSIFICATION_LABELS[c] ?? c)
+      .join(', ');
+    const prefix = advanced.classificationMode === 'exclude' ? 'Excluye tipo' : 'Tipo';
+    parts.push(`${prefix}: ${labels}`);
+  }
+
+  if (advanced.qualityTags.length > 0) {
+    const labels = advanced.qualityTags
+      .map((q) => BULK_QUALITY_TAG_LABELS[q] ?? q)
+      .join(', ');
+    const prefix = advanced.qualityTagMode === 'exclude' ? 'Excluye calidad' : 'Calidad';
+    parts.push(`${prefix}: ${labels}`);
+  }
+
+  return parts;
+}
+
+export function hasActiveBulkAdvancedFilters(filters: BulkAudienceAdvancedFilters): boolean {
+  return (
+    filters.waTagIds.length > 0
+    || filters.directoryTags.length > 0
+    || filters.classifications.length > 0
+    || filters.qualityTags.length > 0
+  );
+}
+
 export interface BulkRecipient {
   phone: string;
   name?: string;

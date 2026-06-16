@@ -37,6 +37,7 @@ import SortIcon from '@mui/icons-material/Sort';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { ContactAvatar } from '@/components/common/ContactAvatar';
 import { directoryService } from '@/services/directoryService';
+import { listWhatsAppTags, type WhatsAppTag } from '@/services/whatsappService';
 import type { DirectoryEntry } from '@/types/lead';
 import { downloadDirectoryCsv } from '@/utils/exportDirectoryCsv';
 import {
@@ -46,14 +47,20 @@ import {
 } from '@/utils/directoryContactStatus';
 import { formatRelativeTime } from '@/utils/date';
 import {
+  advancedFiltersToBulkParams,
   BULK_DIRECTORY_DEFAULT_SORT_DIRECTION,
   BULK_DIRECTORY_DEFAULT_SORT_FIELD,
   BULK_DIRECTORY_SORT_LABELS,
   BULK_SEND_MAX_RECIPIENTS,
+  DEFAULT_BULK_AUDIENCE_ADVANCED_FILTERS,
   defaultBulkSortDirection,
+  hasActiveBulkAdvancedFilters,
+  summarizeBulkAdvancedFilters,
+  type BulkAudienceAdvancedFilters,
   type BulkDirectorySortDirection,
   type BulkDirectorySortField,
 } from './bulkSendTypes';
+import BulkSendAdvancedFilters from './BulkSendAdvancedFilters';
 
 const CLASSIFICATION_LABELS: Record<string, string> = {
   user: 'Usuario',
@@ -114,9 +121,13 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
   const [page, setPage] = useState(0);
   const [searchInput, setSearchInput] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
-  const [classificationFilter, setClassificationFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
+  const [advancedFilters, setAdvancedFilters] = useState<BulkAudienceAdvancedFilters>(
+    DEFAULT_BULK_AUDIENCE_ADVANCED_FILTERS,
+  );
+  const [waTags, setWaTags] = useState<WhatsAppTag[]>([]);
+  const [showDirectoryTagFilters, setShowDirectoryTagFilters] = useState(false);
   const [includeOptOut, setIncludeOptOut] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [manualExpanded, setManualExpanded] = useState(initialManualExpanded);
@@ -131,7 +142,6 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
   const bulkFilters = useMemo(
     () => ({
       searchTerm: searchTerm || undefined,
-      classification: classificationFilter || undefined,
       status: statusFilter || undefined,
       source: sourceFilter || undefined,
       includeOptOut,
@@ -139,16 +149,17 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
       page,
       sortField,
       sortDirection,
+      ...advancedFiltersToBulkParams(advancedFilters),
     }),
     [
       searchTerm,
-      classificationFilter,
       statusFilter,
       sourceFilter,
       includeOptOut,
       page,
       sortField,
       sortDirection,
+      advancedFilters,
     ],
   );
 
@@ -173,6 +184,36 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
   useEffect(() => {
     if (initialManualExpanded) setManualExpanded(true);
   }, [initialManualExpanded]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void listWhatsAppTags()
+      .then((tags) => {
+        if (!cancelled) setWaTags(tags);
+      })
+      .catch(() => {
+        if (!cancelled) setWaTags([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const directoryTagSuggestions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const entry of entries) {
+      for (const tag of entry.tags ?? []) {
+        const trimmed = tag.trim();
+        if (trimmed) seen.add(trimmed);
+      }
+    }
+    return [...seen].sort((a, b) => a.localeCompare(b, 'es'));
+  }, [entries]);
+
+  const advancedFilterSummary = useMemo(
+    () => summarizeBulkAdvancedFilters(advancedFilters, waTags),
+    [advancedFilters, waTags],
+  );
 
   const handleSearchChange = (value: string) => {
     setSearchInput(value);
@@ -225,12 +266,12 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
     try {
       const all = await directoryService.fetchAllEntriesForBulk({
         searchTerm: searchTerm || undefined,
-        classification: classificationFilter || undefined,
         status: statusFilter || undefined,
         source: sourceFilter || undefined,
         includeOptOut,
         sortField,
         sortDirection,
+        ...advancedFiltersToBulkParams(advancedFilters),
       });
       const nextIds = new Set(selectedIds);
       const nextEntriesMap = new Map(selectedEntries.map((e) => [e.id, e]));
@@ -263,7 +304,12 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
   };
 
   const sortDirectionLabel = sortDirection === 'asc' ? 'Ascendente' : 'Descendente';
-  const hasFilters = Boolean(searchTerm || classificationFilter || statusFilter || sourceFilter);
+  const hasFilters = Boolean(
+    searchTerm
+    || statusFilter
+    || sourceFilter
+    || hasActiveBulkAdvancedFilters(advancedFilters),
+  );
   const sortOptions: BulkDirectorySortField[] = [
     'last_whatsapp_message_at',
     'full_name',
@@ -369,22 +415,26 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
 
         <Collapse in={showFilters}>
           <Stack spacing={1.5} sx={{ mb: 1.5, p: 1.5, borderRadius: 1, bgcolor: 'action.hover' }}>
-            <Stack direction="row" spacing={0.5} flexWrap="wrap" alignItems="center">
-              <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
-                Tipo:
-              </Typography>
-              {['', 'user', 'company', 'lead', 'unknown'].map((key) =>
-                filterChip(
-                  key ? CLASSIFICATION_LABELS[key] : 'Todas',
-                  classificationFilter === key,
-                  () => {
-                    setClassificationFilter(key);
-                    setPage(0);
-                  },
-                  key === 'user' ? 'primary' : key === 'lead' ? 'warning' : undefined,
-                ),
-              )}
-            </Stack>
+            {advancedFilterSummary.length > 0 && (
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                {advancedFilterSummary.map((label) => (
+                  <Chip key={label} label={label} size="small" color="primary" variant="outlined" />
+                ))}
+              </Stack>
+            )}
+
+            <BulkSendAdvancedFilters
+              filters={advancedFilters}
+              onChange={(next) => {
+                setAdvancedFilters(next);
+                setPage(0);
+              }}
+              waTags={waTags}
+              directoryTagSuggestions={directoryTagSuggestions}
+              showDirectoryTags={showDirectoryTagFilters}
+              onToggleDirectoryTags={() => setShowDirectoryTagFilters((v) => !v)}
+            />
+
             <Stack direction="row" spacing={0.5} flexWrap="wrap" alignItems="center">
               <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
                 Estado:
@@ -471,6 +521,7 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
                 <TableCell sx={{ fontWeight: 700 }}>Contacto</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Teléfono</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Tipo</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Tags</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Estado</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Último mensaje</TableCell>
               </TableRow>
@@ -478,7 +529,7 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
             <TableBody>
               {entries.length === 0 && !loading && (
                 <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
+                  <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
                     <Typography color="text.secondary">
                       No hay contactos con teléfono para los filtros actuales.
                     </Typography>
@@ -528,6 +579,22 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
                         size="small"
                         variant="outlined"
                       />
+                    </TableCell>
+                    <TableCell>
+                      {entry.tags && entry.tags.length > 0 ? (
+                        <Stack direction="row" spacing={0.5} flexWrap="nowrap">
+                          {entry.tags.slice(0, 2).map((tag) => (
+                            <Chip key={tag} label={tag} size="small" variant="outlined" />
+                          ))}
+                          {entry.tags.length > 2 && (
+                            <Chip label={`+${entry.tags.length - 2}`} size="small" variant="outlined" />
+                          )}
+                        </Stack>
+                      ) : (
+                        <Typography variant="body2" color="text.disabled">
+                          —
+                        </Typography>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Chip

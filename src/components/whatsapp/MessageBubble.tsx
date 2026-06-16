@@ -41,9 +41,11 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import ZoomInIcon from '@mui/icons-material/ZoomIn';
 import CloseIcon from '@mui/icons-material/Close';
 import ReplyIcon from '@mui/icons-material/Reply';
+import ForwardIcon from '@mui/icons-material/Forward';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import AddReactionIcon from '@mui/icons-material/AddReaction';
 import SubtitlesIcon from '@mui/icons-material/Subtitles';
+import { isForwardableMessage } from '@/services/forwardWhatsAppMessage';
 import type { WhatsAppContact, WhatsAppMessage } from '@/services/whatsappService';
 import {
   getMediaUrl,
@@ -70,6 +72,7 @@ interface MessageBubbleProps {
   onToggleSelect?: (id: string) => void;
   onDelete?: (id: string) => void;
   onReply?: (msg: WhatsAppMessage) => void;
+  onForward?: (msg: WhatsAppMessage) => void;
   reactions?: MessageReaction[];
   currentAgentReactionEmoji?: string;
   reacting?: boolean;
@@ -515,6 +518,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
   onToggleSelect,
   onDelete,
   onReply,
+  onForward,
   reactions = [],
   currentAgentReactionEmoji,
   reacting,
@@ -754,6 +758,12 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
           <MenuItem onClick={() => { setMenuAnchor(null); onReply(message); }}>
             <ListItemIcon><ReplyIcon fontSize="small" /></ListItemIcon>
             <ListItemText>Responder</ListItemText>
+          </MenuItem>
+        )}
+        {onForward && isForwardableMessage(message) && (
+          <MenuItem onClick={() => { setMenuAnchor(null); onForward(message); }}>
+            <ListItemIcon><ForwardIcon fontSize="small" /></ListItemIcon>
+            <ListItemText>Reenviar</ListItemText>
           </MenuItem>
         )}
         {copyablePlainText ? (

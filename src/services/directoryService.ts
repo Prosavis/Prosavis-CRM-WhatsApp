@@ -118,6 +118,7 @@ function toDbEntry(data: Partial<DirectoryEntry>): Record<string, unknown> {
 export type DirectoryBulkFilters = {
   status?: string;
   source?: string;
+  /** @deprecated Usar includeClassifications */
   classification?: string;
   searchTerm?: string;
   includeOptOut?: boolean;
@@ -125,12 +126,85 @@ export type DirectoryBulkFilters = {
   page?: number;
   sortField?: BulkDirectorySortField;
   sortDirection?: BulkDirectorySortDirection;
+  includeWaTagIds?: string[];
+  excludeWaTagIds?: string[];
+  waTagMatchAll?: boolean;
+  includeDirectoryTags?: string[];
+  excludeDirectoryTags?: string[];
+  directoryTagMatchAll?: boolean;
+  includeClassifications?: string[];
+  excludeClassifications?: string[];
+  includeQualityTags?: string[];
+  excludeQualityTags?: string[];
 };
 
-const BULK_TIMESTAMP_SORT_FIELDS = new Set<BulkDirectorySortField>([
-  'last_whatsapp_message_at',
-  'created_at',
-]);
+type BulkFilteredRpcRow = DirectoryRow & { total_count: number };
+
+function buildBulkFilteredRpcParams(filters?: DirectoryBulkFilters) {
+  const limit = filters?.limit ?? 50;
+  const page = filters?.page ?? 0;
+
+  let includeClassifications = filters?.includeClassifications;
+  let excludeClassifications = filters?.excludeClassifications;
+  if (filters?.classification?.trim()) {
+    includeClassifications = [filters.classification.trim()];
+    excludeClassifications = undefined;
+  }
+
+  return {
+    p_search_term: filters?.searchTerm?.trim() || null,
+    p_status: filters?.status || null,
+    p_source: filters?.source || null,
+    p_include_opt_out: filters?.includeOptOut === true,
+    p_include_wa_tag_ids:
+      filters?.includeWaTagIds && filters.includeWaTagIds.length > 0
+        ? filters.includeWaTagIds
+        : null,
+    p_exclude_wa_tag_ids:
+      filters?.excludeWaTagIds && filters.excludeWaTagIds.length > 0
+        ? filters.excludeWaTagIds
+        : null,
+    p_wa_tag_match_all: filters?.waTagMatchAll === true,
+    p_include_directory_tags:
+      filters?.includeDirectoryTags && filters.includeDirectoryTags.length > 0
+        ? filters.includeDirectoryTags
+        : null,
+    p_exclude_directory_tags:
+      filters?.excludeDirectoryTags && filters.excludeDirectoryTags.length > 0
+        ? filters.excludeDirectoryTags
+        : null,
+    p_directory_tag_match_all: filters?.directoryTagMatchAll === true,
+    p_include_classifications:
+      includeClassifications && includeClassifications.length > 0
+        ? includeClassifications
+        : null,
+    p_exclude_classifications:
+      excludeClassifications && excludeClassifications.length > 0
+        ? excludeClassifications
+        : null,
+    p_include_quality_tags:
+      filters?.includeQualityTags && filters.includeQualityTags.length > 0
+        ? filters.includeQualityTags
+        : null,
+    p_exclude_quality_tags:
+      filters?.excludeQualityTags && filters.excludeQualityTags.length > 0
+        ? filters.excludeQualityTags
+        : null,
+    p_sort_field: filters?.sortField ?? BULK_DIRECTORY_DEFAULT_SORT_FIELD,
+    p_sort_direction: filters?.sortDirection ?? BULK_DIRECTORY_DEFAULT_SORT_DIRECTION,
+    p_limit: limit,
+    p_offset: page * limit,
+  };
+}
+
+function mapBulkRpcRows(rows: BulkFilteredRpcRow[]) {
+  const totalCount = rows.length > 0 ? Number(rows[0].total_count) : 0;
+  const entries = rows.map((row) => {
+    const { total_count: _total, ...directoryRow } = row;
+    return mapRowToEntry(directoryRow as DirectoryRow);
+  });
+  return { entries, totalCount };
+}
 
 function isValidBulkPhone(phone: string | undefined): boolean {
   if (!phone) return false;
@@ -328,62 +402,19 @@ export const directoryService = {
    * Paginated directory entries for bulk send (phone required, opt_out excluded by default).
    */
   async getEntriesForBulk(filters?: DirectoryBulkFilters) {
-    const limit = filters?.limit ?? 50;
-    const page = filters?.page ?? 0;
-    const from = page * limit;
-    const to = from + limit - 1;
-    const sortField = filters?.sortField ?? BULK_DIRECTORY_DEFAULT_SORT_FIELD;
-    const ascending = (filters?.sortDirection ?? BULK_DIRECTORY_DEFAULT_SORT_DIRECTION) === 'asc';
-
-    const includeOptOut = filters?.includeOptOut === true;
-
-    let query = supabase.from('crm_directory').select('*', { count: 'exact' }).not('phone', 'is', null);
-
-    if (!includeOptOut) {
-      query = query.eq('opt_out', false).neq('status', 'opt_out');
-    }
-
-    if (filters?.status === 'active') {
-      query = query.or('status.eq.active,whatsapp_conversation_id.not.is.null');
-      if (!includeOptOut) query = query.eq('opt_out', false);
-    } else if (filters?.status === 'inactive') {
-      query = query.eq('status', 'inactive').is('whatsapp_conversation_id', null);
-      if (!includeOptOut) query = query.eq('opt_out', false);
-    } else if (filters?.status === 'opt_out') {
-      query = query.or('opt_out.eq.true,status.eq.opt_out');
-    } else if (filters?.status) {
-      query = query.eq('status', filters.status);
-    }
-
-    if (filters?.source) query = query.eq('source', filters.source);
-    if (filters?.classification) query = query.eq('classification', filters.classification);
-
-    if (filters?.searchTerm?.trim()) {
-      const term = `%${filters.searchTerm.trim()}%`;
-      query = query.or(
-        `full_name.ilike.${term},phone.ilike.${term},email.ilike.${term},display_name.ilike.${term}`,
-      );
-    }
-
-    if (BULK_TIMESTAMP_SORT_FIELDS.has(sortField)) {
-      query = query.order(sortField, { ascending, nullsFirst: false });
-    } else {
-      query = query.order(sortField, { ascending });
-    }
-
-    query = query.range(from, to);
-
-    const { data, error, count } = await query;
+    const { data, error } = await supabase.rpc(
+      'get_crm_directory_bulk_filtered',
+      buildBulkFilteredRpcParams(filters),
+    );
     if (error) throw error;
 
-    const entries = (data ?? [])
-      .map((row) => mapRowToEntry(row as DirectoryRow))
-      .filter((entry) => isValidBulkPhone(entry.phone));
+    const { entries, totalCount } = mapBulkRpcRows((data ?? []) as BulkFilteredRpcRow[]);
+    const validEntries = entries.filter((entry) => isValidBulkPhone(entry.phone));
 
     return {
-      entries,
-      count: entries.length,
-      totalCount: count ?? entries.length,
+      entries: validEntries,
+      count: validEntries.length,
+      totalCount,
     };
   },
 
