@@ -1,15 +1,41 @@
 import { supabase } from '@/config/supabase';
 import { directoryService } from '@/services/directoryService';
 import type { DirectoryEntry } from '@/types/lead';
+import {
+  looksLikePhoneValue,
+  resolveContactPhoneForSave,
+} from '@/utils/directoryPhone';
+
+export interface UpdateUserProfileContext {
+  fallbackPhone?: string;
+  directoryEntryId?: string;
+}
 
 export async function updateUserProfileViaFunction(
   payload: Record<string, string>,
   userId: string,
+  context?: UpdateUserProfileContext,
 ): Promise<{ success: boolean }> {
-  const phoneDigits = (payload.phoneNumber ?? userId).replace(/\D/g, '');
-  if (phoneDigits.length < 10) {
-    throw new Error('Teléfono inválido para actualizar perfil.');
+  let existing: DirectoryEntry | null = null;
+
+  if (context?.directoryEntryId) {
+    existing = await directoryService.getEntryById(context.directoryEntryId);
   }
+  if (!existing && context?.fallbackPhone) {
+    existing = (await directoryService.findByPhone(context.fallbackPhone))[0] ?? null;
+  }
+  if (!existing) {
+    existing = await directoryService.findByAppUserId(userId);
+  }
+  if (!existing && looksLikePhoneValue(userId)) {
+    existing = (await directoryService.findByPhone(userId))[0] ?? null;
+  }
+
+  const phoneE164 = resolveContactPhoneForSave({
+    payloadPhone: payload.phoneNumber,
+    fallbackPhone: context?.fallbackPhone,
+    existingEntryPhone: existing?.phone,
+  });
 
   const name = payload.name?.trim() || payload.displayName?.trim() || undefined;
   const photoUrl = payload.photoUrl?.trim() || payload.photoURL?.trim() || undefined;
@@ -21,17 +47,15 @@ export async function updateUserProfileViaFunction(
   if (payload.department?.trim()) metadataPatch.department = payload.department.trim();
   if (payload.city?.trim()) metadataPatch.city = payload.city.trim();
 
-  // Centralizado en crm_directory (fuente única de contactos).
-  const existing = (await directoryService.findByPhone(phoneDigits))[0] ?? null;
   const mergedMetadata = {
     ...(existing?.metadata ?? {}),
     ...metadataPatch,
   };
 
   const patch: Partial<DirectoryEntry> = {
-    phone: payload.phoneNumber?.trim() || phoneDigits,
+    phone: phoneE164,
     appUserId: userId,
-    ...(name !== undefined ? { displayName: name } : {}),
+    ...(name !== undefined ? { displayName: name, fullName: name } : {}),
     ...(photoUrl !== undefined ? { photoUrl } : {}),
     ...(email !== undefined ? { email } : {}),
     ...(notes !== undefined ? { notes } : {}),
@@ -48,6 +72,7 @@ export async function updateUserProfileViaFunction(
     });
   }
 
+  const phoneDigits = phoneE164.replace(/\D/g, '');
   const convPatch: Record<string, string | null> = {};
   if (name) convPatch.contact_name = name;
   if (photoUrl) convPatch.contact_photo_url = photoUrl;

@@ -302,6 +302,17 @@ export const directoryService = {
       .map((row) => mapRowToEntry(row));
   },
 
+  /** Busca entrada por Firebase app_user_id. */
+  async findByAppUserId(appUserId: string): Promise<DirectoryEntry | null> {
+    const { data, error } = await supabase
+      .from('crm_directory')
+      .select('*')
+      .eq('app_user_id', appUserId)
+      .maybeSingle();
+    if (error) throw error;
+    return data ? mapRowToEntry(data as DirectoryRow) : null;
+  },
+
   /**
    * Fetch a single entry by ID.
    */

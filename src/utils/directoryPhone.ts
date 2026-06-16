@@ -33,6 +33,36 @@ export function directoryPhoneKey(
   return digits.slice(-10);
 }
 
+/** True si el valor parece un número de teléfono (≥10 dígitos), no un UID. */
+export function looksLikePhoneValue(value: string | null | undefined): boolean {
+  if (!value || typeof value !== 'string') return false;
+  const digits = value.replace(/\D/g, '');
+  return digits.length >= 10;
+}
+
+/**
+ * Resuelve teléfono E.164 para guardar perfil/contacto.
+ * Orden: payload → fallback (conversación/entry) → teléfono existente en entry.
+ */
+export function resolveContactPhoneForSave(options: {
+  payloadPhone?: string | null;
+  fallbackPhone?: string | null;
+  existingEntryPhone?: string | null;
+}): string {
+  const candidates = [
+    options.payloadPhone,
+    options.fallbackPhone,
+    options.existingEntryPhone,
+  ];
+  for (const raw of candidates) {
+    const normalized = normalizeDirectoryPhoneE164(raw);
+    if (normalized) return normalized;
+  }
+  throw new Error(
+    'Teléfono inválido. Usa formato internacional, ej. +573001234567',
+  );
+}
+
 export function directoryPhoneLookupVariants(
   phone: string | null | undefined
 ): string[] {
