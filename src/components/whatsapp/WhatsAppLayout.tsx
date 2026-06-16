@@ -58,14 +58,15 @@ function resolveAdminDisplayName(
   return 'Administrador';
 }
 
+import { resolveContactDisplayName } from '@/utils/contactDisplayName';
+
 function conversationShortLabel(c: WhatsAppConversation): string {
-  return (
-    c.contactName?.trim() ||
-    c.whatsappProfileName?.trim() ||
-    c.contactPhone?.trim() ||
-    c.phone?.trim() ||
-    'Chat'
-  );
+  return resolveContactDisplayName({
+    contactName: c.contactName,
+    whatsappProfileName: c.whatsappProfileName,
+    phone: c.contactPhone ?? c.phone,
+    conversationId: c.id,
+  });
 }
 
 type RightPanelMode = 'none' | 'templates' | 'contact';

@@ -1,39 +1,78 @@
 // directory-ai-analyze: usa Gemini para PROPONER (no aplicar) arreglos de calidad
 // sobre crm_directory, a partir de los issues abiertos del orquestador.
-//
-// Reglas estrictas:
-//  - NUNCA escribe en crm_directory. Solo inserta filas en crm_directory_ai_suggestions
-//    (revisión humana). El humano aplica desde la UI vía upsert/merge existentes.
-//  - Las sugerencias de etiquetas se restringen EXCLUSIVAMENTE a los tags ya existentes
-//    en whatsapp_chat_tags (se filtran en el servidor; no se inventan tags nuevos).
-//  - Los teléfonos sugeridos se validan/normalizan a E.164 con la utilidad compartida.
-//
-// Cobertura total de la tabla:
-//  - Cada invocación procesa un lote PEQUEÑO de issues abiertos PENDIENTES de análisis
-//    (ai_analyzed_at IS NULL) con UNA sola llamada a Gemini, y los marca al terminar.
-//    Devuelve `remaining` para que el frontend repita hasta cubrir cientos/miles de
-//    contactos sin re-analizar y sin exceder el límite de 150s del worker.
 
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { requireCrmAdmin } from '../_shared/supabase.ts';
 import {
   getGeminiApiKey,
-  geminiGenerateJson,
+  geminiGenerateJsonWithMeta,
+  isGeminiMaxTokensError,
   resolveGeminiModel,
   DEFAULT_GEMINI_MODEL,
 } from '../_shared/geminiClient.ts';
 import { normalizeDirectoryPhoneE164 } from '../_shared/directoryPhone.ts';
 
-// Modelo de análisis: el más capaz disponible (configurable por env). Fallback a flash.
 const ANALYSIS_MODEL = resolveGeminiModel('GEMINI_MODEL_DIRECTORY_ANALYSIS', 'gemini-3.5-pro');
 
-// Cuántos issues procesar por invocación (el frontend repite hasta remaining=0).
-// CRÍTICO: cada invocación hace UNA sola llamada a Gemini sobre este lote para
-// mantenernos muy por debajo del límite de 150s/worker (WORKER_RESOURCE_LIMIT).
-const DEFAULT_MAX_ISSUES_PER_RUN = 12;
-const MAX_ISSUES_PER_RUN = 25;
+const DEFAULT_MAX_ISSUES_PER_RUN = 8;
+const MAX_ISSUES_PER_RUN = 15;
+const MIN_ISSUES_PER_RUN = 3;
+const MAX_SPLIT_DEPTH = 2;
 
 const DUPLICATE_ISSUE_TYPES = ['duplicate_phone', 'duplicate_email', 'duplicate_name'];
+
+const FIELD_SUGGESTION = {
+  type: 'object',
+  nullable: true,
+  properties: {
+    value: { type: 'string' },
+    contact_name: { type: 'string' },
+    reason: { type: 'string' },
+    confidence: { type: 'number' },
+  },
+};
+
+const DIRECTORY_ANALYSIS_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  properties: {
+    summary: { type: 'string' },
+    suggestions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          entry_id: { type: 'string' },
+          name_cleanup: FIELD_SUGGESTION,
+          phone_fix: FIELD_SUGGESTION,
+          tags: {
+            type: 'object',
+            nullable: true,
+            properties: {
+              values: { type: 'array', items: { type: 'string' } },
+              reason: { type: 'string' },
+              confidence: { type: 'number' },
+            },
+          },
+        },
+        required: ['entry_id'],
+      },
+    },
+    duplicates: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          entry_ids: { type: 'array', items: { type: 'string' } },
+          is_same_person: { type: 'boolean' },
+          confidence: { type: 'number' },
+          reason: { type: 'string' },
+        },
+        required: ['entry_ids', 'is_same_person'],
+      },
+    },
+  },
+  required: ['summary', 'suggestions', 'duplicates'],
+};
 
 interface DirectoryRow {
   id: string;
@@ -45,6 +84,13 @@ interface DirectoryRow {
   source: string | null;
 }
 
+interface WaConversationRow {
+  id: string;
+  contact_name: string | null;
+  whatsapp_profile_name: string | null;
+  phone_key: string | null;
+}
+
 interface IssueRow {
   id: string;
   entry_id: string | null;
@@ -53,9 +99,15 @@ interface IssueRow {
   details: Record<string, unknown> | null;
 }
 
+interface DupGroup {
+  primary: string;
+  ids: string[];
+  issue: IssueRow;
+}
+
 interface GeminiSuggestion {
   entry_id?: string;
-  name_cleanup?: { value?: string; reason?: string; confidence?: number } | null;
+  name_cleanup?: { value?: string; contact_name?: string; reason?: string; confidence?: number } | null;
   phone_fix?: { value?: string; reason?: string; confidence?: number } | null;
   tags?: { values?: string[]; reason?: string; confidence?: number } | null;
 }
@@ -89,6 +141,19 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
+function computeEffectiveBatchSize(requested: number, dupGroupCount: number): number {
+  const base = Math.min(requested, DEFAULT_MAX_ISSUES_PER_RUN);
+  const penalty = Math.floor(dupGroupCount / 2);
+  return Math.max(MIN_ISSUES_PER_RUN, base - penalty);
+}
+
+function buildTagsPromptSection(allowedTags: string[]): string {
+  if (allowedTags.length <= 40) {
+    return `- tags: SOLO etiquetas de esta lista (no inventes): ${JSON.stringify(allowedTags)}. Si ninguna aplica, omite el campo.\n`;
+  }
+  return `- tags: hay ${allowedTags.length} etiquetas en el sistema; sugiere solo nombres ya presentes en tags del contacto o de la lista corta: ${JSON.stringify(allowedTags.slice(0, 40))}…\n`;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -102,41 +167,54 @@ Deno.serve(async (req) => {
 
     const requestedType = typeof body.issueType === 'string' ? body.issueType.trim() : '';
     const reanalyze = body.reanalyze === true;
+    const requestedBatch = Number(body.batchSize ?? body.limit);
     const maxIssues = Math.max(
-      5,
-      Math.min(Number(body.limit) || DEFAULT_MAX_ISSUES_PER_RUN, MAX_ISSUES_PER_RUN),
+      MIN_ISSUES_PER_RUN,
+      Math.min(
+        Number.isFinite(requestedBatch) && requestedBatch > 0
+          ? requestedBatch
+          : DEFAULT_MAX_ISSUES_PER_RUN,
+        MAX_ISSUES_PER_RUN,
+      ),
     );
 
-    // Modelo efectivo de esta invocación (puede degradar a flash si el pro no existe).
     let modelUsed = ANALYSIS_MODEL;
+    let retries = 0;
+    let batchSizeUsed = maxIssues;
+    let lastFinishReason: string | undefined;
 
     async function analyzeBatch(prompt: string): Promise<GeminiResult> {
       try {
-        return await geminiGenerateJson<GeminiResult>({
+        const { data, finishReason } = await geminiGenerateJsonWithMeta<GeminiResult>({
           apiKey: geminiKey,
           model: modelUsed,
           prompt,
           temperature: 0,
           maxOutputTokens: 8192,
+          responseSchema: DIRECTORY_ANALYSIS_SCHEMA,
         });
+        lastFinishReason = finishReason;
+        return data;
       } catch (e) {
         const msg = String((e as Error)?.message ?? e);
         const modelMissing = /\b404\b|not found|not_found|is not supported|no such model|unsupported/i.test(msg);
         if (modelMissing && modelUsed !== DEFAULT_GEMINI_MODEL) {
           modelUsed = DEFAULT_GEMINI_MODEL;
-          return await geminiGenerateJson<GeminiResult>({
+          const { data, finishReason } = await geminiGenerateJsonWithMeta<GeminiResult>({
             apiKey: geminiKey,
             model: modelUsed,
             prompt,
             temperature: 0,
             maxOutputTokens: 8192,
+            responseSchema: DIRECTORY_ANALYSIS_SCHEMA,
           });
+          lastFinishReason = finishReason;
+          return data;
         }
         throw e;
       }
     }
 
-    // ── 1. Lote de issues PENDIENTES de análisis (cursor = ai_analyzed_at) ───
     let issueQuery = supabase
       .from('crm_directory_issues')
       .select('id, entry_id, related_entry_ids, issue_type, details')
@@ -167,16 +245,17 @@ Deno.serve(async (req) => {
         created: 0,
         remaining,
         model: modelUsed,
+        batchSizeUsed: 0,
+        retries: 0,
         summary: reanalyze
           ? 'No hay inconsistencias abiertas para analizar.'
           : 'No quedan inconsistencias pendientes de análisis con IA.',
       });
     }
 
-    // ── 2. Resolver entradas y grupos de duplicados del lote ─────────────────
     const entryIdSet = new Set<string>();
     const issueByEntry = new Map<string, IssueRow[]>();
-    const dupGroups: { primary: string; ids: string[]; issue: IssueRow }[] = [];
+    const dupGroups: DupGroup[] = [];
 
     for (const issue of issues) {
       if (issue.entry_id) {
@@ -199,7 +278,6 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── 3. Cargar entradas + tags existentes (whitelist de etiquetas) ────────
     const allEntryIds = [...entryIdSet];
     const entryById = new Map<string, DirectoryRow>();
     for (const idsChunk of chunk(allEntryIds, 300)) {
@@ -209,6 +287,23 @@ Deno.serve(async (req) => {
         .in('id', idsChunk);
       if (dirError) throw dirError;
       for (const e of (dirData ?? []) as DirectoryRow[]) entryById.set(e.id, e);
+    }
+
+    const phoneKeys = [...new Set(
+      [...entryById.values()]
+        .map((e) => e.phone_key)
+        .filter((k): k is string => typeof k === 'string' && k.trim() !== ''),
+    )];
+    const waByPhoneKey = new Map<string, WaConversationRow>();
+    for (const keysChunk of chunk(phoneKeys, 200)) {
+      const { data: waData, error: waError } = await supabase
+        .from('whatsapp_conversations')
+        .select('id, contact_name, whatsapp_profile_name, phone_key')
+        .in('phone_key', keysChunk);
+      if (waError) throw waError;
+      for (const row of (waData ?? []) as WaConversationRow[]) {
+        if (row.phone_key) waByPhoneKey.set(row.phone_key, row);
+      }
     }
 
     const { data: tagsData, error: tagsError } = await supabase
@@ -221,19 +316,27 @@ Deno.serve(async (req) => {
       .filter((n): n is string => typeof n === 'string' && n.trim() !== '');
     const allowedTagByLower = new Map(allowedTags.map((t) => [t.toLowerCase(), t]));
 
-    // ── 4. Helpers de prompt + upsert de sugerencias ─────────────────────────
     function buildPrompt(
       entriesChunk: DirectoryRow[],
-      dupChunk: { ids: string[] }[],
+      dupChunk: DupGroup[],
     ): string {
-      const compactEntries = entriesChunk.map((e) => ({
-        id: e.id,
-        full_name: e.full_name ?? '',
-        phone: e.phone ?? '',
-        email: e.email ?? '',
-        tags: e.tags ?? [],
-        issues: (issueByEntry.get(e.id) ?? []).map((i) => i.issue_type),
-      }));
+      const compactEntries = entriesChunk.map((e) => {
+        const wa = e.phone_key ? waByPhoneKey.get(e.phone_key) : undefined;
+        const issueTypes = (issueByEntry.get(e.id) ?? []).map((i) => i.issue_type);
+        const payload: Record<string, unknown> = {
+          id: e.id,
+          full_name: e.full_name ?? '',
+          phone: e.phone ?? '',
+          email: e.email ?? '',
+          tags: e.tags ?? [],
+          issues: issueTypes,
+        };
+        if (issueTypes.includes('name_wa_mismatch') || wa) {
+          payload.contact_name = wa?.contact_name ?? '';
+          payload.whatsapp_profile_name = wa?.whatsapp_profile_name ?? '';
+        }
+        return payload;
+      });
       const compactDupGroups = dupChunk.map((g) => ({
         entry_ids: g.ids,
         members: g.ids.map((id) => {
@@ -244,19 +347,13 @@ Deno.serve(async (req) => {
 
       return (
         'Eres un asistente experto en calidad de datos para un CRM de Prosavis (Colombia). ' +
-        'Analiza con criterio cada contacto del directorio y devuelve EXCLUSIVAMENTE JSON válido con esta forma:\n' +
-        '{"summary": string, "suggestions": [{"entry_id": string, ' +
-        '"name_cleanup": {"value": string, "reason": string, "confidence": number}|null, ' +
-        '"phone_fix": {"value": string, "reason": string, "confidence": number}|null, ' +
-        '"tags": {"values": string[], "reason": string, "confidence": number}|null}], ' +
-        '"duplicates": [{"entry_ids": string[], "is_same_person": boolean, "confidence": number, "reason": string}]}\n\n' +
+        'Devuelve JSON con summary (máx. 300 caracteres), suggestions y duplicates.\n\n' +
         'Reglas:\n' +
-        '- name_cleanup: si el nombre tiene emojis, mayúsculas raras, espacios sobrantes, o es basura, propone una versión limpia y legible en español. Si está bien, usa null. NUNCA inventes un nombre cuando no haya información (deja null).\n' +
-        '- phone_fix: si el teléfono tiene formato inválido pero se puede inferir, propone el número en formato E.164 colombiano (+57XXXXXXXXXX). Si no se puede inferir con seguridad, usa null.\n' +
-        '- tags: SOLO puedes sugerir etiquetas de esta lista exacta (no inventes ninguna): ' +
-        JSON.stringify(allowedTags) + '. Si ninguna aplica, usa null.\n' +
-        '- duplicates: para cada grupo, decide si realmente son la MISMA persona (mismo nombre+teléfono/email coherentes). Si dudas, is_same_person=false.\n' +
-        '- confidence es un número entre 0 y 1. summary es un resumen breve en español de los hallazgos de este lote.\n\n' +
+        '- name_cleanup: corrige emojis, capitalización, espacios. Si name_wa_mismatch, propone full_name CRM y contact_name para WhatsApp (mismo valor legible). Si está bien, omite el campo.\n' +
+        '- phone_fix: E.164 colombiano (+57…). Si no se puede inferir, omite.\n' +
+        buildTagsPromptSection(allowedTags) +
+        '- duplicates: is_same_person solo si es la misma persona. reason máx. 120 caracteres.\n' +
+        '- confidence: 0..1. No inventes nombres sin datos.\n\n' +
         'CONTACTOS:\n' + JSON.stringify(compactEntries) + '\n\n' +
         'GRUPOS_DUPLICADOS:\n' + JSON.stringify(compactDupGroups)
       );
@@ -293,26 +390,53 @@ Deno.serve(async (req) => {
       created += 1;
     }
 
-    async function processResult(result: GeminiResult) {
+    async function processResult(result: GeminiResult, scopeDupGroups: DupGroup[]) {
       for (const s of result.suggestions ?? []) {
         const entry = s.entry_id ? entryById.get(s.entry_id) : undefined;
         if (!entry) continue;
         const primaryIssue = (issueByEntry.get(entry.id) ?? [])[0];
+        const wa = entry.phone_key ? waByPhoneKey.get(entry.phone_key) : undefined;
 
         const nameVal = s.name_cleanup?.value?.trim();
         if (nameVal && nameVal.toLowerCase() !== (entry.full_name ?? '').trim().toLowerCase()) {
+          const contactName = s.name_cleanup?.contact_name?.trim() || nameVal;
           await upsert({
             dedupeKey: `name_cleanup:${entry.id}`,
             entryId: entry.id,
             issueId: primaryIssue?.id ?? null,
             type: 'name_cleanup',
             field: 'full_name',
-            current: { value: entry.full_name ?? '' },
-            suggested: { value: nameVal },
+            current: {
+              value: entry.full_name ?? '',
+              contact_name: wa?.contact_name ?? '',
+              whatsapp_profile_name: wa?.whatsapp_profile_name ?? '',
+            },
+            suggested: { value: nameVal, contact_name: contactName },
             confidence: clampConfidence(s.name_cleanup?.confidence),
             reason: s.name_cleanup?.reason ?? '',
             related: [],
           });
+        } else if (nameVal && wa && primaryIssue?.issue_type === 'name_wa_mismatch') {
+          const currentCn = (wa.contact_name ?? '').trim();
+          const suggestedCn = s.name_cleanup?.contact_name?.trim() || nameVal;
+          if (suggestedCn && suggestedCn !== currentCn) {
+            await upsert({
+              dedupeKey: `name_cleanup:${entry.id}`,
+              entryId: entry.id,
+              issueId: primaryIssue?.id ?? null,
+              type: 'name_cleanup',
+              field: 'full_name',
+              current: {
+                value: entry.full_name ?? '',
+                contact_name: currentCn,
+                whatsapp_profile_name: wa.whatsapp_profile_name ?? '',
+              },
+              suggested: { value: entry.full_name ?? nameVal, contact_name: suggestedCn },
+              confidence: clampConfidence(s.name_cleanup?.confidence),
+              reason: s.name_cleanup?.reason ?? 'Sincronizar contact_name con nombre CRM',
+              related: [],
+            });
+          }
         }
 
         const rawPhone = s.phone_fix?.value?.trim();
@@ -362,8 +486,8 @@ Deno.serve(async (req) => {
       for (const d of result.duplicates ?? []) {
         const ids = (d.entry_ids ?? []).filter((id): id is string => typeof id === 'string' && entryById.has(id));
         if (!d.is_same_person || ids.length < 2) continue;
-        const group = dupGroups.find((g) => sortedIdsKey(g.ids) === sortedIdsKey(ids))
-          ?? dupGroups.find((g) => ids.every((id) => g.ids.includes(id)));
+        const group = scopeDupGroups.find((g) => sortedIdsKey(g.ids) === sortedIdsKey(ids))
+          ?? scopeDupGroups.find((g) => ids.every((id) => g.ids.includes(id)));
         const primary = group?.primary ?? ids[0];
         const related = ids.filter((id) => id !== primary);
         await upsert({
@@ -381,24 +505,64 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── 5. Una sola llamada a Gemini por invocación ──────────────────────────
-    // Combina contactos + grupos de duplicados del lote en un único prompt. Esto
-    // garantiza ≤1 llamada (≤~75s) por worker y evita WORKER_RESOURCE_LIMIT.
-    // El frontend repite hasta agotar `remaining`.
-    const entriesToAnalyze = [...issueByEntry.keys()]
-      .map((id) => entryById.get(id))
-      .filter((e): e is DirectoryRow => !!e);
-
-    if (entriesToAnalyze.length > 0 || dupGroups.length > 0) {
-      const result = await analyzeBatch(buildPrompt(entriesToAnalyze, dupGroups));
-      await processResult(result);
+    function dupGroupsForIssues(issueSubset: IssueRow[]): DupGroup[] {
+      const ids = new Set(issueSubset.map((i) => i.id));
+      return dupGroups.filter((g) => ids.has(g.issue.id));
     }
 
-    // ── 6. Marcar el lote como analizado (avanza el cursor) ──────────────────
-    const issueIds = issues.map((i) => i.id);
-    if (issueIds.length > 0) {
+    function entriesForIssues(issueSubset: IssueRow[]): DirectoryRow[] {
+      const entryIds = new Set<string>();
+      for (const issue of issueSubset) {
+        if (issue.entry_id) entryIds.add(issue.entry_id);
+      }
+      return [...entryIds]
+        .map((id) => entryById.get(id))
+        .filter((e): e is DirectoryRow => !!e);
+    }
+
+    async function processIssueSubset(
+      issueSubset: IssueRow[],
+      depth = 0,
+    ): Promise<string[]> {
+      if (issueSubset.length === 0) return [];
+
+      const subsetDupGroups = dupGroupsForIssues(issueSubset);
+      const entriesChunk = entriesForIssues(issueSubset);
+
+      try {
+        const result = await analyzeBatch(buildPrompt(entriesChunk, subsetDupGroups));
+        await processResult(result, subsetDupGroups);
+        return issueSubset.map((i) => i.id);
+      } catch (e) {
+        if (isGeminiMaxTokensError(e) && issueSubset.length > 1 && depth < MAX_SPLIT_DEPTH) {
+          retries += 1;
+          const mid = Math.ceil(issueSubset.length / 2);
+          const left = await processIssueSubset(issueSubset.slice(0, mid), depth + 1);
+          const right = await processIssueSubset(issueSubset.slice(mid), depth + 1);
+          return [...left, ...right];
+        }
+        throw e;
+      }
+    }
+
+    batchSizeUsed = computeEffectiveBatchSize(maxIssues, dupGroups.length);
+    const issueChunks = chunk(issues, batchSizeUsed);
+    const stampedIssueIds: string[] = [];
+    let failedBatches = 0;
+
+    for (const issueChunk of issueChunks) {
+      try {
+        const ids = await processIssueSubset(issueChunk);
+        stampedIssueIds.push(...ids);
+      } catch {
+        failedBatches += 1;
+      }
+    }
+
+    const uniqueStamped = [...new Set(stampedIssueIds)];
+    if (uniqueStamped.length > 0) {
       const stampedAt = new Date().toISOString();
-      for (const idsChunk of chunk(issueIds, 200)) {
+      for (const idsChunk of chunk(uniqueStamped, 200)) {
         const { error: stampError } = await supabase
           .from('crm_directory_issues')
           .update({ ai_analyzed_at: stampedAt })
@@ -407,14 +571,21 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── 7. Resumen global (notificación legible) + progreso ──────────────────
     const remaining = reanalyze ? 0 : await countRemaining();
+    const entriesAnalyzed = new Set(
+      uniqueStamped.flatMap((id) => {
+        const issue = issues.find((i) => i.id === id);
+        return issue?.entry_id ? [issue.entry_id] : [];
+      }),
+    ).size;
+
     const summary =
-      `Última pasada de IA (${modelUsed}): ${entriesToAnalyze.length} contacto(s) y ` +
-      `${dupGroups.length} grupo(s) de duplicados revisados, ${created} sugerencia(s) nueva(s). ` +
+      `Última pasada de IA (${modelUsed}): ${entriesAnalyzed} contacto(s) y ` +
+      `${dupGroups.length} grupo(s) de duplicados revisados, ${created} sugerencia(s) nueva(s).` +
+      (failedBatches > 0 ? ` ${failedBatches} lote(s) fallaron (reintentar pendientes).` : '') +
       (remaining > 0
-        ? `Pendientes por analizar: ${remaining}.`
-        : 'Toda la tabla quedó analizada.');
+        ? ` Pendientes por analizar: ${remaining}.`
+        : ' Toda la tabla quedó analizada.');
 
     await supabase.rpc('upsert_directory_ai_suggestion', {
       p_dedupe_key: 'summary:global',
@@ -431,11 +602,15 @@ Deno.serve(async (req) => {
     });
 
     return jsonResponse({
-      analyzed: issues.length,
+      analyzed: uniqueStamped.length,
       created,
       remaining,
       model: modelUsed,
       summary,
+      batchSizeUsed,
+      retries,
+      failedBatches,
+      finishReason: lastFinishReason,
     });
   } catch (error) {
     if (error instanceof Response) return error;

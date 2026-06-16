@@ -1,8 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/config/supabase';
 import type { WhatsAppConversation } from '@/services/whatsappService';
+import { patchWhatsAppConversationAdmin } from '@/services/whatsappService';
 import type { DirectoryEntry } from '@/types/lead';
 import { pickContactPhotoUrl } from '@/utils/contactAvatar';
+import {
+  pickDirectoryDisplayName,
+  resolveContactDisplayName,
+  shouldSyncContactNameFromDirectory,
+} from '@/utils/contactDisplayName';
 import { directoryPhoneLookupVariants } from '@/utils/directoryPhone';
 import { normalizeWhatsAppPanelPhone } from '@/utils/whatsappPhone';
 
@@ -90,6 +96,7 @@ export function useWhatsAppContactContext(
   const [directoryEntry, setDirectoryEntry] = useState<DirectoryEntry | null>(null);
   const [user, setUser] = useState<WhatsAppContactContextValue['user']>(null);
   const [loading, setLoading] = useState(false);
+  const lastSyncedContactNameRef = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!conversation) {
@@ -158,11 +165,29 @@ export function useWhatsAppContactContext(
     void refresh();
   }, [refresh]);
 
-  const displayName =
-    conversation?.contactName ??
-    conversation?.whatsappProfileName ??
-    user?.displayName ??
-    user?.name;
+  const dirDisplayName = pickDirectoryDisplayName(directoryEntry);
+  const displayName = resolveContactDisplayName({
+    directoryDisplayName: directoryEntry?.displayName,
+    directoryFullName: directoryEntry?.fullName,
+    contactName: conversation?.contactName,
+    whatsappProfileName: conversation?.whatsappProfileName,
+    phone: conversation?.contactPhone ?? conversation?.phone,
+    conversationId: conversation?.id,
+  });
+
+  useEffect(() => {
+    if (!conversation?.id || !dirDisplayName) return;
+    if (!shouldSyncContactNameFromDirectory(dirDisplayName, conversation.contactName)) return;
+    if (lastSyncedContactNameRef.current === `${conversation.id}:${dirDisplayName}`) return;
+
+    lastSyncedContactNameRef.current = `${conversation.id}:${dirDisplayName}`;
+    void patchWhatsAppConversationAdmin({
+      conversationId: conversation.id,
+      patch: { contactName: dirDisplayName },
+    }).catch(() => {
+      lastSyncedContactNameRef.current = null;
+    });
+  }, [conversation?.id, conversation?.contactName, dirDisplayName]);
   const photoUrl = pickContactPhotoUrl(
     user?.photoUrl ?? user?.photoURL,
     conversation?.contactPhotoUrl,

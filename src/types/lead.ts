@@ -120,7 +120,8 @@ export type DirectoryIssueType =
   | 'invalid_phone'
   | 'duplicate_phone'
   | 'duplicate_email'
-  | 'duplicate_name';
+  | 'duplicate_name'
+  | 'name_wa_mismatch';
 
 export type DirectoryIssueSeverity = 'warning' | 'error';
 export type DirectoryIssueStatus = 'open' | 'dismissed' | 'resolved';
@@ -198,6 +199,10 @@ export interface AIAnalyzeResult {
   remaining?: number;
   /** Modelo de Gemini realmente usado en la pasada. */
   model?: string;
+  batchSizeUsed?: number;
+  retries?: number;
+  failedBatches?: number;
+  finishReason?: string;
 }
 
 // ──────────────────────────────────────────────

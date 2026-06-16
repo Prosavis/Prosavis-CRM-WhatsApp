@@ -64,6 +64,7 @@ const ISSUE_CATEGORIES: CategoryMeta[] = [
   { type: 'missing_name', label: 'Sin nombre', description: 'Contacto sin nombre o con placeholder' },
   { type: 'invalid_name', label: 'Nombre inválido', description: 'Nombre de 1 carácter o solo símbolos/números' },
   { type: 'emoji_name', label: 'Con emojis', description: 'El nombre contiene emojis o pictogramas' },
+  { type: 'name_wa_mismatch', label: 'Nombre WA ≠ CRM', description: 'El inbox muestra perfil WA o contact_name distinto del directorio' },
   { type: 'missing_phone', label: 'Sin teléfono', description: 'Contacto sin número de teléfono' },
   { type: 'invalid_phone', label: 'Teléfono inválido', description: 'El teléfono no normaliza a formato E.164' },
   { type: 'duplicate_phone', label: 'Duplicado (tel)', description: 'Mismo teléfono en varias entradas' },
@@ -115,6 +116,7 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
   const [mergeGroup, setMergeGroup] = useState<DirectoryEntry[]>([]);
   const [mergeKeeperId, setMergeKeeperId] = useState<string>('');
   const [mergeLoading, setMergeLoading] = useState(false);
+  const [unifyLoading, setUnifyLoading] = useState(false);
 
   const notify = (message: string, severity: 'success' | 'error') =>
     setSnackbar({ open: true, message, severity });
@@ -217,6 +219,37 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
     }
   };
 
+  const handleUnifyOne = async (issue: DirectoryIssue) => {
+    if (!issue.entryId) return;
+    try {
+      await directoryMonitorService.unifyContactNameFromDirectory(issue.entryId);
+      notify('Nombre unificado desde CRM', 'success');
+      refreshAll();
+      onDirectoryChanged?.();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'No se pudo unificar el nombre', 'error');
+    }
+  };
+
+  const handleUnifyAll = async () => {
+    setUnifyLoading(true);
+    try {
+      const { unified, failed } = await directoryMonitorService.unifyAllContactNamesFromDirectory();
+      notify(
+        failed > 0
+          ? `Unificados ${unified} contacto(s); ${failed} fallaron`
+          : `Unificados ${unified} contacto(s)`,
+        failed > 0 ? 'error' : 'success',
+      );
+      refreshAll();
+      onDirectoryChanged?.();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'No se pudo unificar en lote', 'error');
+    } finally {
+      setUnifyLoading(false);
+    }
+  };
+
   const totalPages = Math.ceil(totalCount / rowsPerPage);
   const from = totalCount === 0 ? 0 : page * rowsPerPage + 1;
   const to = Math.min((page + 1) * rowsPerPage, totalCount);
@@ -249,9 +282,23 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
             </ToggleButton>
           </ToggleButtonGroup>
           {view === 'issues' && (
-            <Button startIcon={<RefreshIcon />} size="small" onClick={refreshAll}>
-              Actualizar
-            </Button>
+            <>
+              <Button startIcon={<RefreshIcon />} size="small" onClick={refreshAll}>
+                Actualizar
+              </Button>
+              {(stats.byType.name_wa_mismatch ?? 0) > 0 && (
+                <Button
+                  size="small"
+                  variant="contained"
+                  color="secondary"
+                  disabled={unifyLoading}
+                  startIcon={unifyLoading ? <CircularProgress size={14} color="inherit" /> : <DoneAllIcon />}
+                  onClick={handleUnifyAll}
+                >
+                  Unificar todos (CRM → WA)
+                </Button>
+              )}
+            </>
           )}
         </Stack>
       </Stack>
@@ -454,6 +501,18 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
                                 </IconButton>
                               </span>
                             </Tooltip>
+                            {issue.issueType === 'name_wa_mismatch' && statusFilter === 'open' && (
+                              <Tooltip title="Unificar nombre CRM en WhatsApp">
+                                <IconButton
+                                  size="small"
+                                  color="secondary"
+                                  disabled={!issue.entryId}
+                                  onClick={() => handleUnifyOne(issue)}
+                                >
+                                  <DoneAllIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
                             {isDuplicate && (
                               <Tooltip title="Fusionar duplicados">
                                 <IconButton size="small" color="warning" onClick={() => openMergeDialog(issue)}>

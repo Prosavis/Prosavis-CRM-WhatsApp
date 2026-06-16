@@ -50,14 +50,15 @@ export interface ForwardMessageDialogProps {
   onForwarded?: (result: ForwardWhatsAppResult) => void;
 }
 
+import { resolveContactDisplayName } from '@/utils/contactDisplayName';
+
 function getConversationLabel(c: WhatsAppConversation): string {
-  return (
-    c.contactName ||
-    c.whatsappProfileName ||
-    c.contactPhone ||
-    c.phone ||
-    c.id
-  );
+  return resolveContactDisplayName({
+    contactName: c.contactName,
+    whatsappProfileName: c.whatsappProfileName,
+    phone: c.contactPhone ?? c.phone,
+    conversationId: c.id,
+  });
 }
 
 function getDirectoryLabel(entry: DirectoryEntry): string {

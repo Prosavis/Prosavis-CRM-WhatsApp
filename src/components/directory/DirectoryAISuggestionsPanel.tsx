@@ -101,6 +101,7 @@ const DirectoryAISuggestionsPanel: React.FC<DirectoryAISuggestionsPanelProps> = 
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeProgress, setAnalyzeProgress] = useState<string | null>(null);
+  const [partialFailures, setPartialFailures] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   const [typeFilter, setTypeFilter] = useState<AISuggestionType | null>(null);
@@ -165,6 +166,7 @@ const DirectoryAISuggestionsPanel: React.FC<DirectoryAISuggestionsPanelProps> = 
     setAnalyzing(true);
     setAnalyzeProgress('Analizando toda la tabla…');
     setError(null);
+    setPartialFailures(0);
     try {
       const result = await directoryMonitorService.analyzeAllWithAI(undefined, (p) => {
         setAnalyzeProgress(
@@ -172,14 +174,24 @@ const DirectoryAISuggestionsPanel: React.FC<DirectoryAISuggestionsPanelProps> = 
             ? `Analizando… ${p.createdTotal} sugerencia(s), quedan ${p.remaining}`
             : `Finalizando… ${p.createdTotal} sugerencia(s)`,
         );
-        // Refresco ligero de contadores entre pasadas.
+        if ((p.failedBatches ?? 0) > 0) {
+          setPartialFailures(p.failedBatches ?? 0);
+        }
         fetchStats();
       });
-      notify(
-        `Análisis completo: ${result.created} sugerencia(s) sobre ${result.analyzed} inconsistencia(s)` +
-          (result.model ? ` · modelo ${result.model}` : ''),
-        'success',
-      );
+      setPartialFailures(result.failedBatchesTotal ?? 0);
+      if ((result.failedBatchesTotal ?? 0) > 0) {
+        notify(
+          `Análisis parcial: ${result.created} sugerencia(s); ${result.failedBatchesTotal} lote(s) fallaron. Reintenta pendientes.`,
+          'error',
+        );
+      } else {
+        notify(
+          `Análisis completo: ${result.created} sugerencia(s) sobre ${result.analyzed} inconsistencia(s)` +
+            (result.model ? ` · modelo ${result.model}` : ''),
+          'success',
+        );
+      }
       refreshAll();
     } catch (err) {
       notify(err instanceof Error ? err.message : 'No se pudo ejecutar el análisis con IA', 'error');
@@ -187,6 +199,10 @@ const DirectoryAISuggestionsPanel: React.FC<DirectoryAISuggestionsPanelProps> = 
       setAnalyzing(false);
       setAnalyzeProgress(null);
     }
+  };
+
+  const handleRetryPending = async () => {
+    await handleAnalyze();
   };
 
   const handleApply = async (s: DirectoryAISuggestion) => {
@@ -253,6 +269,17 @@ const DirectoryAISuggestionsPanel: React.FC<DirectoryAISuggestionsPanelProps> = 
           )}
         </Stack>
       </Stack>
+
+      {partialFailures > 0 && (
+        <Alert severity="warning" sx={{ mb: 2 }} action={
+          <Button color="inherit" size="small" onClick={handleRetryPending} disabled={analyzing}>
+            Reintentar pendientes
+          </Button>
+        }>
+          <AlertTitle>Análisis incompleto</AlertTitle>
+          {partialFailures} lote(s) fallaron por límite de tokens de Gemini. Los pendientes se pueden reintentar.
+        </Alert>
+      )}
 
       {summary && (
         <Alert severity="info" icon={<AutoAwesomeIcon />} sx={{ mb: 2 }}>

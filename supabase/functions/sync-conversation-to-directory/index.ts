@@ -44,6 +44,12 @@ function safeInt(value: unknown): number | null {
   return null;
 }
 
+function isUsableDirectoryName(name: string | null): boolean {
+  if (!name || name.trim().length < 2) return false;
+  if (!/\p{L}/u.test(name)) return false;
+  return !/[\u2122\u2139\u2190-\u21FF\u2300-\u27BF\u2B00-\u2BFF\uFE00-\uFE0F\u{1F000}-\u{1FAFF}]/u.test(name);
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -101,7 +107,7 @@ Deno.serve(async (req) => {
     if (phoneKey) {
       const { data: byKey } = await supabase
         .from('crm_directory')
-        .select('id, display_name, photo_url, unread_whatsapp_count, opt_out, status')
+        .select('id, display_name, full_name, photo_url, unread_whatsapp_count, opt_out, status')
         .eq('phone_key', phoneKey)
         .limit(1);
       existingEntry = byKey?.[0] ?? null;
@@ -111,7 +117,7 @@ Deno.serve(async (req) => {
       const phoneVariants = directoryPhoneLookupVariants(rawPhone);
       const { data: byPhone } = await supabase
         .from('crm_directory')
-        .select('id, display_name, photo_url, unread_whatsapp_count, opt_out, status')
+        .select('id, display_name, full_name, photo_url, unread_whatsapp_count, opt_out, status')
         .in('phone', phoneVariants.length > 0 ? phoneVariants : [phone])
         .limit(1);
       existingEntry = byPhone?.[0] ?? null;
@@ -148,6 +154,15 @@ Deno.serve(async (req) => {
     // --- Si existe entry, usar el mejor display_name/photo_url ---
     // Prioridad: existing record > WhatsApp data
     if (existingEntry) {
+      const existingFullName = safeString(existingEntry.full_name as string | undefined);
+      if (isUsableDirectoryName(existingFullName)) {
+        delete entry.full_name;
+      } else if (displayName && existingFullName && existingFullName !== displayName) {
+        if (existingFullName.length > 3 && !/^\d+$/.test(existingFullName)) {
+          delete entry.full_name;
+        }
+      }
+
       if (!displayName && existingEntry.display_name) {
         // No sobreescribir display_name existente con null
         delete entry.display_name;

@@ -49,6 +49,7 @@ import {
   useDirectoryContactMeta,
 } from '@/hooks/useDirectoryContactMeta';
 import { pickContactPhotoUrl } from '@/utils/contactAvatar';
+import { resolveContactDisplayName } from '@/utils/contactDisplayName';
 import {
   isWhatsAppConversationLastActiveWithin24h,
   type WhatsAppTabCounts,
@@ -270,13 +271,17 @@ const ConversationList: React.FC<ConversationListProps> = ({
 
     if (search.trim()) {
       const term = search.toLowerCase();
-      result = result.filter(
-        (c) =>
+      result = result.filter((c) => {
+        const dirMeta = getDirectoryMetaForConversation(c, directoryMetaByPhoneKey);
+        return (
           c.contactName?.toLowerCase().includes(term) ||
+          c.whatsappProfileName?.toLowerCase().includes(term) ||
+          dirMeta?.displayName?.toLowerCase().includes(term) ||
           c.contactPhone?.includes(term) ||
           c.phone?.includes(term) ||
-          c.id.includes(term),
-      );
+          c.id.includes(term)
+        );
+      });
     }
 
     result.sort((a, b) => {
@@ -288,7 +293,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
     });
 
     return result;
-  }, [conversations, search, filter, selectedTagIds]);
+  }, [conversations, search, filter, selectedTagIds, directoryMetaByPhoneKey]);
 
   const handleTagFilterClick = (e: React.MouseEvent<HTMLElement>) => {
     if (filter === 'tagged' && tags.length > 0) {
@@ -638,12 +643,13 @@ const ConversationList: React.FC<ConversationListProps> = ({
         {filtered.map((conv) => {
           const dirMeta = getDirectoryMetaForConversation(conv, directoryMetaByPhoneKey);
           const rowPhone = conv.contactPhone || conv.phone;
-          const rowName =
-            conv.contactName ||
-            conv.whatsappProfileName ||
-            dirMeta?.displayName ||
-            rowPhone ||
-            conv.id;
+          const rowName = resolveContactDisplayName({
+            directoryDisplayName: dirMeta?.displayName,
+            contactName: conv.contactName,
+            whatsappProfileName: conv.whatsappProfileName,
+            phone: rowPhone,
+            conversationId: conv.id,
+          });
           const rowPhoto = pickContactPhotoUrl(dirMeta?.photoUrl, conv.contactPhotoUrl);
           const convTags = (conv.tagIds || []).map((id) => tagMap.get(id)).filter(Boolean) as WhatsAppTag[];
           const isUnread = conv.unreadCount > 0 || conv.crmForceUnread;

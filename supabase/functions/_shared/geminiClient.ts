@@ -185,6 +185,27 @@ export async function geminiGenerateText(params: {
   return extractTextFromResponse(data);
 }
 
+/** Error tipado cuando Gemini trunca la salida por límite de tokens. */
+export class GeminiMaxTokensError extends Error {
+  readonly finishReason = 'MAX_TOKENS';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'GeminiMaxTokensError';
+  }
+}
+
+export function isGeminiMaxTokensError(error: unknown): boolean {
+  if (error instanceof GeminiMaxTokensError) return true;
+  const msg = String((error as Error)?.message ?? error);
+  return msg.includes('MAX_TOKENS');
+}
+
+export interface GeminiJsonResult<T> {
+  data: T;
+  finishReason?: string;
+}
+
 /**
  * Genera JSON estructurado usando Gemini.
  * Usa response_mime_type: "application/json" para forzar salida JSON válida.
@@ -195,7 +216,21 @@ export async function geminiGenerateJson<T>(params: {
   prompt: string;
   temperature?: number;
   maxOutputTokens?: number;
+  responseSchema?: Record<string, unknown>;
 }): Promise<T> {
+  const result = await geminiGenerateJsonWithMeta<T>(params);
+  return result.data;
+}
+
+/** Igual que geminiGenerateJson pero expone finishReason para depuración/retry. */
+export async function geminiGenerateJsonWithMeta<T>(params: {
+  apiKey: string;
+  model?: string;
+  prompt: string;
+  temperature?: number;
+  maxOutputTokens?: number;
+  responseSchema?: Record<string, unknown>;
+}): Promise<GeminiJsonResult<T>> {
   const model = params.model ??
     resolveGeminiModel('GEMINI_MODEL_JSON', DEFAULT_GEMINI_MODEL);
 
@@ -204,24 +239,21 @@ export async function geminiGenerateJson<T>(params: {
     model,
     contents: [{ role: 'user', parts: [{ text: params.prompt }] }],
     temperature: params.temperature ?? 0,
-    // Salida JSON puede ser extensa; los modelos con "thinking" también
-    // consumen tokens de salida. Un presupuesto holgado evita truncamientos.
     maxOutputTokens: params.maxOutputTokens ?? 8192,
     responseMimeType: 'application/json',
+    responseSchema: params.responseSchema,
   });
 
   const finishReason = data.candidates?.[0]?.finishReason;
   const raw = stripCodeFences(extractTextFromResponse(data));
 
-  // Con responseMimeType=application/json el texto ya debería ser JSON puro.
   try {
-    return JSON.parse(raw) as T;
+    return { data: JSON.parse(raw) as T, finishReason };
   } catch {
-    // Safety net: extraer el primer objeto/array bien formado.
     const jsonMatch = raw.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
     if (jsonMatch) {
       try {
-        return JSON.parse(jsonMatch[0]) as T;
+        return { data: JSON.parse(jsonMatch[0]) as T, finishReason };
       } catch {
         // cae al throw de abajo
       }
@@ -231,7 +263,11 @@ export async function geminiGenerateJson<T>(params: {
       : finishReason && finishReason !== 'STOP'
         ? ` (finishReason: ${finishReason})`
         : '';
-    throw new Error(`Gemini no devolvió JSON válido${truncated}: ${raw.slice(0, 200)}`);
+    const message = `Gemini no devolvió JSON válido${truncated}: ${raw.slice(0, 200)}`;
+    if (finishReason === 'MAX_TOKENS') {
+      throw new GeminiMaxTokensError(message);
+    }
+    throw new Error(message);
   }
 }
 

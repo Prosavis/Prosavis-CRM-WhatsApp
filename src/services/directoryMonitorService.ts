@@ -1,6 +1,12 @@
 import { supabase } from '@/config/supabase';
 import { directoryService, mapRowToEntry } from '@/services/directoryService';
+import { patchWhatsAppConversationAdmin } from '@/services/whatsappService';
 import type { Database } from '@/types/database';
+import {
+  pickDirectoryDisplayName,
+  shouldSyncContactNameFromDirectory,
+} from '@/utils/contactDisplayName';
+import { directoryPhoneKey } from '@/utils/directoryPhone';
 import type {
   AIAnalyzeResult,
   AISuggestionStats,
@@ -235,6 +241,80 @@ export const directoryMonitorService = {
     if (error) throw error;
   },
 
+  /** Sincroniza contact_name de WhatsApp desde el nombre canónico del directorio. */
+  async unifyContactNameFromDirectory(entryId: string): Promise<void> {
+    const entry = await directoryService.getEntryById(entryId);
+    if (!entry) throw new Error('Entrada no encontrada');
+
+    const dirName = pickDirectoryDisplayName(entry);
+    if (!dirName) throw new Error('Sin nombre CRM válido');
+
+    let conversationId = entry.whatsAppConversationId;
+    if (!conversationId && entry.phone) {
+      const key = directoryPhoneKey(entry.phone);
+      if (key) {
+        const { data, error } = await supabase
+          .from('whatsapp_conversations')
+          .select('id')
+          .eq('phone_key', key)
+          .order('last_message_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (error) throw error;
+        conversationId = data?.id ?? undefined;
+      }
+    }
+
+    if (!conversationId) throw new Error('Sin conversación WhatsApp vinculada');
+
+    await patchWhatsAppConversationAdmin({
+      conversationId,
+      patch: { contactName: dirName },
+    });
+
+    const { data: openIssues, error: issuesError } = await supabase
+      .from('crm_directory_issues')
+      .select('id')
+      .eq('entry_id', entryId)
+      .eq('issue_type', 'name_wa_mismatch')
+      .eq('status', 'open');
+    if (issuesError) throw issuesError;
+
+    for (const row of openIssues ?? []) {
+      const { error } = await supabase.rpc('resolve_directory_issue', {
+        p_issue_id: row.id,
+        p_resolution: 'auto_sync_crm_name',
+      });
+      if (error) throw error;
+    }
+  },
+
+  /** Unifica en lote todos los issues abiertos de tipo name_wa_mismatch. */
+  async unifyAllContactNamesFromDirectory(): Promise<{ unified: number; failed: number }> {
+    const { issues } = await this.getIssues({
+      issueType: 'name_wa_mismatch',
+      status: 'open',
+      limit: 500,
+      page: 0,
+    });
+
+    let unified = 0;
+    let failed = 0;
+    for (const issue of issues) {
+      if (!issue.entryId) {
+        failed += 1;
+        continue;
+      }
+      try {
+        await this.unifyContactNameFromDirectory(issue.entryId);
+        unified += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    return { unified, failed };
+  },
+
   // ── IA (Gemini) ───────────────────────────────────────────────────────────
 
   /**
@@ -277,33 +357,74 @@ export const directoryMonitorService = {
    */
   async analyzeAllWithAI(
     params?: { issueType?: DirectoryIssueType; reanalyze?: boolean },
-    onProgress?: (p: { analyzedTotal: number; createdTotal: number; remaining: number; model?: string }) => void,
-  ): Promise<AIAnalyzeResult> {
+    onProgress?: (p: {
+      analyzedTotal: number;
+      createdTotal: number;
+      remaining: number;
+      model?: string;
+      failedBatches?: number;
+    }) => void,
+  ): Promise<AIAnalyzeResult & { failedBatchesTotal: number }> {
     let analyzedTotal = 0;
     let createdTotal = 0;
+    let failedBatchesTotal = 0;
     let lastSummary = '';
     let model: string | undefined;
-    const MAX_PASSES = 500; // salvaguarda anti-bucle (miles de issues)
+    const MAX_PASSES = 500;
 
     for (let pass = 0; pass < MAX_PASSES; pass += 1) {
-      const result = await this.analyzeWithAI({
-        issueType: params?.issueType,
-        // 'reanalyze' solo en la primera pasada: reabre el cursor para toda la tabla.
-        reanalyze: params?.reanalyze && pass === 0,
-      });
+      let result: AIAnalyzeResult;
+      try {
+        result = await this.analyzeWithAI({
+          issueType: params?.issueType,
+          reanalyze: params?.reanalyze && pass === 0,
+        });
+      } catch (err) {
+        failedBatchesTotal += 1;
+        onProgress?.({
+          analyzedTotal,
+          createdTotal,
+          remaining: -1,
+          model,
+          failedBatches: failedBatchesTotal,
+        });
+        const remainingGuess = await supabase
+          .from('crm_directory_issues')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'open')
+          .is('ai_analyzed_at', null);
+        const remaining = remainingGuess.count ?? 0;
+        if (remaining <= 0) break;
+        continue;
+      }
+
       analyzedTotal += result.analyzed;
       createdTotal += result.created;
+      failedBatchesTotal += result.failedBatches ?? 0;
       lastSummary = result.summary || lastSummary;
       model = result.model ?? model;
       const remaining = result.remaining ?? 0;
-      onProgress?.({ analyzedTotal, createdTotal, remaining, model });
+      onProgress?.({ analyzedTotal, createdTotal, remaining, model, failedBatches: failedBatchesTotal });
 
-      // Fin: sin pendientes, o el lote no avanzó (evita bucles).
       if (remaining <= 0 || result.analyzed === 0) {
-        return { analyzed: analyzedTotal, created: createdTotal, summary: lastSummary, remaining, model };
+        return {
+          analyzed: analyzedTotal,
+          created: createdTotal,
+          summary: lastSummary,
+          remaining,
+          model,
+          failedBatchesTotal,
+        };
       }
     }
-    return { analyzed: analyzedTotal, created: createdTotal, summary: lastSummary, remaining: 0, model };
+    return {
+      analyzed: analyzedTotal,
+      created: createdTotal,
+      summary: lastSummary,
+      remaining: 0,
+      model,
+      failedBatchesTotal,
+    };
   },
 
   /** Conteos de sugerencias por tipo y estado. */
@@ -394,9 +515,53 @@ export const directoryMonitorService = {
 
     switch (suggestion.suggestionType) {
       case 'name_cleanup': {
-        const value = String((suggestion.suggestedValue as { value?: unknown }).value ?? '').trim();
-        if (!value) throw new Error('Sugerencia de nombre vacía.');
-        await directoryService.updateEntry(suggestion.entryId, { fullName: value });
+        const suggested = suggestion.suggestedValue as { value?: unknown; contact_name?: unknown };
+        const value = String(suggested.value ?? '').trim();
+        const contactName = String(suggested.contact_name ?? value).trim();
+        if (!value && !contactName) throw new Error('Sugerencia de nombre vacía.');
+        if (value) {
+          await directoryService.updateEntry(suggestion.entryId, { fullName: value });
+        }
+
+        const entry = await directoryService.getEntryById(suggestion.entryId);
+        let conversationId = entry?.whatsAppConversationId;
+        if (!conversationId && entry?.phone) {
+          const key = directoryPhoneKey(entry.phone);
+          if (key) {
+            const { data } = await supabase
+              .from('whatsapp_conversations')
+              .select('id, contact_name')
+              .eq('phone_key', key)
+              .order('last_message_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            conversationId = data?.id ?? undefined;
+            if (data && shouldSyncContactNameFromDirectory(contactName || value, data.contact_name)) {
+              await patchWhatsAppConversationAdmin({
+                conversationId: data.id,
+                patch: { contactName: contactName || value },
+              });
+            }
+          }
+        } else if (conversationId && contactName) {
+          await patchWhatsAppConversationAdmin({
+            conversationId,
+            patch: { contactName },
+          });
+        }
+
+        const { data: openIssues } = await supabase
+          .from('crm_directory_issues')
+          .select('id')
+          .eq('entry_id', suggestion.entryId)
+          .eq('issue_type', 'name_wa_mismatch')
+          .eq('status', 'open');
+        for (const row of openIssues ?? []) {
+          await supabase.rpc('resolve_directory_issue', {
+            p_issue_id: row.id,
+            p_resolution: 'auto_sync_crm_name',
+          });
+        }
         break;
       }
       case 'phone_fix': {
