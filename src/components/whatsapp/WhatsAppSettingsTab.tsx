@@ -54,6 +54,13 @@ import {
   areSoundsEnabled,
   getSoundVolume,
 } from '@/utils/soundPreferences';
+import {
+  areDesktopNotificationsEnabled,
+  getNotificationPermission,
+  isNotificationSupported,
+  requestNotificationPermission,
+  setDesktopNotificationsEnabled,
+} from '@/utils/desktopNotifications';
 
 interface WhatsAppSettingsTabProps {
   phoneNumberId?: string;
@@ -91,6 +98,13 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
   const { setEnabled: setSoundsEnabled, setVolume: setSoundVolume, playClick } = useSoundEffects();
   const [soundsOn, setSoundsOn] = useState(() => areSoundsEnabled());
   const [volumePercent, setVolumePercent] = useState(() => Math.round(getSoundVolume() * 100));
+  const [desktopNotificationsOn, setDesktopNotificationsOn] = useState(() =>
+    areDesktopNotificationsEnabled(),
+  );
+  const [notificationPermission, setNotificationPermission] = useState(() =>
+    getNotificationPermission(),
+  );
+  const desktopNotificationsSupported = isNotificationSupported();
 
   const loadProfile = useCallback(async () => {
     setProfileLoading(true);
@@ -533,6 +547,38 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
                 </Box>
                 <Typography variant="caption" color="text.secondary">
                   Incluye notificaciones de mensajes entrantes y efectos al enviar o cambiar de pestaña.
+                </Typography>
+                <Divider />
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={desktopNotificationsOn}
+                      disabled={!desktopNotificationsSupported}
+                      onChange={async (_, checked) => {
+                        if (checked) {
+                          const permission = await requestNotificationPermission();
+                          setNotificationPermission(permission);
+                          if (permission !== 'granted') {
+                            setDesktopNotificationsOn(false);
+                            setDesktopNotificationsEnabled(false);
+                            return;
+                          }
+                        }
+                        setDesktopNotificationsOn(checked);
+                        setDesktopNotificationsEnabled(checked);
+                      }}
+                    />
+                  }
+                  label="Notificaciones de escritorio"
+                />
+                <Typography variant="caption" color="text.secondary" display="block">
+                  {!desktopNotificationsSupported
+                    ? 'Tu navegador no soporta notificaciones de escritorio.'
+                    : notificationPermission === 'granted'
+                      ? 'Cuando el CRM está en segundo plano, el sistema te alertará con sonido y podrás volver al chat con un clic.'
+                      : notificationPermission === 'denied'
+                        ? 'Las notificaciones están bloqueadas. Habilítalas en la configuración del navegador para este sitio.'
+                        : 'Activa el interruptor para permitir alertas cuando uses otra pestaña u otra aplicación.'}
                 </Typography>
               </Stack>
             </CardContent>

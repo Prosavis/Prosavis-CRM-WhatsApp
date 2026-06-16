@@ -35,6 +35,10 @@ import {
   type WhatsAppInboxMetrics,
 } from '@/utils/whatsappInboxStats';
 import { areSoundsEnabled, getSoundVolume } from '@/utils/soundPreferences';
+import {
+  canShowDesktopNotifications,
+  showInboundMessageNotification,
+} from '@/utils/desktopNotifications';
 import useSoundEffects from '@/hooks/useSoundEffects';
 
 const INBOUND_NOTIFY_AUDIO = `${import.meta.env.BASE_URL}assets/audio/WhatsAppSound.mp3`;
@@ -281,17 +285,33 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
       return ta >= tb ? a : b;
     });
 
-    if (areSoundsEnabled() && !document.hidden) {
+    const contactLabel = conversationShortLabel(best);
+    const focusPhone = best.contactPhone || best.phone || '';
+
+    if (areSoundsEnabled()) {
       const audio = notifyAudioRef.current;
       if (audio) {
         audio.volume = getSoundVolume();
+        audio.currentTime = 0;
         void audio.play().catch(() => {});
       }
     }
-    setInboundAlert({
-      message: `Nuevo mensaje en ${conversationShortLabel(best)}`,
-      conversationId: best.id,
-    });
+
+    if (document.hidden && canShowDesktopNotifications()) {
+      showInboundMessageNotification({
+        title: 'Nuevo mensaje de WhatsApp',
+        body: contactLabel,
+        conversationId: best.id,
+        phone: focusPhone,
+      });
+    }
+
+    if (!document.hidden) {
+      setInboundAlert({
+        message: `Nuevo mensaje en ${contactLabel}`,
+        conversationId: best.id,
+      });
+    }
     setInboundPulse(true);
     window.setTimeout(() => setInboundPulse(false), 1400);
   }, [conversations, loading]);

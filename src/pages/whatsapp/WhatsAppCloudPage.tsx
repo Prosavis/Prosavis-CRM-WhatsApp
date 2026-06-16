@@ -65,6 +65,14 @@ import {
 } from '@/services/whatsappService';
 import { directoryService } from '@/services/directoryService';
 import type { WhatsAppInboxMetrics } from '@/utils/whatsappInboxStats';
+import {
+  WHATSAPP_FOCUS_CHAT_EVENT,
+  dismissDesktopNotificationsOnboarding,
+  getNotificationPermission,
+  isDesktopNotificationsOnboardingDismissed,
+  isNotificationSupported,
+  type WhatsAppFocusChatDetail,
+} from '@/utils/desktopNotifications';
 
 const LeadsPage = lazy(() => import('../leads/LeadsPage'));
 const DiscountCodesTab = lazy(() => import('@/components/whatsapp/DiscountCodesTab'));
@@ -215,6 +223,12 @@ const WhatsAppCloudPage: React.FC = () => {
   const [purgeError, setPurgeError] = useState<string | null>(null);
 
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [showNotificationsOnboarding, setShowNotificationsOnboarding] = useState(
+    () =>
+      isNotificationSupported() &&
+      getNotificationPermission() === 'default' &&
+      !isDesktopNotificationsOnboardingDismissed(),
+  );
 
   const focusPhone = searchParams.get('focusPhone') || undefined;
 
@@ -239,6 +253,39 @@ const WhatsAppCloudPage: React.FC = () => {
     next.delete('focusPhone');
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams]);
+
+  const handleFocusChatFromNotification = useCallback(
+    (phone: string) => {
+      const next = new URLSearchParams(searchParams);
+      next.delete('tab');
+      if (phone) next.set('focusPhone', phone);
+      setSearchParams(next, { replace: true });
+      window.focus();
+    },
+    [searchParams, setSearchParams],
+  );
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<WhatsAppFocusChatDetail>).detail;
+      if (!detail?.phone) return;
+      handleFocusChatFromNotification(detail.phone);
+    };
+    window.addEventListener(WHATSAPP_FOCUS_CHAT_EVENT, handler);
+    return () => window.removeEventListener(WHATSAPP_FOCUS_CHAT_EVENT, handler);
+  }, [handleFocusChatFromNotification]);
+
+  const handleDismissNotificationsOnboarding = useCallback(() => {
+    dismissDesktopNotificationsOnboarding();
+    setShowNotificationsOnboarding(false);
+  }, []);
+
+  const handleGoToNotificationSettings = useCallback(() => {
+    handleDismissNotificationsOnboarding();
+    const next = new URLSearchParams(searchParams);
+    next.set('tab', 'settings');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, handleDismissNotificationsOnboarding]);
 
   const handleInboxMetrics = useCallback((metrics: WhatsAppInboxMetrics) => {
     setInboxTotalContacts(metrics.totalConversations);
@@ -357,6 +404,22 @@ const WhatsAppCloudPage: React.FC = () => {
         onOpenDirectory={() => setDirectoryDialogOpen(true)}
         onOpenBulk={() => setBulkOpen(true)}
       />
+
+      {showNotificationsOnboarding && (
+        <Alert
+          severity="info"
+          sx={{ mb: 2 }}
+          onClose={handleDismissNotificationsOnboarding}
+          action={
+            <Button color="inherit" size="small" onClick={handleGoToNotificationSettings}>
+              Activar en Ajustes
+            </Button>
+          }
+        >
+          Activa las notificaciones de escritorio en Ajustes para escuchar alertas cuando el CRM esté en
+          segundo plano.
+        </Alert>
+      )}
 
       <Box sx={{ px: { xs: 0.5, sm: 0 } }}>
         <Box
