@@ -3,7 +3,6 @@ import { requireCrmAdmin } from '../_shared/supabase.ts';
 import {
   assertMetaSendEnabled,
   formatError,
-  metaErrorMessage,
   sendTextOutbound,
   sendWhatsAppMediaOutbound,
   type MediaType,

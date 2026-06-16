@@ -152,7 +152,7 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
     conversationId: '',
     entryId: null,
   });
-  const lastSavedSnapshotRef = useRef<string | null>(null);
+  const [lastSavedSnapshot, setLastSavedSnapshot] = useState<string | null>(null);
   const lastPersistedCrmKeyRef = useRef<string | null>(null);
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -179,9 +179,9 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
   }), [entryAssignedTo, entryClassification, entrySeq, entryStatus]);
 
   const isDirty = useMemo(() => {
-    if (!lastSavedSnapshotRef.current) return false;
-    return contactDraftKey(currentContactDraft()) !== lastSavedSnapshotRef.current;
-  }, [currentContactDraft]);
+    if (!lastSavedSnapshot) return false;
+    return contactDraftKey(currentContactDraft()) !== lastSavedSnapshot;
+  }, [currentContactDraft, lastSavedSnapshot]);
 
   const hydrateForm = useCallback(
     (targetEntry: DirectoryEntry | null, conv: WhatsAppConversation) => {
@@ -195,7 +195,7 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
       setCity(contactSnapshot.city);
       setAddress(contactSnapshot.address);
       setAdminNotes(contactSnapshot.adminNotes);
-      lastSavedSnapshotRef.current = contactDraftKey(contactSnapshot);
+      setLastSavedSnapshot(contactDraftKey(contactSnapshot));
 
       if (targetEntry) {
         const crmSnapshot = crmDraftFromEntry(targetEntry);
@@ -228,6 +228,7 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
     }
     hydratedIdsRef.current = { conversationId: convId, entryId };
     hydrateForm(entry, conversation);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- guarded by hydratedIdsRef; solo conv/entry id
   }, [conversation.id, entry, entry?.id, hydrateForm]);
 
   useEffect(() => {
@@ -372,6 +373,8 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
     return () => {
       cancelled = true;
     };
+    // Auto-sync una vez por par conversación/entrada; autoSyncDoneRef evita bucles.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional narrow deps
   }, [conversation.id, entry?.id, loading, refetch]);
 
   const dialogUser: User | null = useMemo(() => {
@@ -435,7 +438,7 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
         ...draft,
         phone: normalizedPhone ?? draft.phone,
       };
-      lastSavedSnapshotRef.current = contactDraftKey(savedDraft);
+      setLastSavedSnapshot(contactDraftKey(savedDraft));
       if (normalizedPhone) setPhone(normalizedPhone);
       setSaveSuccess(true);
     } catch (e: unknown) {

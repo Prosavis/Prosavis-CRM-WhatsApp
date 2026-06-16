@@ -47,7 +47,7 @@ function safeInt(value: unknown): number | null {
 function isUsableDirectoryName(name: string | null): boolean {
   if (!name || name.trim().length < 2) return false;
   if (!/\p{L}/u.test(name)) return false;
-  return !/[\u2122\u2139\u2190-\u21FF\u2300-\u27BF\u2B00-\u2BFF\uFE00-\uFE0F\u{1F000}-\u{1FAFF}]/u.test(name);
+  return !/\p{Extended_Pictographic}/u.test(name);
 }
 
 Deno.serve(async (req) => {

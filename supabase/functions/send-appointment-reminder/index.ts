@@ -75,7 +75,6 @@ function formatTime(isoString: string): string {
 }
 
 function formatSchedule(isoString: string): string {
-  const date = new Date(isoString);
   return `${formatDate(isoString)} — ${formatTime(isoString)}`;
 }
 

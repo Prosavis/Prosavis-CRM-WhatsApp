@@ -352,7 +352,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
       const updated = conversations.find((c) => c.id === selectedConversation.id);
       if (updated) setSelectedConversation(updated);
     }
-  }, [conversations]);
+  }, [conversations, selectedConversation]);
 
   useEffect(() => {
     if (!phoneNumberId || !myUid) {

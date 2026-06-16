@@ -494,7 +494,6 @@ export const directoryService = {
    */
   async getStats() {
     const countRows = async (applyFilter?: (query: any) => any) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let query = (supabase.from('crm_directory') as any).select('*', { count: 'exact', head: true });
       if (applyFilter) {
         query = applyFilter(query);

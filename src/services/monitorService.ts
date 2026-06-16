@@ -182,10 +182,8 @@ export async function getHeavyChats(limit = 20): Promise<HeavyChat[]> {
 // Métricas generales
 // ──────────────────────────────────────────────
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function safeCount(table: string, filter?: { column: string; value: any }): Promise<number> {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let query = (supabase.from(table as any) as any).select('*', { count: 'exact', head: true });
     if (filter) {
       query = query.eq(filter.column, filter.value);

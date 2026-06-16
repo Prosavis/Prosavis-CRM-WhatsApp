@@ -1,7 +1,6 @@
 import type { DirectoryEntry } from '@/types/lead';
 
-const EMOJI_RE =
-  /[\u2122\u2139\u2190-\u21FF\u2300-\u27BF\u2B00-\u2BFF\uFE00-\uFE0F\u{1F000}-\u{1FAFF}]/u;
+const EMOJI_RE = /\p{Extended_Pictographic}/u;
 
 export interface ContactNameSources {
   directoryDisplayName?: string | null;

@@ -311,7 +311,7 @@ const WhatsAppCloudPage: React.FC = () => {
     } finally {
       setMetricsLoading(false);
     }
-  }, [days, phoneNumberId]);
+  }, [days]);
 
   const loadLogs = useCallback(async () => {
     setLogsLoading(true);
@@ -343,7 +343,7 @@ const WhatsAppCloudPage: React.FC = () => {
     } finally {
       setLogsLoading(false);
     }
-  }, [days, phoneNumberId]);
+  }, [days]);
 
   useEffect(() => {
     loadMetrics();

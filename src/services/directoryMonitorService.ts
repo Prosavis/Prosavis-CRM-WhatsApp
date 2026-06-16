@@ -455,6 +455,7 @@ export const directoryMonitorService = {
           });
           throw new Error(
             `El análisis con IA falló ${consecutiveFailures} veces seguidas y se detuvo. Último error: ${message}`,
+            { cause: err },
           );
         }
         const remainingGuess = await supabase
@@ -612,9 +613,13 @@ export const directoryMonitorService = {
               .limit(1)
               .maybeSingle();
             conversationId = data?.id ?? undefined;
-            if (data && shouldSyncContactNameFromDirectory(contactName || value, data.contact_name)) {
+            if (
+              conversationId
+              && data
+              && shouldSyncContactNameFromDirectory(contactName || value, data.contact_name)
+            ) {
               await patchWhatsAppConversationAdmin({
-                conversationId: data.id,
+                conversationId,
                 patch: { contactName: contactName || value },
               });
             }

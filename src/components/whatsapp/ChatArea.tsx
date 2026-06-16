@@ -748,7 +748,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     } finally {
       setDeleting(false);
     }
-  }, [deleteTargetId, selectedIds, selectionMode]);
+  }, [deleteTargetId, selectedIds, selectionMode, conversation.id]);
 
   const handleBulkDelete = useCallback(() => {
     setDeleteTargetId(null);
