@@ -1,6 +1,11 @@
 import type { DirectoryEntry } from '@/types/lead';
 import type { WhatsAppTemplateSummary } from '@/services/whatsappService';
 import {
+  fetchAllBroadcastRecipients,
+  type BroadcastRecipientStatus,
+} from '@/services/whatsappService';
+import { directoryService } from '@/services/directoryService';
+import {
   buildDisplayMessageBody,
   buildTemplateSendComponents,
   type WhatsAppTemplateSendComponent,
@@ -107,4 +112,51 @@ export function buildTemplatePayload(message: BulkMessageState): {
       message.bodyValues,
     ),
   };
+}
+
+/** Estados que se pueden reintentar desde el wizard de envío masivo. */
+export const BULK_RETRY_RECIPIENT_STATUSES: BroadcastRecipientStatus[] = ['failed', 'pending'];
+
+/**
+ * Carga destinatarios fallidos/pendientes de un job y los convierte en selección
+ * de audiencia (directorio + teléfonos manuales) para reintentar en el mismo flujo.
+ */
+export async function buildAudienceFromBroadcastJob(jobId: string): Promise<{
+  entries: DirectoryEntry[];
+  manualPhones: string[];
+  total: number;
+}> {
+  const rows = await fetchAllBroadcastRecipients(jobId, BULK_RETRY_RECIPIENT_STATUSES);
+  const byPhone = new Map<string, (typeof rows)[0]>();
+  for (const row of rows) {
+    const digits = row.phone.replace(/\D/g, '');
+    if (digits.length >= 10) byPhone.set(digits, row);
+  }
+
+  const entries: DirectoryEntry[] = [];
+  const manualPhones: string[] = [];
+  const seenEntryIds = new Set<string>();
+
+  const phones = [...byPhone.keys()];
+  const CHUNK = 15;
+  for (let i = 0; i < phones.length; i += CHUNK) {
+    const chunk = phones.slice(i, i + CHUNK);
+    const lookups = await Promise.all(
+      chunk.map(async (phone) => {
+        const row = byPhone.get(phone)!;
+        const found = await directoryService.findByPhone(phone);
+        return { phone, row, found: found[0] ?? null };
+      }),
+    );
+    for (const { phone, found } of lookups) {
+      if (found && !seenEntryIds.has(found.id)) {
+        seenEntryIds.add(found.id);
+        entries.push(found);
+      } else if (!found) {
+        manualPhones.push(phone);
+      }
+    }
+  }
+
+  return { entries, manualPhones, total: byPhone.size };
 }

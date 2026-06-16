@@ -88,6 +88,11 @@ export interface BulkSendAudienceStepProps {
   recipientCount: number;
   onSelectedIdsChange: (ids: Set<string>, entries: DirectoryEntry[]) => void;
   onManualPhonesRawChange: (value: string) => void;
+  /** Aviso tras cargar fallidos para reintento (mismo wizard). */
+  audienceNotice?: string | null;
+  onAudienceNoticeDismiss?: () => void;
+  /** Abre la sección de teléfonos manuales al preparar un reintento. */
+  initialManualExpanded?: boolean;
 }
 
 const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
@@ -97,6 +102,9 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
   recipientCount,
   onSelectedIdsChange,
   onManualPhonesRawChange,
+  audienceNotice,
+  onAudienceNoticeDismiss,
+  initialManualExpanded = false,
 }) => {
   const [entries, setEntries] = useState<DirectoryEntry[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -111,7 +119,7 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
   const [sourceFilter, setSourceFilter] = useState('');
   const [includeOptOut, setIncludeOptOut] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
-  const [manualExpanded, setManualExpanded] = useState(false);
+  const [manualExpanded, setManualExpanded] = useState(initialManualExpanded);
   const [sortField, setSortField] = useState<BulkDirectorySortField>(
     BULK_DIRECTORY_DEFAULT_SORT_FIELD,
   );
@@ -161,6 +169,10 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
   useEffect(() => {
     void fetchEntries();
   }, [fetchEntries]);
+
+  useEffect(() => {
+    if (initialManualExpanded) setManualExpanded(true);
+  }, [initialManualExpanded]);
 
   const handleSearchChange = (value: string) => {
     setSearchInput(value);
@@ -277,7 +289,13 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
   );
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: { xs: 'column', lg: 'row' }, gap: 2, minHeight: 0, flex: 1 }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1, gap: 1.5 }}>
+      {audienceNotice && (
+        <Alert severity="info" onClose={onAudienceNoticeDismiss}>
+          {audienceNotice}
+        </Alert>
+      )}
+      <Box sx={{ display: 'flex', flexDirection: { xs: 'column', lg: 'row' }, gap: 2, minHeight: 0, flex: 1 }}>
       <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ mb: 1.5 }}>
           <Chip icon={<PeopleIcon />} label={`${totalCount.toLocaleString('es-CO')} con teléfono`} size="small" variant="outlined" />
@@ -634,6 +652,7 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
           />
         </Collapse>
       </Box>
+    </Box>
     </Box>
   );
 };

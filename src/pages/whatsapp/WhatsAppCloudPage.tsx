@@ -54,6 +54,7 @@ import WhatsAppLayout from '@/components/whatsapp/WhatsAppLayout';
 import WhatsAppTopBar from '@/components/whatsapp/WhatsAppTopBar';
 import WhatsAppDirectoryContactsDialog from '@/components/whatsapp/WhatsAppDirectoryContactsDialog';
 import WhatsAppBulkSendDialog from '@/components/whatsapp/bulk/WhatsAppBulkSendDialog';
+import BroadcastJobsSection from '@/components/whatsapp/metrics/BroadcastJobsSection';
 import { WHATSAPP_CLOUD_PRODUCTION } from '@/constants/whatsappCloudAccounts';
 import useSoundEffects from '@/hooks/useSoundEffects';
 import {
@@ -150,7 +151,19 @@ const WhatsAppCloudPage: React.FC = () => {
   const { playNavigation } = useSoundEffects();
   const { registerTabController, unregisterTabController } = useAdminTour();
   const tabParam = searchParams.get('tab');
+  const broadcastJobParam = searchParams.get('broadcastJob');
   const activeTab = tabParam === 'metrics' ? 1 : tabParam === 'leads' ? 2 : tabParam === 'discounts' ? 3 : tabParam === 'settings' ? 4 : tabParam === 'monitoreo' ? 5 : 0;
+
+  const clearBroadcastJobParam = useCallback(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('broadcastJob');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
 
   const handleMainTabChange = (_: React.SyntheticEvent, value: number) => {
     playNavigation();
@@ -699,6 +712,13 @@ const WhatsAppCloudPage: React.FC = () => {
             </Card>
           )}
 
+          {/* Envíos masivos del panel — desglose por destinatario */}
+          <BroadcastJobsSection
+            days={days}
+            initialJobId={broadcastJobParam}
+            onInitialJobConsumed={clearBroadcastJobParam}
+          />
+
           {/* Logs de mensajes */}
           <Card data-tour="whatsapp-metrics-logs" elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
             <CardContent>
@@ -960,6 +980,18 @@ const WhatsAppCloudPage: React.FC = () => {
         phoneNumberId={phoneNumberId}
         botLabel={botLabel}
         phoneDisplay={phoneDisplay}
+        onViewJobInMetrics={(jobId) => {
+          setBulkOpen(false);
+          setSearchParams(
+            (prev) => {
+              const next = new URLSearchParams(prev);
+              next.set('tab', 'metrics');
+              next.set('broadcastJob', jobId);
+              return next;
+            },
+            { replace: true },
+          );
+        }}
       />
 
       <WhatsAppDirectoryContactsDialog

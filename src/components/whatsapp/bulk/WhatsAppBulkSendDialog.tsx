@@ -21,7 +21,6 @@ import CloseIcon from '@mui/icons-material/Close';
 import SendIcon from '@mui/icons-material/Send';
 import {
   runBulkWhatsAppSend,
-  retryBulkWhatsAppSend,
   type BulkSendCounts,
 } from '@/services/whatsappService';
 import type { DirectoryEntry } from '@/types/lead';
@@ -33,6 +32,7 @@ import BulkSendResultStep from './BulkSendResultStep';
 import {
   BULK_CONFIRM_PHRASE,
   BULK_SEND_MAX_RECIPIENTS,
+  buildAudienceFromBroadcastJob,
   buildBulkRecipients,
   buildTemplatePayload,
   parseManualPhones,
@@ -46,6 +46,8 @@ export interface WhatsAppBulkSendDialogProps {
   phoneNumberId: string;
   botLabel: string;
   phoneDisplay: string;
+  /** Navega a Métricas con el detalle del job (destinatarios enviados/fallidos). */
+  onViewJobInMetrics?: (jobId: string) => void;
 }
 
 const INITIAL_MESSAGE: BulkMessageState = {
@@ -63,6 +65,7 @@ const WhatsAppBulkSendDialog: React.FC<WhatsAppBulkSendDialogProps> = ({
   phoneNumberId,
   botLabel,
   phoneDisplay,
+  onViewJobInMetrics,
 }) => {
   const theme = useTheme();
   const fullScreen = useMediaQuery(theme.breakpoints.down('md'));
@@ -79,6 +82,8 @@ const WhatsAppBulkSendDialog: React.FC<WhatsAppBulkSendDialogProps> = ({
   const [progress, setProgress] = useState<BulkSendCounts | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [result, setResult] = useState<BulkSendCounts | null>(null);
+  const [audienceRetryNotice, setAudienceRetryNotice] = useState<string | null>(null);
+  const [expandManualOnAudience, setExpandManualOnAudience] = useState(false);
 
   const manualPhones = useMemo(() => parseManualPhones(manualPhonesRaw), [manualPhonesRaw]);
   const recipients = useMemo(
@@ -100,6 +105,8 @@ const WhatsAppBulkSendDialog: React.FC<WhatsAppBulkSendDialogProps> = ({
     setResult(null);
     setLoading(false);
     setRetrying(false);
+    setAudienceRetryNotice(null);
+    setExpandManualOnAudience(false);
   }, []);
 
   const handleClose = () => {
@@ -155,17 +162,29 @@ const WhatsAppBulkSendDialog: React.FC<WhatsAppBulkSendDialogProps> = ({
     }
   };
 
-  const handleRetryFailed = async () => {
-    if (!jobId) return;
+  const retryableCount = (result?.failed ?? 0) + (result?.pending ?? 0);
+
+  const handlePrepareRetryWithFailed = async () => {
+    if (!jobId || retryableCount <= 0) return;
     setRetrying(true);
     setError(null);
     try {
-      const retryResult = await retryBulkWhatsAppSend(jobId, (chunk) => {
-        setProgress(chunk.totals);
-      });
-      setResult(retryResult.totals);
+      const { entries, manualPhones, total } = await buildAudienceFromBroadcastJob(jobId);
+      if (total === 0) {
+        setError('No hay destinatarios fallidos o pendientes para reintentar.');
+        return;
+      }
+      setSelectedIds(new Set(entries.map((e) => e.id)));
+      setSelectedEntries(entries);
+      setManualPhonesRaw(manualPhones.join('\n'));
+      setExpandManualOnAudience(manualPhones.length > 0);
+      setConfirmPhrase('');
+      setAudienceRetryNotice(
+        `${total} contacto${total !== 1 ? 's' : ''} con envío fallido o pendiente preseleccionado${total !== 1 ? 's' : ''}. Revisa la audiencia y confirma el reintento.`,
+      );
+      setStep(0);
     } catch (err: unknown) {
-      setError((err as Error)?.message || 'Error al reintentar');
+      setError((err as Error)?.message || 'No se pudieron cargar los fallidos');
     } finally {
       setRetrying(false);
     }
@@ -225,6 +244,9 @@ const WhatsAppBulkSendDialog: React.FC<WhatsAppBulkSendDialogProps> = ({
             recipientCount={recipientCount}
             onSelectedIdsChange={handleSelectedChange}
             onManualPhonesRawChange={setManualPhonesRaw}
+            audienceNotice={audienceRetryNotice}
+            onAudienceNoticeDismiss={() => setAudienceRetryNotice(null)}
+            initialManualExpanded={expandManualOnAudience}
           />
         )}
         {step === 1 && (
@@ -260,7 +282,14 @@ const WhatsAppBulkSendDialog: React.FC<WhatsAppBulkSendDialogProps> = ({
             sent={result.sent}
             failed={result.failed}
             skipped={result.skipped}
-            onRetryFailed={result.failed > 0 ? handleRetryFailed : undefined}
+            retryableCount={retryableCount}
+            jobId={jobId}
+            onPrepareRetryWithFailed={
+              retryableCount > 0 ? handlePrepareRetryWithFailed : undefined
+            }
+            onViewInMetrics={
+              jobId && onViewJobInMetrics ? () => onViewJobInMetrics(jobId) : undefined
+            }
             retrying={retrying}
             error={error}
           />

@@ -843,6 +843,185 @@ export async function retryBulkWhatsAppSend(
   return result;
 }
 
+// --- Envíos masivos (historial en métricas) ---
+
+export type BroadcastJobStatus = 'processing' | 'completed';
+
+export type BroadcastRecipientStatus = 'pending' | 'sent' | 'failed' | 'skipped';
+
+export interface BroadcastJobSummary {
+  id: string;
+  status: BroadcastJobStatus | string;
+  totalRecipients: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+  pending: number;
+  templateName: string | null;
+  richBodyPreview: string | null;
+  createdAt: Date;
+  completedAt: Date | null;
+  lastProgressAt: Date | null;
+}
+
+export interface BroadcastRecipientDetail {
+  id: string;
+  jobId: string;
+  phone: string;
+  name: string | null;
+  status: BroadcastRecipientStatus;
+  attempts: number;
+  errorMessage: string | null;
+  waMessageId: string | null;
+  processedAt: Date | null;
+}
+
+interface BroadcastJobRow {
+  id: string;
+  status: string;
+  total_recipients: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+  template_name: string | null;
+  rich_body_preview: string | null;
+  created_at: string;
+  completed_at: string | null;
+  last_progress_at: string | null;
+}
+
+interface BroadcastRecipientRow {
+  id: string;
+  job_id: string;
+  phone: string;
+  name: string | null;
+  status: string;
+  attempts: number;
+  error_message: string | null;
+  wa_message_id: string | null;
+  processed_at: string | null;
+}
+
+function mapBroadcastJob(row: BroadcastJobRow): BroadcastJobSummary {
+  const sent = row.sent ?? 0;
+  const failed = row.failed ?? 0;
+  const skipped = row.skipped ?? 0;
+  const total = row.total_recipients ?? 0;
+  const pending = Math.max(0, total - sent - failed - skipped);
+  return {
+    id: row.id,
+    status: row.status,
+    totalRecipients: total,
+    sent,
+    failed,
+    skipped,
+    pending,
+    templateName: row.template_name,
+    richBodyPreview: row.rich_body_preview,
+    createdAt: new Date(row.created_at),
+    completedAt: row.completed_at ? new Date(row.completed_at) : null,
+    lastProgressAt: row.last_progress_at ? new Date(row.last_progress_at) : null,
+  };
+}
+
+function mapBroadcastRecipient(row: BroadcastRecipientRow): BroadcastRecipientDetail {
+  return {
+    id: row.id,
+    jobId: row.job_id,
+    phone: row.phone,
+    name: row.name,
+    status: row.status as BroadcastRecipientStatus,
+    attempts: row.attempts ?? 0,
+    errorMessage: row.error_message,
+    waMessageId: row.wa_message_id,
+    processedAt: row.processed_at ? new Date(row.processed_at) : null,
+  };
+}
+
+/** Lista jobs de envío masivo recientes (pestaña Métricas). */
+export async function listBroadcastJobs(options: {
+  days?: number;
+  limit?: number;
+} = {}): Promise<BroadcastJobSummary[]> {
+  const days = options.days ?? 30;
+  const limit = options.limit ?? 50;
+  const from = new Date();
+  from.setDate(from.getDate() - days);
+
+  const { data, error } = await supabase
+    .from('whatsapp_broadcast_jobs')
+    .select(
+      'id, status, total_recipients, sent, failed, skipped, template_name, rich_body_preview, created_at, completed_at, last_progress_at',
+    )
+    .gte('created_at', from.toISOString())
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) throw error;
+  return ((data ?? []) as BroadcastJobRow[]).map(mapBroadcastJob);
+}
+
+/** Destinatarios de un job con paginación y filtro por estado. */
+export async function listBroadcastRecipients(
+  jobId: string,
+  options: {
+    status?: BroadcastRecipientStatus | 'all';
+    limit?: number;
+    offset?: number;
+  } = {},
+): Promise<{ recipients: BroadcastRecipientDetail[]; total: number }> {
+  const status = options.status ?? 'all';
+  const limit = options.limit ?? 50;
+  const offset = options.offset ?? 0;
+
+  let query = supabase
+    .from('whatsapp_broadcast_recipients')
+    .select('id, job_id, phone, name, status, attempts, error_message, wa_message_id, processed_at', {
+      count: 'exact',
+    })
+    .eq('job_id', jobId)
+    .order('created_at', { ascending: true });
+
+  if (status !== 'all') {
+    query = query.eq('status', status);
+  }
+
+  const { data, error, count } = await query.range(offset, offset + limit - 1);
+  if (error) throw error;
+
+  return {
+    recipients: ((data ?? []) as BroadcastRecipientRow[]).map(mapBroadcastRecipient),
+    total: count ?? 0,
+  };
+}
+
+const BROADCAST_RECIPIENTS_PAGE = 200;
+
+/** Trae todos los destinatarios de un job filtrados por estado(s). */
+export async function fetchAllBroadcastRecipients(
+  jobId: string,
+  statuses: BroadcastRecipientStatus[],
+): Promise<BroadcastRecipientDetail[]> {
+  const statusSet = new Set(statuses);
+  const all: BroadcastRecipientDetail[] = [];
+  let offset = 0;
+
+  while (true) {
+    const { recipients, total } = await listBroadcastRecipients(jobId, {
+      status: 'all',
+      limit: BROADCAST_RECIPIENTS_PAGE,
+      offset,
+    });
+    for (const row of recipients) {
+      if (statusSet.has(row.status)) all.push(row);
+    }
+    offset += BROADCAST_RECIPIENTS_PAGE;
+    if (offset >= total) break;
+  }
+
+  return all;
+}
+
 export async function ensureWhatsAppConversationFromLead(params: {
   phone: string;
   name?: string;
