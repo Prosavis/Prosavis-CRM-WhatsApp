@@ -377,6 +377,7 @@ export const directoryMonitorService = {
       try {
         result = await this.analyzeWithAI({
           issueType: params?.issueType,
+          batchSize: 5,
           reanalyze: params?.reanalyze && pass === 0,
         });
       } catch (err) {

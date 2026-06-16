@@ -133,6 +133,9 @@ function extractTextFromResponse(data: GeminiGenerateContentResponse): string {
   const parts = candidate.content?.parts;
   if (!parts?.length) {
     const reason = candidate.finishReason;
+    if (reason === 'MAX_TOKENS') {
+      throw new GeminiMaxTokensError(`Gemini no devolvió contenido (finishReason: ${reason})`);
+    }
     if (reason && reason !== 'STOP') {
       throw new Error(`Gemini no devolvió contenido (finishReason: ${reason})`);
     }

@@ -12,12 +12,14 @@ import {
 } from '../_shared/geminiClient.ts';
 import { normalizeDirectoryPhoneE164 } from '../_shared/directoryPhone.ts';
 
-const ANALYSIS_MODEL = resolveGeminiModel('GEMINI_MODEL_DIRECTORY_ANALYSIS', 'gemini-3.5-pro');
+// Flash por defecto: menos tokens de razonamiento que pro → menos MAX_TOKENS en JSON largo.
+const ANALYSIS_MODEL = resolveGeminiModel('GEMINI_MODEL_DIRECTORY_ANALYSIS', DEFAULT_GEMINI_MODEL);
 
-const DEFAULT_MAX_ISSUES_PER_RUN = 8;
-const MAX_ISSUES_PER_RUN = 15;
-const MIN_ISSUES_PER_RUN = 3;
-const MAX_SPLIT_DEPTH = 2;
+const DEFAULT_MAX_ISSUES_PER_RUN = 5;
+const MAX_ISSUES_PER_RUN = 10;
+const MIN_ISSUES_PER_RUN = 1;
+const MAX_SPLIT_DEPTH = 3;
+const MAX_DUP_GROUPS_PER_PROMPT = 3;
 
 const DUPLICATE_ISSUE_TYPES = ['duplicate_phone', 'duplicate_email', 'duplicate_name'];
 
@@ -143,8 +145,12 @@ function chunk<T>(arr: T[], size: number): T[][] {
 
 function computeEffectiveBatchSize(requested: number, dupGroupCount: number): number {
   const base = Math.min(requested, DEFAULT_MAX_ISSUES_PER_RUN);
-  const penalty = Math.floor(dupGroupCount / 2);
+  const penalty = Math.ceil(dupGroupCount / 2);
   return Math.max(MIN_ISSUES_PER_RUN, base - penalty);
+}
+
+function capDupGroupsForPrompt(groups: DupGroup[]): DupGroup[] {
+  return groups.slice(0, MAX_DUP_GROUPS_PER_PROMPT);
 }
 
 function buildTagsPromptSection(allowedTags: string[]): string {
@@ -526,7 +532,7 @@ Deno.serve(async (req) => {
     ): Promise<string[]> {
       if (issueSubset.length === 0) return [];
 
-      const subsetDupGroups = dupGroupsForIssues(issueSubset);
+      const subsetDupGroups = capDupGroupsForPrompt(dupGroupsForIssues(issueSubset));
       const entriesChunk = entriesForIssues(issueSubset);
 
       try {
@@ -549,13 +555,15 @@ Deno.serve(async (req) => {
     const issueChunks = chunk(issues, batchSizeUsed);
     const stampedIssueIds: string[] = [];
     let failedBatches = 0;
+    let lastBatchError: string | undefined;
 
     for (const issueChunk of issueChunks) {
       try {
         const ids = await processIssueSubset(issueChunk);
         stampedIssueIds.push(...ids);
-      } catch {
+      } catch (e) {
         failedBatches += 1;
+        lastBatchError = e instanceof Error ? e.message : String(e);
       }
     }
 
@@ -611,10 +619,24 @@ Deno.serve(async (req) => {
       retries,
       failedBatches,
       finishReason: lastFinishReason,
+      lastError: lastBatchError,
+      partialSuccess: failedBatches > 0,
     });
   } catch (error) {
     if (error instanceof Response) return error;
     const message = error instanceof Error ? error.message : 'Error desconocido';
+    if (isGeminiMaxTokensError(error) || message.includes('MAX_TOKENS')) {
+      return jsonResponse({
+        analyzed: 0,
+        created: 0,
+        remaining: -1,
+        model: ANALYSIS_MODEL,
+        summary: 'Lote demasiado grande para Gemini; reintenta (lotes más pequeños).',
+        failedBatches: 1,
+        lastError: message,
+        partialSuccess: true,
+      });
+    }
     return jsonResponse({ error: message }, 500);
   }
 });
