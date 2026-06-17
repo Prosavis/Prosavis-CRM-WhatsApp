@@ -25,14 +25,33 @@ let cachedToken: { value: string; expiresAt: number } | null = null;
 function loadServiceAccount(): ServiceAccount {
   if (cachedAccount) return cachedAccount;
 
-  const raw = Deno.env.get('FIREBASE_SERVICE_ACCOUNT_JSON')?.trim();
+  const raw = (
+    Deno.env.get('FIREBASE_SERVICE_ACCOUNT_JSON') ??
+    Deno.env.get('FIREBASE_SERVICE_ACCOUNT_B64') ??
+    ''
+  ).trim();
   if (!raw) {
     throw new Error('Falta el secret FIREBASE_SERVICE_ACCOUNT_JSON.');
   }
 
+  // Acepta JSON crudo o base64. El base64 evita que los saltos de linea de la
+  // private_key o las comillas rompan el valor al cargarlo como variable de
+  // entorno (p.ej. via --env-file).
+  let jsonText = raw;
+  if (!raw.startsWith('{')) {
+    try {
+      jsonText = atob(raw);
+    } catch (error) {
+      throw new Error(
+        'FIREBASE_SERVICE_ACCOUNT_JSON no es JSON ni base64 valido.',
+        { cause: error },
+      );
+    }
+  }
+
   let parsed: Record<string, unknown>;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(jsonText);
   } catch (error) {
     throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON no es un JSON valido.', { cause: error });
   }
