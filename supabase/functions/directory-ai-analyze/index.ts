@@ -26,6 +26,9 @@ const MAX_DUP_GROUPS_PER_PROMPT = 3;
 
 const DUPLICATE_ISSUE_TYPES = ['duplicate_phone', 'duplicate_email', 'duplicate_name'];
 
+// Confianza mínima para proponer keep_separate (personas distintas) sin fusionar.
+const KEEP_SEPARATE_MIN_CONFIDENCE = 0.6;
+
 const FIELD_SUGGESTION = {
   type: 'object',
   nullable: true,
@@ -71,6 +74,7 @@ const DIRECTORY_ANALYSIS_SCHEMA: Record<string, unknown> = {
           is_same_person: { type: 'boolean' },
           confidence: { type: 'number' },
           reason: { type: 'string' },
+          distinguishing_field: { type: 'string', nullable: true },
         },
         required: ['entry_ids', 'is_same_person'],
       },
@@ -87,6 +91,8 @@ interface DirectoryRow {
   email: string | null;
   tags: string[] | null;
   source: string | null;
+  classification: string | null;
+  messages_count: number | null;
 }
 
 interface WaConversationRow {
@@ -122,6 +128,7 @@ interface GeminiDuplicate {
   is_same_person?: boolean;
   confidence?: number;
   reason?: string;
+  distinguishing_field?: string;
 }
 
 interface GeminiResult {
@@ -179,7 +186,16 @@ Deno.serve(async (req) => {
     const geminiKey: string = apiKey;
 
     const requestedType = typeof body.issueType === 'string' ? body.issueType.trim() : '';
-    const reanalyze = body.reanalyze === true;
+    const targetEntryIds = Array.isArray(body.entryIds)
+      ? (body.entryIds as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim() !== '')
+      : [];
+    const targetIssueIds = Array.isArray(body.issueIds)
+      ? (body.issueIds as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim() !== '')
+      : [];
+    // Modo dirigido por fila: regenera la sugerencia de las entradas/issues indicados.
+    const targeted = targetEntryIds.length > 0 || targetIssueIds.length > 0;
+    const force = body.force === true;
+    const reanalyze = !targeted && body.reanalyze === true;
     const requestedBatch = Number(body.batchSize ?? body.limit);
     const maxIssues = Math.max(
       MIN_ISSUES_PER_RUN,
@@ -203,6 +219,10 @@ Deno.serve(async (req) => {
       maxIssues,
       requestedType: requestedType || null,
       reanalyze,
+      targeted,
+      targetEntryIds: targetEntryIds.length,
+      targetIssueIds: targetIssueIds.length,
+      force,
     });
 
     if (MODEL_RESOLUTION.overridden) {
@@ -272,8 +292,14 @@ Deno.serve(async (req) => {
     let issueQuery = supabase
       .from('crm_directory_issues')
       .select('id, entry_id, related_entry_ids, issue_type, details')
-      .eq('status', 'open')
-      .is('ai_analyzed_at', null);
+      .eq('status', 'open');
+    if (targeted) {
+      // Dirigido: filtra por entradas/issues e ignora ai_analyzed_at para poder regenerar.
+      if (targetIssueIds.length > 0) issueQuery = issueQuery.in('id', targetIssueIds);
+      if (targetEntryIds.length > 0) issueQuery = issueQuery.in('entry_id', targetEntryIds);
+    } else {
+      issueQuery = issueQuery.is('ai_analyzed_at', null);
+    }
     if (requestedType) issueQuery = issueQuery.eq('issue_type', requestedType);
     issueQuery = issueQuery.order('detected_at', { ascending: true }).limit(maxIssues);
 
@@ -338,7 +364,7 @@ Deno.serve(async (req) => {
     for (const idsChunk of chunk(allEntryIds, 300)) {
       const { data: dirData, error: dirError } = await supabase
         .from('crm_directory')
-        .select('id, full_name, phone, phone_key, email, tags, source')
+        .select('id, full_name, phone, phone_key, email, tags, source, classification, messages_count')
         .in('id', idsChunk);
       if (dirError) throw new Error(formatError(dirError));
       for (const e of (dirData ?? []) as DirectoryRow[]) entryById.set(e.id, e);
@@ -396,7 +422,18 @@ Deno.serve(async (req) => {
         entry_ids: g.ids,
         members: g.ids.map((id) => {
           const e = entryById.get(id);
-          return { id, full_name: e?.full_name ?? '', phone: e?.phone ?? '', email: e?.email ?? '' };
+          const wa = e?.phone_key ? waByPhoneKey.get(e.phone_key) : undefined;
+          return {
+            id,
+            full_name: e?.full_name ?? '',
+            phone: e?.phone ?? '',
+            email: e?.email ?? '',
+            source: e?.source ?? '',
+            tags: e?.tags ?? [],
+            classification: e?.classification ?? '',
+            messages_count: e?.messages_count ?? 0,
+            contact_name: wa?.contact_name ?? '',
+          };
         }),
       }));
 
@@ -413,7 +450,10 @@ Deno.serve(async (req) => {
         'Si hay name_wa_mismatch, propone full_name (CRM) y contact_name (WhatsApp) con el mismo valor legible.\n' +
         '- phone_fix: E.164 colombiano (+57…). NUNCA inventes números; si no hay teléfono en los datos, omite.\n' +
         buildTagsPromptSection(allowedTags) +
-        '- duplicates: is_same_person solo si es la misma persona. reason máx. 120 caracteres.\n' +
+        '- duplicates: is_same_person=true SOLO si coinciden identificadores fuertes (mismo teléfono o ' +
+        'mismo email). Si comparten nombre pero difieren teléfono, email o fuente, son personas DIFERENTES ' +
+        '(is_same_person=false) y debes citar en distinguishing_field el dato diferenciador ' +
+        '(ej. "telefonos distintos", "emails distintos", "fuentes distintas"). reason máx. 120 caracteres.\n' +
         '- confidence: 0..1. No inventes datos que no estén presentes.\n\n' +
         'CONTACTOS:\n' + JSON.stringify(compactEntries) + '\n\n' +
         'GRUPOS_DUPLICADOS:\n' + JSON.stringify(compactDupGroups)
@@ -546,23 +586,44 @@ Deno.serve(async (req) => {
 
       for (const d of result.duplicates ?? []) {
         const ids = (d.entry_ids ?? []).filter((id): id is string => typeof id === 'string' && entryById.has(id));
-        if (!d.is_same_person || ids.length < 2) continue;
+        if (ids.length < 2) continue;
         const group = scopeDupGroups.find((g) => sortedIdsKey(g.ids) === sortedIdsKey(ids))
           ?? scopeDupGroups.find((g) => ids.every((id) => g.ids.includes(id)));
         const primary = group?.primary ?? ids[0];
         const related = ids.filter((id) => id !== primary);
-        await upsert({
-          dedupeKey: `merge:${sortedIdsKey(ids)}`,
-          entryId: primary,
-          issueId: group?.issue.id ?? null,
-          type: 'merge',
-          field: null,
-          current: {},
-          suggested: { primary, related },
-          confidence: clampConfidence(d.confidence),
-          reason: d.reason ?? '',
-          related,
-        });
+
+        if (d.is_same_person) {
+          await upsert({
+            dedupeKey: `merge:${sortedIdsKey(ids)}`,
+            entryId: primary,
+            issueId: group?.issue.id ?? null,
+            type: 'merge',
+            field: null,
+            current: {},
+            suggested: { primary, related },
+            confidence: clampConfidence(d.confidence),
+            reason: d.reason ?? '',
+            related,
+          });
+          continue;
+        }
+
+        // Personas distintas con suficiente confianza: proponer dejarlas independientes.
+        const conf = clampConfidence(d.confidence);
+        if (conf != null && conf >= KEEP_SEPARATE_MIN_CONFIDENCE) {
+          await upsert({
+            dedupeKey: `keep_separate:${sortedIdsKey(ids)}`,
+            entryId: primary,
+            issueId: group?.issue.id ?? null,
+            type: 'keep_separate',
+            field: null,
+            current: {},
+            suggested: { entry_ids: ids, distinguishing_field: d.distinguishing_field ?? '' },
+            confidence: conf,
+            reason: d.reason ?? '',
+            related,
+          });
+        }
       }
     }
 
@@ -676,19 +737,22 @@ Deno.serve(async (req) => {
         ? ` Pendientes por analizar: ${remaining}.`
         : ' Toda la tabla quedó analizada.');
 
-    await supabase.rpc('upsert_directory_ai_suggestion', {
-      p_dedupe_key: 'summary:global',
-      p_entry_id: null,
-      p_issue_id: null,
-      p_type: 'summary',
-      p_field: null,
-      p_current: {},
-      p_suggested: { text: summary },
-      p_confidence: null,
-      p_reason: null,
-      p_related: [],
-      p_model: modelUsed,
-    });
+    // En modo dirigido no recalculamos el resumen global: preserva el del análisis completo.
+    if (!targeted) {
+      await supabase.rpc('upsert_directory_ai_suggestion', {
+        p_dedupe_key: 'summary:global',
+        p_entry_id: null,
+        p_issue_id: null,
+        p_type: 'summary',
+        p_field: null,
+        p_current: {},
+        p_suggested: { text: summary },
+        p_confidence: null,
+        p_reason: null,
+        p_related: [],
+        p_model: modelUsed,
+      });
+    }
 
     logAnalysis('invoke_done', {
       analyzed: uniqueStamped.length,
@@ -698,6 +762,13 @@ Deno.serve(async (req) => {
       retries,
       finishReason: lastFinishReason,
     });
+
+    const processedEntryIds = [...new Set(
+      uniqueStamped.flatMap((id) => {
+        const issue = issues.find((i) => i.id === id);
+        return issue?.entry_id ? [issue.entry_id] : [];
+      }),
+    )];
 
     return jsonResponse({
       analyzed: uniqueStamped.length,
@@ -713,6 +784,8 @@ Deno.serve(async (req) => {
       finishReason: lastFinishReason,
       lastError: lastBatchError,
       partialSuccess: failedBatches > 0,
+      targeted,
+      entryIds: processedEntryIds,
     });
   } catch (error) {
     if (error instanceof Response) return error;

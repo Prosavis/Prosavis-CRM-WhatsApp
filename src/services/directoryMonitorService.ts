@@ -212,7 +212,48 @@ export const directoryMonitorService = {
       issues = issues.filter((issue) => matchesSearch(issue, filters.search ?? ''));
     }
 
+    // Adjunta a cada issue su sugerencia IA abierta (si existe) para la acción por fila.
+    const issueEntryIds = issues
+      .map((issue) => issue.entryId)
+      .filter((id): id is string => typeof id === 'string');
+    if (issueEntryIds.length > 0) {
+      try {
+        const suggestionMap = await this.getSuggestionsForEntries(issueEntryIds);
+        issues = issues.map((issue) => ({
+          ...issue,
+          aiSuggestion: issue.entryId ? suggestionMap.get(issue.entryId) ?? null : null,
+        }));
+      } catch {
+        /* sin sugerencias: la fila simplemente generará bajo demanda */
+      }
+    }
+
     return { issues, totalCount: count ?? issues.length };
+  },
+
+  /**
+   * Devuelve las sugerencias IA abiertas (excluye 'summary') para un conjunto de entradas,
+   * indexadas por entryId y ordenadas por mayor confianza.
+   */
+  async getSuggestionsForEntries(entryIds: string[]): Promise<Map<string, DirectoryAISuggestion>> {
+    const map = new Map<string, DirectoryAISuggestion>();
+    const ids = [...new Set(entryIds.filter((id) => typeof id === 'string' && id.trim() !== ''))];
+    if (ids.length === 0) return map;
+
+    const { data, error } = await supabase
+      .from('crm_directory_ai_suggestions')
+      .select('*')
+      .eq('status', 'open')
+      .neq('suggestion_type', 'summary')
+      .in('entry_id', ids)
+      .order('confidence', { ascending: false, nullsFirst: false });
+    if (error) throw error;
+
+    for (const row of (data ?? []) as SuggestionRow[]) {
+      if (!row.entry_id || map.has(row.entry_id)) continue;
+      map.set(row.entry_id, mapSuggestionRow(row));
+    }
+    return map;
   },
 
   /** Devuelve las entradas de un grupo de duplicados (principal + relacionadas). */
@@ -293,32 +334,6 @@ export const directoryMonitorService = {
     }
   },
 
-  /** Unifica en lote todos los issues abiertos de tipo name_wa_mismatch. */
-  async unifyAllContactNamesFromDirectory(): Promise<{ unified: number; failed: number }> {
-    const { issues } = await this.getIssues({
-      issueType: 'name_wa_mismatch',
-      status: 'open',
-      limit: 500,
-      page: 0,
-    });
-
-    let unified = 0;
-    let failed = 0;
-    for (const issue of issues) {
-      if (!issue.entryId) {
-        failed += 1;
-        continue;
-      }
-      try {
-        await this.unifyContactNameFromDirectory(issue.entryId);
-        unified += 1;
-      } catch {
-        failed += 1;
-      }
-    }
-    return { unified, failed };
-  },
-
   // ── IA (Gemini) ───────────────────────────────────────────────────────────
 
   /**
@@ -329,6 +344,8 @@ export const directoryMonitorService = {
   async analyzeWithAI(params?: {
     issueType?: DirectoryIssueType;
     entryIds?: string[];
+    issueIds?: string[];
+    force?: boolean;
     limit?: number;
     batchSize?: number;
     reanalyze?: boolean;
@@ -338,12 +355,17 @@ export const directoryMonitorService = {
       batchSize: params?.batchSize,
       limit: params?.limit,
       reanalyze: params?.reanalyze,
+      entryIds: params?.entryIds?.length,
+      issueIds: params?.issueIds?.length,
+      force: params?.force,
     });
     const started = Date.now();
     const { data, error } = await supabase.functions.invoke<AIAnalyzeResult>('directory-ai-analyze', {
       body: {
         issueType: params?.issueType,
         entryIds: params?.entryIds,
+        issueIds: params?.issueIds,
+        force: params?.force,
         limit: params?.limit,
         batchSize: params?.batchSize,
         reanalyze: params?.reanalyze,
@@ -502,6 +524,18 @@ export const directoryMonitorService = {
       model,
       failedBatchesTotal,
     };
+  },
+
+  /**
+   * Genera (bajo demanda) la sugerencia IA para una sola inconsistencia: invoca la Edge
+   * Function en modo dirigido (`entryIds` + `force`) y recupera la propuesta resultante.
+   * Devuelve `null` si la IA no propuso nada seguro para esa entrada.
+   */
+  async generateSuggestionForIssue(issue: DirectoryIssue): Promise<DirectoryAISuggestion | null> {
+    if (!issue.entryId) throw new Error('La inconsistencia no tiene entrada asociada.');
+    await this.analyzeWithAI({ entryIds: [issue.entryId], force: true });
+    const map = await this.getSuggestionsForEntries([issue.entryId]);
+    return map.get(issue.entryId) ?? null;
   },
 
   /** Conteos de sugerencias por tipo y estado. */
@@ -666,6 +700,35 @@ export const directoryMonitorService = {
           if (dupId && dupId !== suggestion.entryId) {
             await this.mergeEntries(suggestion.entryId, dupId);
           }
+        }
+        break;
+      }
+      case 'keep_separate': {
+        // Personas distintas: NO se fusiona crm_directory. Solo se resuelve la(s)
+        // inconsistencia(s) de duplicado del grupo como "distintas según IA".
+        const suggested = suggestion.suggestedValue as { entry_ids?: unknown };
+        const groupIds = Array.isArray(suggested.entry_ids)
+          ? suggested.entry_ids.map(String)
+          : [...new Set([suggestion.entryId, ...suggestion.relatedEntryIds])];
+
+        const { data: openDuplicates, error: dupError } = await supabase
+          .from('crm_directory_issues')
+          .select('id')
+          .in('issue_type', ['duplicate_phone', 'duplicate_email', 'duplicate_name'])
+          .eq('status', 'open')
+          .in('entry_id', groupIds);
+        if (dupError) throw dupError;
+
+        const issueIds = new Set<string>();
+        if (suggestion.issueId) issueIds.add(suggestion.issueId);
+        for (const row of openDuplicates ?? []) issueIds.add(row.id);
+
+        for (const issueId of issueIds) {
+          const { error } = await supabase.rpc('resolve_directory_issue', {
+            p_issue_id: issueId,
+            p_resolution: 'ai_distinct_persons',
+          });
+          if (error) throw error;
         }
         break;
       }

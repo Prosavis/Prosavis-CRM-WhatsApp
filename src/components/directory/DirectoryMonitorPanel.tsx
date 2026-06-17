@@ -1,13 +1,15 @@
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import CallMergeIcon from '@mui/icons-material/CallMerge';
+import CheckIcon from '@mui/icons-material/Check';
 import DoneAllIcon from '@mui/icons-material/DoneAll';
 import EditIcon from '@mui/icons-material/Edit';
+import PeopleAltIcon from '@mui/icons-material/PeopleAlt';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import RuleIcon from '@mui/icons-material/Rule';
 import SearchIcon from '@mui/icons-material/Search';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 
 import Alert from '@mui/material/Alert';
+import AlertTitle from '@mui/material/AlertTitle';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
@@ -16,6 +18,7 @@ import Dialog from '@mui/material/Dialog';
 import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
 import DialogTitle from '@mui/material/DialogTitle';
+import Divider from '@mui/material/Divider';
 import FormControl from '@mui/material/FormControl';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import IconButton from '@mui/material/IconButton';
@@ -36,17 +39,16 @@ import TableContainer from '@mui/material/TableContainer';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import TextField from '@mui/material/TextField';
-import ToggleButton from '@mui/material/ToggleButton';
-import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
-import DirectoryAISuggestionsPanel from '@/components/directory/DirectoryAISuggestionsPanel';
 import DirectoryEditDialog from '@/components/directory/DirectoryEditDialog';
 import DirectoryEntryDrawer from '@/components/directory/DirectoryEntryDrawer';
 import { directoryMonitorService } from '@/services/directoryMonitorService';
 import type {
+  AISuggestionType,
+  DirectoryAISuggestion,
   DirectoryEntry,
   DirectoryIssue,
   DirectoryIssueStats,
@@ -77,9 +79,50 @@ const ISSUE_LABELS: Record<DirectoryIssueType, string> = ISSUE_CATEGORIES.reduce
   {} as Record<DirectoryIssueType, string>,
 );
 
+const SUGGESTION_LABELS: Record<AISuggestionType, string> = {
+  name_cleanup: 'Limpiar nombre',
+  phone_fix: 'Corregir teléfono',
+  tag_suggestion: 'Sugerir etiquetas',
+  merge: 'Fusionar duplicados',
+  keep_separate: 'Personas diferentes',
+  summary: 'Resumen',
+};
+
 const DUPLICATE_TYPES: DirectoryIssueType[] = ['duplicate_phone', 'duplicate_email', 'duplicate_name'];
 
 const SEARCH_DEBOUNCE_MS = 400;
+
+function renderSuggestionCurrent(s: DirectoryAISuggestion): React.ReactNode {
+  if (s.suggestionType === 'merge' || s.suggestionType === 'keep_separate') return '—';
+  const value = (s.currentValue as { value?: unknown }).value;
+  if (Array.isArray(value)) return value.join(', ') || '—';
+  return String(value ?? '') || '—';
+}
+
+function renderSuggestionProposed(s: DirectoryAISuggestion): React.ReactNode {
+  if (s.suggestionType === 'merge') {
+    const related = (s.suggestedValue as { related?: unknown }).related;
+    const count = Array.isArray(related) ? related.length : s.relatedEntryIds.length;
+    return `Fusionar ${count} duplicado(s) en la entrada principal`;
+  }
+  if (s.suggestionType === 'keep_separate') {
+    const field = String((s.suggestedValue as { distinguishing_field?: unknown }).distinguishing_field ?? '').trim();
+    return field
+      ? `Marcar como personas diferentes (${field})`
+      : 'Marcar como personas diferentes';
+  }
+  const value = (s.suggestedValue as { value?: unknown }).value;
+  if (Array.isArray(value)) {
+    return (
+      <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+        {value.map((v) => (
+          <Chip key={String(v)} label={String(v)} size="small" color="success" variant="outlined" />
+        ))}
+      </Stack>
+    );
+  }
+  return String(value ?? '') || '—';
+}
 
 export interface DirectoryMonitorPanelProps {
   /** Se invoca tras fusionar/editar para refrescar el listado principal del directorio. */
@@ -87,7 +130,6 @@ export interface DirectoryMonitorPanelProps {
 }
 
 const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirectoryChanged }) => {
-  const [view, setView] = useState<'issues' | 'ai'>('issues');
   const [stats, setStats] = useState<DirectoryIssueStats>({ openTotal: 0, dismissedTotal: 0, byType: {} });
   const [issues, setIssues] = useState<DirectoryIssue[]>([]);
   const [loading, setLoading] = useState(true);
@@ -116,7 +158,17 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
   const [mergeGroup, setMergeGroup] = useState<DirectoryEntry[]>([]);
   const [mergeKeeperId, setMergeKeeperId] = useState<string>('');
   const [mergeLoading, setMergeLoading] = useState(false);
-  const [unifyLoading, setUnifyLoading] = useState(false);
+
+  // Análisis IA global
+  const [summary, setSummary] = useState<string | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeProgress, setAnalyzeProgress] = useState<string | null>(null);
+
+  // Solución IA por fila
+  const [aiRowBusyId, setAiRowBusyId] = useState<string | null>(null);
+  const [previewSuggestion, setPreviewSuggestion] = useState<DirectoryAISuggestion | null>(null);
+  const [previewIssue, setPreviewIssue] = useState<DirectoryIssue | null>(null);
+  const [applyLoading, setApplyLoading] = useState(false);
 
   const notify = (message: string, severity: 'success' | 'error') =>
     setSnackbar({ open: true, message, severity });
@@ -124,6 +176,7 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
   const fetchStats = useCallback(async () => {
     try {
       setStats(await directoryMonitorService.getIssueStats());
+      setSummary(await directoryMonitorService.getGlobalSummary());
     } catch {
       /* fallback silencioso */
     }
@@ -175,6 +228,89 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
     fetchStats();
     fetchIssues();
   }, [fetchStats, fetchIssues]);
+
+  const handleAnalyzeAll = async () => {
+    setAnalyzing(true);
+    setAnalyzeProgress('Analizando toda la tabla…');
+    setError(null);
+    try {
+      const result = await directoryMonitorService.analyzeAllWithAI({ reanalyze: true }, (p) => {
+        setAnalyzeProgress(
+          p.remaining > 0
+            ? `Analizando… ${p.createdTotal} sugerencia(s), quedan ${p.remaining}`
+            : `Finalizando… ${p.createdTotal} sugerencia(s)`,
+        );
+      });
+      if ((result.failedBatchesTotal ?? 0) > 0) {
+        notify(
+          `Análisis parcial: ${result.created} sugerencia(s); ${result.failedBatchesTotal} lote(s) fallaron.`,
+          'error',
+        );
+      } else {
+        notify(
+          `Análisis completo: ${result.created} sugerencia(s) sobre ${result.analyzed} inconsistencia(s)` +
+            (result.model ? ` · modelo ${result.model}` : ''),
+          'success',
+        );
+      }
+      refreshAll();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'No se pudo ejecutar el análisis con IA', 'error');
+    } finally {
+      setAnalyzing(false);
+      setAnalyzeProgress(null);
+    }
+  };
+
+  const openPreview = (issue: DirectoryIssue, suggestion: DirectoryAISuggestion) => {
+    setPreviewIssue(issue);
+    setPreviewSuggestion(suggestion);
+  };
+
+  const closePreview = () => {
+    setPreviewIssue(null);
+    setPreviewSuggestion(null);
+  };
+
+  const handleSolveWithAI = async (issue: DirectoryIssue) => {
+    if (issue.aiSuggestion) {
+      openPreview(issue, issue.aiSuggestion);
+      return;
+    }
+    if (!issue.entryId) {
+      notify('La inconsistencia no tiene entrada asociada.', 'error');
+      return;
+    }
+    setAiRowBusyId(issue.id);
+    try {
+      const suggestion = await directoryMonitorService.generateSuggestionForIssue(issue);
+      if (suggestion) {
+        openPreview(issue, suggestion);
+      } else {
+        notify('La IA no encontró una solución segura para esta fila.', 'error');
+      }
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'No se pudo generar la solución con IA', 'error');
+    } finally {
+      setAiRowBusyId(null);
+    }
+  };
+
+  const handleApplyPreview = async () => {
+    if (!previewSuggestion) return;
+    setApplyLoading(true);
+    try {
+      await directoryMonitorService.applySuggestion(previewSuggestion);
+      notify('Solución aplicada', 'success');
+      closePreview();
+      refreshAll();
+      onDirectoryChanged?.();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'No se pudo aplicar la solución', 'error');
+    } finally {
+      setApplyLoading(false);
+    }
+  };
 
   const handleDismiss = async (issue: DirectoryIssue) => {
     try {
@@ -231,28 +367,16 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
     }
   };
 
-  const handleUnifyAll = async () => {
-    setUnifyLoading(true);
-    try {
-      const { unified, failed } = await directoryMonitorService.unifyAllContactNamesFromDirectory();
-      notify(
-        failed > 0
-          ? `Unificados ${unified} contacto(s); ${failed} fallaron`
-          : `Unificados ${unified} contacto(s)`,
-        failed > 0 ? 'error' : 'success',
-      );
-      refreshAll();
-      onDirectoryChanged?.();
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'No se pudo unificar en lote', 'error');
-    } finally {
-      setUnifyLoading(false);
-    }
-  };
-
   const totalPages = Math.ceil(totalCount / rowsPerPage);
   const from = totalCount === 0 ? 0 : page * rowsPerPage + 1;
   const to = Math.min((page + 1) * rowsPerPage, totalCount);
+
+  const previewConfidencePct =
+    previewSuggestion?.confidence != null ? Math.round(previewSuggestion.confidence * 100) : null;
+  const previewIsKeepSeparate = previewSuggestion?.suggestionType === 'keep_separate';
+  const previewDistinguishingField = previewIsKeepSeparate
+    ? String((previewSuggestion?.suggestedValue as { distinguishing_field?: unknown }).distinguishing_field ?? '').trim()
+    : '';
 
   return (
     <Box>
@@ -262,51 +386,40 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
             Monitoreo del contacto
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            Inconsistencias detectadas por el orquestador para revisión humana.
+            Inconsistencias detectadas por el orquestador para revisión humana. Resuelve cada fila con IA bajo demanda.
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-          <ToggleButtonGroup
-            size="small"
-            exclusive
-            value={view}
-            onChange={(_, next) => next && setView(next)}
-          >
-            <ToggleButton value="issues">
-              <RuleIcon fontSize="small" sx={{ mr: 0.5 }} />
-              Inconsistencias
-            </ToggleButton>
-            <ToggleButton value="ai">
-              <AutoAwesomeIcon fontSize="small" sx={{ mr: 0.5 }} />
-              Sugerencias IA
-            </ToggleButton>
-          </ToggleButtonGroup>
-          {view === 'issues' && (
-            <>
-              <Button startIcon={<RefreshIcon />} size="small" onClick={refreshAll}>
-                Actualizar
-              </Button>
-              {(stats.byType.name_wa_mismatch ?? 0) > 0 && (
-                <Button
-                  size="small"
-                  variant="contained"
-                  color="secondary"
-                  disabled={unifyLoading}
-                  startIcon={unifyLoading ? <CircularProgress size={14} color="inherit" /> : <DoneAllIcon />}
-                  onClick={handleUnifyAll}
-                >
-                  Unificar todos (CRM → WA)
-                </Button>
-              )}
-            </>
-          )}
+          <Button startIcon={<RefreshIcon />} size="small" onClick={refreshAll} disabled={analyzing}>
+            Actualizar
+          </Button>
+          <Stack alignItems={{ xs: 'flex-start', sm: 'flex-end' }} spacing={0.25}>
+            <Button
+              size="small"
+              variant="contained"
+              color="secondary"
+              startIcon={analyzing ? <CircularProgress size={14} color="inherit" /> : <AutoAwesomeIcon />}
+              onClick={handleAnalyzeAll}
+              disabled={analyzing}
+            >
+              {analyzing ? 'Analizando…' : 'Analizar toda la tabla con IA'}
+            </Button>
+            {analyzeProgress && (
+              <Typography variant="caption" color="text.secondary">
+                {analyzeProgress}
+              </Typography>
+            )}
+          </Stack>
         </Stack>
       </Stack>
 
-      {view === 'ai' ? (
-        <DirectoryAISuggestionsPanel onDirectoryChanged={onDirectoryChanged} />
-      ) : (
-        <>
+      {summary && (
+        <Alert severity="info" icon={<AutoAwesomeIcon />} sx={{ mb: 2 }}>
+          <AlertTitle>Resumen de la IA</AlertTitle>
+          {summary}
+        </Alert>
+      )}
+
       <Paper sx={{ p: 2, mb: 2 }}>
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
           <Chip
@@ -410,6 +523,8 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
                     const isDuplicate = DUPLICATE_TYPES.includes(issue.issueType);
                     const dupCount = Number(issue.details?.count ?? issue.relatedEntryIds.length + 1);
                     const fallbackName = String(issue.details?.full_name ?? '') || '—';
+                    const aiBusy = aiRowBusyId === issue.id;
+                    const hasSuggestion = !!issue.aiSuggestion;
                     return (
                       <TableRow key={issue.id} hover>
                         <TableCell>
@@ -456,16 +571,29 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
                           </Typography>
                         </TableCell>
                         <TableCell>
-                          <Chip
-                            label={
-                              isDuplicate
-                                ? `${ISSUE_LABELS[issue.issueType]} · ${dupCount}`
-                                : ISSUE_LABELS[issue.issueType]
-                            }
-                            color={issue.severity === 'error' ? 'error' : 'warning'}
-                            size="small"
-                            variant="outlined"
-                          />
+                          <Stack direction="row" spacing={0.5} alignItems="center">
+                            <Chip
+                              label={
+                                isDuplicate
+                                  ? `${ISSUE_LABELS[issue.issueType]} · ${dupCount}`
+                                  : ISSUE_LABELS[issue.issueType]
+                              }
+                              color={issue.severity === 'error' ? 'error' : 'warning'}
+                              size="small"
+                              variant="outlined"
+                            />
+                            {hasSuggestion && (
+                              <Tooltip title="Hay una solución de IA lista para previsualizar">
+                                <Chip
+                                  icon={<AutoAwesomeIcon sx={{ fontSize: 14 }} />}
+                                  label="IA"
+                                  size="small"
+                                  color="secondary"
+                                  variant="outlined"
+                                />
+                              </Tooltip>
+                            )}
+                          </Stack>
                         </TableCell>
                         <TableCell>
                           <Typography variant="caption" color="text.secondary">
@@ -479,6 +607,24 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
                         </TableCell>
                         <TableCell align="right">
                           <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                            {statusFilter === 'open' && (
+                              <Tooltip title="Solución con IA">
+                                <span>
+                                  <IconButton
+                                    size="small"
+                                    color="secondary"
+                                    disabled={aiBusy || !issue.entryId}
+                                    onClick={() => handleSolveWithAI(issue)}
+                                  >
+                                    {aiBusy ? (
+                                      <CircularProgress size={16} color="inherit" />
+                                    ) : (
+                                      <AutoAwesomeIcon fontSize="small" />
+                                    )}
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+                            )}
                             <Tooltip title="Ver ficha">
                               <span>
                                 <IconButton
@@ -586,6 +732,106 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
         </Paper>
       )}
 
+      <Dialog open={!!previewSuggestion} onClose={applyLoading ? undefined : closePreview} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <AutoAwesomeIcon color="secondary" fontSize="small" />
+            <span>Solución propuesta por IA</span>
+          </Stack>
+        </DialogTitle>
+        <DialogContent dividers>
+          {previewSuggestion && (
+            <Stack spacing={2}>
+              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                <Chip
+                  label={SUGGESTION_LABELS[previewSuggestion.suggestionType]}
+                  size="small"
+                  color="secondary"
+                  variant="outlined"
+                />
+                {previewConfidencePct != null && (
+                  <Chip
+                    label={`Confianza ${previewConfidencePct}%`}
+                    size="small"
+                    color={previewConfidencePct >= 75 ? 'success' : previewConfidencePct >= 50 ? 'warning' : 'default'}
+                  />
+                )}
+              </Stack>
+
+              {previewIssue?.entry && (
+                <Typography variant="body2" color="text.secondary">
+                  Contacto: <strong>{previewIssue.entry.fullName || '—'}</strong>
+                  {previewIssue.entry.phone ? ` · ${previewIssue.entry.phone}` : ''}
+                </Typography>
+              )}
+
+              {previewIsKeepSeparate ? (
+                <Alert severity="info" icon={<PeopleAltIcon />}>
+                  <AlertTitle>Son personas diferentes</AlertTitle>
+                  {previewDistinguishingField
+                    ? `La IA detectó datos diferenciadores: ${previewDistinguishingField}. `
+                    : 'La IA detectó que comparten nombre pero difieren en sus identificadores. '}
+                  Se marcarán como contactos independientes (no se fusionan) y la inconsistencia de duplicado quedará resuelta.
+                </Alert>
+              ) : (
+                <Box>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                    <Box flex={1}>
+                      <Typography variant="caption" color="text.secondary">
+                        Actual
+                      </Typography>
+                      <Typography variant="body2">{renderSuggestionCurrent(previewSuggestion)}</Typography>
+                    </Box>
+                    <Divider orientation="vertical" flexItem sx={{ display: { xs: 'none', sm: 'block' } }} />
+                    <Box flex={1}>
+                      <Typography variant="caption" color="text.secondary">
+                        Propuesto
+                      </Typography>
+                      <Box>{renderSuggestionProposed(previewSuggestion)}</Box>
+                    </Box>
+                  </Stack>
+                </Box>
+              )}
+
+              {previewSuggestion.reason && (
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Razón
+                  </Typography>
+                  <Typography variant="body2">{previewSuggestion.reason}</Typography>
+                </Box>
+              )}
+
+              <Typography variant="caption" color="text.secondary">
+                Nada se escribe en la base de datos hasta que confirmes.
+              </Typography>
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closePreview} disabled={applyLoading}>
+            Cancelar
+          </Button>
+          <Button
+            variant="contained"
+            color={previewIsKeepSeparate ? 'secondary' : 'success'}
+            startIcon={
+              applyLoading ? (
+                <CircularProgress size={16} color="inherit" />
+              ) : previewIsKeepSeparate ? (
+                <PeopleAltIcon />
+              ) : (
+                <CheckIcon />
+              )
+            }
+            onClick={handleApplyPreview}
+            disabled={applyLoading}
+          >
+            Aplicar solución
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Dialog open={!!mergeIssue} onClose={() => setMergeIssue(null)} maxWidth="sm" fullWidth>
         <DialogTitle>Fusionar duplicados</DialogTitle>
         <DialogContent>
@@ -671,8 +917,6 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
           {snackbar.message}
         </Alert>
       </Snackbar>
-        </>
-      )}
     </Box>
   );
 };

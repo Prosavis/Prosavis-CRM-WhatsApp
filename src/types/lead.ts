@@ -141,6 +141,8 @@ export interface DirectoryIssue {
   resolution?: string;
   /** Entrada principal vinculada al issue (cargada por el servicio). */
   entry?: DirectoryEntry | null;
+  /** Sugerencia IA abierta asociada a la entrada del issue (cargada por el servicio). */
+  aiSuggestion?: DirectoryAISuggestion | null;
 }
 
 export interface DirectoryIssueStats {
@@ -159,6 +161,7 @@ export type AISuggestionType =
   | 'phone_fix'
   | 'tag_suggestion'
   | 'merge'
+  | 'keep_separate'
   | 'summary';
 
 export type AISuggestionStatus = 'open' | 'applied' | 'dismissed';
