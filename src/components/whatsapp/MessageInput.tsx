@@ -615,7 +615,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
         }
       }
 
-      // Enter envía; Shift+Enter inserta nueva línea (estándar de editores y clientes de chat).
+      // Enter envía sin salto de línea (Lexical lo bloquea en EnterSubmitPlugin); Shift+Enter inserta nueva línea.
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         handleSend();

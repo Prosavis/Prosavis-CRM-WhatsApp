@@ -12,6 +12,7 @@ import {
   IS_CODE,
   IS_ITALIC,
   IS_STRIKETHROUGH,
+  KEY_ENTER_COMMAND,
   LineBreakNode,
   mergeRegister,
   PASTE_COMMAND,
@@ -84,6 +85,27 @@ function InitialParagraphPlugin(): null {
         root.append($createParagraphNode());
       }
     });
+  }, [editor]);
+
+  return null;
+}
+
+/** Enter sin Shift no inserta salto de línea; el envío lo maneja MessageInput.onKeyDown. */
+function EnterSubmitPlugin(): null {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    return editor.registerCommand(
+      KEY_ENTER_COMMAND,
+      (event) => {
+        if (event?.shiftKey) {
+          return false;
+        }
+        event?.preventDefault();
+        return true;
+      },
+      COMMAND_PRIORITY_CRITICAL,
+    );
   }, [editor]);
 
   return null;
@@ -222,6 +244,7 @@ const EditorBridge = forwardRef<WhatsAppLexicalEditorHandle, WhatsAppLexicalEdit
     return (
       <>
         <InitialParagraphPlugin />
+        <EnterSubmitPlugin />
         <PlainTextPastePlugin />
         <HistoryPlugin />
         <OnChangePlugin
