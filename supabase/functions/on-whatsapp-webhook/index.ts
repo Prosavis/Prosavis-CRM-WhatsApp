@@ -316,7 +316,7 @@ async function processInboundMessage(params: {
 
   const { data: existingConversation, error: conversationReadError } = await params.supabase
     .from('whatsapp_conversations')
-    .select('unread_count')
+    .select('unread_count, contact_name_locked')
     .eq('stable_key', senderPhone)
     .maybeSingle();
 
@@ -325,26 +325,34 @@ async function processInboundMessage(params: {
   const unreadCount = Number(existingConversation?.unread_count ?? 0) + 1;
   const lastMessageText = content.messageBody ?? `[${getString(params.message.type) || 'mensaje'}]`;
 
+  // Si el nombre fue editado manualmente desde la ficha (contact_name_locked),
+  // o si el webhook no trae push name, no tocamos los nombres del contacto
+  // para no sobrescribir lo editado ni borrarlo con null.
+  const isNameLocked = existingConversation?.contact_name_locked === true;
+  const shouldUpdateName = !isNameLocked && contactName !== null;
+
+  const conversationPatch: Record<string, unknown> = {
+    stable_key: senderPhone,
+    phone: senderPhone,
+    state: 'active',
+    contact_phone: senderPhone,
+    last_message_text: lastMessageText,
+    last_message_at: createdAt,
+    last_message_direction: 'inbound',
+    last_message_outbound_status: null,
+    unread_count: unreadCount,
+    phone_number_id: phoneNumberId,
+    ...UNARCHIVE_CONVERSATION_PATCH,
+  };
+
+  if (shouldUpdateName) {
+    conversationPatch.contact_name = contactName;
+    conversationPatch.whatsapp_profile_name = contactName;
+  }
+
   const { error: conversationError } = await params.supabase
     .from('whatsapp_conversations')
-    .upsert(
-      {
-        stable_key: senderPhone,
-        phone: senderPhone,
-        state: 'active',
-        contact_name: contactName,
-        contact_phone: senderPhone,
-        whatsapp_profile_name: contactName,
-        last_message_text: lastMessageText,
-        last_message_at: createdAt,
-        last_message_direction: 'inbound',
-        last_message_outbound_status: null,
-        unread_count: unreadCount,
-        phone_number_id: phoneNumberId,
-        ...UNARCHIVE_CONVERSATION_PATCH,
-      },
-      { onConflict: 'stable_key' },
-    );
+    .upsert(conversationPatch, { onConflict: 'stable_key' });
 
   if (conversationError) throw conversationError;
 

@@ -8,6 +8,7 @@ function toDbPatch(patch: Record<string, unknown>) {
   if ('contactName' in patch) dbPatch.contact_name = patch.contactName;
   if ('contactPhotoUrl' in patch) dbPatch.contact_photo_url = patch.contactPhotoUrl;
   if ('whatsappProfileName' in patch) dbPatch.whatsapp_profile_name = patch.whatsappProfileName;
+  if ('contactNameLocked' in patch) dbPatch.contact_name_locked = patch.contactNameLocked;
   if ('crmForceUnread' in patch) dbPatch.crm_force_unread = patch.crmForceUnread;
   if ('tagIds' in patch) dbPatch.tag_ids = patch.tagIds;
   if ('isPinned' in patch) {

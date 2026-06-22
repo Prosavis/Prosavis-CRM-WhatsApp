@@ -93,9 +93,11 @@ Deno.serve(async (req) => {
     const phone = normalizeDirectoryPhoneE164(rawPhone) ?? rawPhone;
 
     // --- Construir display_name y full_name ---
+    // contact_name (editable manualmente) tiene prioridad sobre el push name de WhatsApp
+    // para que el nombre verificado prevalezca al propagarse a crm_directory.
     const waProfileName = safeString(record.whatsapp_profile_name);
     const contactName = safeString(record.contact_name);
-    const displayName = waProfileName || contactName;
+    const displayName = contactName || waProfileName;
 
     // --- Determinar si la conversación está activa ---
     const isActive = record.state === 'active';

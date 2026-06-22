@@ -500,6 +500,8 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
           contactPhotoUrl: form.photoUrl.trim() || null,
           whatsappProfileName: form.whatsappProfileName.trim() || null,
           adminNotes: form.adminNotes.trim() || null,
+          // Bloquea el nombre frente a futuros mensajes entrantes de WhatsApp.
+          contactNameLocked: contactName.length >= 2 ? true : undefined,
         },
       });
 

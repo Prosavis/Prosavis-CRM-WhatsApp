@@ -408,6 +408,7 @@ export async function patchWhatsAppConversationAdmin(params: {
     adminNotes: string | null;
     contactPhotoUrl: string | null;
     whatsappProfileName: string | null;
+    contactNameLocked: boolean;
     automatedInboundDisabled: boolean | null;
     isArchived: boolean;
     isPinned: boolean;

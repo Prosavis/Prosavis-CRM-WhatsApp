@@ -963,6 +963,7 @@ export type Database = {
           bsuid: string | null
           chat_tags: string[] | null
           contact_name: string | null
+          contact_name_locked: boolean
           contact_phone: string | null
           contact_photo_url: string | null
           created_at: string
@@ -990,6 +991,7 @@ export type Database = {
           bsuid?: string | null
           chat_tags?: string[] | null
           contact_name?: string | null
+          contact_name_locked?: boolean
           contact_phone?: string | null
           contact_photo_url?: string | null
           created_at?: string
@@ -1017,6 +1019,7 @@ export type Database = {
           bsuid?: string | null
           chat_tags?: string[] | null
           contact_name?: string | null
+          contact_name_locked?: boolean
           contact_phone?: string | null
           contact_photo_url?: string | null
           created_at?: string
