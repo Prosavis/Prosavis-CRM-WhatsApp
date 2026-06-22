@@ -12,6 +12,7 @@ import Alert from '@mui/material/Alert';
 import AlertTitle from '@mui/material/AlertTitle';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import Checkbox from '@mui/material/Checkbox';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Dialog from '@mui/material/Dialog';
@@ -170,6 +171,10 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
   const [previewIssue, setPreviewIssue] = useState<DirectoryIssue | null>(null);
   const [applyLoading, setApplyLoading] = useState(false);
 
+  // Selección masiva: filas (issues) con sugerencia IA lista para aplicar en lote.
+  const [selectedIssueIds, setSelectedIssueIds] = useState<Set<string>>(new Set());
+  const [bulkApplying, setBulkApplying] = useState(false);
+
   const notify = (message: string, severity: 'success' | 'error') =>
     setSnackbar({ open: true, message, severity });
 
@@ -195,6 +200,7 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
       });
       setIssues(result.issues);
       setTotalCount(result.totalCount);
+      setSelectedIssueIds(new Set());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al cargar el monitoreo');
     } finally {
@@ -367,6 +373,58 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
     }
   };
 
+  // Filas seleccionables: solo las que ya tienen una sugerencia IA lista.
+  const selectableIssues = issues.filter((issue) => !!issue.aiSuggestion);
+  const allSelectableSelected =
+    selectableIssues.length > 0 && selectableIssues.every((issue) => selectedIssueIds.has(issue.id));
+  const someSelectableSelected = selectableIssues.some((issue) => selectedIssueIds.has(issue.id));
+
+  const toggleSelectOne = (issueId: string) => {
+    setSelectedIssueIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(issueId)) next.delete(issueId);
+      else next.add(issueId);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelectedIssueIds((prev) => {
+      if (selectableIssues.length > 0 && selectableIssues.every((issue) => prev.has(issue.id))) {
+        return new Set();
+      }
+      return new Set(selectableIssues.map((issue) => issue.id));
+    });
+  };
+
+  const handleApplySelected = async () => {
+    const suggestionIds = issues
+      .filter((issue) => selectedIssueIds.has(issue.id) && issue.aiSuggestion)
+      .map((issue) => issue.aiSuggestion!.id);
+    if (suggestionIds.length === 0) return;
+    setBulkApplying(true);
+    try {
+      const result = await directoryMonitorService.applySuggestionsBulk(suggestionIds);
+      if (result.failed > 0) {
+        notify(
+          `Aplicadas ${result.applied} · ${result.failed} fallaron${
+            result.errors[0]?.error ? ` (${result.errors[0].error})` : ''
+          }`,
+          'error',
+        );
+      } else {
+        notify(`${result.applied} solución(es) aplicada(s) en lote`, 'success');
+      }
+      setSelectedIssueIds(new Set());
+      refreshAll();
+      onDirectoryChanged?.();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'No se pudieron aplicar las soluciones en lote', 'error');
+    } finally {
+      setBulkApplying(false);
+    }
+  };
+
   const totalPages = Math.ceil(totalCount / rowsPerPage);
   const from = totalCount === 0 ? 0 : page * rowsPerPage + 1;
   const to = Math.min((page + 1) * rowsPerPage, totalCount);
@@ -485,6 +543,41 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
         </Alert>
       )}
 
+      {statusFilter === 'open' && selectedIssueIds.size > 0 && (
+        <Paper
+          sx={{
+            p: 1.5,
+            mb: 2,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 2,
+            flexWrap: 'wrap',
+            bgcolor: 'secondary.light',
+            color: 'secondary.contrastText',
+          }}
+        >
+          <Typography variant="body2" fontWeight={600}>
+            {selectedIssueIds.size} fila(s) seleccionada(s) con sugerencia de IA
+          </Typography>
+          <Stack direction="row" spacing={1}>
+            <Button size="small" color="inherit" onClick={() => setSelectedIssueIds(new Set())} disabled={bulkApplying}>
+              Limpiar
+            </Button>
+            <Button
+              size="small"
+              variant="contained"
+              color="success"
+              startIcon={bulkApplying ? <CircularProgress size={14} color="inherit" /> : <DoneAllIcon />}
+              onClick={handleApplySelected}
+              disabled={bulkApplying}
+            >
+              {bulkApplying ? 'Aplicando…' : `Aplicar ${selectedIssueIds.size} seleccionada(s)`}
+            </Button>
+          </Stack>
+        </Paper>
+      )}
+
       {loading ? (
         <Box display="flex" justifyContent="center" py={6}>
           <CircularProgress />
@@ -495,6 +588,21 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
             <Table size="small">
               <TableHead>
                 <TableRow>
+                  <TableCell padding="checkbox">
+                    {statusFilter === 'open' && (
+                      <Tooltip title="Seleccionar todas las filas con sugerencia de IA">
+                        <span>
+                          <Checkbox
+                            size="small"
+                            checked={allSelectableSelected}
+                            indeterminate={!allSelectableSelected && someSelectableSelected}
+                            onChange={toggleSelectAll}
+                            disabled={selectableIssues.length === 0}
+                          />
+                        </span>
+                      </Tooltip>
+                    )}
+                  </TableCell>
                   <TableCell>Contacto</TableCell>
                   <TableCell>Teléfono</TableCell>
                   <TableCell>Email</TableCell>
@@ -506,7 +614,7 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
               <TableBody>
                 {issues.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} align="center">
+                    <TableCell colSpan={7} align="center">
                       <Stack alignItems="center" spacing={1} py={4}>
                         <DoneAllIcon sx={{ fontSize: 44, color: 'success.light' }} />
                         <Typography color="text.secondary">

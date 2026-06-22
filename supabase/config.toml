@@ -150,3 +150,6 @@ verify_jwt = false
 
 [functions.directory-ai-analyze]
 verify_jwt = false
+
+[functions.directory-monitor]
+verify_jwt = false

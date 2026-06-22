@@ -119,6 +119,51 @@ function toFirestoreValue(value: string): { stringValue: string } {
   return { stringValue: value };
 }
 
+/** Access token OAuth2 (scope datastore) de la service account de Firebase. */
+export async function getServiceAccountAccessToken(): Promise<string> {
+  return getAccessToken(loadServiceAccount());
+}
+
+/** Project ID resuelto desde la service account / env. */
+export function getServiceAccountProjectId(): string {
+  return loadServiceAccount().projectId;
+}
+
+/**
+ * Lee el documento `admins/{uid}` de Firestore vía REST con la service account.
+ * Devuelve los campos como objeto plano (string/bool) o null si no existe.
+ */
+export async function getFirestoreAdminDoc(
+  uid: string,
+): Promise<Record<string, unknown> | null> {
+  const account = loadServiceAccount();
+  const accessToken = await getAccessToken(account);
+  const url =
+    `https://firestore.googleapis.com/v1/projects/${account.projectId}` +
+    `/databases/(default)/documents/admins/${encodeURIComponent(uid)}`;
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Error al leer admins/${uid}: ${res.status} ${detail}`);
+  }
+  const payload = (await res.json()) as {
+    fields?: Record<string, Record<string, unknown>>;
+  };
+  const fields = payload.fields ?? {};
+  const out: Record<string, unknown> = {};
+  for (const [key, wrapper] of Object.entries(fields)) {
+    if ('stringValue' in wrapper) out[key] = wrapper.stringValue;
+    else if ('booleanValue' in wrapper) out[key] = wrapper.booleanValue;
+    else if ('integerValue' in wrapper) out[key] = Number(wrapper.integerValue);
+    else out[key] = wrapper;
+  }
+  return out;
+}
+
 /**
  * Actualiza campos string del documento Firestore users/{uid}.
  * Solo escribe los campos provistos (updateMask) y exige que el doc exista

@@ -742,4 +742,47 @@ export const directoryMonitorService = {
     });
     if (error) throw error;
   },
+
+  /**
+   * Aplica varias sugerencias de una sola pasada delegando en la Edge Function
+   * unificada `directory-monitor` (acción `applySuggestions`). El backend ejecuta
+   * la misma lógica de `applySuggestion` por cada id y devuelve el conteo de
+   * aplicadas/fallidas para informar al usuario.
+   */
+  async applySuggestionsBulk(suggestionIds: string[]): Promise<{
+    applied: number;
+    failed: number;
+    errors: { id: string; error: string }[];
+  }> {
+    const ids = [...new Set(suggestionIds.filter((id) => typeof id === 'string' && id.trim() !== ''))];
+    if (ids.length === 0) return { applied: 0, failed: 0, errors: [] };
+
+    const { data, error } = await supabase.functions.invoke<{
+      applied: number;
+      failed: number;
+      errors: { id: string; error: string }[];
+    }>('directory-monitor', {
+      body: { action: 'applySuggestions', suggestionIds: ids },
+    });
+    if (error) {
+      const ctx = (error as { context?: Response }).context;
+      if (ctx) {
+        const raw = await ctx.text().catch(() => '');
+        if (raw) {
+          let parsedError: string | null = null;
+          try {
+            const payload = JSON.parse(raw) as { error?: unknown };
+            if (payload && typeof payload === 'object' && 'error' in payload) {
+              parsedError = String(payload.error);
+            }
+          } catch {
+            parsedError = raw.slice(0, 500);
+          }
+          if (parsedError) throw new Error(`HTTP ${ctx.status}: ${parsedError}`);
+        }
+      }
+      throw error;
+    }
+    return data ?? { applied: 0, failed: 0, errors: [] };
+  },
 };
