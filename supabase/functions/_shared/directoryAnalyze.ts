@@ -28,7 +28,7 @@ const MIN_ISSUES_PER_RUN = 1;
 const MAX_SPLIT_DEPTH = 3;
 const MAX_DUP_GROUPS_PER_PROMPT = 3;
 
-const DUPLICATE_ISSUE_TYPES = ['duplicate_phone', 'duplicate_email', 'duplicate_name'];
+const DUPLICATE_ISSUE_TYPES = ['duplicate_phone', 'duplicate_email', 'duplicate_name', 'duplicate_orphan'];
 
 // Confianza mínima para proponer keep_separate (personas distintas) sin fusionar.
 const KEEP_SEPARATE_MIN_CONFIDENCE = 0.6;
@@ -97,6 +97,16 @@ interface DirectoryRow {
   source: string | null;
   classification: string | null;
   messages_count: number | null;
+  provider_id: string | null;
+  service_id: string | null;
+  metadata: Record<string, unknown> | null;
+}
+
+/** Extrae el doc Firestore de origen (firebase_crmClient_docId) de metadata. */
+function firebaseDocIdOf(row: DirectoryRow | undefined): string {
+  const sourceIds = (row?.metadata as { source_ids?: Record<string, unknown> } | null)?.source_ids;
+  const docId = sourceIds?.firebase_crmClient_docId;
+  return typeof docId === 'string' ? docId : '';
 }
 
 interface WaConversationRow {
@@ -389,7 +399,7 @@ export async function runDirectoryAnalysis(
     for (const idsChunk of chunk(allEntryIds, 300)) {
       const { data: dirData, error: dirError } = await supabase
         .from('crm_directory')
-        .select('id, full_name, phone, phone_key, email, tags, source, classification, messages_count')
+        .select('id, full_name, phone, phone_key, email, tags, source, classification, messages_count, provider_id, service_id, metadata')
         .in('id', idsChunk);
       if (dirError) throw new Error(formatError(dirError));
       for (const e of (dirData ?? []) as DirectoryRow[]) entryById.set(e.id, e);
@@ -458,6 +468,9 @@ export async function runDirectoryAnalysis(
             classification: e?.classification ?? '',
             messages_count: e?.messages_count ?? 0,
             contact_name: wa?.contact_name ?? '',
+            provider_id: e?.provider_id ?? '',
+            service_id: e?.service_id ?? '',
+            firebase_doc: firebaseDocIdOf(e),
           };
         }),
       }));
@@ -475,10 +488,12 @@ export async function runDirectoryAnalysis(
         'Si hay name_wa_mismatch, propone full_name (CRM) y contact_name (WhatsApp) con el mismo valor legible.\n' +
         '- phone_fix: E.164 colombiano (+57…). NUNCA inventes números; si no hay teléfono en los datos, omite.\n' +
         buildTagsPromptSection(allowedTags) +
-        '- duplicates: is_same_person=true SOLO si coinciden identificadores fuertes (mismo teléfono o ' +
-        'mismo email). Si comparten nombre pero difieren teléfono, email o fuente, son personas DIFERENTES ' +
-        '(is_same_person=false) y debes citar en distinguishing_field el dato diferenciador ' +
-        '(ej. "telefonos distintos", "emails distintos", "fuentes distintas"). reason máx. 120 caracteres.\n' +
+        '- duplicates: is_same_person=true si coinciden identificadores fuertes — mismo teléfono, ' +
+        'mismo email, mismo firebase_doc, o mismo provider_id+service_id (aunque NO tengan teléfono ' +
+        'ni email: misma persona del mismo servicio CRM). Si comparten solo el nombre y NINGÚN ' +
+        'identificador (teléfono, email, firebase_doc ni provider_id+service_id), son personas ' +
+        'DIFERENTES (is_same_person=false) y cita en distinguishing_field el dato diferenciador ' +
+        '(ej. "telefonos distintos", "emails distintos", "sin identificador compartido"). reason máx. 120 caracteres.\n' +
         '- confidence: 0..1. No inventes datos que no estén presentes.\n\n' +
         'CONTACTOS:\n' + JSON.stringify(compactEntries) + '\n\n' +
         'GRUPOS_DUPLICADOS:\n' + JSON.stringify(compactDupGroups)

@@ -73,6 +73,7 @@ const ISSUE_CATEGORIES: CategoryMeta[] = [
   { type: 'duplicate_phone', label: 'Duplicado (tel)', description: 'Mismo teléfono en varias entradas' },
   { type: 'duplicate_email', label: 'Duplicado (email)', description: 'Mismo email en varias entradas' },
   { type: 'duplicate_name', label: 'Duplicado (nombre)', description: 'Mismo nombre en varias entradas' },
+  { type: 'duplicate_orphan', label: 'Duplicado (huérfano)', description: 'Mismo nombre sin teléfono/email ni identificador compartido' },
 ];
 
 const ISSUE_LABELS: Record<DirectoryIssueType, string> = ISSUE_CATEGORIES.reduce(
@@ -89,7 +90,7 @@ const SUGGESTION_LABELS: Record<AISuggestionType, string> = {
   summary: 'Resumen',
 };
 
-const DUPLICATE_TYPES: DirectoryIssueType[] = ['duplicate_phone', 'duplicate_email', 'duplicate_name'];
+const DUPLICATE_TYPES: DirectoryIssueType[] = ['duplicate_phone', 'duplicate_email', 'duplicate_name', 'duplicate_orphan'];
 
 const SEARCH_DEBOUNCE_MS = 400;
 

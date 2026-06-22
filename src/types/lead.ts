@@ -121,6 +121,7 @@ export type DirectoryIssueType =
   | 'duplicate_phone'
   | 'duplicate_email'
   | 'duplicate_name'
+  | 'duplicate_orphan'
   | 'name_wa_mismatch';
 
 export type DirectoryIssueSeverity = 'warning' | 'error';

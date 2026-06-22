@@ -15,7 +15,7 @@ type SupabaseClient = any;
 // deno-lint-ignore no-explicit-any
 type Row = Record<string, any>;
 
-const DUPLICATE_ISSUE_TYPES = ['duplicate_phone', 'duplicate_email', 'duplicate_name'];
+const DUPLICATE_ISSUE_TYPES = ['duplicate_phone', 'duplicate_email', 'duplicate_name', 'duplicate_orphan'];
 
 // ── Mapping (snake_case DB → camelCase cliente) ─────────────────────────────
 
