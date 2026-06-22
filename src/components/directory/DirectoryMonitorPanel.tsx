@@ -634,7 +634,27 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
                     const aiBusy = aiRowBusyId === issue.id;
                     const hasSuggestion = !!issue.aiSuggestion;
                     return (
-                      <TableRow key={issue.id} hover>
+                      <TableRow key={issue.id} hover selected={selectedIssueIds.has(issue.id)}>
+                        <TableCell padding="checkbox">
+                          {statusFilter === 'open' && (
+                            <Tooltip
+                              title={
+                                hasSuggestion
+                                  ? 'Seleccionar para aplicar en lote'
+                                  : 'Sin sugerencia de IA: genera una primero'
+                              }
+                            >
+                              <span>
+                                <Checkbox
+                                  size="small"
+                                  checked={selectedIssueIds.has(issue.id)}
+                                  disabled={!hasSuggestion}
+                                  onChange={() => toggleSelectOne(issue.id)}
+                                />
+                              </span>
+                            </Tooltip>
+                          )}
+                        </TableCell>
                         <TableCell>
                           <Stack direction="row" spacing={1} alignItems="center">
                             <Box
