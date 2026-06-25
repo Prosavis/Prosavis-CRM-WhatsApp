@@ -517,6 +517,12 @@ async function unifyContactName(supabase: SupabaseClient, entryId: string) {
   return { success: true };
 }
 
+async function runDetection(supabase: SupabaseClient) {
+  const { data, error } = await supabase.rpc('detect_directory_issues');
+  if (error) throw new Error(formatError(error));
+  return { detected: typeof data === 'number' ? data : 0 };
+}
+
 async function applySuggestions(supabase: SupabaseClient, suggestionIds: string[]) {
   const ids = [...new Set(suggestionIds.filter((id) => typeof id === 'string' && id.trim() !== ''))];
   if (ids.length === 0) return { applied: 0, failed: 0, errors: [] as Row[] };
@@ -612,6 +618,8 @@ Deno.serve(async (req) => {
         return jsonResponse(await applySuggestions(supabase, body.suggestionIds ?? []));
       case 'analyze':
         return jsonResponse(await runDirectoryAnalysis(supabase, body));
+      case 'runDetection':
+        return jsonResponse(await runDetection(supabase));
       default:
         return jsonResponse({ error: `Acción no soportada: ${action || '(vacía)'}` }, 400);
     }

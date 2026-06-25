@@ -336,6 +336,33 @@ export const directoryMonitorService = {
 
   // ── IA (Gemini) ───────────────────────────────────────────────────────────
 
+  /** Escaneo manual de inconsistencias vía Edge Function unificada (sin modificar contactos). */
+  async runDetection(): Promise<{ detected: number }> {
+    const { data, error } = await supabase.functions.invoke<{ detected: number }>('directory-monitor', {
+      body: { action: 'runDetection' },
+    });
+    if (error) {
+      const ctx = (error as { context?: Response }).context;
+      if (ctx) {
+        const raw = await ctx.text().catch(() => '');
+        if (raw) {
+          let parsedError: string | null = null;
+          try {
+            const payload = JSON.parse(raw) as { error?: unknown };
+            if (payload && typeof payload === 'object' && 'error' in payload) {
+              parsedError = String(payload.error);
+            }
+          } catch {
+            parsedError = raw.slice(0, 500);
+          }
+          if (parsedError) throw new Error(`HTTP ${ctx.status}: ${parsedError}`);
+        }
+      }
+      throw error;
+    }
+    return data ?? { detected: 0 };
+  },
+
   /**
    * Lanza una pasada de análisis con IA (Edge Function). La IA solo propone sugerencias.
    * Procesa un lote de issues pendientes y devuelve `remaining`; para cubrir toda la

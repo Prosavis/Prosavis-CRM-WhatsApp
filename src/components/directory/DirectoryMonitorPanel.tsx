@@ -165,6 +165,8 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
   const [summary, setSummary] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeProgress, setAnalyzeProgress] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState<string | null>(null);
 
   // Solución IA por fila
   const [aiRowBusyId, setAiRowBusyId] = useState<string | null>(null);
@@ -235,6 +237,24 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
     fetchStats();
     fetchIssues();
   }, [fetchStats, fetchIssues]);
+
+  const handleScanDirectory = async () => {
+    setScanning(true);
+    setScanProgress('Escaneando directorio…');
+    setError(null);
+    try {
+      const result = await directoryMonitorService.runDetection();
+      setScanProgress(`${result.detected} inconsistencia(s) detectadas`);
+      notify(`Escaneo completo: ${result.detected} inconsistencia(s) detectadas`, 'success');
+      refreshAll();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'No se pudo escanear el directorio';
+      setError(message);
+      notify(message, 'error');
+    } finally {
+      setScanning(false);
+    }
+  };
 
   const handleAnalyzeAll = async () => {
     setAnalyzing(true);
@@ -445,13 +465,33 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
             Monitoreo del contacto
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            Inconsistencias detectadas por el orquestador para revisión humana. Resuelve cada fila con IA bajo demanda.
+            Inconsistencias detectadas al escanear manualmente. Resuelve cada fila con IA bajo demanda.
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-          <Button startIcon={<RefreshIcon />} size="small" onClick={refreshAll} disabled={analyzing}>
+          <Button startIcon={<RefreshIcon />} size="small" onClick={refreshAll} disabled={analyzing || scanning}>
             Actualizar
           </Button>
+          <Stack alignItems={{ xs: 'flex-start', sm: 'flex-end' }} spacing={0.25}>
+            <Tooltip title="Detecta inconsistencias de calidad (teléfono, emojis, nombres, etc.). No modifica contactos.">
+              <span>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={scanning ? <CircularProgress size={14} color="inherit" /> : <SearchIcon />}
+                  onClick={handleScanDirectory}
+                  disabled={scanning || analyzing}
+                >
+                  {scanning ? 'Escaneando…' : 'Escanear directorio'}
+                </Button>
+              </span>
+            </Tooltip>
+            {scanProgress && (
+              <Typography variant="caption" color="text.secondary">
+                {scanProgress}
+              </Typography>
+            )}
+          </Stack>
           <Stack alignItems={{ xs: 'flex-start', sm: 'flex-end' }} spacing={0.25}>
             <Button
               size="small"
@@ -459,7 +499,7 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
               color="secondary"
               startIcon={analyzing ? <CircularProgress size={14} color="inherit" /> : <AutoAwesomeIcon />}
               onClick={handleAnalyzeAll}
-              disabled={analyzing}
+              disabled={analyzing || scanning}
             >
               {analyzing ? 'Analizando…' : 'Analizar toda la tabla con IA'}
             </Button>
