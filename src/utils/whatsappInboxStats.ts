@@ -25,8 +25,10 @@ export interface WhatsAppInboxMetrics {
   /** Todas las conversaciones de la línea (incluye archivadas). */
   totalConversations: number;
   tabCounts: WhatsAppTabCounts;
-  /** Conversaciones que incluyen cada tagId (universo completo, incluye archivadas). */
+  /** Conversaciones activas (no archivadas) que incluyen cada tagId. */
   tagCountsById: Record<string, number>;
+  /** Conversaciones archivadas que incluyen cada tagId. */
+  archivedTagCountsById: Record<string, number>;
 }
 
 export function computeTabCounts(conversations: WhatsAppConversation[]): WhatsAppTabCounts {
@@ -58,9 +60,13 @@ export function computeTabCounts(conversations: WhatsAppConversation[]): WhatsAp
   return { last24h, all, unread, tagged, archived };
 }
 
-export function computeTagCounts(conversations: WhatsAppConversation[]): Record<string, number> {
+function computeTagCountsForArchiveState(
+  conversations: WhatsAppConversation[],
+  archived: boolean,
+): Record<string, number> {
   const out: Record<string, number> = {};
   for (const c of conversations) {
+    if (!!c.isArchived !== archived) continue;
     const ids = c.tagIds;
     if (!ids?.length) continue;
     for (const id of ids) {
@@ -71,10 +77,21 @@ export function computeTagCounts(conversations: WhatsAppConversation[]): Record<
   return out;
 }
 
+/** Conteo por tag en conversaciones activas (mismo universo que el filtro del inbox). */
+export function computeTagCounts(conversations: WhatsAppConversation[]): Record<string, number> {
+  return computeTagCountsForArchiveState(conversations, false);
+}
+
+/** Conteo por tag en conversaciones archivadas (para aviso y filtro en pestaña Archivados). */
+export function computeArchivedTagCounts(conversations: WhatsAppConversation[]): Record<string, number> {
+  return computeTagCountsForArchiveState(conversations, true);
+}
+
 export function computeWhatsAppInboxMetrics(conversations: WhatsAppConversation[]): WhatsAppInboxMetrics {
   return {
     totalConversations: conversations.length,
     tabCounts: computeTabCounts(conversations),
     tagCountsById: computeTagCounts(conversations),
+    archivedTagCountsById: computeArchivedTagCounts(conversations),
   };
 }

@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
@@ -17,6 +18,10 @@ export default defineConfig({
       '@': resolve(__dirname, './src'),
     },
     dedupe: ['react', 'react-dom', '@emotion/react', '@emotion/styled'],
+  },
+  test: {
+    environment: 'node',
+    include: ['src/**/*.test.ts'],
   },
   optimizeDeps: {
     include: [

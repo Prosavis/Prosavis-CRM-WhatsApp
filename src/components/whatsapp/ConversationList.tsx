@@ -66,10 +66,30 @@ import { useLongPress } from '@/hooks/useLongPress';
 
 export type BulkTagMode = 'add' | 'replace';
 
+function conversationMatchesSelectedTags(
+  c: WhatsAppConversation,
+  selectedTagIds: string[],
+): boolean {
+  if (selectedTagIds.length === 0) return true;
+  return selectedTagIds.every((tid) => c.tagIds?.includes(tid));
+}
+
+function countConversationsMatchingTags(
+  conversations: WhatsAppConversation[],
+  selectedTagIds: string[],
+  archived: boolean,
+): number {
+  if (selectedTagIds.length === 0) return 0;
+  return conversations.filter(
+    (c) => !!c.isArchived === archived && conversationMatchesSelectedTags(c, selectedTagIds),
+  ).length;
+}
+
 interface ConversationListProps {
   conversations: WhatsAppConversation[];
   tabCounts: WhatsAppTabCounts;
   tagCountsById: Record<string, number>;
+  archivedTagCountsById: Record<string, number>;
   selectedId: string | null;
   onSelect: (conversation: WhatsAppConversation) => void;
   loading?: boolean;
@@ -394,6 +414,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
   conversations,
   tabCounts,
   tagCountsById,
+  archivedTagCountsById,
   selectedId,
   onSelect,
   loading,
@@ -469,12 +490,12 @@ const ConversationList: React.FC<ConversationListProps> = ({
       result = result.filter((c) => c.unreadCount > 0 || c.crmForceUnread);
     } else if (filter === 'tagged') {
       if (selectedTagIds.length > 0) {
-        result = result.filter((c) =>
-          selectedTagIds.every((tid) => c.tagIds?.includes(tid)),
-        );
+        result = result.filter((c) => conversationMatchesSelectedTags(c, selectedTagIds));
       } else {
         result = result.filter((c) => c.tagIds && c.tagIds.length > 0);
       }
+    } else if (filter === 'archived' && selectedTagIds.length > 0) {
+      result = result.filter((c) => conversationMatchesSelectedTags(c, selectedTagIds));
     }
 
     if (search.trim()) {
@@ -503,8 +524,27 @@ const ConversationList: React.FC<ConversationListProps> = ({
     return result;
   }, [conversations, search, filter, selectedTagIds, directoryMetaByPhoneKey]);
 
+  const archivedMatchingSelectedTags = useMemo(
+    () => countConversationsMatchingTags(conversations, selectedTagIds, true),
+    [conversations, selectedTagIds],
+  );
+
+  const showSelectedTagChips =
+    selectedTagIds.length > 0 && (filter === 'tagged' || filter === 'archived');
+
+  const showArchivedTagHint =
+    filter === 'tagged'
+    && selectedTagIds.length > 0
+    && !loading
+    && filtered.length === 0
+    && archivedMatchingSelectedTags > 0;
+
+  const handleViewArchivedWithTags = useCallback(() => {
+    setFilter('archived');
+  }, []);
+
   const handleTagFilterClick = (e: React.MouseEvent<HTMLElement>) => {
-    if (filter === 'tagged' && tags.length > 0) {
+    if ((filter === 'tagged' || filter === 'archived') && tags.length > 0) {
       setTagMenuAnchor(e.currentTarget);
     }
   };
@@ -658,7 +698,9 @@ const ConversationList: React.FC<ConversationListProps> = ({
               onChange={(_, val) => {
                 if (val) {
                   setFilter(val);
-                  if (val !== 'tagged') setSelectedTagIds([]);
+                  if (val !== 'tagged' && val !== 'archived') {
+                    setSelectedTagIds([]);
+                  }
                 }
               }}
               size="small"
@@ -703,7 +745,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
                 icon={<LocalOfferIcon sx={{ fontSize: 16 }} />}
               />
             </ToggleButton>
-            <ToggleButton value="archived">
+            <ToggleButton value="archived" onClick={handleTagFilterClick}>
               <InboxFilterTabLabel
                 label="Archivados"
                 count={tabCounts.archived}
@@ -713,7 +755,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
             </ToggleButton>
             </ToggleButtonGroup>
           </Box>
-          {filter === 'tagged' && selectedTagIds.length > 0 && (
+          {showSelectedTagChips && (
             <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', alignItems: 'center', maxWidth: '100%' }}>
               {selectedTagIds.map((tid) => (
                 <Chip
@@ -847,7 +889,9 @@ const ConversationList: React.FC<ConversationListProps> = ({
           </ListItemButton>
           {tags.map((tag) => {
             const checked = selectedTagIds.includes(tag.id);
-            const cnt = tagCountsById[tag.id] ?? 0;
+            const cnt = filter === 'archived'
+              ? (archivedTagCountsById[tag.id] ?? 0)
+              : (tagCountsById[tag.id] ?? 0);
             return (
               <ListItemButton key={tag.id} onClick={() => toggleTagId(tag.id)}>
                 <Checkbox
@@ -1170,7 +1214,30 @@ const ConversationList: React.FC<ConversationListProps> = ({
 
         {filtered.length === 0 && !loading && (
           <Box sx={{ p: 4, textAlign: 'center' }}>
-            <Typography variant="body2" color="text.secondary">No hay conversaciones</Typography>
+            {showArchivedTagHint ? (
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1.5 }}>
+                <Typography variant="body2" color="text.secondary">
+                  No hay conversaciones activas con este tag.
+                  {' '}
+                  {archivedMatchingSelectedTags}
+                  {' '}
+                  archivada{archivedMatchingSelectedTags === 1 ? '' : 's'}
+                  {selectedTagIds.length === 1 ? (
+                    <>
+                      {' '}
+                      con «{tagMap.get(selectedTagIds[0])?.name || 'tag'}».
+                    </>
+                  ) : (
+                    '.'
+                  )}
+                </Typography>
+                <Button variant="outlined" size="small" onClick={handleViewArchivedWithTags}>
+                  Ver archivadas
+                </Button>
+              </Box>
+            ) : (
+              <Typography variant="body2" color="text.secondary">No hay conversaciones</Typography>
+            )}
           </Box>
         )}
       </List>

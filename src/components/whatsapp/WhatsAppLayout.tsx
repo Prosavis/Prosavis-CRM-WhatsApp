@@ -713,6 +713,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
             conversations={conversations}
             tabCounts={inboxMetrics.tabCounts}
             tagCountsById={inboxMetrics.tagCountsById}
+            archivedTagCountsById={inboxMetrics.archivedTagCountsById}
             selectedId={selectedConversation?.id ?? null}
             onSelect={handleConversationSelect}
             loading={loading}
