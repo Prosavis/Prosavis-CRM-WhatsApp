@@ -11,6 +11,10 @@ type Unsubscribe = () => void;
 
 const DEFAULT_MESSAGE_LIMIT = 200;
 
+/** PostgREST/Supabase limita cada request a max_rows (1000 por defecto). */
+const CONVERSATIONS_PAGE_SIZE = 1000;
+const CONVERSATIONS_MAX_PAGES = 50;
+
 async function invokeFn<T>(name: string, body?: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.functions.invoke<T>(name, { body });
   if (error) {
@@ -269,19 +273,33 @@ function dedupeWhatsAppMessagesByWaMessageId(
 }
 
 async function fetchConversations(phoneNumberId?: string): Promise<WhatsAppConversation[]> {
-  let query = supabase
-    .from('whatsapp_conversations')
-    .select('*')
-    .order('is_pinned', { ascending: false })
-    .order('last_message_at', { ascending: false, nullsFirst: false });
+  const allRows: ConversationRow[] = [];
 
-  if (phoneNumberId) {
-    query = query.eq('phone_number_id', phoneNumberId);
+  for (let page = 0; page < CONVERSATIONS_MAX_PAGES; page += 1) {
+    const from = page * CONVERSATIONS_PAGE_SIZE;
+    const to = from + CONVERSATIONS_PAGE_SIZE - 1;
+
+    let query = supabase
+      .from('whatsapp_conversations')
+      .select('*')
+      .order('is_pinned', { ascending: false })
+      .order('last_message_at', { ascending: false, nullsFirst: false })
+      .range(from, to);
+
+    if (phoneNumberId) {
+      query = query.eq('phone_number_id', phoneNumberId);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const batch = data ?? [];
+    allRows.push(...batch);
+
+    if (batch.length < CONVERSATIONS_PAGE_SIZE) break;
   }
 
-  const { data, error } = await query;
-  if (error) throw error;
-  return (data ?? []).map(mapConversationRow);
+  return allRows.map(mapConversationRow);
 }
 
 export async function refetchConversations(
