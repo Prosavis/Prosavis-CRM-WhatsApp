@@ -23,6 +23,7 @@ import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { ContactAvatar } from '@/components/common/ContactAvatar';
 import type { DirectoryEntry } from '@/types/lead';
+import { getClassificationLabel } from '@/utils/classificationLabels';
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -73,15 +74,6 @@ function truncate(value: string, max = 18): string {
   if (value.length <= max) return value;
   return `${value.slice(0, max)}…`;
 }
-
-// ── Labels ───────────────────────────────────────────────────────────────
-
-const classificationLabels: Record<string, string> = {
-  company: 'Empresa',
-  user: 'Usuario',
-  lead: 'Lead',
-  unknown: 'Desconocido',
-};
 
 const qualityLabels: Record<string, string> = {
   good: 'Bueno',
@@ -246,7 +238,7 @@ const DirectoryEntryDrawer: React.FC<DirectoryEntryDrawerProps> = ({
 
         <Stack direction="row" spacing={1} flexWrap="wrap" justifyContent="center" useFlexGap>
           <Chip
-            label={classificationLabels[entry.classification] ?? entry.classification}
+            label={getClassificationLabel(entry.classification)}
             size="small"
             color={entry.classification === 'user' ? 'primary' : 'default'}
             variant={entry.classification === 'user' ? 'filled' : 'outlined'}
@@ -344,7 +336,7 @@ const DirectoryEntryDrawer: React.FC<DirectoryEntryDrawerProps> = ({
 
         {/* 3. CRM */}
         <Section title="CRM">
-          <Field label="Clasificación" value={classificationLabels[entry.classification] ?? entry.classification} />
+          <Field label="Clasificación" value={getClassificationLabel(entry.classification)} />
           <Field label="Calidad" value={qualityLabels[entry.qualityTag] ?? entry.qualityTag} />
           <Field label="Estado" value={statusLabels[entry.status] ?? entry.status} />
           <Field label="Origen" value={fmtNullable(entry.source)} />

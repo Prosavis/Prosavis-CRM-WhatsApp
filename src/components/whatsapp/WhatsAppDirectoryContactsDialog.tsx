@@ -41,6 +41,7 @@ import DirectoryEntryDrawer from '@/components/directory/DirectoryEntryDrawer';
 import DirectoryEditDialog from '@/components/directory/DirectoryEditDialog';
 import DirectoryMonitorPanel from '@/components/directory/DirectoryMonitorPanel';
 import type { DirectoryEntry } from '@/types/lead';
+import DirectoryClassificationTagPicker from '@/components/directory/DirectoryClassificationTagPicker';
 import {
   DIRECTORY_STATUS_LABELS,
   DIRECTORY_STATUS_SUMMARY,
@@ -580,12 +581,16 @@ const WhatsAppDirectoryContactsDialog: React.FC<WhatsAppDirectoryContactsDialogP
                   </TableCell>
 
                   {/* Clasificación */}
-                  <TableCell>
-                    <Chip
-                      label={CLASSIFICATION_LABELS[entry.classification] ?? entry.classification}
-                      size="small"
-                      color={CLASSIFICATION_CHIP_COLORS[entry.classification] as 'primary' | 'info' | 'warning' | 'default' | undefined}
-                      variant="outlined"
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    <DirectoryClassificationTagPicker
+                      entry={entry}
+                      compact
+                      autoSave
+                      onSaved={(updated) => {
+                        setEntries((prev) =>
+                          prev.map((row) => (row.id === updated.id ? updated : row))
+                        );
+                      }}
                     />
                   </TableCell>
 

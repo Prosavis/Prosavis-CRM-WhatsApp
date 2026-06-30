@@ -22,6 +22,11 @@ import {
 import CloseIcon from '@mui/icons-material/Close';
 import SaveOutlinedIcon from '@mui/icons-material/SaveOutlined';
 import { directoryService } from '@/services/directoryService';
+import DirectoryClassificationTagPicker, {
+  saveDirectoryClassificationTags,
+} from '@/components/directory/DirectoryClassificationTagPicker';
+import { listWhatsAppTags } from '@/services/whatsappService';
+import { tagNamesToIds } from '@/utils/classificationLabels';
 import type {
   DirectoryChannel,
   DirectoryEntry,
@@ -102,13 +107,6 @@ function ReadOnlyField({ label, value }: { label: string; value?: string | numbe
 // Constants
 // ---------------------------------------------------------------------------
 
-const CLASSIFICATION_OPTIONS: { value: DirectoryClassification; label: string }[] = [
-  { value: 'company', label: 'Empresa / Pro' },
-  { value: 'user', label: 'Usuario' },
-  { value: 'lead', label: 'Lead' },
-  { value: 'unknown', label: 'Sin clasificar' },
-];
-
 const QUALITY_TAG_OPTIONS: { value: DirectoryQualityTag; label: string; color: string }[] = [
   { value: 'good', label: 'Bueno', color: 'success.main' },
   { value: 'standard', label: 'Estándar', color: 'warning.main' },
@@ -162,12 +160,12 @@ export default function DirectoryEditDialog({
   const [address, setAddress] = useState(entry.address ?? '');
   const [notes, setNotes] = useState(entry.notes ?? '');
 
-  const [classification, setClassification] = useState<DirectoryClassification>(entry.classification);
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  const [initialTagIds, setInitialTagIds] = useState<string[]>([]);
   const [qualityTag, setQualityTag] = useState<DirectoryQualityTag>(entry.qualityTag);
   const [status, setStatus] = useState<string>(entry.status);
   const [source, setSource] = useState(entry.source ?? '');
   const [channels, setChannels] = useState(entry.channels?.join(', ') ?? '');
-  const [tags, setTags] = useState(entry.tags?.join(', ') ?? '');
 
   const [paymentStatus, setPaymentStatus] = useState(entry.paymentStatus ?? '');
   const [pendingAmount, setPendingAmount] = useState(entry.pendingAmount);
@@ -198,12 +196,17 @@ export default function DirectoryEditDialog({
     setPhotoUrl(entry.photoUrl ?? '');
     setAddress(entry.address ?? '');
     setNotes(entry.notes ?? '');
-    setClassification(entry.classification);
     setQualityTag(entry.qualityTag);
     setStatus(entry.status);
     setSource(entry.source ?? '');
     setChannels(entry.channels?.join(', ') ?? '');
-    setTags(entry.tags?.join(', ') ?? '');
+    setSelectedTagIds([]);
+    setInitialTagIds([]);
+    void listWhatsAppTags().then((tags) => {
+      const ids = tagNamesToIds(entry.tags ?? [], tags);
+      setSelectedTagIds(ids);
+      setInitialTagIds(ids);
+    });
     setPaymentStatus(entry.paymentStatus ?? '');
     setPendingAmount(entry.pendingAmount);
     setPendingAppointmentsCount(entry.pendingAppointmentsCount);
@@ -237,10 +240,6 @@ export default function DirectoryEditDialog({
         .split(',')
         .map((c) => c.trim().toUpperCase() as DirectoryChannel)
         .filter(Boolean);
-      const parsedTags = tags
-        .split(',')
-        .map((t) => t.trim())
-        .filter(Boolean);
 
       let parsedMetadata: Record<string, unknown> | undefined;
       if (metadata.trim()) {
@@ -261,12 +260,10 @@ export default function DirectoryEditDialog({
         photoUrl: photoUrl.trim() || undefined,
         address: address.trim() || undefined,
         notes: notes.trim() || undefined,
-        classification,
         qualityTag,
         status,
         source: source.trim() || undefined,
         channels: parsedChannels.length > 0 ? parsedChannels : undefined,
-        tags: parsedTags.length > 0 ? parsedTags : undefined,
         paymentStatus: paymentStatus || undefined,
         pendingAmount,
         pendingAppointmentsCount,
@@ -283,6 +280,14 @@ export default function DirectoryEditDialog({
         console.error('No se pudo guardar la entrada');
         setSaving(false);
         return;
+      }
+
+      const tagsChanged =
+        JSON.stringify([...selectedTagIds].sort()) !==
+        JSON.stringify([...initialTagIds].sort());
+
+      if (tagsChanged) {
+        await saveDirectoryClassificationTags(entry.id, selectedTagIds);
       }
 
       // re-fetch to get the freshest version
@@ -308,12 +313,12 @@ export default function DirectoryEditDialog({
     photoUrl,
     address,
     notes,
-    classification,
+    selectedTagIds,
+    initialTagIds,
     qualityTag,
     status,
     source,
     channels,
-    tags,
     paymentStatus,
     pendingAmount,
     pendingAppointmentsCount,
@@ -449,21 +454,13 @@ export default function DirectoryEditDialog({
         {/* TAB 1 – CRM */}
         <TabPanel value={activeTab} index={1}>
           <Grid container spacing={2}>
-            <Grid item xs={12} sm={4}>
-              <TextField
-                select
-                label="Clasificación"
-                value={classification}
-                onChange={(e) => setClassification(e.target.value as DirectoryClassification)}
-                fullWidth
-                size="small"
-              >
-                {CLASSIFICATION_OPTIONS.map((o) => (
-                  <MenuItem key={o.value} value={o.value}>
-                    {o.label}
-                  </MenuItem>
-                ))}
-              </TextField>
+            <Grid item xs={12}>
+              <DirectoryClassificationTagPicker
+                entry={entry}
+                value={selectedTagIds}
+                onChange={setSelectedTagIds}
+                disabled={saving}
+              />
             </Grid>
             <Grid item xs={12} sm={4}>
               <TextField
@@ -514,16 +511,6 @@ export default function DirectoryEditDialog({
                 fullWidth
                 size="small"
                 helperText="Ej: whatsapp, email, phone"
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                label="Tags (separados por coma)"
-                value={tags}
-                onChange={(e) => setTags(e.target.value)}
-                fullWidth
-                size="small"
-                helperText="Ej: VIP, Reclamo, Frecuente"
               />
             </Grid>
           </Grid>

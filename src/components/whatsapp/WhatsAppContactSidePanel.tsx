@@ -30,6 +30,7 @@ import {
 } from '@/services/whatsappService';
 import type { WhatsAppContactContextValue } from '@/hooks/useWhatsAppContactContext';
 import { directoryService } from '@/services/directoryService';
+import DirectoryClassificationTagPicker from '@/components/directory/DirectoryClassificationTagPicker';
 import { AppointmentService } from '@/services/appointmentService';
 import type { Appointment } from '@/types/appointment';
 import type { DirectoryChannel, DirectoryEntry } from '@/types/lead';
@@ -460,7 +461,6 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
         photoUrl: form.photoUrl.trim() || undefined,
         address: form.address.trim() || undefined,
         notes: form.notes.trim() || undefined,
-        classification: form.classification.trim() as DirectoryEntry['classification'],
         qualityTag: form.qualityTag as DirectoryEntry['qualityTag'],
         status: form.status,
         source: form.source || undefined,
@@ -468,7 +468,6 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
         activeSequence: form.activeSequence,
         whatsAppAssignedTo: form.whatsAppAssignedTo.trim() || undefined,
         optOut: form.optOut,
-        tags: form.tags,
         paymentStatus: form.paymentStatus || undefined,
         otpRequired: form.otpRequired,
         preferredServiceAddressLine: form.preferredServiceAddressLine.trim() || undefined,
@@ -711,28 +710,16 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
                   ))}
                 </Stack>
               )}
-              <TextField
-                label="Tags (separados por coma)"
-                size="small"
-                value={form.tags.join(', ')}
-                onChange={(e) =>
-                  setField(
-                    'tags',
-                    e.target.value
-                      .split(',')
-                      .map((t) => t.trim())
-                      .filter(Boolean),
-                  )
-                }
-                fullWidth
-              />
-              <TextField
-                label="Clasificación"
-                size="small"
-                value={form.classification}
-                onChange={(e) => setField('classification', e.target.value)}
-                fullWidth
-              />
+              {entry && (
+                <DirectoryClassificationTagPicker
+                  entry={entry}
+                  autoSave
+                  onSaved={(updated) => {
+                    setField('classification', updated.classification);
+                    setField('tags', updated.tags ?? []);
+                  }}
+                />
+              )}
               <FormControl size="small" fullWidth>
                 <InputLabel>Calidad</InputLabel>
                 <Select

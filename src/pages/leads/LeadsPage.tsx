@@ -50,20 +50,7 @@ import DirectoryEntryDrawer from '@/components/directory/DirectoryEntryDrawer';
 import DirectoryEditDialog from '@/components/directory/DirectoryEditDialog';
 import DirectoryMonitorPanel from '@/components/directory/DirectoryMonitorPanel';
 import type { DirectoryEntry, DirectorySource } from '@/types/lead';
-
-const CLASSIFICATION_CHIP_COLORS: Record<string, 'default' | 'primary' | 'info' | 'warning'> = {
-  user: 'primary',
-  company: 'info',
-  lead: 'warning',
-  unknown: 'default',
-};
-
-const CLASSIFICATION_LABELS: Record<string, string> = {
-  user: 'Usuario',
-  company: 'Empresa',
-  lead: 'Lead',
-  unknown: 'Desconocido',
-};
+import DirectoryClassificationTagPicker from '@/components/directory/DirectoryClassificationTagPicker';
 
 const STATUS_CHIP_COLORS: Record<string, 'default' | 'success' | 'error' | 'warning'> = {
   active: 'success',
@@ -659,11 +646,16 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
                       <TableCell>
                         <Typography variant="body2">{entry.email || '—'}</Typography>
                       </TableCell>
-                      <TableCell>
-                        <Chip
-                          label={CLASSIFICATION_LABELS[entry.classification] || entry.classification}
-                          color={CLASSIFICATION_CHIP_COLORS[entry.classification] || 'default'}
-                          size="small"
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <DirectoryClassificationTagPicker
+                          entry={entry}
+                          compact
+                          autoSave
+                          onSaved={(updated) => {
+                            setEntries((prev) =>
+                              prev.map((row) => (row.id === updated.id ? updated : row))
+                            );
+                          }}
                         />
                       </TableCell>
                       <TableCell>

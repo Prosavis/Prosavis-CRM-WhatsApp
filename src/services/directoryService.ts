@@ -242,7 +242,11 @@ export const directoryService = {
    * Update an existing entry via upsert_directory_entry (merge por phone_key/email).
    * Evita duplicados al añadir teléfono o al sincronizar desde WhatsApp.
    */
-  async updateEntry(entryId: string, data: Partial<DirectoryEntry>) {
+  async updateEntry(
+    entryId: string,
+    data: Partial<DirectoryEntry>,
+    options?: { overwriteClassification?: boolean; replaceTags?: boolean }
+  ) {
     const existing = await this.getEntryById(entryId);
     if (!existing) {
       throw new Error(`Directorio: entrada no encontrada (${entryId})`);
@@ -260,7 +264,8 @@ export const directoryService = {
 
     const { data: id, error } = await supabase.rpc('upsert_directory_entry', {
       p_entry: row,
-      p_overwrite_classification: false,
+      p_overwrite_classification: options?.overwriteClassification ?? false,
+      p_replace_tags: options?.replaceTags ?? false,
     });
     if (error) throw error;
     return { id: id as string, success: true };
@@ -531,5 +536,24 @@ export const directoryService = {
   async seedAllUsersAsEntries() {
     // TODO: implement actual sync from Firebase users to crm_directory
     return { created: 0, skipped: 0, errors: 0 };
+  },
+
+  /**
+   * Asigna tags de clasificación (sincroniza con conversación WA si existe).
+   */
+  async setClassificationTags(
+    directoryId: string,
+    tagIds: string[]
+  ): Promise<DirectoryEntry> {
+    const { error } = await supabase.rpc('set_directory_classification_tags', {
+      p_directory_id: directoryId,
+      p_tag_ids: tagIds,
+    });
+    if (error) throw error;
+    const updated = await this.getEntryById(directoryId);
+    if (!updated) {
+      throw new Error(`Directorio: entrada no encontrada tras actualizar tags (${directoryId})`);
+    }
+    return updated;
   },
 };
