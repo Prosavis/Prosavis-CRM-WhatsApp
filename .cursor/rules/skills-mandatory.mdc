@@ -1,0 +1,30 @@
+---
+description: Skills obligatorias para Prosavis-CRM-WhatsApp (Supabase + Vercel + WABA)
+alwaysApply: true
+---
+
+# Skills obligatorias (CRM WhatsApp)
+
+**Skills:** `../.agents/skills/<nombre>/SKILL.md` (suite compartida).
+
+Complementa `agent-vercel-supabase-waba.mdc`.
+
+## Paso 0
+
+`using-superpowers` + bundles globales de `GitHub/.cursor/rules/skills-mandatory.mdc`.
+
+## Bundles por tipo de tarea
+
+| Tipo | Skills obligatorias |
+|------|---------------------|
+| **Postgres / migraciones** | `supabase`, `supabase-postgres-best-practices` |
+| **React CRM** | `vercel-react-best-practices`, `tanstack-query` |
+| **Tests** | `react-testing-library`, `javascript-typescript-jest` |
+| **WhatsApp** | MCP `prosavis-waba` (no duplicar en skill) |
+| **Directorio unificado** | `crm_directory` en Supabase — SSOT de contactos |
+
+## MCPs
+
+- `supabase` — queries, migraciones, Edge Functions
+- `vercel` — deploys CRM
+- `prosavis-waba` — WhatsApp Business API
