@@ -130,11 +130,13 @@ const ReminderTrackingTable: React.FC<ReminderTrackingTableProps> = ({ rows, onV
                   <TableCell>{row.phoneMasked ?? '—'}</TableCell>
                   <TableCell>{formatServiceDate(row.scheduledDate)}</TableCell>
                   <TableCell>
-                    <Chip
-                      size="small"
-                      label={REMINDER_STATUS_LABEL[row.deliveryStatus]}
-                      color={REMINDER_STATUS_COLOR[row.deliveryStatus]}
-                    />
+                    <Tooltip title={row.failureReason ?? ''} disableHoverListener={!row.failureReason}>
+                      <Chip
+                        size="small"
+                        label={REMINDER_STATUS_LABEL[row.deliveryStatus]}
+                        color={REMINDER_STATUS_COLOR[row.deliveryStatus]}
+                      />
+                    </Tooltip>
                   </TableCell>
                   <TableCell>{formatSentAt(row)}</TableCell>
                   <TableCell>

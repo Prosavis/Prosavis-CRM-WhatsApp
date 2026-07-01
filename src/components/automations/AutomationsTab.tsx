@@ -47,6 +47,7 @@ const AutomationsTab: React.FC = () => {
               recipientType="client"
               upcoming={data.clients.upcoming}
               lastRun={data.clients.lastRun}
+              onRefresh={() => void refetch()}
             />
           )}
           {subTab === 1 && (
@@ -54,6 +55,7 @@ const AutomationsTab: React.FC = () => {
               recipientType="professional"
               upcoming={data.professionals.upcoming}
               lastRun={data.professionals.lastRun}
+              onRefresh={() => void refetch()}
             />
           )}
         </>

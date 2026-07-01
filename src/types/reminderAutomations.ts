@@ -6,7 +6,8 @@ export type ReminderDeliveryStatus =
   | 'sent'
   | 'failed'
   | 'sent_unverified'
-  | 'skipped';
+  | 'skipped'
+  | 'not_attempted';
 
 export type ReminderRecipientType = 'client' | 'professional';
 
@@ -30,6 +31,9 @@ export interface ReminderRow {
   address: string | null;
   professionalName: string | null;
   clientName: string | null;
+  failureReason: string | null;
+  attemptCount: number;
+  lastAttemptAt: string | null;
 }
 
 export interface ReminderAutomationsDashboard {
@@ -56,6 +60,7 @@ export const REMINDER_STATUS_LABEL: Record<ReminderDeliveryStatus, string> = {
   failed: 'Fallido',
   sent_unverified: 'Sin verificar',
   skipped: 'Omitido',
+  not_attempted: 'Sin intento',
 };
 
 export const REMINDER_STATUS_COLOR: Record<
@@ -70,4 +75,5 @@ export const REMINDER_STATUS_COLOR: Record<
   failed: 'error',
   sent_unverified: 'warning',
   skipped: 'default',
+  not_attempted: 'warning',
 };

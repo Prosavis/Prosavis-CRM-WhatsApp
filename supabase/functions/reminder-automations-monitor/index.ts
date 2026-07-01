@@ -9,9 +9,15 @@ import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { formatError } from '../_shared/errors.ts';
 import { requireDirectoryAdmin } from '../_shared/directoryMonitorAuth.ts';
 import {
-  getFirestoreUserPhone,
+  getFirestoreDocument,
+  patchFirestoreDocument,
   runFirestoreQuery,
 } from '../_shared/firebaseAdminRest.ts';
+import {
+  resolveClientPhoneForAppointment,
+  resolveProfessionalPhoneForAppointment,
+} from '../_shared/appointmentPhoneResolver.ts';
+import { normalizeDirectoryPhoneE164 } from '../_shared/directoryPhone.ts';
 
 // deno-lint-ignore no-explicit-any
 type SupabaseClient = any;
@@ -31,7 +37,8 @@ export type ReminderDeliveryStatus =
   | 'sent'
   | 'failed'
   | 'sent_unverified'
-  | 'skipped';
+  | 'skipped'
+  | 'not_attempted';
 
 export interface ReminderRow {
   appointmentId: string;
@@ -53,6 +60,9 @@ export interface ReminderRow {
   address: string | null;
   professionalName: string | null;
   clientName: string | null;
+  failureReason: string | null;
+  attemptCount: number;
+  lastAttemptAt: string | null;
 }
 
 export interface ReminderAutomationsDashboard {
@@ -215,6 +225,16 @@ interface MessageLogRow {
 
 type LogMap = Map<string, MessageLogRow>;
 
+interface AppointmentPhoneIndex {
+  client: Map<string, MessageLogRow>;
+  professional: Map<string, MessageLogRow>;
+}
+
+function normalizeLogPhone(phone: string | null | undefined): string | null {
+  if (!phone) return null;
+  return normalizeDirectoryPhoneE164(phone) ?? phone.replace(/\D/g, '');
+}
+
 function logMapKey(appointmentId: string, recipientType: RecipientType): string {
   return `${appointmentId}:${recipientType}`;
 }
@@ -222,11 +242,11 @@ function logMapKey(appointmentId: string, recipientType: RecipientType): string 
 async function fetchReminderLogs(
   supabase: SupabaseClient,
   sinceIso: string,
-): Promise<LogMap> {
+): Promise<{ byAppointment: LogMap; byPhone: AppointmentPhoneIndex }> {
   const { data, error } = await supabase
     .from('whatsapp_message_log')
     .select(
-      'id, template_name, status, wa_message_id, created_at, error_message, message_body, conversation_stable_key, raw_payload',
+      'id, template_name, status, wa_message_id, created_at, error_message, message_body, conversation_stable_key, raw_payload, recipient_phone',
     )
     .in('template_name', [TEMPLATE_CLIENT, TEMPLATE_PROFESSIONAL])
     .gte('created_at', sinceIso)
@@ -234,36 +254,94 @@ async function fetchReminderLogs(
 
   if (error) throw new Error(formatError(error));
 
-  const map: LogMap = new Map();
-  for (const row of (data ?? []) as MessageLogRow[]) {
+  const byAppointment: LogMap = new Map();
+  const byPhone: AppointmentPhoneIndex = {
+    client: new Map(),
+    professional: new Map(),
+  };
+
+  for (const row of (data ?? []) as (MessageLogRow & { recipient_phone?: string | null })[]) {
     const payload = row.raw_payload ?? {};
     if (payload.source !== 'reminder_scheduler') continue;
+
     const appointmentId = String(payload.appointment_id ?? '').trim();
     const recipientType = payload.recipient_type as RecipientType | undefined;
-    if (!appointmentId || !recipientType) continue;
-    const key = logMapKey(appointmentId, recipientType);
-    if (!map.has(key)) map.set(key, row);
+
+    if (appointmentId && recipientType) {
+      const key = logMapKey(appointmentId, recipientType);
+      if (!byAppointment.has(key)) byAppointment.set(key, row);
+    }
+
+    const phoneKey = normalizeLogPhone(row.recipient_phone);
+    const template = row.template_name;
+    if (phoneKey && template) {
+      const kind: RecipientType | null =
+        template === TEMPLATE_CLIENT
+          ? 'client'
+          : template === TEMPLATE_PROFESSIONAL
+            ? 'professional'
+            : null;
+      if (kind && !byPhone[kind].has(phoneKey)) {
+        byPhone[kind].set(phoneKey, row);
+      }
+    }
   }
-  return map;
+
+  return { byAppointment, byPhone };
+}
+
+function resolveLogForRow(
+  appointmentId: string,
+  recipientType: RecipientType,
+  phone: string | null,
+  logMaps: { byAppointment: LogMap; byPhone: AppointmentPhoneIndex },
+): MessageLogRow | undefined {
+  const direct = logMaps.byAppointment.get(logMapKey(appointmentId, recipientType));
+  if (direct) return direct;
+
+  const phoneKey = normalizeLogPhone(phone);
+  if (!phoneKey) return undefined;
+  return logMaps.byPhone[recipientType].get(phoneKey);
 }
 
 // ── Estado por fila ─────────────────────────────────────────────────────────
 
-async function resolveClientPhone(data: Record<string, unknown>): Promise<string | null> {
-  const direct = String(data.clientPhone ?? '').trim();
-  if (direct) return direct;
-  const uid = String(data.clientAppUserId ?? data.clientId ?? '').trim();
-  return getFirestoreUserPhone(uid || null);
+function readRecipientTrackingFields(
+  data: Record<string, unknown>,
+  recipientType: RecipientType,
+): {
+  lastError: string | null;
+  attemptCount: number;
+  lastAttemptAt: string | null;
+} {
+  if (recipientType === 'client') {
+    return {
+      lastError: String(data.recordatorio24hLastError ?? '').trim() || null,
+      attemptCount: Number(data.recordatorio24hAttemptCount ?? 0) || 0,
+      lastAttemptAt: parseTimestamp(data.recordatorio24hLastAttemptAt),
+    };
+  }
+  return {
+    lastError: String(data.recordatorioProfesionalLastError ?? '').trim() || null,
+    attemptCount: Number(data.recordatorioProfesionalAttemptCount ?? 0) || 0,
+    lastAttemptAt: parseTimestamp(data.recordatorioProfesionalLastAttemptAt),
+  };
 }
 
-async function resolveProfessionalPhone(data: Record<string, unknown>): Promise<{
-  phone: string | null;
-  missingProfessional: boolean;
-}> {
-  const uid = String(data.teamMemberId ?? data.providerId ?? '').trim();
-  if (!uid) return { phone: null, missingProfessional: true };
-  const phone = await getFirestoreUserPhone(uid);
-  return { phone, missingProfessional: false };
+function resolveFailureReason(params: {
+  log: MessageLogRow | undefined;
+  lastError: string | null;
+  deliveryStatus: ReminderDeliveryStatus;
+}): string | null {
+  if (params.log?.error_message) return params.log.error_message;
+  if (params.lastError) return params.lastError;
+  if (params.deliveryStatus === 'not_attempted') {
+    return 'No se registró intento en el batch de las 6 PM';
+  }
+  if (params.deliveryStatus === 'failed') {
+    return 'Fallo de envío sin detalle registrado';
+  }
+  return null;
 }
 
 function resolveDeliveryStatus(params: {
@@ -275,6 +353,8 @@ function resolveDeliveryStatus(params: {
   missingProfessional: boolean;
   log: MessageLogRow | undefined;
   meta: ReturnType<typeof buildMeta>;
+  lastError: string | null;
+  lastAttemptAt: string | null;
 }): ReminderDeliveryStatus {
   const status = params.appointmentStatus.toUpperCase();
   if (params.section === 'lastRun' && ['CANCELLED', 'CANCELED', 'REJECTED'].includes(status)) {
@@ -292,6 +372,7 @@ function resolveDeliveryStatus(params: {
   const logFailed = params.log?.status === 'failed';
   const logSent = params.log?.status === 'sent';
   const hasSentAt = Boolean(params.sentAt);
+  const hasAttempt = Boolean(params.lastAttemptAt) || (params.lastError?.length ?? 0) > 0;
 
   if (hasSentAt && logSent) return 'sent';
   if (hasSentAt && !params.log) return 'sent_unverified';
@@ -299,6 +380,7 @@ function resolveDeliveryStatus(params: {
 
   if (params.section === 'lastRun') {
     const batchPassed = Date.now() > new Date(params.meta.lastBatchRunAt).getTime() + 5 * 60_000;
+    if (!hasSentAt && batchPassed && !hasAttempt && !params.log) return 'not_attempted';
     if (!hasSentAt && batchPassed) return 'failed';
     if (hasSentAt && logSent) return 'sent';
     if (hasSentAt) return 'sent_unverified';
@@ -320,8 +402,9 @@ async function buildReminderRow(
   doc: { id: string; data: Record<string, unknown> },
   recipientType: RecipientType,
   section: 'upcoming' | 'lastRun',
-  logMap: LogMap,
+  logMaps: { byAppointment: LogMap; byPhone: AppointmentPhoneIndex },
   meta: ReturnType<typeof buildMeta>,
+  supabase: SupabaseClient,
 ): Promise<ReminderRow> {
   const data = doc.data;
   const appointmentId = doc.id;
@@ -334,18 +417,19 @@ async function buildReminderRow(
     : 'recordatorioProfesionalSentAt';
   const sentAt = parseTimestamp(data[sentAtField]);
   const templateName = recipientType === 'client' ? TEMPLATE_CLIENT : TEMPLATE_PROFESSIONAL;
+  const tracking = readRecipientTrackingFields(data, recipientType);
 
   let phone: string | null = null;
   let missingProfessional = false;
   if (recipientType === 'client') {
-    phone = await resolveClientPhone(data);
+    phone = await resolveClientPhoneForAppointment(supabase, data);
   } else {
-    const resolved = await resolveProfessionalPhone(data);
+    const resolved = await resolveProfessionalPhoneForAppointment(data);
     phone = resolved.phone;
     missingProfessional = resolved.missingProfessional;
   }
 
-  const log = logMap.get(logMapKey(appointmentId, recipientType));
+  const log = resolveLogForRow(appointmentId, recipientType, phone, logMaps);
   const deliveryStatus = resolveDeliveryStatus({
     recipientType,
     section,
@@ -355,6 +439,14 @@ async function buildReminderRow(
     missingProfessional,
     log,
     meta,
+    lastError: tracking.lastError,
+    lastAttemptAt: tracking.lastAttemptAt,
+  });
+
+  const failureReason = resolveFailureReason({
+    log,
+    lastError: tracking.lastError,
+    deliveryStatus,
   });
 
   const recipientName = recipientType === 'client' ? clientName : professionalName;
@@ -379,6 +471,9 @@ async function buildReminderRow(
     address: getAppointmentAddress(data),
     professionalName,
     clientName,
+    failureReason,
+    attemptCount: tracking.attemptCount,
+    lastAttemptAt: tracking.lastAttemptAt,
   };
 }
 
@@ -392,6 +487,7 @@ function emptySummary(): Record<ReminderDeliveryStatus, number> {
     failed: 0,
     sent_unverified: 0,
     skipped: 0,
+    not_attempted: 0,
   };
 }
 
@@ -413,10 +509,14 @@ async function buildDashboard(supabase: SupabaseClient): Promise<ReminderAutomat
   const lastRunStart = colombiaMidnightUtc(0, now).toISOString();
   const lastRunEnd = colombiaMidnightUtc(1, now).toISOString();
 
-  const [upcomingDocs, lastRunDocs, logMap] = await Promise.all([
+  const logSince = new Date(
+    new Date(meta.lastBatchRunAt).getTime() - 2 * 60 * 60 * 1000,
+  ).toISOString();
+
+  const [upcomingDocs, lastRunDocs, logMaps] = await Promise.all([
     fetchAppointmentsInRange(upcomingStart, upcomingEnd, true),
     fetchAppointmentsInRange(lastRunStart, lastRunEnd, false),
-    fetchReminderLogs(supabase, meta.lastBatchRunAt),
+    fetchReminderLogs(supabase, logSince),
   ]);
 
   const clientsUpcoming: ReminderRow[] = [];
@@ -425,16 +525,20 @@ async function buildDashboard(supabase: SupabaseClient): Promise<ReminderAutomat
   const professionalsLastRun: ReminderRow[] = [];
 
   for (const doc of upcomingDocs) {
-    clientsUpcoming.push(await buildReminderRow(doc, 'client', 'upcoming', logMap, meta));
+    clientsUpcoming.push(
+      await buildReminderRow(doc, 'client', 'upcoming', logMaps, meta, supabase),
+    );
     professionalsUpcoming.push(
-      await buildReminderRow(doc, 'professional', 'upcoming', logMap, meta),
+      await buildReminderRow(doc, 'professional', 'upcoming', logMaps, meta, supabase),
     );
   }
 
   for (const doc of lastRunDocs) {
-    clientsLastRun.push(await buildReminderRow(doc, 'client', 'lastRun', logMap, meta));
+    clientsLastRun.push(
+      await buildReminderRow(doc, 'client', 'lastRun', logMaps, meta, supabase),
+    );
     professionalsLastRun.push(
-      await buildReminderRow(doc, 'professional', 'lastRun', logMap, meta),
+      await buildReminderRow(doc, 'professional', 'lastRun', logMaps, meta, supabase),
     );
   }
 
@@ -456,6 +560,173 @@ async function buildDashboard(supabase: SupabaseClient): Promise<ReminderAutomat
   };
 }
 
+function getAppointmentAddressFromData(data: Record<string, unknown>): string {
+  const serviceAddress = data.serviceAddress as Record<string, unknown> | undefined;
+  if (serviceAddress?.addressLine && typeof serviceAddress.addressLine === 'string') {
+    return serviceAddress.addressLine;
+  }
+  const location = data.location as Record<string, unknown> | undefined;
+  if (location?.address && typeof location.address === 'string') {
+    return location.address;
+  }
+  return '';
+}
+
+function buildRetryAppointmentPayload(
+  appointmentId: string,
+  data: Record<string, unknown>,
+) {
+  return {
+    clientName: String(data.clientName ?? 'Cliente'),
+    professionalName: String(data.providerName ?? 'Profesional'),
+    scheduledDate: String(data.scheduledDate ?? ''),
+    address: getAppointmentAddressFromData(data),
+    durationMinutes: Number(data.duration ?? 0) || 0,
+    totalAmount: Number(data.totalAmount ?? data.price ?? 0) || 0,
+    paymentStatus: String(data.paymentStatus ?? 'PAGO_PENDIENTE'),
+    appointmentId,
+  };
+}
+
+async function handleRetry(
+  supabase: SupabaseClient,
+  appointmentId: string,
+  recipientType: RecipientType,
+): Promise<Response> {
+  const trimmedId = appointmentId.trim();
+  if (!trimmedId) {
+    return jsonResponse({ error: 'appointmentId es requerido.' }, 400);
+  }
+  if (!['client', 'professional'].includes(recipientType)) {
+    return jsonResponse({ error: 'recipientType inválido.' }, 400);
+  }
+
+  const data = await getFirestoreDocument('appointments', trimmedId);
+  if (!data) {
+    return jsonResponse({ error: 'Cita no encontrada.' }, 404);
+  }
+
+  const sentAtField = recipientType === 'client'
+    ? 'recordatorio24hSentAt'
+    : 'recordatorioProfesionalSentAt';
+  const existingSentAt = parseTimestamp(data[sentAtField]);
+  if (existingSentAt) {
+    return jsonResponse({ error: 'El recordatorio ya fue enviado.' }, 409);
+  }
+
+  let phone: string | null = null;
+  if (recipientType === 'client') {
+    phone = await resolveClientPhoneForAppointment(supabase, data);
+  } else {
+    const resolved = await resolveProfessionalPhoneForAppointment(data);
+    phone = resolved.phone;
+    if (resolved.missingProfessional) {
+      return jsonResponse({ error: 'Cita sin profesional asignado.' }, 400);
+    }
+  }
+
+  if (!phone) {
+    return jsonResponse({ error: 'No se pudo resolver teléfono del destinatario.' }, 400);
+  }
+
+  const url = Deno.env.get('SEND_APPOINTMENT_REMINDER_URL')?.trim()
+    ?? `${Deno.env.get('SUPABASE_URL')?.trim()}/functions/v1/send-appointment-reminder`;
+  const apiKey = Deno.env.get('REMINDER_API_KEY')?.trim();
+  if (!apiKey) {
+    return jsonResponse({ error: 'REMINDER_API_KEY no configurada.' }, 503);
+  }
+
+  const appointmentData = buildRetryAppointmentPayload(trimmedId, data);
+  const attemptFields = recipientType === 'client'
+    ? {
+        lastAttemptAt: 'recordatorio24hLastAttemptAt',
+        lastError: 'recordatorio24hLastError',
+        attemptCount: 'recordatorio24hAttemptCount',
+        sentAt: 'recordatorio24hSentAt',
+      }
+    : {
+        lastAttemptAt: 'recordatorioProfesionalLastAttemptAt',
+        lastError: 'recordatorioProfesionalLastError',
+        attemptCount: 'recordatorioProfesionalAttemptCount',
+        sentAt: 'recordatorioProfesionalSentAt',
+      };
+
+  const currentCount = Number(data[attemptFields.attemptCount] ?? 0) || 0;
+  const nowIso = new Date().toISOString();
+
+  await patchFirestoreDocument('appointments', trimmedId, {
+    [attemptFields.lastAttemptAt]: nowIso,
+    [attemptFields.attemptCount]: currentCount + 1,
+  });
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+      },
+      body: JSON.stringify({
+        recipientPhone: phone,
+        recipientType,
+        appointmentData,
+      }),
+    });
+  } catch (error) {
+    const msg = `network: ${formatError(error)}`;
+    await patchFirestoreDocument('appointments', trimmedId, {
+      [attemptFields.lastError]: msg,
+    });
+    return jsonResponse({ success: false, error: msg }, 502);
+  }
+
+  if (!response.ok) {
+    let errorText = '';
+    try {
+      const json = (await response.json()) as { error?: string };
+      errorText = json.error ?? JSON.stringify(json);
+    } catch {
+      errorText = await response.text().catch(() => '');
+    }
+    const msg = `http_${response.status}: ${errorText || 'sin detalle'}`;
+    await patchFirestoreDocument('appointments', trimmedId, {
+      [attemptFields.lastError]: msg,
+    });
+    return jsonResponse({ success: false, error: msg }, response.status);
+  }
+
+  const result = (await response.json()) as {
+    success?: boolean;
+    waMessageId?: string;
+    error?: string;
+  };
+
+  if (!result.success) {
+    const msg = result.error ?? 'Envío rechazado por Meta';
+    await patchFirestoreDocument('appointments', trimmedId, {
+      [attemptFields.lastError]: msg,
+    });
+    return jsonResponse({ success: false, error: msg }, 412);
+  }
+
+  await patchFirestoreDocument('appointments', trimmedId, {
+    [attemptFields.sentAt]: nowIso,
+    [attemptFields.lastError]: null,
+  });
+
+  if (recipientType === 'client' && !String(data.clientPhone ?? '').trim()) {
+    await patchFirestoreDocument('appointments', trimmedId, { clientPhone: phone }).catch(() => {
+      /* cache opcional */
+    });
+  }
+
+  return jsonResponse({
+    success: true,
+    waMessageId: result.waMessageId ?? null,
+  });
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -471,6 +742,12 @@ Deno.serve(async (req) => {
 
     if (action === 'dashboard') {
       return jsonResponse(await buildDashboard(supabase));
+    }
+
+    if (action === 'retry') {
+      const appointmentId = String(body.appointmentId ?? '').trim();
+      const recipientType = body.recipientType as RecipientType;
+      return await handleRetry(supabase, appointmentId, recipientType);
     }
 
     return jsonResponse({ error: `Acción no soportada: ${action}` }, 400);

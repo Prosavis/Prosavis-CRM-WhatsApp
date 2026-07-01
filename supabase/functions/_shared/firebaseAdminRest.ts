@@ -313,8 +313,8 @@ export async function runFirestoreQuery(
 }
 
 /**
- * Lee el teléfono de users/{uid} (phone o phoneNumber).
- * Misma lógica que el scheduler de recordatorios en Firebase Functions.
+ * Lee el teléfono de users/{uid} (phone, phoneNumber o whatsappPhone).
+ * Misma lógica que reminderPhoneResolver en Firebase Functions.
  */
 export async function getFirestoreUserPhone(
   uid: string | null | undefined,
@@ -339,6 +339,89 @@ export async function getFirestoreUserPhone(
     fields?: Record<string, FirestoreValue>;
   };
   const data = parseFirestoreDocument(payload.fields);
-  const phone = String(data.phone ?? data.phoneNumber ?? '').trim();
-  return phone || null;
+  const candidates = [data.phone, data.phoneNumber, data.whatsappPhone];
+  for (const c of candidates) {
+    const phone = String(c ?? '').trim();
+    if (phone) return phone;
+  }
+  return null;
+}
+
+/** Lee un documento Firestore por colección e id. */
+export async function getFirestoreDocument(
+  collectionId: string,
+  documentId: string,
+): Promise<Record<string, unknown> | null> {
+  const account = loadServiceAccount();
+  const accessToken = await getAccessToken(account);
+  const url =
+    `https://firestore.googleapis.com/v1/projects/${account.projectId}` +
+    `/databases/(default)/documents/${encodeURIComponent(collectionId)}` +
+    `/${encodeURIComponent(documentId)}`;
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(
+      `Error al leer ${collectionId}/${documentId}: ${res.status} ${detail}`,
+    );
+  }
+
+  const payload = (await res.json()) as {
+    fields?: Record<string, FirestoreValue>;
+  };
+  return parseFirestoreDocument(payload.fields);
+}
+
+function toFirestorePatchValue(value: unknown): FirestoreValue {
+  if (value === null) return { nullValue: null };
+  if (typeof value === 'string') return { stringValue: value };
+  if (typeof value === 'boolean') return { booleanValue: value };
+  if (typeof value === 'number') {
+    if (Number.isInteger(value)) return { integerValue: String(value) };
+    return { doubleValue: value };
+  }
+  return { stringValue: String(value) };
+}
+
+/** Actualiza campos de un documento Firestore (patch parcial). */
+export async function patchFirestoreDocument(
+  collectionId: string,
+  documentId: string,
+  fields: Record<string, unknown>,
+): Promise<void> {
+  const fieldNames = Object.keys(fields);
+  if (fieldNames.length === 0) return;
+
+  const account = loadServiceAccount();
+  const accessToken = await getAccessToken(account);
+  const mask = fieldNames.map((f) => `updateMask.fieldPaths=${encodeURIComponent(f)}`).join('&');
+  const url =
+    `https://firestore.googleapis.com/v1/projects/${account.projectId}` +
+    `/databases/(default)/documents/${encodeURIComponent(collectionId)}` +
+    `/${encodeURIComponent(documentId)}?${mask}`;
+
+  const firestoreFields: Record<string, FirestoreValue> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    firestoreFields[key] = toFirestorePatchValue(value);
+  }
+
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ fields: firestoreFields }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(
+      `Error al actualizar ${collectionId}/${documentId}: ${res.status} ${detail}`,
+    );
+  }
 }

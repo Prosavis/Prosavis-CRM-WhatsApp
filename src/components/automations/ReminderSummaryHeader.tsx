@@ -20,6 +20,7 @@ const SUMMARY_ORDER: ReminderDeliveryStatus[] = [
   'pending',
   'sent',
   'failed',
+  'not_attempted',
   'sent_unverified',
   'missing_phone',
   'missing_professional',

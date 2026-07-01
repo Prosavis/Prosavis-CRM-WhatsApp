@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Box,
   Button,
   Chip,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
@@ -14,9 +15,11 @@ import {
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import ReplayIcon from '@mui/icons-material/Replay';
 import { useNavigate } from 'react-router-dom';
 import type { ReminderRow } from '@/types/reminderAutomations';
 import { REMINDER_STATUS_COLOR, REMINDER_STATUS_LABEL } from '@/types/reminderAutomations';
+import { retryReminderSend } from '@/services/reminderAutomationsService';
 
 function formatIso(iso: string | null): string {
   if (!iso) return '—';
@@ -31,18 +34,24 @@ function formatIso(iso: string | null): string {
   });
 }
 
+const RETRYABLE_STATUSES = new Set(['failed', 'not_attempted', 'missing_phone']);
+
 export interface ReminderMessageDetailDialogProps {
   row: ReminderRow | null;
   open: boolean;
   onClose: () => void;
+  onRetrySuccess?: () => void;
 }
 
 const ReminderMessageDetailDialog: React.FC<ReminderMessageDetailDialogProps> = ({
   row,
   open,
   onClose,
+  onRetrySuccess,
 }) => {
   const navigate = useNavigate();
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
 
   if (!row) return null;
 
@@ -50,6 +59,26 @@ const ReminderMessageDetailDialog: React.FC<ReminderMessageDetailDialogProps> = 
     if (!row.conversationStableKey) return;
     navigate(`/whatsapp?conversation=${encodeURIComponent(row.conversationStableKey)}`);
     onClose();
+  };
+
+  const showRetryButton = RETRYABLE_STATUSES.has(row.deliveryStatus);
+  const canRetry = showRetryButton && Boolean(row.phone);
+
+  const handleRetry = async () => {
+    setRetryError(null);
+    setRetrying(true);
+    try {
+      await retryReminderSend({
+        appointmentId: row.appointmentId,
+        recipientType: row.recipientType,
+      });
+      onRetrySuccess?.();
+      onClose();
+    } catch (err) {
+      setRetryError(err instanceof Error ? err.message : 'Error al reintentar');
+    } finally {
+      setRetrying(false);
+    }
   };
 
   return (
@@ -110,16 +139,30 @@ const ReminderMessageDetailDialog: React.FC<ReminderMessageDetailDialogProps> = 
                 size="small"
                 label={REMINDER_STATUS_LABEL[row.deliveryStatus]}
                 color={REMINDER_STATUS_COLOR[row.deliveryStatus]}
+                title={row.failureReason ?? undefined}
               />
               <Typography variant="caption" color="text.secondary">
                 {row.templateName}
               </Typography>
             </Stack>
+            <DetailRow label="Intentos" value={String(row.attemptCount)} />
+            <DetailRow label="Último intento" value={formatIso(row.lastAttemptAt)} />
             <DetailRow label="Firestore sentAt" value={formatIso(row.sentAt)} />
             <DetailRow label="Log status" value={row.logStatus ?? '—'} />
             <DetailRow label="Log created_at" value={formatIso(row.logCreatedAt)} />
             <DetailRow label="WA message ID" value={row.waMessageId ?? '—'} mono />
           </Box>
+
+          {row.failureReason && (
+            <Box>
+              <Typography variant="overline" color="error">
+                Motivo del fallo
+              </Typography>
+              <Typography variant="body2" color="error.main">
+                {row.failureReason}
+              </Typography>
+            </Box>
+          )}
 
           {row.messageBody && (
             <Box>
@@ -141,7 +184,7 @@ const ReminderMessageDetailDialog: React.FC<ReminderMessageDetailDialogProps> = 
             </Box>
           )}
 
-          {row.logErrorMessage && (
+          {row.logErrorMessage && row.logErrorMessage !== row.failureReason && (
             <Box>
               <Typography variant="overline" color="error">
                 Error Meta
@@ -151,9 +194,25 @@ const ReminderMessageDetailDialog: React.FC<ReminderMessageDetailDialogProps> = 
               </Typography>
             </Box>
           )}
+
+          {retryError && (
+            <Typography variant="body2" color="error.main">
+              {retryError}
+            </Typography>
+          )}
         </Stack>
       </DialogContent>
       <DialogActions>
+        {showRetryButton && (
+          <Button
+            startIcon={retrying ? <CircularProgress size={16} /> : <ReplayIcon />}
+            onClick={() => void handleRetry()}
+            disabled={retrying || !canRetry}
+            sx={{ textTransform: 'none' }}
+          >
+            Reintentar envío
+          </Button>
+        )}
         {row.conversationStableKey && (
           <Button
             startIcon={<OpenInNewIcon />}

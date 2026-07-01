@@ -31,3 +31,36 @@ export async function getReminderAutomationsDashboard(): Promise<ReminderAutomat
   }
   return data;
 }
+
+export interface RetryReminderResult {
+  success: boolean;
+  waMessageId?: string | null;
+  error?: string;
+}
+
+export async function retryReminderSend(params: {
+  appointmentId: string;
+  recipientType: 'client' | 'professional';
+}): Promise<RetryReminderResult> {
+  const { data, error } = await supabase.functions.invoke<RetryReminderResult>(
+    'reminder-automations-monitor',
+    {
+      body: {
+        action: 'retry',
+        appointmentId: params.appointmentId,
+        recipientType: params.recipientType,
+      },
+    },
+  );
+
+  if (error) {
+    throw new Error(await parseInvokeError(error));
+  }
+  if (!data) {
+    throw new Error('Respuesta vacía al reintentar recordatorio');
+  }
+  if ('error' in data && typeof data.error === 'string' && !data.success) {
+    throw new Error(data.error);
+  }
+  return data;
+}

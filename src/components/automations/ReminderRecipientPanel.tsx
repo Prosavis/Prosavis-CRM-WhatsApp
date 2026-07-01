@@ -8,11 +8,13 @@ export interface ReminderRecipientPanelProps {
   recipientType: ReminderRecipientType;
   upcoming: ReminderRow[];
   lastRun: ReminderRow[];
+  onRefresh?: () => void;
 }
 
 const ReminderRecipientPanel: React.FC<ReminderRecipientPanelProps> = ({
   upcoming,
   lastRun,
+  onRefresh,
 }) => {
   const [detailRow, setDetailRow] = useState<ReminderRow | null>(null);
 
@@ -46,6 +48,7 @@ const ReminderRecipientPanel: React.FC<ReminderRecipientPanelProps> = ({
         row={detailRow}
         open={Boolean(detailRow)}
         onClose={() => setDetailRow(null)}
+        onRetrySuccess={onRefresh}
       />
     </Box>
   );
