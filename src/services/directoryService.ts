@@ -233,6 +233,7 @@ export const directoryService = {
     const { data: id, error } = await supabase.rpc('upsert_directory_entry', {
       p_entry: row,
       p_overwrite_classification: false,
+      p_replace_tags: false,
     });
     if (error) throw error;
     return { id: id as string, success: true };

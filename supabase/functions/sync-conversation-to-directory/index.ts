@@ -198,7 +198,11 @@ Deno.serve(async (req) => {
     // --- Ejecutar upsert_directory_entry via RPC ---
     const { data: upsertedId, error: upsertError } = await supabase.rpc(
       'upsert_directory_entry',
-      { p_entry: entry },
+      {
+        p_entry: entry,
+        p_overwrite_classification: false,
+        p_replace_tags: false,
+      },
     );
 
     if (upsertError) {
