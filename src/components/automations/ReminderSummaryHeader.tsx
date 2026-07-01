@@ -20,6 +20,7 @@ const SUMMARY_ORDER: ReminderDeliveryStatus[] = [
   'pending',
   'sent',
   'failed',
+  'disabled',
   'not_attempted',
   'sent_unverified',
   'missing_phone',
@@ -109,7 +110,7 @@ const ReminderSummaryHeader: React.FC<ReminderSummaryHeaderProps> = ({
             </Typography>
           </Stack>
           <Typography variant="body2" color="text.secondary">
-            Solo lectura — pipeline de las 6:00 PM (Colombia) para citas del día siguiente.
+            Monitoreo y control del pipeline de las 6:00 PM (Colombia) para citas del día siguiente.
           </Typography>
           {meta && (
             <Stack spacing={0.25} sx={{ mt: 1 }}>

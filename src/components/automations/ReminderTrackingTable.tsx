@@ -3,10 +3,12 @@ import {
   Box,
   Chip,
   FormControl,
+  FormControlLabel,
   IconButton,
   InputLabel,
   MenuItem,
   Select,
+  Switch,
   Table,
   TableBody,
   TableCell,
@@ -55,6 +57,11 @@ function formatSentAt(row: ReminderRow): string {
   return '—';
 }
 
+function formatPhone(phone: string | null): string {
+  if (!phone) return '—';
+  return phone;
+}
+
 async function copyText(text: string) {
   try {
     await navigator.clipboard.writeText(text);
@@ -66,9 +73,18 @@ async function copyText(text: string) {
 export interface ReminderTrackingTableProps {
   rows: ReminderRow[];
   onViewDetail: (row: ReminderRow) => void;
+  onToggleReminder?: (row: ReminderRow, enabled: boolean) => void;
+  toggleLoadingKey?: string | null;
+  readOnly?: boolean;
 }
 
-const ReminderTrackingTable: React.FC<ReminderTrackingTableProps> = ({ rows, onViewDetail }) => {
+const ReminderTrackingTable: React.FC<ReminderTrackingTableProps> = ({
+  rows,
+  onViewDetail,
+  onToggleReminder,
+  toggleLoadingKey,
+  readOnly = false,
+}) => {
   const [statusFilter, setStatusFilter] = useState<ReminderDeliveryStatus | 'all'>('all');
 
   const filtered = useMemo(() => {
@@ -121,41 +137,71 @@ const ReminderTrackingTable: React.FC<ReminderTrackingTableProps> = ({ rows, onV
                 </TableCell>
               </TableRow>
             ) : (
-              filtered.map((row) => (
-                <TableRow key={`${row.appointmentId}-${row.recipientType}`} hover>
-                  <TableCell>
-                    <StackCopyId id={row.appointmentId} />
-                  </TableCell>
-                  <TableCell>{row.recipientName}</TableCell>
-                  <TableCell>{row.phoneMasked ?? '—'}</TableCell>
-                  <TableCell>{formatServiceDate(row.scheduledDate)}</TableCell>
-                  <TableCell>
-                    <Tooltip title={row.failureReason ?? ''} disableHoverListener={!row.failureReason}>
-                      <Chip
-                        size="small"
-                        label={REMINDER_STATUS_LABEL[row.deliveryStatus]}
-                        color={REMINDER_STATUS_COLOR[row.deliveryStatus]}
-                      />
-                    </Tooltip>
-                  </TableCell>
-                  <TableCell>{formatSentAt(row)}</TableCell>
-                  <TableCell>
-                    <Typography variant="caption" display="block">
-                      {row.templateName}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" display="block">
-                      {row.waMessageId ?? '—'}
-                    </Typography>
-                  </TableCell>
-                  <TableCell align="right">
-                    <Tooltip title="Ver detalle">
-                      <IconButton size="small" onClick={() => onViewDetail(row)}>
-                        <VisibilityIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                  </TableCell>
-                </TableRow>
-              ))
+              filtered.map((row) => {
+                const toggleKey = row.recipientKey
+                  ? `${row.recipientKey}:${row.recipientType}`
+                  : null;
+                const canToggle = !readOnly && Boolean(row.recipientKey && row.phone);
+                const toggleTooltip = !row.phone
+                  ? 'Sin teléfono registrado'
+                  : !row.recipientKey
+                    ? 'Destinatario sin identificador estable en directorio'
+                    : 'Activar o desactivar recordatorio 24h para este destinatario';
+
+                return (
+                  <TableRow key={`${row.appointmentId}-${row.recipientType}`} hover>
+                    <TableCell>
+                      <StackCopyId id={row.appointmentId} />
+                    </TableCell>
+                    <TableCell>{row.recipientName}</TableCell>
+                    <TableCell>{formatPhone(row.phone)}</TableCell>
+                    <TableCell>{formatServiceDate(row.scheduledDate)}</TableCell>
+                    <TableCell>
+                      <Tooltip title={row.failureReason ?? ''} disableHoverListener={!row.failureReason}>
+                        <Chip
+                          size="small"
+                          label={REMINDER_STATUS_LABEL[row.deliveryStatus]}
+                          color={REMINDER_STATUS_COLOR[row.deliveryStatus]}
+                        />
+                      </Tooltip>
+                    </TableCell>
+                    <TableCell>{formatSentAt(row)}</TableCell>
+                    <TableCell>
+                      <Typography variant="caption" display="block">
+                        {row.templateName}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        {row.waMessageId ?? '—'}
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="right">
+                      <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+                        {!readOnly && onToggleReminder && (
+                          <Tooltip title={toggleTooltip}>
+                            <FormControlLabel
+                              sx={{ mr: 0 }}
+                              control={
+                                <Switch
+                                  size="small"
+                                  checked={row.remindersEnabled}
+                                  disabled={!canToggle || toggleLoadingKey === toggleKey}
+                                  onChange={(e) => onToggleReminder(row, e.target.checked)}
+                                />
+                              }
+                              label=""
+                            />
+                          </Tooltip>
+                        )}
+                        <Tooltip title="Ver detalle">
+                          <IconButton size="small" onClick={() => onViewDetail(row)}>
+                            <VisibilityIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
+                    </TableCell>
+                  </TableRow>
+                );
+              })
             )}
           </TableBody>
         </Table>

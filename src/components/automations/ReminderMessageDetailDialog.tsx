@@ -125,7 +125,7 @@ const ReminderMessageDetailDialog: React.FC<ReminderMessageDetailDialogProps> = 
             <Typography variant="body2">
               Cliente: {row.clientName ?? '—'} · Profesional: {row.professionalName ?? '—'}
             </Typography>
-            <Typography variant="body2">Teléfono: {row.phoneMasked ?? '—'}</Typography>
+            <Typography variant="body2">Teléfono: {row.phone ?? '—'}</Typography>
           </Box>
 
           <Divider />

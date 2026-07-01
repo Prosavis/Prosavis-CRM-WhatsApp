@@ -27,11 +27,6 @@ function normalizeName(name: string): string {
     .trim();
 }
 
-function isSentinelClientId(id: string | null | undefined): boolean {
-  if (!id) return true;
-  return SENTINEL_CLIENT_IDS.has(id.trim());
-}
-
 function pickPhone(row: DirectoryRow | null | undefined): string | null {
   const raw = row?.phone?.trim();
   if (!raw) return null;
@@ -117,7 +112,12 @@ async function getDirectoryByPhoneFromClientId(
   return data as DirectoryRow | null;
 }
 
-async function resolveDirectoryEntry(
+export function isSentinelClientId(id: string | null | undefined): boolean {
+  if (!id) return true;
+  return SENTINEL_CLIENT_IDS.has(id.trim());
+}
+
+export async function resolveDirectoryEntry(
   supabase: SupabaseClient,
   clientId: string,
 ): Promise<DirectoryRow | null> {

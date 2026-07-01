@@ -3,6 +3,7 @@ import { Alert, AlertTitle, Box, Button, Tab, Tabs } from '@mui/material';
 import { useReminderAutomationsDashboard } from '@/hooks/useReminderAutomationsDashboard';
 import ReminderSummaryHeader from './ReminderSummaryHeader';
 import ReminderRecipientPanel from './ReminderRecipientPanel';
+import ReminderHistoryPanel from './ReminderHistoryPanel';
 
 const AutomationsTab: React.FC = () => {
   const { data, isLoading, isFetching, error, refetch } = useReminderAutomationsDashboard();
@@ -16,7 +17,7 @@ const AutomationsTab: React.FC = () => {
         onRefresh={() => void refetch()}
       />
 
-      {error && (
+      {error && subTab !== 2 && (
         <Alert
           severity="error"
           sx={{ mb: 2 }}
@@ -31,35 +32,33 @@ const AutomationsTab: React.FC = () => {
         </Alert>
       )}
 
-      {data && (
-        <>
-          <Tabs
-            value={subTab}
-            onChange={(_, v: number) => setSubTab(v)}
-            sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}
-          >
-            <Tab label="Clientes" sx={{ textTransform: 'none', fontWeight: 600 }} />
-            <Tab label="Cleaners" sx={{ textTransform: 'none', fontWeight: 600 }} />
-          </Tabs>
+      <Tabs
+        value={subTab}
+        onChange={(_, v: number) => setSubTab(v)}
+        sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}
+      >
+        <Tab label="Clientes" sx={{ textTransform: 'none', fontWeight: 600 }} />
+        <Tab label="Cleaners" sx={{ textTransform: 'none', fontWeight: 600 }} />
+        <Tab label="Historial" sx={{ textTransform: 'none', fontWeight: 600 }} />
+      </Tabs>
 
-          {subTab === 0 && (
-            <ReminderRecipientPanel
-              recipientType="client"
-              upcoming={data.clients.upcoming}
-              lastRun={data.clients.lastRun}
-              onRefresh={() => void refetch()}
-            />
-          )}
-          {subTab === 1 && (
-            <ReminderRecipientPanel
-              recipientType="professional"
-              upcoming={data.professionals.upcoming}
-              lastRun={data.professionals.lastRun}
-              onRefresh={() => void refetch()}
-            />
-          )}
-        </>
+      {subTab === 0 && data && (
+        <ReminderRecipientPanel
+          recipientType="client"
+          upcoming={data.clients.upcoming}
+          lastRun={data.clients.lastRun}
+          onRefresh={() => void refetch()}
+        />
       )}
+      {subTab === 1 && data && (
+        <ReminderRecipientPanel
+          recipientType="professional"
+          upcoming={data.professionals.upcoming}
+          lastRun={data.professionals.lastRun}
+          onRefresh={() => void refetch()}
+        />
+      )}
+      {subTab === 2 && <ReminderHistoryPanel />}
     </Box>
   );
 };
