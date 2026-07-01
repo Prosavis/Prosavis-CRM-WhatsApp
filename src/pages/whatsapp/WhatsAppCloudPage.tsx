@@ -78,6 +78,7 @@ const LeadsPage = lazy(() => import('../leads/LeadsPage'));
 const DiscountCodesTab = lazy(() => import('@/components/whatsapp/DiscountCodesTab'));
 const WhatsAppSettingsTab = lazy(() => import('@/components/whatsapp/WhatsAppSettingsTab'));
 const MonitorTab = lazy(() => import('@/components/whatsapp/MonitorTab'));
+const AutomationsPage = lazy(() => import('@/pages/automations/AutomationsPage'));
 
 interface OutboundBucket {
   sent: number;
@@ -160,7 +161,20 @@ const WhatsAppCloudPage: React.FC = () => {
   const { registerTabController, unregisterTabController } = useAdminTour();
   const tabParam = searchParams.get('tab');
   const broadcastJobParam = searchParams.get('broadcastJob');
-  const activeTab = tabParam === 'metrics' ? 1 : tabParam === 'leads' ? 2 : tabParam === 'discounts' ? 3 : tabParam === 'settings' ? 4 : tabParam === 'monitoreo' ? 5 : 0;
+  const activeTab =
+    tabParam === 'metrics'
+      ? 1
+      : tabParam === 'leads'
+        ? 2
+        : tabParam === 'discounts'
+          ? 3
+          : tabParam === 'settings'
+            ? 4
+            : tabParam === 'monitoreo'
+              ? 5
+              : tabParam === 'automations'
+                ? 6
+                : 0;
 
   const clearBroadcastJobParam = useCallback(() => {
     setSearchParams(
@@ -181,12 +195,13 @@ const WhatsAppCloudPage: React.FC = () => {
     else if (value === 2) next.set('tab', 'leads');
     else if (value === 3) next.set('tab', 'discounts');
     else if (value === 4) next.set('tab', 'settings');
-    else next.set('tab', 'monitoreo');
+    else if (value === 5) next.set('tab', 'monitoreo');
+    else next.set('tab', 'automations');
     setSearchParams(next, { replace: true });
   };
 
   useEffect(() => {
-    const tabLabels = ['', 'metrics', 'leads', 'discounts', 'settings', 'monitoreo'] as const;
+    const tabLabels = ['', 'metrics', 'leads', 'discounts', 'settings', 'monitoreo', 'automations'] as const;
     registerTabController('/whatsapp-cloud', {
       setTab: (index: number) => {
         setSearchParams(
@@ -1031,6 +1046,20 @@ const WhatsAppCloudPage: React.FC = () => {
               }
             >
               <MonitorTab />
+            </Suspense>
+          </div>
+        )}
+
+        {activeTab === 6 && (
+          <div data-tour="whatsapp-tab-automations">
+            <Suspense
+              fallback={
+                <Box display="flex" justifyContent="center" alignItems="center" minHeight={240}>
+                  <CircularProgress />
+                </Box>
+              }
+            >
+              <AutomationsPage />
             </Suspense>
           </div>
         )}

@@ -212,3 +212,133 @@ export async function updateFirestoreUser(
     throw new Error(`Error al actualizar users/${uid} en Firestore: ${res.status} ${detail}`);
   }
 }
+
+// ── Lectura / queries (monitor de recordatorios) ─────────────────────────────
+
+type FirestoreValue = Record<string, unknown>;
+
+function unwrapFirestoreValue(wrapper: FirestoreValue): unknown {
+  if ('stringValue' in wrapper) return wrapper.stringValue;
+  if ('booleanValue' in wrapper) return wrapper.booleanValue;
+  if ('integerValue' in wrapper) return Number(wrapper.integerValue);
+  if ('doubleValue' in wrapper) return Number(wrapper.doubleValue);
+  if ('nullValue' in wrapper) return null;
+  if ('timestampValue' in wrapper) return wrapper.timestampValue;
+  if ('referenceValue' in wrapper) return wrapper.referenceValue;
+  if ('mapValue' in wrapper) {
+    const fields = (wrapper.mapValue as { fields?: Record<string, FirestoreValue> }).fields ?? {};
+    return parseFirestoreFields(fields);
+  }
+  if ('arrayValue' in wrapper) {
+    const values = (wrapper.arrayValue as { values?: FirestoreValue[] }).values ?? [];
+    return values.map((item) => unwrapFirestoreValue(item));
+  }
+  return wrapper;
+}
+
+function parseFirestoreFields(
+  fields: Record<string, FirestoreValue>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, wrapper] of Object.entries(fields)) {
+    out[key] = unwrapFirestoreValue(wrapper);
+  }
+  return out;
+}
+
+/** Convierte `fields` de un documento Firestore REST a objeto plano. */
+export function parseFirestoreDocument(
+  fields: Record<string, FirestoreValue> | undefined,
+): Record<string, unknown> {
+  return parseFirestoreFields(fields ?? {});
+}
+
+function documentNameToId(name: string | undefined): string {
+  if (!name) return '';
+  const parts = name.split('/');
+  return parts[parts.length - 1] ?? '';
+}
+
+export interface FirestoreQueryDocument {
+  id: string;
+  data: Record<string, unknown>;
+}
+
+/**
+ * Ejecuta `documents:runQuery` contra una colección de Firestore.
+ * Devuelve documentos con id y campos parseados.
+ */
+export async function runFirestoreQuery(
+  collectionId: string,
+  structuredQuery: Record<string, unknown>,
+): Promise<FirestoreQueryDocument[]> {
+  const account = loadServiceAccount();
+  const accessToken = await getAccessToken(account);
+  const url =
+    `https://firestore.googleapis.com/v1/projects/${account.projectId}` +
+    `/databases/(default)/documents:runQuery`;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      structuredQuery: {
+        from: [{ collectionId }],
+        ...structuredQuery,
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Error en runQuery(${collectionId}): ${res.status} ${detail}`);
+  }
+
+  const rows = (await res.json()) as Array<{
+    document?: { name?: string; fields?: Record<string, FirestoreValue> };
+  }>;
+
+  const docs: FirestoreQueryDocument[] = [];
+  for (const row of rows) {
+    if (!row.document?.name) continue;
+    docs.push({
+      id: documentNameToId(row.document.name),
+      data: parseFirestoreDocument(row.document.fields),
+    });
+  }
+  return docs;
+}
+
+/**
+ * Lee el teléfono de users/{uid} (phone o phoneNumber).
+ * Misma lógica que el scheduler de recordatorios en Firebase Functions.
+ */
+export async function getFirestoreUserPhone(
+  uid: string | null | undefined,
+): Promise<string | null> {
+  if (!uid?.trim()) return null;
+  const account = loadServiceAccount();
+  const accessToken = await getAccessToken(account);
+  const url =
+    `https://firestore.googleapis.com/v1/projects/${account.projectId}` +
+    `/databases/(default)/documents/users/${encodeURIComponent(uid.trim())}`;
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Error al leer users/${uid}: ${res.status} ${detail}`);
+  }
+
+  const payload = (await res.json()) as {
+    fields?: Record<string, FirestoreValue>;
+  };
+  const data = parseFirestoreDocument(payload.fields);
+  const phone = String(data.phone ?? data.phoneNumber ?? '').trim();
+  return phone || null;
+}

@@ -18,6 +18,7 @@ import {
   ConfirmationNumber as ConfirmationNumberIcon,
   Settings as SettingsIcon,
   MonitorHeart as MonitorHeartIcon,
+  AutoAwesome as AutoAwesomeIcon,
   Send as SendIcon,
   Logout as LogoutIcon,
 } from '@mui/icons-material';
@@ -43,6 +44,7 @@ const TAB_ITEMS = [
   { icon: <ConfirmationNumberIcon fontSize="small" />, label: 'Descuentos' },
   { icon: <SettingsIcon fontSize="small" />, label: 'Configuración' },
   { icon: <MonitorHeartIcon fontSize="small" />, label: 'Monitoreo' },
+  { icon: <AutoAwesomeIcon fontSize="small" />, label: 'Automatizaciones' },
 ] as const;
 
 const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
