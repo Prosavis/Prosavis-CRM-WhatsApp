@@ -4,7 +4,6 @@
 
 import { formatError } from './errors.ts';
 import { jsonResponse } from './cors.ts';
-import { jsonResponse } from './cors.ts';
 import {
   resolveClientPhoneForAppointment,
   resolveProfessionalPhoneForAppointment,
