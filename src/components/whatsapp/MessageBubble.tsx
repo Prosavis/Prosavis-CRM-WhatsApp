@@ -125,6 +125,8 @@ function useMediaPrefetch(message: WhatsAppMessage) {
   const [mediaData, setMediaData] = useState<{ url: string; mimeType: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [permanentError, setPermanentError] = useState(false);
   const fetchedRef = useRef(false);
 
   const directUrl = null;
@@ -145,6 +147,8 @@ function useMediaPrefetch(message: WhatsAppMessage) {
 
     setLoading(true);
     setError(false);
+    setErrorMessage('');
+    setPermanentError(false);
     try {
       if (message.storagePath) {
         const signed = await getWhatsAppMediaSignedUrl({ storagePath: message.storagePath });
@@ -160,6 +164,7 @@ function useMediaPrefetch(message: WhatsAppMessage) {
 
       if (!message.mediaId) {
         setError(true);
+        setErrorMessage('Medio sin identificador.');
         return;
       }
 
@@ -171,8 +176,13 @@ function useMediaPrefetch(message: WhatsAppMessage) {
       const data = { url: result.url, mimeType: result.mimeType, cachedAt: Date.now() };
       mediaCache.set(message.mediaId, data);
       setMediaData(data);
-    } catch {
+    } catch (err) {
+      const statusCode = (err as { statusCode?: number }).statusCode;
+      const code = (err as { code?: string }).code;
+      const messageText = err instanceof Error ? err.message : 'No se pudo cargar el medio';
       setError(true);
+      setErrorMessage(messageText);
+      setPermanentError(statusCode === 410 || code === 'meta_unavailable');
     } finally {
       setLoading(false);
     }
@@ -206,11 +216,11 @@ function useMediaPrefetch(message: WhatsAppMessage) {
   const effectiveUrl = directUrl || mediaData?.url || null;
   const effectiveMime = mediaData?.mimeType || '';
 
-  return { effectiveUrl, effectiveMime, loading, error, resolveMedia };
+  return { effectiveUrl, effectiveMime, loading, error, errorMessage, permanentError, resolveMedia };
 }
 
 const MediaContent: React.FC<{ message: WhatsAppMessage; onOpenLightbox?: (url: string) => void }> = ({ message, onOpenLightbox }) => {
-  const { effectiveUrl, effectiveMime, loading, error, resolveMedia } = useMediaPrefetch(message);
+  const { effectiveUrl, effectiveMime, loading, error, errorMessage, permanentError, resolveMedia } = useMediaPrefetch(message);
   const [transcript, setTranscript] = useState(message.voiceTranscription || '');
   const [transcribing, setTranscribing] = useState(false);
   const [transcriptionError, setTranscriptionError] = useState('');
@@ -428,9 +438,45 @@ const MediaContent: React.FC<{ message: WhatsAppMessage; onOpenLightbox?: (url: 
       );
     }
     return (
-      <Box onClick={resolveMedia} sx={{ mb: 0.5, p: 2, bgcolor: 'rgba(0,0,0,0.04)', borderRadius: 1, display: 'flex', alignItems: 'center', gap: 1, cursor: message.mediaId ? 'pointer' : 'default' }}>
-        {loading ? <CircularProgress size={20} /> : <VideocamIcon sx={{ color: '#667781' }} />}
-        <Typography variant="caption" color="text.secondary">Video — toca para ver</Typography>
+      <Box
+        onClick={permanentError ? undefined : resolveMedia}
+        sx={{
+          mb: 0.5,
+          p: 2,
+          bgcolor: 'rgba(0,0,0,0.04)',
+          borderRadius: 1,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+          cursor: message.mediaId && !permanentError ? 'pointer' : 'default',
+        }}
+      >
+        {loading ? (
+          <CircularProgress size={20} />
+        ) : error ? (
+          <>
+            <VideocamIcon sx={{ color: '#667781' }} />
+            <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>
+              {errorMessage || 'No se pudo cargar el video'}
+            </Typography>
+            {!permanentError && (
+              <IconButton
+                size="small"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  resolveMedia();
+                }}
+              >
+                <RefreshIcon fontSize="small" />
+              </IconButton>
+            )}
+          </>
+        ) : (
+          <>
+            <VideocamIcon sx={{ color: '#667781' }} />
+            <Typography variant="caption" color="text.secondary">Video — toca para ver</Typography>
+          </>
+        )}
       </Box>
     );
   }

@@ -50,13 +50,44 @@ export function getWhatsAppAccessToken(): string | null {
   return Deno.env.get('WHATSAPP_ACCESS_TOKEN')?.trim() ?? null;
 }
 
+export class WhatsAppMediaError extends Error {
+  statusCode: number;
+  code: 'meta_unavailable' | 'meta_auth' | 'meta_download' | 'storage' | 'config';
+
+  constructor(
+    message: string,
+    options: {
+      statusCode: number;
+      code: WhatsAppMediaError['code'];
+    },
+  ) {
+    super(message);
+    this.name = 'WhatsAppMediaError';
+    this.statusCode = options.statusCode;
+    this.code = options.code;
+  }
+}
+
+function classifyMetaHttpStatus(status: number): { statusCode: number; code: WhatsAppMediaError['code'] } {
+  if (status === 401 || status === 403) {
+    return { statusCode: 502, code: 'meta_auth' };
+  }
+  if (status === 404 || status === 410) {
+    return { statusCode: 410, code: 'meta_unavailable' };
+  }
+  return { statusCode: 502, code: 'meta_download' };
+}
+
 export async function downloadWhatsAppMediaFromMeta(
   mediaId: string,
   accessToken?: string,
 ): Promise<WhatsAppMediaBlob> {
   const token = accessToken ?? getWhatsAppAccessToken();
   if (!token) {
-    throw new Error('WHATSAPP_ACCESS_TOKEN no configurado.');
+    throw new WhatsAppMediaError('WHATSAPP_ACCESS_TOKEN no configurado.', {
+      statusCode: 503,
+      code: 'config',
+    });
   }
 
   const metaRes = await fetch(`https://graph.facebook.com/v21.0/${mediaId}`, {
@@ -67,23 +98,38 @@ export async function downloadWhatsAppMediaFromMeta(
     const message =
       (metaJson as { error?: { message?: string } })?.error?.message ??
       `Meta media metadata failed (${metaRes.status})`;
-    throw new Error(message);
+    const classified = classifyMetaHttpStatus(metaRes.status);
+    throw new WhatsAppMediaError(message, classified);
   }
 
   const downloadUrl = String((metaJson as { url?: string }).url ?? '').trim();
   if (!downloadUrl) {
-    throw new Error('URL de descarga Meta no disponible.');
+    throw new WhatsAppMediaError('URL de descarga Meta no disponible.', {
+      statusCode: 502,
+      code: 'meta_download',
+    });
   }
 
   const mimeType =
     String((metaJson as { mime_type?: string }).mime_type ?? '').trim() ||
     'application/octet-stream';
+  const fileSize = Number((metaJson as { file_size?: number }).file_size ?? 0);
+  if (fileSize > 104857600) {
+    throw new WhatsAppMediaError(
+      `El archivo supera el límite de Storage (${Math.round(fileSize / 1048576)} MB).`,
+      { statusCode: 413, code: 'storage' },
+    );
+  }
 
   const binaryRes = await fetch(downloadUrl, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!binaryRes.ok) {
-    throw new Error(`No se pudo descargar media de Meta (${binaryRes.status}).`);
+    const classified = classifyMetaHttpStatus(binaryRes.status);
+    throw new WhatsAppMediaError(
+      `No se pudo descargar media de Meta (${binaryRes.status}).`,
+      classified,
+    );
   }
 
   const bytes = new Uint8Array(await binaryRes.arrayBuffer());
@@ -301,14 +347,29 @@ export async function resolveWhatsAppMediaById(params: {
     }
   }
 
+  let bytes: Uint8Array;
+  let mimeType: string;
   try {
-    const { bytes, mimeType } = await downloadWhatsAppMediaFromMeta(params.mediaId);
-    const storagePath = buildStoragePath(
-      params.stableKeyHint?.trim() || 'unknown',
-      params.mediaId,
-      mimeType || params.mimeTypeHint || 'application/octet-stream',
+    ({ bytes, mimeType } = await downloadWhatsAppMediaFromMeta(params.mediaId));
+  } catch (error) {
+    console.error('[resolveWhatsAppMediaById] Meta download failed', {
+      mediaId: params.mediaId,
+      error: String(error),
+    });
+    if (error instanceof WhatsAppMediaError) throw error;
+    throw new WhatsAppMediaError(
+      error instanceof Error ? error.message : String(error),
+      { statusCode: 502, code: 'meta_download' },
     );
+  }
 
+  const storagePath = buildStoragePath(
+    params.stableKeyHint?.trim() || 'unknown',
+    params.mediaId,
+    mimeType || params.mimeTypeHint || 'application/octet-stream',
+  );
+
+  try {
     const persisted = await persistToWhatsAppBucket(
       params.supabase,
       bytes,
@@ -327,14 +388,17 @@ export async function resolveWhatsAppMediaById(params: {
     });
 
     return persisted;
-  } catch (metaError) {
-    console.error('[resolveWhatsAppMediaById] Meta download failed', {
+  } catch (storageError) {
+    console.error('[resolveWhatsAppMediaById] Storage persist failed', {
       mediaId: params.mediaId,
-      error: String(metaError),
+      storagePath,
+      error: String(storageError),
     });
-    throw Object.assign(
-      new Error('Medio no disponible. El archivo expiró en Storage y ya no está disponible en Meta.'),
-      { statusCode: 410 },
+    throw new WhatsAppMediaError(
+      storageError instanceof Error
+        ? `No se pudo guardar el archivo en Storage: ${storageError.message}`
+        : 'No se pudo guardar el archivo en Storage.',
+      { statusCode: 502, code: 'storage' },
     );
   }
 }

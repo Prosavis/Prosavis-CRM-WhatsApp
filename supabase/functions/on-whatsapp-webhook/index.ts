@@ -6,6 +6,7 @@ import {
   getWhatsAppAccessToken,
   OUTBOUND_META_SIGNED_URL_EXPIRES_SECONDS,
   persistToWhatsAppBucket,
+  WhatsAppMediaError,
 } from '../_shared/whatsappMediaStorage.ts';
 import { UNARCHIVE_CONVERSATION_PATCH } from '../_shared/whatsappOutbound.ts';
 
@@ -265,10 +266,14 @@ async function persistInboundMedia(params: {
       storageUrl: persisted.signedUrl,
     };
   } catch (error) {
+    const details =
+      error instanceof WhatsAppMediaError
+        ? { code: error.code, statusCode: error.statusCode, message: error.message }
+        : { message: String(error) };
     console.error('[on-whatsapp-webhook] persistInboundMedia failed', {
       mediaId: params.mediaId,
       stableKey: params.stableKey,
-      error: String(error),
+      ...details,
     });
     return { storagePath: null, storageUrl: null };
   }
@@ -300,19 +305,6 @@ async function processInboundMessage(params: {
   const contactName = getContactName(params.contacts, senderPhone);
   const content = getMessageContent(params.message);
   const createdAt = getUnixDate(params.message.timestamp);
-
-  let storagePath: string | null = null;
-  let storageUrl: string | null = null;
-  if (content.mediaId) {
-    const persisted = await persistInboundMedia({
-      supabase: params.supabase,
-      mediaId: content.mediaId,
-      mimeType: content.mimeType,
-      stableKey: senderPhone,
-    });
-    storagePath = persisted.storagePath;
-    storageUrl = persisted.storageUrl;
-  }
 
   const { data: existingConversation, error: conversationReadError } = await params.supabase
     .from('whatsapp_conversations')
@@ -366,9 +358,9 @@ async function processInboundMessage(params: {
       message_body: content.messageBody,
       media_type: content.mediaType,
       media_id: content.mediaId,
-      media_url: storageUrl,
-      storage_url: storageUrl,
-      storage_path: storagePath,
+      media_url: null,
+      storage_url: null,
+      storage_path: null,
       caption: content.caption,
       status: 'received',
       wa_message_id: waMessageId,
@@ -388,6 +380,38 @@ async function processInboundMessage(params: {
 
   if (insertError && isUniqueViolation(insertError)) return 'duplicate';
   if (insertError) throw insertError;
+
+  let storagePath: string | null = null;
+  let storageUrl: string | null = null;
+  if (content.mediaId) {
+    const persisted = await persistInboundMedia({
+      supabase: params.supabase,
+      mediaId: content.mediaId,
+      mimeType: content.mimeType,
+      stableKey: senderPhone,
+    });
+    storagePath = persisted.storagePath;
+    storageUrl = persisted.storageUrl;
+
+    if (storagePath && insertedMessage?.id) {
+      const { error: mediaUpdateError } = await params.supabase
+        .from('whatsapp_message_log')
+        .update({
+          storage_path: storagePath,
+          storage_url: storageUrl,
+          media_url: storageUrl,
+          mime_type: content.mimeType,
+        })
+        .eq('id', insertedMessage.id);
+      if (mediaUpdateError) {
+        console.error('[on-whatsapp-webhook] message media update failed', {
+          messageLogId: insertedMessage.id,
+          mediaId: content.mediaId,
+          error: mediaUpdateError,
+        });
+      }
+    }
+  }
 
   if (content.mediaId && storagePath && insertedMessage?.id) {
     await params.supabase.from('whatsapp_media_assets').insert({

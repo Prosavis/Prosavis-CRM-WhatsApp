@@ -27,7 +27,17 @@ async function invokeFn<T>(name: string, body?: Record<string, unknown>): Promis
           typeof payload === 'object' && payload && 'error' in payload
             ? String((payload as { error: unknown }).error)
             : JSON.stringify(payload);
-        throw new Error(message || error.message);
+        const code =
+          typeof payload === 'object' && payload && 'code' in payload
+            ? String((payload as { code: unknown }).code)
+            : undefined;
+        const enriched = new Error(message || error.message) as Error & {
+          statusCode?: number;
+          code?: string;
+        };
+        enriched.statusCode = response.status;
+        if (code) enriched.code = code;
+        throw enriched;
       } catch (parseError) {
         if (parseError instanceof Error && parseError.message !== error.message) {
           throw parseError;

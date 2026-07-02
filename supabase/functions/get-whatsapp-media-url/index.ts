@@ -4,14 +4,23 @@ import {
   createWhatsAppMediaSignedUrl,
   DEFAULT_SIGNED_URL_EXPIRES_SECONDS,
   resolveWhatsAppMediaById,
+  WhatsAppMediaError,
 } from '../_shared/whatsappMediaStorage.ts';
 
 function statusCodeFromError(error: unknown): number {
+  if (error instanceof WhatsAppMediaError) return error.statusCode;
   if (error instanceof Error && 'statusCode' in error) {
     return (error as Error & { statusCode: number }).statusCode;
   }
   if (error instanceof Response) return error.status;
   return 502;
+}
+
+function errorPayload(error: unknown): { error: string; code?: string } {
+  if (error instanceof WhatsAppMediaError) {
+    return { error: error.message, code: error.code };
+  }
+  return { error: error instanceof Error ? error.message : String(error) };
 }
 
 Deno.serve(async (req) => {
@@ -50,7 +59,7 @@ Deno.serve(async (req) => {
           error: String(error),
         });
         return jsonResponse(
-          { error: error instanceof Error ? error.message : String(error) },
+          errorPayload(error),
           statusCodeFromError(error),
         );
       }
@@ -116,6 +125,6 @@ Deno.serve(async (req) => {
   } catch (error) {
     if (error instanceof Response) return error;
     console.error('[get-whatsapp-media-url] unexpected error', error);
-    return jsonResponse({ error: error instanceof Error ? error.message : String(error) }, statusCodeFromError(error));
+    return jsonResponse(errorPayload(error), statusCodeFromError(error));
   }
 });
