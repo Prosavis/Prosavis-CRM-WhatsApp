@@ -136,6 +136,17 @@ O regenerar manifest y desplegar por lotes:
 node scripts/pack-edge-function.mjs > scripts/deploy-manifest.json
 ```
 
+## Migraciones Supabase
+
+```powershell
+npx supabase migration list
+npx supabase db push
+```
+
+Si `db push` falla por desfase entre git y `schema_migrations` remoto, ver **[supabase/MIGRATIONS.md](./supabase/MIGRATIONS.md)** (procedimiento `migration repair`, timestamps únicos, estado alineado 02/07/2026).
+
+Recordatorios 24h: despliegue completo en [RECORDATORIO_WHATSAPP_24H.md](../prosavis-firebase/docs/whatsapp/RECORDATORIO_WHATSAPP_24H.md#7-despliegue).
+
 ## Operación WhatsApp Cloud
 
 - `on-whatsapp-webhook` audita cada POST, valida firma con `WHATSAPP_APP_SECRET` y procesa mensajes solo con `WHATSAPP_WEBHOOK_MODE=active`.

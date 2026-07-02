@@ -15,6 +15,7 @@ import {
   patchFirestoreDocument,
   runFirestoreQuery,
 } from './firebaseAdminRest.ts';
+import { persistBatchSnapshot } from './reminderBatchSnapshot.ts';
 
 // deno-lint-ignore no-explicit-any
 type SupabaseClient = any;
@@ -181,6 +182,12 @@ export function formatColombiaDateKey(date: Date): string {
   const m = String(col.month + 1).padStart(2, '0');
   const d = String(col.day).padStart(2, '0');
   return `${y}-${m}-${d}`;
+}
+
+/** 6 PM Colombia del día anterior al servicio (inicio del batch 24h). */
+export function reminderBatchStartUtcForScheduledDate(scheduledDateIso: string): Date {
+  const col = getColombiaDate(new Date(scheduledDateIso));
+  return new Date(Date.UTC(col.year, col.month, col.day - 1, 23, 0, 0, 0));
 }
 
 function buildMeta(now = new Date()) {
@@ -362,9 +369,12 @@ function resolveLogForRow(
   recipientType: RecipientType,
   phone: string | null,
   logMaps: { byAppointment: LogMap; byPhone: AppointmentPhoneIndex },
+  options?: { allowPhoneFallback?: boolean },
 ): MessageLogRow | undefined {
   const direct = logMaps.byAppointment.get(logMapKey(appointmentId, recipientType));
   if (direct) return direct;
+
+  if (options?.allowPhoneFallback === false) return undefined;
 
   const phoneKey = normalizeLogPhone(phone);
   if (!phoneKey) return undefined;
@@ -393,6 +403,50 @@ function readRecipientTrackingFields(
   };
 }
 
+const SUCCESSFUL_LOG_STATUSES = new Set(['sent', 'delivered', 'read', 'accepted']);
+
+function isReminderLogSuccessful(log: MessageLogRow | undefined): boolean {
+  if (!log) return false;
+  if (log.status === 'failed') return false;
+  if (log.wa_message_id) return true;
+  return SUCCESSFUL_LOG_STATUSES.has(log.status);
+}
+
+function isCancelledOrRejected(appointmentStatus: string): boolean {
+  const status = appointmentStatus.toUpperCase();
+  return status === 'CANCELLED' || status === 'CANCELED' || status === 'REJECTED';
+}
+
+function isSentAtValidForReminderCycle(
+  sentAt: string | null,
+  scheduledDate: string | null,
+): boolean {
+  if (!sentAt || !scheduledDate) return false;
+  const batchStart = reminderBatchStartUtcForScheduledDate(scheduledDate);
+  const slackMs = 2 * 60 * 60 * 1000;
+  return new Date(sentAt).getTime() >= batchStart.getTime() - slackMs;
+}
+
+function isLogValidForReminderCycle(
+  log: MessageLogRow | undefined,
+  scheduledDate: string | null,
+): boolean {
+  if (!log || !scheduledDate || !isReminderLogSuccessful(log)) return false;
+  const batchStart = reminderBatchStartUtcForScheduledDate(scheduledDate);
+  const slackMs = 2 * 60 * 60 * 1000;
+  return new Date(log.created_at).getTime() >= batchStart.getTime() - slackMs;
+}
+
+function wasReminderSent(params: {
+  sentAt: string | null;
+  log: MessageLogRow | undefined;
+  scheduledDate: string | null;
+}): boolean {
+  if (params.log?.status === 'failed') return false;
+  if (isSentAtValidForReminderCycle(params.sentAt, params.scheduledDate)) return true;
+  return isLogValidForReminderCycle(params.log, params.scheduledDate);
+}
+
 function resolveFailureReason(params: {
   log: MessageLogRow | undefined;
   lastError: string | null;
@@ -400,6 +454,17 @@ function resolveFailureReason(params: {
 }): string | null {
   if (params.deliveryStatus === 'disabled') {
     return 'Recordatorio desactivado por administrador';
+  }
+  if (params.deliveryStatus === 'missing_phone') {
+    if (params.lastError) return params.lastError;
+    return 'No enviado: sin teléfono en cita ni directorio';
+  }
+  if (params.deliveryStatus === 'missing_professional') {
+    if (params.lastError) return params.lastError;
+    return 'No enviado: cita sin profesional asignado';
+  }
+  if (params.deliveryStatus === 'skipped') {
+    return 'No enviado: cita cancelada/rechazada';
   }
   if (params.log?.error_message) return params.log.error_message;
   if (params.lastError) return params.lastError;
@@ -414,9 +479,10 @@ function resolveFailureReason(params: {
 
 function resolveDeliveryStatus(params: {
   recipientType: RecipientType;
-  section: 'upcoming' | 'lastRun';
+  section: 'upcoming' | 'lastRun' | 'snapshot';
   appointmentStatus: string;
   sentAt: string | null;
+  scheduledDate: string | null;
   phone: string | null;
   missingProfessional: boolean;
   log: MessageLogRow | undefined;
@@ -426,9 +492,6 @@ function resolveDeliveryStatus(params: {
   remindersEnabled: boolean;
 }): ReminderDeliveryStatus {
   const status = params.appointmentStatus.toUpperCase();
-  if (params.section === 'lastRun' && ['CANCELLED', 'CANCELED', 'REJECTED'].includes(status)) {
-    return 'skipped';
-  }
 
   if (params.recipientType === 'professional' && params.missingProfessional) {
     return 'missing_professional';
@@ -443,19 +506,28 @@ function resolveDeliveryStatus(params: {
   }
 
   const logFailed = params.log?.status === 'failed';
-  const logSent = params.log?.status === 'sent';
-  const hasSentAt = Boolean(params.sentAt);
+  const hasSentAt = isSentAtValidForReminderCycle(params.sentAt, params.scheduledDate);
   const hasAttempt = Boolean(params.lastAttemptAt) || (params.lastError?.length ?? 0) > 0;
 
-  if (hasSentAt && logSent) return 'sent';
-  if (hasSentAt && !params.log) return 'sent_unverified';
+  if (wasReminderSent({
+    sentAt: params.sentAt,
+    log: params.log,
+    scheduledDate: params.scheduledDate,
+  })) {
+    return 'sent';
+  }
+
   if (logFailed) return 'failed';
 
-  if (params.section === 'lastRun') {
-    const batchPassed = Date.now() > new Date(params.meta.lastBatchRunAt).getTime() + 5 * 60_000;
+  if (params.section === 'lastRun' && isCancelledOrRejected(status)) {
+    return 'skipped';
+  }
+
+  if (params.section === 'lastRun' || params.section === 'snapshot') {
+    const batchPassed = params.section === 'snapshot'
+      || Date.now() > new Date(params.meta.lastBatchRunAt).getTime() + 5 * 60_000;
     if (!hasSentAt && batchPassed && !hasAttempt && !params.log) return 'not_attempted';
     if (!hasSentAt && batchPassed) return 'failed';
-    if (hasSentAt && logSent) return 'sent';
     if (hasSentAt) return 'sent_unverified';
     return batchPassed ? 'failed' : 'pending';
   }
@@ -464,7 +536,7 @@ function resolveDeliveryStatus(params: {
     if (!hasSentAt) return 'failed';
   }
 
-  if (['PENDING', 'CONFIRMED'].includes(status)) {
+  if (status === 'PENDING' || status === 'CONFIRMED') {
     return 'ready';
   }
 
@@ -474,7 +546,7 @@ function resolveDeliveryStatus(params: {
 async function buildReminderRow(
   doc: { id: string; data: Record<string, unknown> },
   recipientType: RecipientType,
-  section: 'upcoming' | 'lastRun',
+  section: 'upcoming' | 'lastRun' | 'snapshot',
   logMaps: { byAppointment: LogMap; byPhone: AppointmentPhoneIndex },
   meta: ReturnType<typeof buildMeta>,
   supabase: SupabaseClient,
@@ -483,8 +555,8 @@ async function buildReminderRow(
   const data = doc.data;
   const appointmentId = doc.id;
   const appointmentStatus = String(data.status ?? 'UNKNOWN');
-  const clientName = String(data.clientName ?? 'Cliente');
-  const professionalName = String(data.providerName ?? 'Profesional');
+  const clientName = String(data.clientName ?? '').trim() || 'Cliente';
+  const professionalName = String(data.providerName ?? '').trim() || 'Sin profesional asignado';
   const scheduledDate = parseTimestamp(data.scheduledDate);
   const sentAtField = recipientType === 'client'
     ? 'recordatorio24hSentAt'
@@ -505,12 +577,17 @@ async function buildReminderRow(
     missingProfessional = resolved.missingProfessional;
   }
 
-  const log = resolveLogForRow(appointmentId, recipientType, phone, logMaps);
+  phone = normalizeDirectoryPhoneE164(phone) ?? phone;
+
+  const log = resolveLogForRow(appointmentId, recipientType, phone, logMaps, {
+    allowPhoneFallback: section !== 'upcoming',
+  });
   const deliveryStatus = resolveDeliveryStatus({
     recipientType,
     section,
     appointmentStatus,
     sentAt,
+    scheduledDate,
     phone,
     missingProfessional,
     log,
@@ -582,7 +659,7 @@ function accumulateSummary(
 
 async function buildRowsForDocs(
   docs: Array<{ id: string; data: Record<string, unknown> }>,
-  section: 'upcoming' | 'lastRun',
+  section: 'upcoming' | 'lastRun' | 'snapshot',
   logMaps: { byAppointment: LogMap; byPhone: AppointmentPhoneIndex },
   meta: ReturnType<typeof buildMeta>,
   supabase: SupabaseClient,
@@ -694,8 +771,7 @@ export async function buildSnapshotRowsForServiceDate(
   ]);
 
   const prefs = await collectPrefsForDocs(supabase, docs);
-  const section: 'upcoming' | 'lastRun' =
-    serviceDate === meta.upcomingServiceDate ? 'upcoming' : 'lastRun';
+  const section: 'snapshot' = 'snapshot';
 
   const rows: ReminderRow[] = [];
   for (const doc of docs) {
@@ -720,6 +796,14 @@ function getAppointmentAddressFromData(data: Record<string, unknown>): string {
     return location.address;
   }
   return '';
+}
+
+function serviceDateFromAppointment(data: Record<string, unknown>): string {
+  const scheduled = parseTimestamp(data.scheduledDate);
+  if (!scheduled) {
+    return new Date().toISOString().slice(0, 10);
+  }
+  return new Date(scheduled).toLocaleDateString('en-CA', { timeZone: TIMEZONE });
 }
 
 function buildRetryAppointmentPayload(
@@ -878,6 +962,36 @@ export async function handleRetry(
     await patchFirestoreDocument('appointments', trimmedId, { clientPhone: phone }).catch(() => {
       /* cache opcional */
     });
+  }
+
+  const serviceDate = serviceDateFromAppointment(data);
+  const attemptNumber = currentCount + 1;
+  try {
+    const rows = await buildSnapshotRowsForServiceDate(supabase, serviceDate);
+    await persistBatchSnapshot(supabase, rows, {
+      runKind: 'manual',
+      schedulerName: 'reminder-automations-monitor',
+      serviceDate,
+      executionStats: {
+        sent: 1,
+        failed: 0,
+        skippedAlreadySent: 0,
+        skippedDisabled: 0,
+        skippedMissingPhone: 0,
+        skippedMissingProfessional: 0,
+        skippedMaxAttempts: 0,
+        attempted: 1,
+      },
+      events: [{
+        appointmentId: trimmedId,
+        recipientType,
+        outcome: 'sent',
+        waMessageId: result.waMessageId ?? undefined,
+        attemptNumber,
+      }],
+    });
+  } catch (snapshotError) {
+    console.error('manual retry snapshot failed', formatError(snapshotError));
   }
 
   return jsonResponse({

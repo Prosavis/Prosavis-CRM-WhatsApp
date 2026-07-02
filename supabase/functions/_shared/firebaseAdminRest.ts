@@ -380,11 +380,86 @@ function toFirestorePatchValue(value: unknown): FirestoreValue {
   if (value === null) return { nullValue: null };
   if (typeof value === 'string') return { stringValue: value };
   if (typeof value === 'boolean') return { booleanValue: value };
+  if (value instanceof Date) return { timestampValue: value.toISOString() };
   if (typeof value === 'number') {
     if (Number.isInteger(value)) return { integerValue: String(value) };
     return { doubleValue: value };
   }
   return { stringValue: String(value) };
+}
+
+function toFirestoreCreateFields(
+  fields: Record<string, unknown>,
+): Record<string, FirestoreValue> {
+  const out: Record<string, FirestoreValue> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    out[key] = toFirestorePatchValue(value);
+  }
+  return out;
+}
+
+/** Crea un documento en una colección (ID auto-generado por Firestore). */
+export async function createFirestoreDocument(
+  collectionId: string,
+  fields: Record<string, unknown>,
+): Promise<{ id: string; data: Record<string, unknown> }> {
+  const account = loadServiceAccount();
+  const accessToken = await getAccessToken(account);
+  const url =
+    `https://firestore.googleapis.com/v1/projects/${account.projectId}` +
+    `/databases/(default)/documents/${encodeURIComponent(collectionId)}`;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ fields: toFirestoreCreateFields(fields) }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Error al crear documento en ${collectionId}: ${res.status} ${detail}`);
+  }
+
+  const payload = (await res.json()) as {
+    name?: string;
+    fields?: Record<string, FirestoreValue>;
+  };
+  const id = documentNameToId(payload.name);
+  return {
+    id,
+    data: parseFirestoreDocument(payload.fields),
+  };
+}
+
+/** Elimina un documento Firestore por colección e id. */
+export async function deleteFirestoreDocument(
+  collectionId: string,
+  documentId: string,
+): Promise<void> {
+  const account = loadServiceAccount();
+  const accessToken = await getAccessToken(account);
+  const url =
+    `https://firestore.googleapis.com/v1/projects/${account.projectId}` +
+    `/databases/(default)/documents/${encodeURIComponent(collectionId)}` +
+    `/${encodeURIComponent(documentId)}`;
+
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (res.status === 404) {
+    throw new Error(`Documento no encontrado: ${collectionId}/${documentId}`);
+  }
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(
+      `Error al eliminar ${collectionId}/${documentId}: ${res.status} ${detail}`,
+    );
+  }
 }
 
 /** Actualiza campos de un documento Firestore (patch parcial). */

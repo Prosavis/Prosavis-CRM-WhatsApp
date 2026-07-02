@@ -10,6 +10,9 @@ import { normalizeDirectoryPhoneE164 } from './directoryPhone.ts';
 type SupabaseClient = any;
 
 const SENTINEL_CLIENT_IDS = new Set(['manual-appointment', 'web-client']);
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const PHONE_BASED_CLIENT_ID_RE = /^(?:web|mob)_(\d{7,})$/;
 
 interface DirectoryRow {
   id: string;
@@ -117,6 +120,10 @@ export function isSentinelClientId(id: string | null | undefined): boolean {
   return SENTINEL_CLIENT_IDS.has(id.trim());
 }
 
+function isUuid(value: string): boolean {
+  return UUID_RE.test(value.trim());
+}
+
 export async function resolveDirectoryEntry(
   supabase: SupabaseClient,
   clientId: string,
@@ -124,14 +131,22 @@ export async function resolveDirectoryEntry(
   const trimmed = clientId.trim();
   if (!trimmed) return null;
 
+  // IDs sintéticos web_/mob_{tel} — resolver por teléfono antes que por UUID.
+  if (PHONE_BASED_CLIENT_ID_RE.test(trimmed)) {
+    const byPhone = await getDirectoryByPhoneFromClientId(supabase, trimmed);
+    if (byPhone) return byPhone;
+  }
+
   let entry = await getDirectoryByAppUserId(supabase, trimmed);
   if (entry) return entry;
 
   entry = await getDirectoryByFirestoreDocId(supabase, trimmed);
   if (entry) return entry;
 
-  entry = await getDirectoryById(supabase, trimmed);
-  if (entry) return entry;
+  if (isUuid(trimmed)) {
+    entry = await getDirectoryById(supabase, trimmed);
+    if (entry) return entry;
+  }
 
   entry = await getDirectoryByPhoneFromClientId(supabase, trimmed);
   return entry;

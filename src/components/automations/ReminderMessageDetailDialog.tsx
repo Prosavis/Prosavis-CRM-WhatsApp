@@ -18,7 +18,12 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import ReplayIcon from '@mui/icons-material/Replay';
 import { useNavigate } from 'react-router-dom';
 import type { ReminderRow } from '@/types/reminderAutomations';
-import { REMINDER_STATUS_COLOR, REMINDER_STATUS_LABEL } from '@/types/reminderAutomations';
+import {
+  formatReminderSentDisplay,
+  REMINDER_STATUS_COLOR,
+  REMINDER_STATUS_LABEL,
+  reminderStatusTooltip,
+} from '@/types/reminderAutomations';
 import { retryReminderSend } from '@/services/reminderAutomationsService';
 
 function formatIso(iso: string | null): string {
@@ -41,6 +46,7 @@ export interface ReminderMessageDetailDialogProps {
   open: boolean;
   onClose: () => void;
   onRetrySuccess?: () => void;
+  hideRetry?: boolean;
 }
 
 const ReminderMessageDetailDialog: React.FC<ReminderMessageDetailDialogProps> = ({
@@ -48,6 +54,7 @@ const ReminderMessageDetailDialog: React.FC<ReminderMessageDetailDialogProps> = 
   open,
   onClose,
   onRetrySuccess,
+  hideRetry = false,
 }) => {
   const navigate = useNavigate();
   const [retrying, setRetrying] = useState(false);
@@ -61,7 +68,7 @@ const ReminderMessageDetailDialog: React.FC<ReminderMessageDetailDialogProps> = 
     onClose();
   };
 
-  const showRetryButton = RETRYABLE_STATUSES.has(row.deliveryStatus);
+  const showRetryButton = !hideRetry && RETRYABLE_STATUSES.has(row.deliveryStatus);
   const canRetry = showRetryButton && Boolean(row.phone);
 
   const handleRetry = async () => {
@@ -139,12 +146,13 @@ const ReminderMessageDetailDialog: React.FC<ReminderMessageDetailDialogProps> = 
                 size="small"
                 label={REMINDER_STATUS_LABEL[row.deliveryStatus]}
                 color={REMINDER_STATUS_COLOR[row.deliveryStatus]}
-                title={row.failureReason ?? undefined}
+                title={reminderStatusTooltip(row)}
               />
               <Typography variant="caption" color="text.secondary">
                 {row.templateName}
               </Typography>
             </Stack>
+            <DetailRow label="Envío" value={formatReminderSentDisplay(row)} />
             <DetailRow label="Intentos" value={String(row.attemptCount)} />
             <DetailRow label="Último intento" value={formatIso(row.lastAttemptAt)} />
             <DetailRow label="Firestore sentAt" value={formatIso(row.sentAt)} />
@@ -153,7 +161,8 @@ const ReminderMessageDetailDialog: React.FC<ReminderMessageDetailDialogProps> = 
             <DetailRow label="WA message ID" value={row.waMessageId ?? '—'} mono />
           </Box>
 
-          {row.failureReason && (
+          {row.failureReason &&
+            !['sent', 'ready', 'pending'].includes(row.deliveryStatus) && (
             <Box>
               <Typography variant="overline" color="error">
                 Motivo del fallo

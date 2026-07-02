@@ -57,11 +57,43 @@ export interface ReminderAutomationsDashboard {
 export interface HistoryBatchRun {
   id: string;
   runAt: string;
-  runKind: 'primary' | 'retry';
+  runKind: 'primary' | 'retry' | 'manual';
   schedulerName: string;
   serviceDate: string;
   summary: Record<string, number>;
+  executionStats: ExecutionStats;
   createdAt: string;
+}
+
+export interface ExecutionStats {
+  sent: number;
+  failed: number;
+  skippedAlreadySent: number;
+  skippedDisabled: number;
+  skippedMissingPhone: number;
+  skippedMissingProfessional: number;
+  skippedMaxAttempts: number;
+  attempted: number;
+}
+
+export type BatchEventOutcome =
+  | 'sent'
+  | 'failed'
+  | 'skipped_already_sent'
+  | 'skipped_disabled'
+  | 'skipped_missing_phone'
+  | 'skipped_missing_professional'
+  | 'skipped_max_attempts';
+
+export interface HistoryBatchEvent {
+  id: string;
+  batchRunId: string;
+  appointmentId: string;
+  recipientType: ReminderRecipientType;
+  outcome: BatchEventOutcome;
+  errorMessage: string | null;
+  waMessageId: string | null;
+  attemptNumber: number | null;
 }
 
 export interface HistoryBatchItem {
@@ -87,11 +119,53 @@ export interface HistoryBatchItem {
   address: string | null;
   professionalName: string | null;
   clientName: string | null;
+  logStatus: string | null;
+  logCreatedAt: string | null;
+  logErrorMessage: string | null;
 }
 
 export interface ReminderHistoryResponse {
   runs: HistoryBatchRun[];
   itemsByRun: Record<string, HistoryBatchItem[]>;
+  eventsByRun: Record<string, HistoryBatchEvent[]>;
+  deltasByRunId: Record<string, string | null>;
+}
+
+export const BATCH_EVENT_OUTCOME_LABEL: Record<BatchEventOutcome, string> = {
+  sent: 'Enviado',
+  failed: 'Fallido',
+  skipped_already_sent: 'Ya enviado',
+  skipped_disabled: 'Desactivado',
+  skipped_missing_phone: 'Sin teléfono',
+  skipped_missing_professional: 'Sin profesional',
+  skipped_max_attempts: 'Máx. intentos',
+};
+
+export const BATCH_EVENT_OUTCOME_COLOR: Record<
+  BatchEventOutcome,
+  'default' | 'success' | 'error' | 'warning' | 'info'
+> = {
+  sent: 'success',
+  failed: 'error',
+  skipped_already_sent: 'info',
+  skipped_disabled: 'default',
+  skipped_missing_phone: 'warning',
+  skipped_missing_professional: 'warning',
+  skipped_max_attempts: 'warning',
+};
+
+export function formatExecutionStatsNarrative(stats: ExecutionStats): string {
+  const parts: string[] = [];
+  if (stats.sent > 0) parts.push(`${stats.sent} enviados`);
+  if (stats.failed > 0) parts.push(`${stats.failed} fallidos`);
+  const skipped =
+    stats.skippedAlreadySent +
+    stats.skippedDisabled +
+    stats.skippedMissingPhone +
+    stats.skippedMissingProfessional +
+    stats.skippedMaxAttempts;
+  if (skipped > 0) parts.push(`${skipped} omitidos`);
+  return parts.length > 0 ? parts.join(' · ') : 'Sin acciones registradas';
 }
 
 export const REMINDER_STATUS_LABEL: Record<ReminderDeliveryStatus, string> = {
@@ -101,7 +175,7 @@ export const REMINDER_STATUS_LABEL: Record<ReminderDeliveryStatus, string> = {
   missing_professional: 'Sin profesional',
   sent: 'Enviado',
   failed: 'Fallido',
-  sent_unverified: 'Sin verificar',
+  sent_unverified: 'Enviado (sin log)',
   skipped: 'Omitido',
   not_attempted: 'Sin intento',
   disabled: 'Desactivado',
@@ -123,6 +197,43 @@ export const REMINDER_STATUS_COLOR: Record<
   disabled: 'default',
 };
 
+const NO_SEND_DELIVERY_STATUSES = new Set<ReminderDeliveryStatus>([
+  'missing_phone',
+  'missing_professional',
+  'failed',
+  'not_attempted',
+  'skipped',
+]);
+
+export function formatReminderSentDisplay(row: ReminderRow): string {
+  if (NO_SEND_DELIVERY_STATUSES.has(row.deliveryStatus)) {
+    return row.failureReason ?? '—';
+  }
+  if (row.deliveryStatus !== 'sent' && row.deliveryStatus !== 'sent_unverified') {
+    return '—';
+  }
+  const iso = row.sentAt ?? row.logCreatedAt;
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('es-CO', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'America/Bogota',
+  });
+}
+
+export function reminderStatusTooltip(row: ReminderRow): string | undefined {
+  if (row.failureReason) return row.failureReason;
+  if (
+    row.deliveryStatus === 'sent' &&
+    ['CANCELLED', 'CANCELED', 'REJECTED'].includes(row.appointmentStatus.toUpperCase())
+  ) {
+    return 'Cita cancelada; recordatorio enviado antes de cancelar';
+  }
+  return undefined;
+}
+
 export function historyItemToReminderRow(item: HistoryBatchItem): ReminderRow {
   return {
     appointmentId: item.appointmentId,
@@ -138,9 +249,9 @@ export function historyItemToReminderRow(item: HistoryBatchItem): ReminderRow {
     sentAt: item.sentAt,
     templateName: item.templateName ?? '',
     waMessageId: item.waMessageId,
-    logStatus: null,
-    logCreatedAt: null,
-    logErrorMessage: null,
+    logStatus: item.logStatus,
+    logCreatedAt: item.logCreatedAt,
+    logErrorMessage: item.logErrorMessage,
     messageBody: item.messageBody,
     conversationStableKey: item.conversationStableKey,
     address: item.address,

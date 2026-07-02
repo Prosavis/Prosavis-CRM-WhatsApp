@@ -41,11 +41,13 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: 'No autorizado.' }, 401);
       }
 
-      const runKind = body.runKind as 'primary' | 'retry';
+      const runKind = body.runKind as 'primary' | 'retry' | 'manual';
       const schedulerName = String(body.schedulerName ?? '').trim();
       const serviceDate = String(body.serviceDate ?? '').trim();
+      const executionStats = body.executionStats as Record<string, number> | undefined;
+      const events = Array.isArray(body.events) ? body.events : undefined;
 
-      if (!['primary', 'retry'].includes(runKind)) {
+      if (!['primary', 'retry', 'manual'].includes(runKind)) {
         return jsonResponse({ error: 'runKind inválido.' }, 400);
       }
       if (!schedulerName) {
@@ -61,6 +63,33 @@ Deno.serve(async (req) => {
         runKind,
         schedulerName,
         serviceDate,
+        executionStats: executionStats
+          ? {
+            sent: Number(executionStats.sent ?? 0) || 0,
+            failed: Number(executionStats.failed ?? 0) || 0,
+            skippedAlreadySent: Number(executionStats.skippedAlreadySent ?? 0) || 0,
+            skippedDisabled: Number(executionStats.skippedDisabled ?? 0) || 0,
+            skippedMissingPhone: Number(executionStats.skippedMissingPhone ?? 0) || 0,
+            skippedMissingProfessional: Number(executionStats.skippedMissingProfessional ?? 0) || 0,
+            skippedMaxAttempts: Number(executionStats.skippedMaxAttempts ?? 0) || 0,
+            attempted: Number(executionStats.attempted ?? 0) || 0,
+          }
+          : undefined,
+        events: events?.map((event: Record<string, unknown>) => ({
+          appointmentId: String(event.appointmentId ?? ''),
+          recipientType: event.recipientType as 'client' | 'professional',
+          outcome: String(event.outcome ?? 'failed') as
+            | 'sent'
+            | 'failed'
+            | 'skipped_already_sent'
+            | 'skipped_disabled'
+            | 'skipped_missing_phone'
+            | 'skipped_missing_professional'
+            | 'skipped_max_attempts',
+          errorMessage: event.errorMessage ? String(event.errorMessage) : undefined,
+          waMessageId: event.waMessageId ? String(event.waMessageId) : undefined,
+          attemptNumber: event.attemptNumber != null ? Number(event.attemptNumber) : undefined,
+        })).filter((event: { appointmentId: string }) => Boolean(event.appointmentId)),
       });
       return jsonResponse({ success: true, ...result });
     }

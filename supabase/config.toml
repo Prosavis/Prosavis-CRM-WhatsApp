@@ -156,3 +156,6 @@ verify_jwt = false
 
 [functions.reminder-automations-monitor]
 verify_jwt = false
+
+[functions.discount-codes-admin]
+verify_jwt = false

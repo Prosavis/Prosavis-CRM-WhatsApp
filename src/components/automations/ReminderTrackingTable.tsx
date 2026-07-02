@@ -21,7 +21,13 @@ import {
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import type { ReminderDeliveryStatus, ReminderRow } from '@/types/reminderAutomations';
-import { REMINDER_STATUS_COLOR, REMINDER_STATUS_LABEL } from '@/types/reminderAutomations';
+import {
+  formatReminderSentDisplay,
+  REMINDER_STATUS_COLOR,
+  REMINDER_STATUS_LABEL,
+  reminderStatusTooltip,
+} from '@/types/reminderAutomations';
+import { normalizeDirectoryPhoneE164 } from '@/utils/directoryPhone';
 
 function formatServiceDate(iso: string | null): string {
   if (!iso) return '—';
@@ -35,31 +41,9 @@ function formatServiceDate(iso: string | null): string {
   });
 }
 
-function formatSentAt(row: ReminderRow): string {
-  if (row.sentAt) {
-    return new Date(row.sentAt).toLocaleString('es-CO', {
-      day: 'numeric',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZone: 'America/Bogota',
-    });
-  }
-  if (row.logCreatedAt) {
-    return new Date(row.logCreatedAt).toLocaleString('es-CO', {
-      day: 'numeric',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZone: 'America/Bogota',
-    });
-  }
-  return '—';
-}
-
 function formatPhone(phone: string | null): string {
   if (!phone) return '—';
-  return phone;
+  return normalizeDirectoryPhoneE164(phone) ?? phone;
 }
 
 async function copyText(text: string) {
@@ -142,6 +126,7 @@ const ReminderTrackingTable: React.FC<ReminderTrackingTableProps> = ({
                   ? `${row.recipientKey}:${row.recipientType}`
                   : null;
                 const canToggle = !readOnly && Boolean(row.recipientKey && row.phone);
+                const statusTooltip = reminderStatusTooltip(row);
                 const toggleTooltip = !row.phone
                   ? 'Sin teléfono registrado'
                   : !row.recipientKey
@@ -157,7 +142,10 @@ const ReminderTrackingTable: React.FC<ReminderTrackingTableProps> = ({
                     <TableCell>{formatPhone(row.phone)}</TableCell>
                     <TableCell>{formatServiceDate(row.scheduledDate)}</TableCell>
                     <TableCell>
-                      <Tooltip title={row.failureReason ?? ''} disableHoverListener={!row.failureReason}>
+                      <Tooltip
+                        title={statusTooltip ?? ''}
+                        disableHoverListener={!statusTooltip}
+                      >
                         <Chip
                           size="small"
                           label={REMINDER_STATUS_LABEL[row.deliveryStatus]}
@@ -165,7 +153,7 @@ const ReminderTrackingTable: React.FC<ReminderTrackingTableProps> = ({
                         />
                       </Tooltip>
                     </TableCell>
-                    <TableCell>{formatSentAt(row)}</TableCell>
+                    <TableCell>{formatReminderSentDisplay(row)}</TableCell>
                     <TableCell>
                       <Typography variant="caption" display="block">
                         {row.templateName}
