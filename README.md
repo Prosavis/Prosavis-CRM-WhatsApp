@@ -171,6 +171,26 @@ Tras cambiar el límite global, no hace falta redeploy; los uploads fallidos se 
 | Meta expiró el media | `meta_unavailable` (410) | Sin reintentar |
 | Storage transitorio | `storage` (502) | Reintentar |
 
+### Monitoreo de Storage (pestaña Monitoreo)
+
+La pestaña **Monitoreo** del CRM consume la Edge Function `whatsapp-storage-monitor` (no RPCs directas desde el browser para ranking/optimización).
+
+| Acción Edge | Uso |
+| --- | --- |
+| `dashboard` | Gauge, overview multi-bucket, top chats, sugerencias |
+| `ranking` | Tabla paginada de **todos** los chats con bytes reales (`storage.objects`) |
+| `analyze` | Duplicados PDF + huérfanos (dry-run) |
+| `optimize_duplicate_pdfs` | Elimina copias redundantes (SHA-256; conserva 1 por chat) |
+| `optimize_stale_catalog_pdfs` | PDF outbound antiguos con mismo hash |
+| `delete_conversation_media` | Borra Storage + `whatsapp_media_assets` + refs en log |
+| `backfill_metadata` | Sincroniza `size_bytes`; lote SHA-256 en Edge |
+
+RPCs Postgres (`SECURITY DEFINER`, admin CRM): `get_storage_stats`, `get_storage_overview`, `get_conversation_storage_ranking`, `get_duplicate_pdf_groups`, `get_storage_orphans`, `get_storage_suggestions`, `backfill_media_metadata`.
+
+Fuente de verdad de bytes: `storage.objects.metadata->size`. Índice semántico: `whatsapp_media_assets` (`sha256`, `size_bytes`, chat).
+
+Migración: `supabase/migrations/20260702130000_storage_monitor_intelligence.sql`.
+
 ## Verificación de código
 
 ```powershell

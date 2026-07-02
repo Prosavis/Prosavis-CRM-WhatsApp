@@ -17,6 +17,7 @@ export interface PersistedWhatsAppMedia {
   signedUrl: string;
   mimeType: string;
   fileSize: number;
+  sha256: string;
 }
 
 export interface ExistingWhatsAppMediaAsset {
@@ -25,6 +26,13 @@ export interface ExistingWhatsAppMediaAsset {
   mimeType: string | null;
   sizeBytes: number | null;
   messageLogId: string | null;
+}
+
+export async function computeSha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 export function extensionFromMimeType(mimeType: string): string {
@@ -324,17 +332,17 @@ export async function persistToWhatsAppBucket(
 ): Promise<PersistedWhatsAppMedia> {
   await uploadToWhatsAppBucket(supabase, bytes, storagePath, mimeType);
 
-  const signedUrl = await createWhatsAppMediaSignedUrl(
-    supabase,
-    storagePath,
-    expiresIn,
-  );
+  const [signedUrl, sha256] = await Promise.all([
+    createWhatsAppMediaSignedUrl(supabase, storagePath, expiresIn),
+    computeSha256Hex(bytes),
+  ]);
 
   return {
     storagePath,
     signedUrl,
     mimeType,
     fileSize: bytes.byteLength,
+    sha256,
   };
 }
 
@@ -388,6 +396,7 @@ export async function backfillInboundMediaRecords(params: {
   storagePath: string;
   mimeType: string;
   fileSize: number;
+  sha256?: string;
   signedUrl: string;
 }): Promise<void> {
   const { data: messages, error: messagesError } = await params.supabase
@@ -463,6 +472,7 @@ export async function backfillInboundMediaRecords(params: {
     media_id: params.mediaId,
     mime_type: params.mimeType,
     size_bytes: params.fileSize,
+    sha256: params.sha256 ?? null,
   });
 
   if (insertError) {
@@ -494,6 +504,7 @@ export async function resolveWhatsAppMediaById(params: {
         signedUrl,
         mimeType: existing.mimeType ?? params.mimeTypeHint ?? 'application/octet-stream',
         fileSize: existing.sizeBytes ?? 0,
+        sha256: '',
       };
     } catch {
       console.warn('[resolveWhatsAppMediaById] signed URL failed for', {
@@ -540,6 +551,7 @@ export async function resolveWhatsAppMediaById(params: {
       storagePath: persisted.storagePath,
       mimeType: persisted.mimeType,
       fileSize: persisted.fileSize,
+      sha256: persisted.sha256,
       signedUrl: persisted.signedUrl,
     });
 

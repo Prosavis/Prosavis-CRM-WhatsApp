@@ -1,5 +1,6 @@
 import { supabase } from '@/config/supabase';
 import { getApp } from 'firebase/app';
+import { PLAN_FREE_STORAGE_BYTES } from '@/constants/storageLimits';
 
 // ──────────────────────────────────────────────
 // Tipos
@@ -24,6 +25,21 @@ export interface StorageStats {
   breakdown: MediaBreakdown;
 }
 
+export interface StorageBucketOverview {
+  bucketId: string;
+  totalObjects: number;
+  totalBytes: number;
+  usedPercent: number;
+}
+
+export interface StorageOverview {
+  planLimitBytes: number;
+  totalBytes: number;
+  usedPercent: number;
+  freeBytes: number;
+  buckets: StorageBucketOverview[];
+}
+
 export interface HeavyChat {
   stableKey: string;
   contactName: string | null;
@@ -32,6 +48,49 @@ export interface HeavyChat {
   mediaCount: number;
   totalBytes: number;
   lastMessageAt: string | null;
+}
+
+export type StorageSuggestionSeverity = 'critical' | 'warning' | 'info';
+
+export interface StorageSuggestion {
+  id: string;
+  severity: StorageSuggestionSeverity;
+  title: string;
+  message: string;
+  action: string;
+}
+
+export interface DuplicatePdfCopy {
+  asset_id: string;
+  storage_path: string;
+  conversation_stable_key: string;
+  size_bytes: number;
+  created_at: string;
+  message_log_id?: string;
+  heuristic?: boolean;
+}
+
+export interface DuplicatePdfGroup {
+  group_id: string;
+  detection_method: 'sha256' | 'heuristic';
+  copy_count: number;
+  total_bytes: number;
+  copies: DuplicatePdfCopy[];
+  redundant_copies: number;
+  bytes_reclaimable: number;
+}
+
+export interface StorageOrphans {
+  storage_without_db: Array<{ storage_path: string; size_bytes: number; created_at: string }>;
+  db_without_storage: Array<{ asset_id: string; storage_path: string; conversation_stable_key: string; size_bytes: number }>;
+  storage_orphan_count: number;
+  db_orphan_count: number;
+}
+
+export interface OptimizationPreview {
+  bytesReclaimable: number;
+  redundantCopies: number;
+  uniquePdfGroups: number;
 }
 
 export interface GeneralMetrics {
@@ -56,134 +115,178 @@ export interface ConnectionStatus {
 
 export interface MonitorDashboard {
   storage: StorageStats | null;
+  overview: StorageOverview | null;
   heavyChats: HeavyChat[];
+  rankingTotalCount: number;
+  suggestions: StorageSuggestion[];
   metrics: GeneralMetrics | null;
   connections: ConnectionStatus;
 }
 
-// ──────────────────────────────────────────────
-// Storage: desglose multimedia via RPC (storage.objects directo)
-// ──────────────────────────────────────────────
+export type StorageMonitorAction =
+  | 'dashboard'
+  | 'ranking'
+  | 'analyze'
+  | 'optimize_duplicate_pdfs'
+  | 'optimize_stale_catalog_pdfs'
+  | 'delete_conversation_media'
+  | 'backfill_metadata';
 
-// Límite del plan Free de Supabase: 1 GB de Storage
-// Ver https://supabase.com/docs/guides/platform/billing-on-supabase
-const BUCKET_LIMIT = 1 * 1024 * 1024 * 1024; // 1 GB
+export const DELETE_CONVERSATION_MEDIA_CONFIRM = 'ELIMINAR_MEDIA_CONVERSACION';
+export const OPTIMIZE_DUPLICATE_PDFS_CONFIRM = 'OPTIMIZAR_PDFS_DUPLICADOS';
+export const OPTIMIZE_STALE_CATALOG_CONFIRM = 'OPTIMIZAR_CATALOGOS_ANTIGUOS';
 
-function emptyBreakdown(): MediaBreakdown {
-  return { image: { count: 0, bytes: 0 }, video: { count: 0, bytes: 0 }, audio: { count: 0, bytes: 0 }, document: { count: 0, bytes: 0 }, text: { count: 0, bytes: 0 }, other: { count: 0, bytes: 0 } };
+type RankingSort = 'bytes' | 'messages' | 'date' | 'media';
+
+interface EdgeDashboardResponse {
+  storage: StorageStats;
+  overview: StorageOverview;
+  heavyChats: HeavyChat[];
+  rankingTotalCount: number;
+  suggestions: StorageSuggestion[];
 }
 
-export async function getStorageStats(): Promise<StorageStats> {
-  // Stats reales desde storage.objects vía RPC (rápido, preciso)
-  const { data: rpcData, error: rpcError } = await supabase.rpc('get_storage_stats', {
-    p_bucket: 'whatsapp-media',
-  });
+// ──────────────────────────────────────────────
+// Edge Function client
+// ──────────────────────────────────────────────
 
-  if (rpcError) throw rpcError;
+async function invokeStorageMonitor<T>(body: Record<string, unknown>): Promise<T> {
+  const { data, error } = await supabase.functions.invoke<T>('whatsapp-storage-monitor', { body });
+  if (error) throw error;
+  if (!data) throw new Error('Respuesta vacía del monitor de Storage');
+  return data;
+}
 
-  const json = rpcData as unknown as {
-    total_objects: number;
-    total_bytes: number;
-    breakdown: Record<string, { count: number; bytes: number }>;
-  };
-
-  const totalObjects = json.total_objects ?? 0;
-  const totalBytes = json.total_bytes ?? 0;
-
-  // Mapear breakdown del RPC al tipo MediaBreakdown
-  const breakdown = emptyBreakdown();
-  if (json.breakdown) {
-    const bd = breakdown as unknown as Record<string, { count: number; bytes: number }>;
-    for (const [key, val] of Object.entries(json.breakdown)) {
-      if (key in bd) {
-        bd[key] = { count: val.count ?? 0, bytes: val.bytes ?? 0 };
-      }
-    }
-  }
-
+function mapOverview(raw: Record<string, unknown>): StorageOverview {
+  const buckets = (raw.buckets as Array<Record<string, unknown>> | undefined) ?? [];
   return {
-    totalObjects,
-    totalBytes,
-    bucketLimit: BUCKET_LIMIT,
-    usedPercent: Math.min(100, +(totalBytes / BUCKET_LIMIT * 100).toFixed(1)),
-    freeBytes: BUCKET_LIMIT - totalBytes,
-    freePercent: Math.min(100, +((BUCKET_LIMIT - totalBytes) / BUCKET_LIMIT * 100).toFixed(1)),
-    breakdown,
+    planLimitBytes: Number(raw.plan_limit_bytes ?? PLAN_FREE_STORAGE_BYTES),
+    totalBytes: Number(raw.total_bytes ?? 0),
+    usedPercent: Number(raw.used_percent ?? 0),
+    freeBytes: Number(raw.free_bytes ?? 0),
+    buckets: buckets.map((b) => ({
+      bucketId: String(b.bucket_id ?? ''),
+      totalObjects: Number(b.total_objects ?? 0),
+      totalBytes: Number(b.total_bytes ?? 0),
+      usedPercent: Number(b.used_percent ?? 0),
+    })),
   };
 }
 
 // ──────────────────────────────────────────────
-// Chats pesados
+// Storage API
 // ──────────────────────────────────────────────
+
+export async function getStorageDashboard(): Promise<{
+  storage: StorageStats;
+  overview: StorageOverview;
+  heavyChats: HeavyChat[];
+  rankingTotalCount: number;
+  suggestions: StorageSuggestion[];
+}> {
+  const data = await invokeStorageMonitor<EdgeDashboardResponse>({ action: 'dashboard' });
+  return {
+    storage: data.storage,
+    overview: mapOverview(data.overview as unknown as Record<string, unknown>),
+    heavyChats: data.heavyChats,
+    rankingTotalCount: data.rankingTotalCount,
+    suggestions: data.suggestions ?? [],
+  };
+}
+
+export async function getConversationRanking(params: {
+  limit?: number;
+  offset?: number;
+  sort?: RankingSort;
+}): Promise<{ rows: HeavyChat[]; totalCount: number }> {
+  const data = await invokeStorageMonitor<{
+    rows: HeavyChat[];
+    totalCount: number;
+  }>({
+    action: 'ranking',
+    limit: params.limit ?? 20,
+    offset: params.offset ?? 0,
+    sort: params.sort ?? 'bytes',
+  });
+  return { rows: data.rows, totalCount: data.totalCount };
+}
+
+export async function analyzeStorage(params?: { minAgeDays?: number }): Promise<{
+  duplicateGroups: DuplicatePdfGroup[];
+  orphans: StorageOrphans;
+  preview: OptimizationPreview;
+}> {
+  return invokeStorageMonitor({
+    action: 'analyze',
+    minAgeDays: params?.minAgeDays ?? 14,
+  });
+}
+
+export async function optimizeDuplicatePdfs(params: {
+  dryRun?: boolean;
+  confirmPhrase?: string;
+  minAgeDays?: number;
+}) {
+  return invokeStorageMonitor({
+    action: 'optimize_duplicate_pdfs',
+    dryRun: params.dryRun ?? true,
+    confirmPhrase: params.confirmPhrase,
+    minAgeDays: params.minAgeDays ?? 14,
+  });
+}
+
+export async function optimizeStaleCatalogPdfs(params: {
+  dryRun?: boolean;
+  confirmPhrase?: string;
+  minAgeDays?: number;
+}) {
+  return invokeStorageMonitor({
+    action: 'optimize_stale_catalog_pdfs',
+    dryRun: params.dryRun ?? true,
+    confirmPhrase: params.confirmPhrase,
+    minAgeDays: params.minAgeDays ?? 30,
+  });
+}
+
+export async function deleteConversationMedia(params: {
+  stableKey: string;
+  dryRun?: boolean;
+  confirmPhrase?: string;
+}) {
+  return invokeStorageMonitor({
+    action: 'delete_conversation_media',
+    stableKey: params.stableKey,
+    dryRun: params.dryRun ?? true,
+    confirmPhrase: params.confirmPhrase,
+  });
+}
+
+export async function backfillMediaMetadata(params?: { dryRun?: boolean; includeSha256?: boolean }) {
+  return invokeStorageMonitor({
+    action: 'backfill_metadata',
+    dryRun: params?.dryRun ?? true,
+    includeSha256: params?.includeSha256 ?? true,
+  });
+}
+
+// Legacy helpers (mantener compatibilidad con imports existentes)
+export async function getStorageStats(): Promise<StorageStats> {
+  const { storage } = await getStorageDashboard();
+  return storage;
+}
 
 export async function getHeavyChats(limit = 20): Promise<HeavyChat[]> {
-  // 1. Obtener las conversaciones más recientes
-  const { data: conversations, error } = await supabase
-    .from('whatsapp_conversations')
-    .select('stable_key, contact_name, contact_phone, last_message_at')
-    .order('last_message_at', { ascending: false, nullsFirst: false })
-    .limit(50);
-
-  if (error) throw error;
-  if (!conversations || conversations.length === 0) return [];
-
-  const stableKeys = conversations.map((c) => c.stable_key);
-
-  // 2. BATCH: obtener conteo de mensajes por conversación en UNA SOLA QUERY
-  const { data: allMessages } = await supabase
-    .from('whatsapp_message_log')
-    .select('conversation_stable_key')
-    .in('conversation_stable_key', stableKeys);
-
-  const msgCountMap = new Map<string, number>();
-  if (allMessages) {
-    for (const msg of allMessages) {
-      const key = msg.conversation_stable_key;
-      msgCountMap.set(key, (msgCountMap.get(key) ?? 0) + 1);
-    }
-  }
-
-  // 3. BATCH: obtener assets multimedia por conversación en UNA SOLA QUERY
-  const { data: allMedia } = await supabase
-    .from('whatsapp_media_assets')
-    .select('conversation_stable_key, size_bytes')
-    .in('conversation_stable_key', stableKeys);
-
-  const mediaByConv = new Map<string, { count: number; bytes: number }>();
-  if (allMedia) {
-    for (const m of allMedia) {
-      const key = m.conversation_stable_key;
-      const prev = mediaByConv.get(key) ?? { count: 0, bytes: 0 };
-      prev.count += 1;
-      prev.bytes += m.size_bytes ?? 0;
-      mediaByConv.set(key, prev);
-    }
-  }
-
-  // 4. Ensamblar resultados
-  const chats: HeavyChat[] = conversations.map((conv) => {
-    const media = mediaByConv.get(conv.stable_key) ?? { count: 0, bytes: 0 };
-    return {
-      stableKey: conv.stable_key,
-      contactName: conv.contact_name,
-      contactPhone: conv.contact_phone,
-      messageCount: msgCountMap.get(conv.stable_key) ?? 0,
-      mediaCount: media.count,
-      totalBytes: media.bytes,
-      lastMessageAt: conv.last_message_at,
-    };
-  });
-
-  // Ordenar por peso total descendente (más pesados primero) y limitar
-  return chats.sort((a, b) => b.totalBytes - a.totalBytes).slice(0, limit);
+  const { rows } = await getConversationRanking({ limit, offset: 0, sort: 'bytes' });
+  return rows;
 }
 
 // ──────────────────────────────────────────────
 // Métricas generales
 // ──────────────────────────────────────────────
 
-async function safeCount(table: string, filter?: { column: string; value: any }): Promise<number> {
+async function safeCount(table: string, filter?: { column: string; value: unknown }): Promise<number> {
   try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let query = (supabase.from(table as any) as any).select('*', { count: 'exact', head: true });
     if (filter) {
       query = query.eq(filter.column, filter.value);
@@ -253,7 +356,6 @@ export async function checkConnections(): Promise<ConnectionStatus> {
     whatsappApi: { status: 'checking' },
   };
 
-  // Supabase: query simple
   const supabaseStart = performance.now();
   try {
     const { error } = await supabase.from('admin_profiles').select('id', { count: 'exact', head: true }).limit(1);
@@ -269,13 +371,10 @@ export async function checkConnections(): Promise<ConnectionStatus> {
     };
   }
 
-  // Firebase: verificar que el SDK esté inicializado
   try {
     const app = getApp();
-    if (app && app.options.projectId) {
-      result.firebase = {
-        status: 'ok',
-      };
+    if (app?.options.projectId) {
+      result.firebase = { status: 'ok' };
     } else {
       result.firebase = { status: 'error', error: 'Firebase SDK no inicializado' };
     }
@@ -286,7 +385,6 @@ export async function checkConnections(): Promise<ConnectionStatus> {
     };
   }
 
-  // WhatsApp API: verificar que tengamos configurada la línea
   try {
     const { WHATSAPP_CLOUD_PRODUCTION } = await import('@/constants/whatsappCloudAccounts');
     if (WHATSAPP_CLOUD_PRODUCTION?.phoneNumberId && WHATSAPP_CLOUD_PRODUCTION?.wabaId) {
@@ -309,14 +407,10 @@ export async function checkConnections(): Promise<ConnectionStatus> {
 // ──────────────────────────────────────────────
 
 export async function getMonitorDashboard(): Promise<MonitorDashboard> {
-  const [storage, heavyChats, metrics, connections] = await Promise.allSettled([
-    getStorageStats().catch((e) => {
-      console.error('Error en storage stats:', e);
+  const [storageData, metrics, connections] = await Promise.allSettled([
+    getStorageDashboard().catch((e) => {
+      console.error('Error en storage dashboard:', e);
       return null;
-    }),
-    getHeavyChats().catch((e) => {
-      console.error('Error en heavy chats:', e);
-      return [] as HeavyChat[];
     }),
     getGeneralMetrics().catch((e) => {
       console.error('Error en general metrics:', e);
@@ -325,9 +419,14 @@ export async function getMonitorDashboard(): Promise<MonitorDashboard> {
     checkConnections(),
   ]);
 
+  const storagePayload = storageData.status === 'fulfilled' ? storageData.value : null;
+
   return {
-    storage: storage.status === 'fulfilled' ? storage.value : null,
-    heavyChats: heavyChats.status === 'fulfilled' ? heavyChats.value : [],
+    storage: storagePayload?.storage ?? null,
+    overview: storagePayload?.overview ?? null,
+    heavyChats: storagePayload?.heavyChats ?? [],
+    rankingTotalCount: storagePayload?.rankingTotalCount ?? 0,
+    suggestions: storagePayload?.suggestions ?? [],
     metrics: metrics.status === 'fulfilled' ? metrics.value : null,
     connections: connections.status === 'fulfilled' ? connections.value : {
       supabase: { status: 'error', error: 'Falló verificación de conexiones' },

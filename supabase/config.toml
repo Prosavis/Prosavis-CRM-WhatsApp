@@ -154,6 +154,9 @@ verify_jwt = false
 [functions.directory-monitor]
 verify_jwt = false
 
+[functions.whatsapp-storage-monitor]
+verify_jwt = false
+
 [functions.reminder-automations-monitor]
 verify_jwt = false
 

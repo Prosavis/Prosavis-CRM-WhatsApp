@@ -242,12 +242,12 @@ async function persistInboundMedia(params: {
   mediaId: string;
   mimeType: string | null;
   stableKey: string;
-}): Promise<{ storagePath: string | null; storageUrl: string | null }> {
+}): Promise<{ storagePath: string | null; storageUrl: string | null; fileSize: number | null; sha256: string | null }> {
   if (!getWhatsAppAccessToken()) {
     console.error('[on-whatsapp-webhook] persistInboundMedia: WHATSAPP_ACCESS_TOKEN ausente', {
       mediaId: params.mediaId,
     });
-    return { storagePath: null, storageUrl: null };
+    return { storagePath: null, storageUrl: null, fileSize: null, sha256: null };
   }
 
   try {
@@ -264,6 +264,8 @@ async function persistInboundMedia(params: {
     return {
       storagePath: persisted.storagePath,
       storageUrl: persisted.signedUrl,
+      fileSize: persisted.fileSize,
+      sha256: persisted.sha256,
     };
   } catch (error) {
     const details =
@@ -275,7 +277,7 @@ async function persistInboundMedia(params: {
       stableKey: params.stableKey,
       ...details,
     });
-    return { storagePath: null, storageUrl: null };
+    return { storagePath: null, storageUrl: null, fileSize: null, sha256: null };
   }
 }
 
@@ -383,6 +385,8 @@ async function processInboundMessage(params: {
 
   let storagePath: string | null = null;
   let storageUrl: string | null = null;
+  let mediaFileSize: number | null = null;
+  let mediaSha256: string | null = null;
   if (content.mediaId) {
     const persisted = await persistInboundMedia({
       supabase: params.supabase,
@@ -392,6 +396,8 @@ async function processInboundMessage(params: {
     });
     storagePath = persisted.storagePath;
     storageUrl = persisted.storageUrl;
+    mediaFileSize = persisted.fileSize;
+    mediaSha256 = persisted.sha256;
 
     if (storagePath && insertedMessage?.id) {
       const { error: mediaUpdateError } = await params.supabase
@@ -401,6 +407,7 @@ async function processInboundMessage(params: {
           storage_url: storageUrl,
           media_url: storageUrl,
           mime_type: content.mimeType,
+          size_bytes: mediaFileSize,
         })
         .eq('id', insertedMessage.id);
       if (mediaUpdateError) {
@@ -421,7 +428,8 @@ async function processInboundMessage(params: {
       storage_path: storagePath,
       media_id: content.mediaId,
       mime_type: content.mimeType,
-      size_bytes: null,
+      size_bytes: mediaFileSize,
+      sha256: mediaSha256,
     });
   }
 
