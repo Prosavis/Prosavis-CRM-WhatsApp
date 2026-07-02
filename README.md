@@ -152,6 +152,24 @@ Recordatorios 24h: despliegue completo en [RECORDATORIO_WHATSAPP_24H.md](../pros
 - `on-whatsapp-webhook` audita cada POST, valida firma con `WHATSAPP_APP_SECRET` y procesa mensajes solo con `WHATSAPP_WEBHOOK_MODE=active`.
 - Reintentos de Meta se deduplican por huella del payload y `wa_message_id`.
 - Media entrante con `media_id` se registra en log; descarga completa vía `get-whatsapp-media-url` cuando hay token Meta.
+- Archivos **> 6 MB** se suben a Storage con **TUS resumible** (`uploadToWhatsAppBucket` en `_shared/whatsappMediaStorage.ts`); menores usan upload estándar.
+
+### Límite de tamaño en Supabase Storage (obligatorio)
+
+Supabase aplica `min(límite_global_proyecto, límite_bucket)`. El bucket `whatsapp-media` está configurado a **100 MB**, pero si el **Global file size limit** del proyecto es menor (p. ej. 5–10 MB), videos de WhatsApp (~8–16 MB) fallan con `EntityTooLarge` aunque el bucket permita más.
+
+**Configuración requerida** en [Storage Settings](https://supabase.com/dashboard/project/djzwjaegxbhlefanmmee/storage/settings) del proyecto `djzwjaegxbhlefanmmee`:
+
+1. **Global file size limit** → **100 MB** (alineado con bucket y documentos WhatsApp hasta 100 MB).
+2. Verificar bucket `whatsapp-media` → **100 MB** por objeto.
+
+Tras cambiar el límite global, no hace falta redeploy; los uploads fallidos se pueden reintentar desde el inbox (botón reintentar) o tocando el medio de nuevo.
+
+| Error API | Código | UI inbox |
+| --- | --- | --- |
+| Archivo > 100 MB | `storage_oversized` (413) | Mensaje fijo; sin reintentar |
+| Meta expiró el media | `meta_unavailable` (410) | Sin reintentar |
+| Storage transitorio | `storage` (502) | Reintentar |
 
 ## Verificación de código
 

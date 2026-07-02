@@ -87,6 +87,102 @@ const MESSAGE_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
   minute: '2-digit',
 };
 
+function resolveMediaErrorDisplay(params: {
+  code?: string;
+  statusCode?: number;
+  errorMessage: string;
+}): { message: string; permanent: boolean } {
+  const { code, statusCode, errorMessage } = params;
+
+  if (code === 'storage_oversized') {
+    return {
+      message: 'El archivo es demasiado grande para guardarse (máx. 100 MB).',
+      permanent: true,
+    };
+  }
+  if (code === 'meta_unavailable' || statusCode === 410) {
+    return {
+      message: 'El archivo ya no está disponible en WhatsApp.',
+      permanent: true,
+    };
+  }
+  if (code === 'storage') {
+    return {
+      message: errorMessage || 'Error al guardar el archivo. Inténtalo de nuevo.',
+      permanent: false,
+    };
+  }
+  return {
+    message: errorMessage || 'No se pudo cargar el medio',
+    permanent: false,
+  };
+}
+
+interface MediaErrorPlaceholderProps {
+  icon: React.ReactNode;
+  label: string;
+  loading: boolean;
+  error: boolean;
+  errorMessage: string;
+  permanentError: boolean;
+  canResolve: boolean;
+  onResolve: () => void;
+}
+
+const MediaErrorPlaceholder: React.FC<MediaErrorPlaceholderProps> = ({
+  icon,
+  label,
+  loading,
+  error,
+  errorMessage,
+  permanentError,
+  canResolve,
+  onResolve,
+}) => (
+  <Box
+    onClick={permanentError || !canResolve ? undefined : onResolve}
+    sx={{
+      mb: 0.5,
+      p: 1.5,
+      bgcolor: 'rgba(0,0,0,0.04)',
+      borderRadius: 1,
+      display: 'flex',
+      alignItems: 'center',
+      gap: 1,
+      cursor: canResolve && !permanentError ? 'pointer' : 'default',
+    }}
+  >
+    {loading ? (
+      <CircularProgress size={20} />
+    ) : error ? (
+      <>
+        {icon}
+        <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>
+          {errorMessage}
+        </Typography>
+        {!permanentError && (
+          <IconButton
+            size="small"
+            onClick={(e) => {
+              e.stopPropagation();
+              onResolve();
+            }}
+          >
+            <RefreshIcon fontSize="small" />
+          </IconButton>
+        )}
+      </>
+    ) : (
+      <>
+        {icon}
+        <Typography variant="caption" color="text.secondary">
+          {label}
+        </Typography>
+      </>
+    )}
+  </Box>
+);
+
 const getContactDisplayName = (contact: WhatsAppContact) =>
   contact.name?.formatted_name ||
   [contact.name?.first_name, contact.name?.last_name].filter(Boolean).join(' ') ||
@@ -179,10 +275,11 @@ function useMediaPrefetch(message: WhatsAppMessage) {
     } catch (err) {
       const statusCode = (err as { statusCode?: number }).statusCode;
       const code = (err as { code?: string }).code;
-      const messageText = err instanceof Error ? err.message : 'No se pudo cargar el medio';
+      const rawMessage = err instanceof Error ? err.message : 'No se pudo cargar el medio';
+      const display = resolveMediaErrorDisplay({ code, statusCode, errorMessage: rawMessage });
       setError(true);
-      setErrorMessage(messageText);
-      setPermanentError(statusCode === 410 || code === 'meta_unavailable');
+      setErrorMessage(display.message);
+      setPermanentError(display.permanent);
     } finally {
       setLoading(false);
     }
@@ -380,20 +477,16 @@ const MediaContent: React.FC<{ message: WhatsAppMessage; onOpenLightbox?: (url: 
       );
     }
     return (
-      <Box onClick={resolveMedia} sx={{ mb: 0.5, p: 2, bgcolor: 'rgba(0,0,0,0.04)', borderRadius: 1, display: 'flex', alignItems: 'center', gap: 1, cursor: message.mediaId ? 'pointer' : 'default' }}>
-        {loading ? <CircularProgress size={20} /> : error ? (
-          <>
-            <ImageIcon sx={{ color: '#667781' }} />
-            <Typography variant="caption" color="text.secondary">No se pudo cargar</Typography>
-            <IconButton size="small" onClick={(e) => { e.stopPropagation(); resolveMedia(); }}><RefreshIcon fontSize="small" /></IconButton>
-          </>
-        ) : (
-          <>
-            <ImageIcon sx={{ color: '#667781' }} />
-            <Typography variant="caption" color="text.secondary">Imagen — toca para ver</Typography>
-          </>
-        )}
-      </Box>
+      <MediaErrorPlaceholder
+        icon={<ImageIcon sx={{ color: '#667781' }} />}
+        label="Imagen — toca para ver"
+        loading={loading}
+        error={error}
+        errorMessage={errorMessage || 'No se pudo cargar la imagen'}
+        permanentError={permanentError}
+        canResolve={Boolean(message.mediaId)}
+        onResolve={resolveMedia}
+      />
     );
   }
 
@@ -412,13 +505,17 @@ const MediaContent: React.FC<{ message: WhatsAppMessage; onOpenLightbox?: (url: 
       );
     }
     return (
-      <Box onClick={resolveMedia} sx={{ mb: 0.5, p: 1.5, bgcolor: 'rgba(0,0,0,0.04)', borderRadius: 1, display: 'flex', alignItems: 'center', gap: 1, cursor: message.mediaId ? 'pointer' : 'default' }}>
-        {loading ? <CircularProgress size={20} /> : (
-          <>
-            <PlayArrowIcon sx={{ color: '#667781' }} />
-            <Typography variant="caption" color="text.secondary">{message.isVoiceNote ? 'Nota de voz' : 'Audio'} — toca para reproducir</Typography>
-          </>
-        )}
+      <Box sx={{ mb: 0.5, minWidth: 240 }}>
+        <MediaErrorPlaceholder
+          icon={<PlayArrowIcon sx={{ color: '#667781' }} />}
+          label={`${message.isVoiceNote ? 'Nota de voz' : 'Audio'} — toca para reproducir`}
+          loading={loading}
+          error={error}
+          errorMessage={errorMessage || 'No se pudo cargar el audio'}
+          permanentError={permanentError}
+          canResolve={Boolean(message.mediaId)}
+          onResolve={resolveMedia}
+        />
         {transcriptionControls}
       </Box>
     );
@@ -438,46 +535,16 @@ const MediaContent: React.FC<{ message: WhatsAppMessage; onOpenLightbox?: (url: 
       );
     }
     return (
-      <Box
-        onClick={permanentError ? undefined : resolveMedia}
-        sx={{
-          mb: 0.5,
-          p: 2,
-          bgcolor: 'rgba(0,0,0,0.04)',
-          borderRadius: 1,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 1,
-          cursor: message.mediaId && !permanentError ? 'pointer' : 'default',
-        }}
-      >
-        {loading ? (
-          <CircularProgress size={20} />
-        ) : error ? (
-          <>
-            <VideocamIcon sx={{ color: '#667781' }} />
-            <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>
-              {errorMessage || 'No se pudo cargar el video'}
-            </Typography>
-            {!permanentError && (
-              <IconButton
-                size="small"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  resolveMedia();
-                }}
-              >
-                <RefreshIcon fontSize="small" />
-              </IconButton>
-            )}
-          </>
-        ) : (
-          <>
-            <VideocamIcon sx={{ color: '#667781' }} />
-            <Typography variant="caption" color="text.secondary">Video — toca para ver</Typography>
-          </>
-        )}
-      </Box>
+      <MediaErrorPlaceholder
+        icon={<VideocamIcon sx={{ color: '#667781' }} />}
+        label="Video — toca para ver"
+        loading={loading}
+        error={error}
+        errorMessage={errorMessage || 'No se pudo cargar el video'}
+        permanentError={permanentError}
+        canResolve={Boolean(message.mediaId)}
+        onResolve={resolveMedia}
+      />
     );
   }
 

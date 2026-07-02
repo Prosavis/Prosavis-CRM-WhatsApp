@@ -1,6 +1,9 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 export const WHATSAPP_MEDIA_BUCKET = 'whatsapp-media';
+export const WHATSAPP_MEDIA_BUCKET_LIMIT_BYTES = 104_857_600;
+export const STORAGE_RESUMABLE_THRESHOLD_BYTES = 6 * 1024 * 1024;
+export const STORAGE_TUS_CHUNK_BYTES = 6 * 1024 * 1024;
 export const DEFAULT_SIGNED_URL_EXPIRES_SECONDS = 15 * 60;
 export const OUTBOUND_META_SIGNED_URL_EXPIRES_SECONDS = 7200;
 
@@ -52,7 +55,13 @@ export function getWhatsAppAccessToken(): string | null {
 
 export class WhatsAppMediaError extends Error {
   statusCode: number;
-  code: 'meta_unavailable' | 'meta_auth' | 'meta_download' | 'storage' | 'config';
+  code:
+    | 'meta_unavailable'
+    | 'meta_auth'
+    | 'meta_download'
+    | 'storage'
+    | 'storage_oversized'
+    | 'config';
 
   constructor(
     message: string,
@@ -114,10 +123,10 @@ export async function downloadWhatsAppMediaFromMeta(
     String((metaJson as { mime_type?: string }).mime_type ?? '').trim() ||
     'application/octet-stream';
   const fileSize = Number((metaJson as { file_size?: number }).file_size ?? 0);
-  if (fileSize > 104857600) {
+  if (fileSize > WHATSAPP_MEDIA_BUCKET_LIMIT_BYTES) {
     throw new WhatsAppMediaError(
-      `El archivo supera el límite de Storage (${Math.round(fileSize / 1048576)} MB).`,
-      { statusCode: 413, code: 'storage' },
+      `El archivo pesa ${Math.round(fileSize / 1048576)} MB; el máximo permitido es 100 MB.`,
+      { statusCode: 413, code: 'storage_oversized' },
     );
   }
 
@@ -133,10 +142,162 @@ export async function downloadWhatsAppMediaFromMeta(
   }
 
   const bytes = new Uint8Array(await binaryRes.arrayBuffer());
+  if (bytes.byteLength > WHATSAPP_MEDIA_BUCKET_LIMIT_BYTES) {
+    throw new WhatsAppMediaError(
+      `El archivo pesa ${Math.round(bytes.byteLength / 1048576)} MB; el máximo permitido es 100 MB.`,
+      { statusCode: 413, code: 'storage_oversized' },
+    );
+  }
   return {
     bytes,
     mimeType: binaryRes.headers.get('content-type')?.split(';')[0]?.trim() || mimeType,
   };
+}
+
+function encodeTusMetadataValue(value: string): string {
+  return btoa(value);
+}
+
+function buildTusUploadMetadata(storagePath: string, mimeType: string): string {
+  return [
+    `bucketName ${encodeTusMetadataValue(WHATSAPP_MEDIA_BUCKET)}`,
+    `objectName ${encodeTusMetadataValue(storagePath)}`,
+    `contentType ${encodeTusMetadataValue(mimeType)}`,
+  ].join(',');
+}
+
+function getStorageCredentials(): { supabaseUrl: string; serviceRoleKey: string } {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')?.trim();
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')?.trim();
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new WhatsAppMediaError('Faltan SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY.', {
+      statusCode: 503,
+      code: 'config',
+    });
+  }
+  return { supabaseUrl, serviceRoleKey };
+}
+
+function isStorageOversizedError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const statusCode =
+    typeof error === 'object' && error && 'statusCode' in error
+      ? Number((error as { statusCode?: unknown }).statusCode)
+      : undefined;
+  return (
+    statusCode === 413 ||
+    /EntityTooLarge/i.test(message) ||
+    /exceeded the maximum allowed size/i.test(message) ||
+    /payload too large/i.test(message)
+  );
+}
+
+export function classifyStorageUploadError(
+  error: unknown,
+  fileSizeBytes?: number,
+): WhatsAppMediaError {
+  if (error instanceof WhatsAppMediaError) return error;
+
+  const sizeMb =
+    typeof fileSizeBytes === 'number' && fileSizeBytes > 0
+      ? Math.round(fileSizeBytes / 1048576)
+      : null;
+
+  if (isStorageOversizedError(error)) {
+    const sizeHint = sizeMb ? ` (${sizeMb} MB)` : '';
+    return new WhatsAppMediaError(
+      `El archivo es demasiado grande para guardarse${sizeHint}. El máximo permitido es 100 MB (límite global y del bucket whatsapp-media).`,
+      { statusCode: 413, code: 'storage_oversized' },
+    );
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  return new WhatsAppMediaError(
+    `No se pudo guardar el archivo en Storage: ${message}`,
+    { statusCode: 502, code: 'storage' },
+  );
+}
+
+async function tusUploadToWhatsAppBucket(
+  bytes: Uint8Array,
+  storagePath: string,
+  mimeType: string,
+): Promise<void> {
+  const { supabaseUrl, serviceRoleKey } = getStorageCredentials();
+  const endpoint = `${supabaseUrl}/storage/v1/upload/resumable`;
+  const authHeaders = {
+    Authorization: `Bearer ${serviceRoleKey}`,
+    'Tus-Resumable': '1.0.0',
+    'x-upsert': 'true',
+  };
+
+  const createRes = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      ...authHeaders,
+      'Upload-Length': String(bytes.byteLength),
+      'Upload-Metadata': buildTusUploadMetadata(storagePath, mimeType),
+    },
+  });
+
+  if (!createRes.ok) {
+    throw new Error(`TUS create failed (${createRes.status}): ${await createRes.text()}`);
+  }
+
+  const uploadUrl = createRes.headers.get('Location');
+  if (!uploadUrl) {
+    throw new Error('TUS create response missing Location header.');
+  }
+
+  let offset = 0;
+  while (offset < bytes.byteLength) {
+    const chunkEnd = Math.min(offset + STORAGE_TUS_CHUNK_BYTES, bytes.byteLength);
+    const chunk = bytes.subarray(offset, chunkEnd);
+    const patchRes = await fetch(uploadUrl, {
+      method: 'PATCH',
+      headers: {
+        ...authHeaders,
+        'Upload-Offset': String(offset),
+        'Content-Type': 'application/offset+octet-stream',
+      },
+      body: chunk,
+    });
+
+    if (!patchRes.ok) {
+      throw new Error(`TUS patch failed (${patchRes.status}): ${await patchRes.text()}`);
+    }
+
+    const nextOffset = patchRes.headers.get('Upload-Offset');
+    offset = nextOffset ? Number(nextOffset) : chunkEnd;
+  }
+}
+
+export async function uploadToWhatsAppBucket(
+  supabase: SupabaseClient,
+  bytes: Uint8Array,
+  storagePath: string,
+  mimeType: string,
+): Promise<void> {
+  if (bytes.byteLength > WHATSAPP_MEDIA_BUCKET_LIMIT_BYTES) {
+    throw new WhatsAppMediaError(
+      `El archivo pesa ${Math.round(bytes.byteLength / 1048576)} MB; el máximo permitido es 100 MB.`,
+      { statusCode: 413, code: 'storage_oversized' },
+    );
+  }
+
+  try {
+    if (bytes.byteLength <= STORAGE_RESUMABLE_THRESHOLD_BYTES) {
+      const { error: uploadError } = await supabase.storage
+        .from(WHATSAPP_MEDIA_BUCKET)
+        .upload(storagePath, bytes, { upsert: true, contentType: mimeType });
+      if (uploadError) throw uploadError;
+      return;
+    }
+
+    await tusUploadToWhatsAppBucket(bytes, storagePath, mimeType);
+  } catch (error) {
+    throw classifyStorageUploadError(error, bytes.byteLength);
+  }
 }
 
 export async function createWhatsAppMediaSignedUrl(
@@ -161,12 +322,7 @@ export async function persistToWhatsAppBucket(
   mimeType: string,
   expiresIn = DEFAULT_SIGNED_URL_EXPIRES_SECONDS,
 ): Promise<PersistedWhatsAppMedia> {
-  const { error: uploadError } = await supabase.storage
-    .from(WHATSAPP_MEDIA_BUCKET)
-    .upload(storagePath, bytes, { upsert: true, contentType: mimeType });
-  if (uploadError) {
-    throw uploadError;
-  }
+  await uploadToWhatsAppBucket(supabase, bytes, storagePath, mimeType);
 
   const signedUrl = await createWhatsAppMediaSignedUrl(
     supabase,
@@ -394,11 +550,7 @@ export async function resolveWhatsAppMediaById(params: {
       storagePath,
       error: String(storageError),
     });
-    throw new WhatsAppMediaError(
-      storageError instanceof Error
-        ? `No se pudo guardar el archivo en Storage: ${storageError.message}`
-        : 'No se pudo guardar el archivo en Storage.',
-      { statusCode: 502, code: 'storage' },
-    );
+    if (storageError instanceof WhatsAppMediaError) throw storageError;
+    throw classifyStorageUploadError(storageError, bytes.byteLength);
   }
 }
