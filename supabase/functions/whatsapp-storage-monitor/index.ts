@@ -15,8 +15,10 @@ type Row = Record<string, any>;
 export const OPTIMIZE_DUPLICATE_PDFS_CONFIRM = 'OPTIMIZAR_PDFS_DUPLICADOS';
 export const OPTIMIZE_STALE_CATALOG_CONFIRM = 'OPTIMIZAR_CATALOGOS_ANTIGUOS';
 export const DELETE_CONVERSATION_MEDIA_CONFIRM = 'ELIMINAR_MEDIA_CONVERSACION';
+export const RECONCILE_STORAGE_INDEX_CONFIRM = 'RECONCILIAR_INDICE_STORAGE';
 
 const SHA_BACKFILL_BATCH = 25;
+const BACKFILL_MAX_ITERATIONS = 20;
 
 interface CopyRow {
   asset_id: string;
@@ -98,10 +100,10 @@ async function handleDashboard(supabase: SupabaseClient) {
     supabase.rpc('get_storage_suggestions'),
   ]);
 
-  if (statsRes.error) throw statsRes.error;
-  if (overviewRes.error) throw overviewRes.error;
-  if (rankingRes.error) throw rankingRes.error;
-  if (suggestionsRes.error) throw suggestionsRes.error;
+  if (statsRes.error) throw new Error(`get_storage_stats: ${statsRes.error.message ?? JSON.stringify(statsRes.error)}`);
+  if (overviewRes.error) throw new Error(`get_storage_overview: ${overviewRes.error.message ?? JSON.stringify(overviewRes.error)}`);
+  if (rankingRes.error) throw new Error(`get_conversation_storage_ranking: ${rankingRes.error.message ?? JSON.stringify(rankingRes.error)}`);
+  if (suggestionsRes.error) throw new Error(`get_storage_suggestions: ${suggestionsRes.error.message ?? JSON.stringify(suggestionsRes.error)}`);
 
   const rankingJson = rankingRes.data as { rows?: Row[]; total_count?: number };
   return {
@@ -236,6 +238,7 @@ async function deleteMediaCopies(
 
 async function handleOptimizeDuplicatePdfs(
   supabase: SupabaseClient,
+  userRpc: SupabaseClient,
   userId: string,
   body: Row,
 ) {
@@ -246,7 +249,7 @@ async function handleOptimizeDuplicatePdfs(
   }
 
   const minAgeDays = Number(body.minAgeDays ?? 14);
-  const { data, error } = await supabase.rpc('get_duplicate_pdf_groups', { p_min_age_days: minAgeDays });
+  const { data, error } = await userRpc.rpc('get_duplicate_pdf_groups', { p_min_age_days: minAgeDays });
   if (error) throw error;
 
   const groups = (data ?? []) as DuplicateGroup[];
@@ -273,6 +276,7 @@ async function handleOptimizeDuplicatePdfs(
 
 async function handleOptimizeStaleCatalogPdfs(
   supabase: SupabaseClient,
+  userRpc: SupabaseClient,
   userId: string,
   body: Row,
 ) {
@@ -283,7 +287,7 @@ async function handleOptimizeStaleCatalogPdfs(
   }
 
   const minAgeDays = Number(body.minAgeDays ?? 30);
-  const { data, error } = await supabase.rpc('get_duplicate_pdf_groups', { p_min_age_days: minAgeDays });
+  const { data, error } = await userRpc.rpc('get_duplicate_pdf_groups', { p_min_age_days: minAgeDays });
   if (error) throw error;
 
   const groups = (data ?? []) as DuplicateGroup[];
@@ -358,15 +362,39 @@ async function handleDeleteConversationMedia(
 
 async function handleBackfillMetadata(
   supabase: SupabaseClient,
+  userRpc: SupabaseClient,
   userId: string,
   body: Row,
 ) {
   const dryRun = body.dryRun !== false;
-  const sizeResult = await supabase.rpc('backfill_media_metadata', { p_dry_run: dryRun });
-  if (sizeResult.error) throw sizeResult.error;
+  const batchLimit = Math.min(Math.max(Number(body.batchLimit ?? 500), 1), 1000);
+  const maxIterations = Math.min(Math.max(Number(body.maxIterations ?? BACKFILL_MAX_ITERATIONS), 1), 50);
+
+  let iterations = 0;
+  let totalUpdated = 0;
+  let remainingCandidates = 0;
+  let hasMore = false;
+  let lastSizeBackfill: Row = {};
+
+  while (iterations < maxIterations) {
+    const sizeResult = await userRpc.rpc('backfill_media_metadata', {
+      p_dry_run: dryRun,
+      p_batch_limit: batchLimit,
+    });
+    if (sizeResult.error) throw sizeResult.error;
+
+    const payload = (sizeResult.data ?? {}) as Row;
+    lastSizeBackfill = payload;
+    iterations += 1;
+    totalUpdated += Number(payload.updated ?? 0);
+    remainingCandidates = Number(payload.remaining_candidates ?? 0);
+    hasMore = Boolean(payload.has_more);
+
+    if (dryRun || !hasMore || Number(payload.candidates ?? 0) === 0) break;
+  }
 
   let shaUpdated = 0;
-  if (!dryRun && body.includeSha256 !== false) {
+  if (!dryRun && body.includeSha256 === true) {
     const { data: missing } = await supabase
       .from('whatsapp_media_assets')
       .select('id, storage_path, bucket_id')
@@ -393,15 +421,84 @@ async function handleBackfillMetadata(
     action: 'backfill_metadata',
     dryRun,
     bytesFreed: 0,
-    objectsAffected: (sizeResult.data as Row)?.updated ?? 0,
-    details: { sizeBackfill: sizeResult.data, shaUpdated },
+    objectsAffected: totalUpdated,
+    details: { sizeBackfill: lastSizeBackfill, shaUpdated, iterations, remainingCandidates },
     executedBy: userId,
   });
 
   return {
     dryRun,
-    sizeBackfill: sizeResult.data,
+    sizeBackfill: lastSizeBackfill,
+    iterations,
+    totalUpdated,
+    remainingCandidates,
+    hasMore,
     shaUpdated,
+  };
+}
+
+async function handleReconcileIndex(
+  supabase: SupabaseClient,
+  userRpc: SupabaseClient,
+  userId: string,
+  body: Row,
+) {
+  const dryRun = body.dryRun !== false;
+  const confirmation = String(body.confirmPhrase ?? '').trim();
+  const batchLimit = Math.min(Math.max(Number(body.batchLimit ?? 200), 1), 500);
+  const maxIterations = Math.min(Math.max(Number(body.maxIterations ?? 10), 1), 20);
+
+  if (!dryRun && confirmation !== RECONCILE_STORAGE_INDEX_CONFIRM) {
+    return jsonResponse({ error: 'Confirmación incorrecta.' }, 400);
+  }
+
+  let iterations = 0;
+  let totalInserted = 0;
+  let totalUpdatedLogs = 0;
+  let remainingOrphans = 0;
+  let hasMore = false;
+  let lastResult: Row = {};
+
+  while (iterations < maxIterations) {
+    const { data, error } = await userRpc.rpc('reconcile_storage_index', {
+      p_dry_run: dryRun,
+      p_batch_limit: batchLimit,
+    });
+    if (error) throw error;
+
+    const payload = (data ?? {}) as Row;
+    lastResult = payload;
+    iterations += 1;
+    totalInserted += Number(payload.inserted_assets ?? 0);
+    totalUpdatedLogs += Number(payload.updated_logs ?? 0);
+    remainingOrphans = Number(payload.remaining_orphans ?? 0);
+    hasMore = Boolean(payload.has_more);
+
+    if (dryRun || !hasMore || Number(payload.inserted_assets ?? 0) === 0) break;
+  }
+
+  await logOptimization(supabase, {
+    action: 'reconcile_index',
+    dryRun,
+    bytesFreed: 0,
+    objectsAffected: totalInserted,
+    details: {
+      updatedLogs: totalUpdatedLogs,
+      remainingOrphans,
+      iterations,
+      lastResult,
+    },
+    executedBy: userId,
+  });
+
+  return {
+    dryRun,
+    insertedAssets: totalInserted,
+    updatedLogs: totalUpdatedLogs,
+    remainingOrphans,
+    iterations,
+    hasMore,
+    lastResult,
   };
 }
 
@@ -409,27 +506,27 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
-    const { supabase, user } = await requireCrmAdmin(req);
+    const { supabase, userRpc, user } = await requireCrmAdmin(req);
     const body = await req.json().catch(() => ({}));
     const action = String(body.action ?? 'dashboard').trim();
 
     let result: unknown;
     switch (action) {
       case 'dashboard':
-        result = await handleDashboard(supabase);
+        result = await handleDashboard(userRpc);
         break;
       case 'ranking':
-        result = await handleRanking(supabase, body);
+        result = await handleRanking(userRpc, body);
         break;
       case 'analyze':
-        result = await handleAnalyze(supabase, body);
+        result = await handleAnalyze(userRpc, body);
         break;
       case 'optimize_duplicate_pdfs':
-        result = await handleOptimizeDuplicatePdfs(supabase, user.id, body);
+        result = await handleOptimizeDuplicatePdfs(supabase, userRpc, user.id, body);
         if (result instanceof Response) return result;
         break;
       case 'optimize_stale_catalog_pdfs':
-        result = await handleOptimizeStaleCatalogPdfs(supabase, user.id, body);
+        result = await handleOptimizeStaleCatalogPdfs(supabase, userRpc, user.id, body);
         if (result instanceof Response) return result;
         break;
       case 'delete_conversation_media':
@@ -437,7 +534,11 @@ Deno.serve(async (req) => {
         if (result instanceof Response) return result;
         break;
       case 'backfill_metadata':
-        result = await handleBackfillMetadata(supabase, user.id, body);
+        result = await handleBackfillMetadata(supabase, userRpc, user.id, body);
+        break;
+      case 'reconcile_index':
+        result = await handleReconcileIndex(supabase, userRpc, user.id, body);
+        if (result instanceof Response) return result;
         break;
       default:
         return jsonResponse({ error: `Acción desconocida: ${action}` }, 400);
@@ -446,6 +547,7 @@ Deno.serve(async (req) => {
     return jsonResponse(result);
   } catch (error) {
     if (error instanceof Response) return error;
+    console.error('[whatsapp-storage-monitor]', formatError(error), error);
     return jsonResponse({ error: formatError(error) }, 500);
   }
 });

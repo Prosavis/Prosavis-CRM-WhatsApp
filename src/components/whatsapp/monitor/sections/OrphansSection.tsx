@@ -16,7 +16,7 @@ const OrphansSection: React.FC<OrphansSectionProps> = ({ suggestions }) => {
   if (!orphanSuggestion) return null;
 
   return (
-    <BentoCard>
+    <BentoCard sx={{ height: '100%' }}>
       <Stack
         direction="row"
         alignItems="center"
@@ -38,8 +38,9 @@ const OrphansSection: React.FC<OrphansSectionProps> = ({ suggestions }) => {
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
             {orphanSuggestion.message}
           </Typography>
-          <Typography variant="caption" color="text.secondary">
-            Usa &quot;Analizar espacio&quot; en Optimización para ver el detalle y reconciliar.
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+            Usa &quot;Reconciliar índice&quot; en Optimización para crear filas en whatsapp_media_assets desde message_log.
+            Los objetos outbound o legacy sin referencia en message_log permanecen en Storage (no se borran).
           </Typography>
           <List dense>
             <ListItem disablePadding>

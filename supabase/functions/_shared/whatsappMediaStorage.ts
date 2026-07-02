@@ -387,6 +387,27 @@ export async function findExistingMediaAsset(
     };
   }
 
+  const { data: storageRow, error: storageError } = await supabase.rpc(
+    'find_storage_path_by_media_id',
+    { p_media_id: mediaId },
+  );
+  if (!storageError && storageRow && typeof storageRow === 'object') {
+    const row = storageRow as {
+      storage_path?: string;
+      size_bytes?: number | null;
+      mime_type?: string | null;
+    };
+    if (row.storage_path) {
+      return {
+        bucketId: WHATSAPP_MEDIA_BUCKET,
+        storagePath: String(row.storage_path),
+        mimeType: row.mime_type ? String(row.mime_type) : null,
+        sizeBytes: typeof row.size_bytes === 'number' ? row.size_bytes : null,
+        messageLogId: null,
+      };
+    }
+  }
+
   return null;
 }
 
@@ -499,18 +520,31 @@ export async function resolveWhatsAppMediaById(params: {
         params.expiresIn ?? DEFAULT_SIGNED_URL_EXPIRES_SECONDS,
         existing.bucketId,
       );
+      const mimeType = existing.mimeType ?? params.mimeTypeHint ?? 'application/octet-stream';
+      const fileSize = existing.sizeBytes ?? 0;
+
+      void backfillInboundMediaRecords({
+        supabase: params.supabase,
+        mediaId: params.mediaId,
+        storagePath: existing.storagePath,
+        mimeType,
+        fileSize,
+        signedUrl,
+      });
+
       return {
         storagePath: existing.storagePath,
         signedUrl,
-        mimeType: existing.mimeType ?? params.mimeTypeHint ?? 'application/octet-stream',
-        fileSize: existing.sizeBytes ?? 0,
+        mimeType,
+        fileSize,
         sha256: '',
       };
-    } catch {
-      console.warn('[resolveWhatsAppMediaById] signed URL failed for', {
-        mediaId: params.mediaId,
-        storagePath: existing.storagePath,
-      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new WhatsAppMediaError(
+        `No se pudo firmar URL de Storage: ${message}`,
+        { statusCode: 502, code: 'storage' },
+      );
     }
   }
 

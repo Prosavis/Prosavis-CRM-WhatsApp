@@ -1,119 +1,4 @@
--- Storage Monitor Intelligence: RPCs versionadas, optimization log, índices.
--- Fuente de verdad de bytes: storage.objects.metadata->>'size'
-
--- ── Audit trail ──────────────────────────────────────────────────────────────
-
-create table if not exists public.whatsapp_storage_optimization_log (
-  id uuid primary key default gen_random_uuid(),
-  action text not null,
-  dry_run boolean not null default true,
-  bytes_freed bigint not null default 0,
-  objects_affected integer not null default 0,
-  details jsonb not null default '{}',
-  executed_by uuid references auth.users(id),
-  created_at timestamptz not null default now()
-);
-
-create index if not exists whatsapp_storage_optimization_log_created_at_idx
-  on public.whatsapp_storage_optimization_log (created_at desc);
-
-alter table public.whatsapp_storage_optimization_log enable row level security;
-
-drop policy if exists "CRM admins read storage optimization log" on public.whatsapp_storage_optimization_log;
-create policy "CRM admins read storage optimization log"
-on public.whatsapp_storage_optimization_log for select to authenticated
-using (app_private.is_crm_admin());
-
--- ── Índices whatsapp_media_assets ────────────────────────────────────────────
-
-create index if not exists whatsapp_media_assets_sha256_mime_idx
-  on public.whatsapp_media_assets (sha256, mime_type)
-  where sha256 is not null;
-
-create index if not exists whatsapp_media_assets_stable_key_size_idx
-  on public.whatsapp_media_assets (conversation_stable_key, size_bytes);
-
--- ── Umbrales configurables (sin redeploy) ────────────────────────────────────
-
-insert into public.platform_settings (key, value)
-values (
-  'storage_monitor_thresholds',
-  '{
-    "plan_free_bytes": 1073741824,
-    "warning_percent": 80,
-    "critical_percent": 90,
-    "heavy_chat_bytes": 20971520,
-    "metadata_drift_percent": 10,
-    "stale_catalog_days": 30,
-    "duplicate_pdf_min_copies": 3,
-    "duplicate_pdf_min_age_days": 14
-  }'::jsonb
-)
-on conflict (key) do nothing;
-
--- ── Helpers internos ─────────────────────────────────────────────────────────
-
-create or replace function app_private.storage_object_size(p_metadata jsonb)
-returns bigint
-language sql
-immutable
-as $$
-  select coalesce(nullif(trim(p_metadata->>'size'), '')::bigint, 0);
-$$;
-
-create or replace function app_private.storage_object_mimetype(p_metadata jsonb, p_name text)
-returns text
-language sql
-immutable
-as $$
-  select lower(coalesce(
-    nullif(trim(p_metadata->>'mimetype'), ''),
-    nullif(trim(p_metadata->>'contentType'), ''),
-    case
-      when p_name ~* '\.(jpe?g|png|webp|gif)$' then 'image/unknown'
-      when p_name ~* '\.(mp4|3gp)$' then 'video/unknown'
-      when p_name ~* '\.(ogg|mp3|aac|m4a|amr)$' then 'audio/unknown'
-      when p_name ~* '\.pdf$' then 'application/pdf'
-      else 'application/octet-stream'
-    end
-  ));
-$$;
-
-create or replace function app_private.storage_mime_category(p_mime text)
-returns text
-language sql
-immutable
-as $$
-  select case
-    when p_mime like 'image/%' then 'image'
-    when p_mime like 'video/%' then 'video'
-    when p_mime like 'audio/%' then 'audio'
-    when p_mime like 'text/%' or p_mime = 'application/pdf' then
-      case when p_mime like 'text/%' then 'text' else 'document' end
-    when p_mime like 'application/%' then 'document'
-    else 'other'
-  end;
-$$;
-
-create or replace function app_private.storage_monitor_thresholds()
-returns jsonb
-language sql
-stable
-as $$
-  select coalesce(
-    (select value from public.platform_settings where key = 'storage_monitor_thresholds'),
-    '{
-      "plan_free_bytes": 1073741824,
-      "warning_percent": 80,
-      "critical_percent": 90,
-      "heavy_chat_bytes": 20971520,
-      "metadata_drift_percent": 10,
-      "stale_catalog_days": 30,
-      "duplicate_pdf_min_copies": 3,
-      "duplicate_pdf_min_age_days": 14
-    }'::jsonb
-  );
-$$;
+-- Fix: Edge Functions usan service_role; is_crm_admin() requiere auth.uid().
 
 create or replace function app_private.can_access_storage_monitor()
 returns boolean
@@ -297,31 +182,29 @@ begin
     left join public.whatsapp_conversations c on c.stable_key = s.stable_key
     left join message_counts m on m.stable_key = s.stable_key
   )
-  select
-    (select count(*)::int from ranked),
-    (
-      select coalesce(jsonb_agg(row_to_json(x)), '[]'::jsonb)
-      from (
-        select
-          stable_key,
-          contact_name,
-          contact_phone,
-          message_count,
-          media_count,
-          total_bytes,
-          last_message_at
-        from ranked
-        order by
-          case when v_sort = 'bytes' then total_bytes end desc nulls last,
-          case when v_sort = 'messages' then message_count end desc nulls last,
-          case when v_sort = 'media' then media_count end desc nulls last,
-          case when v_sort = 'date' then extract(epoch from last_message_at) end desc nulls last,
-          stable_key asc
-        limit greatest(p_limit, 1)
-        offset greatest(p_offset, 0)
-      ) x
-    )
-  into v_total, v_rows;
+  select count(*)::int into v_total from ranked;
+
+  select coalesce(jsonb_agg(row_to_json(t)), '[]'::jsonb)
+  into v_rows
+  from (
+    select
+      stable_key,
+      contact_name,
+      contact_phone,
+      message_count,
+      media_count,
+      total_bytes,
+      last_message_at
+    from ranked
+    order by
+      case when v_sort = 'bytes' then total_bytes end desc nulls last,
+      case when v_sort = 'messages' then message_count end desc nulls last,
+      case when v_sort = 'media' then media_count end desc nulls last,
+      case when v_sort = 'date' then extract(epoch from last_message_at) end desc nulls last,
+      stable_key asc
+    limit greatest(p_limit, 1)
+    offset greatest(p_offset, 0)
+  ) t;
 
   return jsonb_build_object('rows', v_rows, 'total_count', v_total);
 end;
@@ -554,7 +437,7 @@ begin
       'id', 'storage_critical',
       'severity', 'critical',
       'title', 'Almacenamiento crítico',
-      'message', format('Uso al %s%% del plan Free (1 GB). Libera espacio urgentemente.', v_used_percent),
+      'message', format('Uso al %.1f%% del plan Free (1 GB). Libera espacio urgentemente.', v_used_percent),
       'action', 'optimize_duplicate_pdfs'
     ));
   elsif v_used_percent >= coalesce((v_thresholds->>'warning_percent')::numeric, 80) then
@@ -562,7 +445,7 @@ begin
       'id', 'storage_warning',
       'severity', 'warning',
       'title', 'Almacenamiento elevado',
-      'message', format('Uso al %s%% del plan. Revisa el ranking completo de chats.', v_used_percent),
+      'message', format('Uso al %.1f%% del plan. Revisa el ranking completo de chats.', v_used_percent),
       'action', 'ranking'
     ));
   end if;
@@ -641,7 +524,7 @@ begin
       'id', 'metadata_drift',
       'severity', 'warning',
       'title', 'Metadata incompleta',
-      'message', format('%s%% de assets sin size_bytes. Sincroniza metadata.', v_drift_percent),
+      'message', format('%.1f%% de assets sin size_bytes. Sincroniza metadata.', v_drift_percent),
       'action', 'backfill_metadata'
     ));
   end if;

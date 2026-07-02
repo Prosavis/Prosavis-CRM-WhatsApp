@@ -3,15 +3,22 @@ import {
   Stack, Typography, Button, Dialog, DialogTitle, DialogContent,
   DialogActions, Alert, CircularProgress, Checkbox, FormControlLabel, List, ListItem, ListItemText,
 } from '@mui/material';
-import { Tune as TuneIcon, Sync as SyncIcon, PictureAsPdf as PdfIcon } from '@mui/icons-material';
+import {
+  Tune as TuneIcon,
+  Sync as SyncIcon,
+  PictureAsPdf as PdfIcon,
+  Link as LinkIcon,
+} from '@mui/icons-material';
 import BentoCard from '../ui/BentoCard';
 import {
   analyzeStorage,
   optimizeDuplicatePdfs,
   optimizeStaleCatalogPdfs,
   backfillMediaMetadata,
+  reconcileStorageIndex,
   OPTIMIZE_DUPLICATE_PDFS_CONFIRM,
   OPTIMIZE_STALE_CATALOG_CONFIRM,
+  RECONCILE_STORAGE_INDEX_CONFIRM,
 } from '@/services/monitorService';
 
 function formatBytes(bytes: number): string {
@@ -21,7 +28,7 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 ** i).toFixed(1)} ${units[i]}`;
 }
 
-type OptimizeAction = 'duplicate_pdfs' | 'stale_catalog' | 'backfill' | null;
+type OptimizeAction = 'duplicate_pdfs' | 'stale_catalog' | 'backfill' | 'reconcile' | null;
 
 interface OptimizationSectionProps {
   onComplete: () => void;
@@ -36,6 +43,11 @@ const OptimizationSection: React.FC<OptimizationSectionProps> = ({ onComplete })
     redundantCopies?: number;
     uniquePdfGroups?: number;
     candidates?: number;
+    insertedAssets?: number;
+    updatedLogs?: number;
+    remainingOrphans?: number;
+    remainingCandidates?: number;
+    hasMore?: boolean;
     previewPaths?: string[];
     message?: string;
   } | null>(null);
@@ -84,10 +96,21 @@ const OptimizationSection: React.FC<OptimizationSectionProps> = ({ onComplete })
         });
       } else if (next === 'backfill') {
         const result = await backfillMediaMetadata({ dryRun: true });
-        const sizeBackfill = (result as { sizeBackfill?: { candidates?: number } }).sizeBackfill;
+        const sizeBackfill = (result as { sizeBackfill?: { candidates?: number; remaining_candidates?: number } }).sizeBackfill;
         setPreview({
           candidates: sizeBackfill?.candidates ?? 0,
-          message: `${sizeBackfill?.candidates ?? 0} assets con size_bytes desincronizado.`,
+          remainingCandidates: sizeBackfill?.remaining_candidates ?? 0,
+          hasMore: (result as { hasMore?: boolean }).hasMore,
+          message: `${sizeBackfill?.candidates ?? 0} assets sincronizarán size_bytes en este lote (${sizeBackfill?.remaining_candidates ?? 0} restantes tras el lote).`,
+        });
+      } else if (next === 'reconcile') {
+        const result = await reconcileStorageIndex({ dryRun: true });
+        setPreview({
+          insertedAssets: (result as { insertedAssets?: number }).insertedAssets,
+          updatedLogs: (result as { updatedLogs?: number }).updatedLogs,
+          remainingOrphans: (result as { remainingOrphans?: number }).remainingOrphans,
+          hasMore: (result as { hasMore?: boolean }).hasMore,
+          message: `Se indexarían ${(result as { insertedAssets?: number }).insertedAssets ?? 0} assets y se actualizarían ${(result as { updatedLogs?: number }).updatedLogs ?? 0} mensajes. Quedarían ~${(result as { remainingOrphans?: number }).remainingOrphans ?? 0} huérfanos sin referencia en message_log.`,
         });
       }
       setAction(next);
@@ -111,6 +134,11 @@ const OptimizationSection: React.FC<OptimizationSectionProps> = ({ onComplete })
         await optimizeStaleCatalogPdfs({ dryRun: false, confirmPhrase: OPTIMIZE_STALE_CATALOG_CONFIRM });
       } else if (action === 'backfill') {
         await backfillMediaMetadata({ dryRun: false });
+      } else if (action === 'reconcile') {
+        await reconcileStorageIndex({
+          dryRun: false,
+          confirmPhrase: RECONCILE_STORAGE_INDEX_CONFIRM,
+        });
       }
       setDialogOpen(false);
       onComplete();
@@ -127,7 +155,11 @@ const OptimizationSection: React.FC<OptimizationSectionProps> = ({ onComplete })
       ? 'Limpiar catálogos PDF antiguos'
       : action === 'backfill'
         ? 'Sincronizar metadata'
-        : 'Análisis de espacio';
+        : action === 'reconcile'
+          ? 'Reconciliar índice'
+          : 'Análisis de espacio';
+
+  const needsDestructiveConfirm = action === 'duplicate_pdfs' || action === 'stale_catalog';
 
   return (
     <>
@@ -143,14 +175,17 @@ const OptimizationSection: React.FC<OptimizationSectionProps> = ({ onComplete })
           <Button variant="outlined" onClick={runAnalyze} disabled={loading}>
             Analizar espacio
           </Button>
+          <Button variant="outlined" startIcon={<LinkIcon />} onClick={() => openOptimize('reconcile')} disabled={loading}>
+            Reconciliar índice
+          </Button>
+          <Button variant="outlined" startIcon={<SyncIcon />} onClick={() => openOptimize('backfill')} disabled={loading}>
+            Sincronizar metadata
+          </Button>
           <Button variant="outlined" startIcon={<PdfIcon />} onClick={() => openOptimize('duplicate_pdfs')} disabled={loading}>
             PDFs duplicados
           </Button>
           <Button variant="outlined" onClick={() => openOptimize('stale_catalog')} disabled={loading}>
             Catálogos antiguos
-          </Button>
-          <Button variant="outlined" startIcon={<SyncIcon />} onClick={() => openOptimize('backfill')} disabled={loading}>
-            Sincronizar metadata
           </Button>
         </Stack>
       </BentoCard>
@@ -159,7 +194,7 @@ const OptimizationSection: React.FC<OptimizationSectionProps> = ({ onComplete })
         <DialogTitle>{dialogTitle}</DialogTitle>
         <DialogContent>
           {preview?.message && <Alert severity="info" sx={{ mb: 2 }}>{preview.message}</Alert>}
-          {action && action !== 'backfill' && (
+          {needsDestructiveConfirm && (
             <Alert severity="warning" sx={{ mb: 2 }}>
               Se liberarían <strong>{formatBytes(preview?.bytesReclaimable ?? 0)}</strong> eliminando{' '}
               <strong>{preview?.redundantCopies ?? 0}</strong> copias redundantes.
@@ -167,7 +202,17 @@ const OptimizationSection: React.FC<OptimizationSectionProps> = ({ onComplete })
           )}
           {action === 'backfill' && (
             <Typography variant="body2" sx={{ mb: 2 }}>
-              {preview?.candidates ?? 0} registros sincronizarán size_bytes desde Storage.
+              {preview?.candidates ?? 0} registros en este lote.
+              {(preview?.remainingCandidates ?? 0) > 0 && (
+                <> Tras ejecutar, quedarán {preview?.remainingCandidates} por sincronizar{preview?.hasMore ? ' (se procesarán en bucle automático).' : '.'}</>
+              )}
+            </Typography>
+          )}
+          {action === 'reconcile' && (
+            <Typography variant="body2" sx={{ mb: 2 }}>
+              Insertará filas en <code>whatsapp_media_assets</code> desde <code>message_log</code> y Storage.
+              No borra archivos. Los huérfanos sin referencia en message_log (~{preview?.remainingOrphans ?? 0}) permanecen en Storage.
+              {preview?.hasMore && ' Se procesarán varios lotes automáticamente.'}
             </Typography>
           )}
           {preview?.previewPaths && preview.previewPaths.length > 0 && (
@@ -179,10 +224,16 @@ const OptimizationSection: React.FC<OptimizationSectionProps> = ({ onComplete })
               ))}
             </List>
           )}
-          {action && (
+          {action && needsDestructiveConfirm && (
             <FormControlLabel
               control={<Checkbox checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />}
               label="Entiendo que no se puede deshacer"
+            />
+          )}
+          {action && !needsDestructiveConfirm && (
+            <FormControlLabel
+              control={<Checkbox checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />}
+              label="Confirmo ejecutar esta operación"
             />
           )}
         </DialogContent>
@@ -191,7 +242,7 @@ const OptimizationSection: React.FC<OptimizationSectionProps> = ({ onComplete })
           {action && (
             <Button
               variant="contained"
-              color="warning"
+              color={needsDestructiveConfirm ? 'warning' : 'primary'}
               onClick={execute}
               disabled={loading || !confirmed}
               startIcon={loading ? <CircularProgress size={16} color="inherit" /> : undefined}

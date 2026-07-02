@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Box, Stack, Typography, Button, Chip, IconButton, Tooltip,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
@@ -46,7 +47,8 @@ const HeavyChatsSection: React.FC<HeavyChatsSectionProps> = ({
   const [chats, setChats] = useState<HeavyChat[]>(initialChats);
   const [total, setTotal] = useState(totalCount);
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [sort, setSort] = useState<SortField>('bytes');
   const [fetching, setFetching] = useState(false);
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; chat: HeavyChat | null; mode: 'media' | 'chat' }>({
@@ -81,9 +83,17 @@ const HeavyChatsSection: React.FC<HeavyChatsSectionProps> = ({
   }, [initialChats, totalCount]);
 
   useEffect(() => {
-    if (page === 0 && sort === 'bytes' && rowsPerPage === 10) return;
+    if (page === 0 && sort === 'bytes' && rowsPerPage === 25) return;
     loadPage();
   }, [page, rowsPerPage, sort, loadPage]);
+
+  const handleOpenInInbox = useCallback((chat: HeavyChat) => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('tab');
+    next.set('conversation', chat.stableKey);
+    if (chat.contactPhone) next.set('focusPhone', chat.contactPhone);
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const handleDeleteMedia = (chat: HeavyChat) => {
     setConfirmed(false);
@@ -181,7 +191,13 @@ const HeavyChatsSection: React.FC<HeavyChatsSectionProps> = ({
                   {chats.map((chat, i) => {
                     const pct = (chat.totalBytes / maxBytes) * 100;
                     return (
-                      <TableRow key={chat.stableKey} hover>
+                      <TableRow
+                        key={chat.stableKey}
+                        hover
+                        onClick={() => handleOpenInInbox(chat)}
+                        sx={{ cursor: 'pointer' }}
+                        aria-label={`Abrir en inbox: ${chat.contactName || chat.contactPhone || 'Sin nombre'}`}
+                      >
                         <TableCell sx={{ pl: 2 }}>{medalIcon(i)}</TableCell>
                         <TableCell>
                           <Typography variant="body2" fontWeight={600} noWrap sx={{ maxWidth: 180 }}>
@@ -216,7 +232,11 @@ const HeavyChatsSection: React.FC<HeavyChatsSectionProps> = ({
                         </TableCell>
                         <TableCell align="center" sx={{ pr: 2 }}>
                           <Tooltip title="Eliminar multimedia (Storage + DB)">
-                            <IconButton size="small" color="warning" onClick={() => handleDeleteMedia(chat)}>
+                            <IconButton
+                              size="small"
+                              color="warning"
+                              onClick={(e) => { e.stopPropagation(); handleDeleteMedia(chat); }}
+                            >
                               <DeleteSweepIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
@@ -238,7 +258,7 @@ const HeavyChatsSection: React.FC<HeavyChatsSectionProps> = ({
                 setRowsPerPage(parseInt(e.target.value, 10));
                 setPage(0);
               }}
-              rowsPerPageOptions={[5, 10, 20, 50]}
+              rowsPerPageOptions={[10, 25, 50, 100]}
               labelRowsPerPage="Filas"
               disabled={fetching}
             />

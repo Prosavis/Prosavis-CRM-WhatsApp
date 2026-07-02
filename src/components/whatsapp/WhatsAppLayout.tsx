@@ -118,6 +118,9 @@ interface WhatsAppLayoutProps {
   focusPhone?: string;
   /** Llamar al cerrar el chat que coincidía con `focusPhone` (p. ej. quitar el query de la URL). */
   onClearFocusPhone?: () => void;
+  focusConversation?: string;
+  /** Llamar al cerrar el chat que coincidía con `focusConversation` (p. ej. quitar el query de la URL). */
+  onClearFocusConversation?: () => void;
   /** Métricas del inbox (contactos totales, tabs, tags) para cabeceras externas o analítica. */
   onInboxMetrics?: (metrics: WhatsAppInboxMetrics) => void;
 }
@@ -127,6 +130,8 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   wabaId,
   focusPhone,
   onClearFocusPhone,
+  focusConversation,
+  onClearFocusConversation,
   onInboxMetrics,
 }) => {
   const theme = useTheme();
@@ -418,6 +423,15 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     }
   }, [focusPhone, conversations]);
 
+  useEffect(() => {
+    if (focusConversation && conversations.length > 0) {
+      const match = conversations.find((c) => c.id === focusConversation);
+      if (match) {
+        setSelectedConversation(match);
+      }
+    }
+  }, [focusConversation, conversations]);
+
   const recipientPhoneForTemplates = selectedConversation
     ? selectedConversation.contactPhone || selectedConversation.phone || ''
     : '';
@@ -469,12 +483,15 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
         if (focusPhone && onClearFocusPhone && conversationMatchesFocusPhone(focusPhone, conversation)) {
           onClearFocusPhone();
         }
+        if (focusConversation && onClearFocusConversation && conversation.id === focusConversation) {
+          onClearFocusConversation();
+        }
         setSelectedConversation(null);
         return;
       }
       setSelectedConversation(conversation);
     },
-    [selectedConversation?.id, focusPhone, onClearFocusPhone],
+    [selectedConversation?.id, focusPhone, onClearFocusPhone, focusConversation, onClearFocusConversation],
   );
 
   const handleContextMarkReadToggle = useCallback(async (conversation: WhatsAppConversation) => {

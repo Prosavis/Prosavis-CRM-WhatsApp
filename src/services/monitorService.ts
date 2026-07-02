@@ -130,11 +130,13 @@ export type StorageMonitorAction =
   | 'optimize_duplicate_pdfs'
   | 'optimize_stale_catalog_pdfs'
   | 'delete_conversation_media'
-  | 'backfill_metadata';
+  | 'backfill_metadata'
+  | 'reconcile_index';
 
 export const DELETE_CONVERSATION_MEDIA_CONFIRM = 'ELIMINAR_MEDIA_CONVERSACION';
 export const OPTIMIZE_DUPLICATE_PDFS_CONFIRM = 'OPTIMIZAR_PDFS_DUPLICADOS';
 export const OPTIMIZE_STALE_CATALOG_CONFIRM = 'OPTIMIZAR_CATALOGOS_ANTIGUOS';
+export const RECONCILE_STORAGE_INDEX_CONFIRM = 'RECONCILIAR_INDICE_STORAGE';
 
 type RankingSort = 'bytes' | 'messages' | 'date' | 'media';
 
@@ -152,8 +154,21 @@ interface EdgeDashboardResponse {
 
 async function invokeStorageMonitor<T>(body: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.functions.invoke<T>('whatsapp-storage-monitor', { body });
-  if (error) throw error;
+  if (error) {
+    const ctx = (error as { context?: Response }).context;
+    if (ctx) {
+      try {
+        const payload = await ctx.json() as { error?: string };
+        if (payload?.error) throw new Error(payload.error);
+      } catch (parseErr) {
+        if (parseErr instanceof Error && parseErr.message !== error.message) throw parseErr;
+      }
+    }
+    throw error;
+  }
   if (!data) throw new Error('Respuesta vacía del monitor de Storage');
+  const payload = data as unknown as { error?: string };
+  if (payload?.error) throw new Error(payload.error);
   return data;
 }
 
@@ -261,11 +276,33 @@ export async function deleteConversationMedia(params: {
   });
 }
 
-export async function backfillMediaMetadata(params?: { dryRun?: boolean; includeSha256?: boolean }) {
+export async function backfillMediaMetadata(params?: {
+  dryRun?: boolean;
+  includeSha256?: boolean;
+  batchLimit?: number;
+  maxIterations?: number;
+}) {
   return invokeStorageMonitor({
     action: 'backfill_metadata',
     dryRun: params?.dryRun ?? true,
-    includeSha256: params?.includeSha256 ?? true,
+    includeSha256: params?.includeSha256 ?? false,
+    batchLimit: params?.batchLimit ?? 500,
+    maxIterations: params?.maxIterations ?? 20,
+  });
+}
+
+export async function reconcileStorageIndex(params?: {
+  dryRun?: boolean;
+  confirmPhrase?: string;
+  batchLimit?: number;
+  maxIterations?: number;
+}) {
+  return invokeStorageMonitor({
+    action: 'reconcile_index',
+    dryRun: params?.dryRun ?? true,
+    confirmPhrase: params?.confirmPhrase,
+    batchLimit: params?.batchLimit ?? 200,
+    maxIterations: params?.maxIterations ?? 10,
   });
 }
 

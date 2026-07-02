@@ -21,7 +21,7 @@ const StorageLimitsSection: React.FC = () => {
   const [open, setOpen] = useState(false);
 
   return (
-    <BentoCard>
+    <BentoCard sx={{ height: '100%' }}>
       <Stack
         direction="row"
         alignItems="center"

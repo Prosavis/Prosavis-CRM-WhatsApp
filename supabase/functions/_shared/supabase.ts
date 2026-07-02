@@ -16,6 +16,19 @@ export function getServiceClient() {
   });
 }
 
+/** Cliente con JWT del admin para RPCs que validan app_private.is_crm_admin(). */
+export function getUserRpcClient(authHeader: string) {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')?.trim();
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY')?.trim();
+  if (!supabaseUrl || !anonKey) {
+    throw new Error('Faltan SUPABASE_URL o SUPABASE_ANON_KEY.');
+  }
+  return createClient(supabaseUrl, anonKey, {
+    global: { headers: { Authorization: authHeader } },
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
 export async function requireCrmAdmin(req: Request) {
   const authHeader = req.headers.get('Authorization');
   if (!authHeader) {
@@ -41,5 +54,10 @@ export async function requireCrmAdmin(req: Request) {
     throw new Response('Usuario sin permisos CRM.', { status: 403 });
   }
 
-  return { supabase, user: userData.user, profile };
+  return {
+    supabase,
+    userRpc: getUserRpcClient(authHeader),
+    user: userData.user,
+    profile,
+  };
 }

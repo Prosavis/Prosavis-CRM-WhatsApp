@@ -75,23 +75,27 @@ const MonitorTab: React.FC = () => {
 
           <StorageOverviewSection storage={storage} overview={overview} loading={loading && !dashboard} />
 
-          <StorageLimitsSection />
+          <HeavyChatsSection
+            initialChats={heavyChats}
+            totalCount={rankingTotalCount}
+            loading={loading}
+            onRefresh={loadData}
+          />
 
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '7fr 5fr' }, gap: 2 }}>
-            <HeavyChatsSection
-              initialChats={heavyChats}
-              totalCount={rankingTotalCount}
-              loading={loading}
-              onRefresh={loadData}
-            />
+          <MetricsGrid metrics={metrics} loading={loading} />
+
+          <Box sx={{
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' },
+            gap: 2,
+            alignItems: 'stretch',
+          }}>
+            <OrphansSection suggestions={suggestions} />
             <ConnectionsSection connections={connections} />
+            <StorageLimitsSection />
           </Box>
 
           <OptimizationSection onComplete={loadData} />
-
-          <OrphansSection suggestions={suggestions} />
-
-          <MetricsGrid metrics={metrics} loading={loading} />
         </Box>
       )}
     </Box>

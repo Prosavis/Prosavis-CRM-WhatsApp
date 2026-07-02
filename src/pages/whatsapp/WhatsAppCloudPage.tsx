@@ -246,6 +246,7 @@ const WhatsAppCloudPage: React.FC = () => {
   );
 
   const focusPhone = searchParams.get('focusPhone') || undefined;
+  const focusConversation = searchParams.get('conversation') || undefined;
 
   const handleOpenLeadInInbox = useCallback(async (phone: string, name?: string) => {
     try {
@@ -266,6 +267,12 @@ const WhatsAppCloudPage: React.FC = () => {
   const handleClearFocusPhone = useCallback(() => {
     const next = new URLSearchParams(searchParams);
     next.delete('focusPhone');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  const handleClearFocusConversation = useCallback(() => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('conversation');
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams]);
 
@@ -446,6 +453,8 @@ const WhatsAppCloudPage: React.FC = () => {
             wabaId={wabaId}
             focusPhone={focusPhone}
             onClearFocusPhone={handleClearFocusPhone}
+            focusConversation={focusConversation}
+            onClearFocusConversation={handleClearFocusConversation}
             onInboxMetrics={handleInboxMetrics}
           />
         </Box>
