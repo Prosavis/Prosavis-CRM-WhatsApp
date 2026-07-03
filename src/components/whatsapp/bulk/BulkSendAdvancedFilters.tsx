@@ -13,8 +13,10 @@ import {
   ToggleButton,
   ToggleButtonGroup,
   Typography,
+  useTheme,
 } from '@mui/material';
 import type { WhatsAppTag } from '@/services/whatsappService';
+import { coloredChipSx } from '@/utils/coloredChipStyles';
 import {
   BULK_AUDIENCE_TAG_FILTER_LABELS,
   BULK_CLASSIFICATION_LABELS,
@@ -44,6 +46,7 @@ const BulkSendAdvancedFilters: React.FC<BulkSendAdvancedFiltersProps> = ({
   showDirectoryTags = false,
   onToggleDirectoryTags,
 }) => {
+  const theme = useTheme();
   const patch = (partial: Partial<BulkAudienceAdvancedFilters>) => {
     onChange({ ...filters, ...partial });
   };
@@ -88,9 +91,8 @@ const BulkSendAdvancedFilters: React.FC<BulkSendAdvancedFiltersProps> = ({
                   label={option.name}
                   size="small"
                   sx={{
-                    bgcolor: option.color || '#1976d2',
-                    color: '#fff',
-                    '& .MuiChip-deleteIcon': { color: 'rgba(255,255,255,0.8)' },
+                    ...coloredChipSx(theme, option.color, 'filled'),
+                    '& .MuiChip-deleteIcon': { color: 'inherit' },
                   }}
                 />
               ))

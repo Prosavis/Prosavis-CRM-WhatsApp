@@ -1,6 +1,7 @@
 import React from 'react';
-import { Box, Typography } from '@mui/material';
+import { Box, Typography, useTheme } from '@mui/material';
 import { motion } from 'framer-motion';
+import { getMetricAccent } from '@/utils/coloredChipStyles';
 
 interface MetricCardProps {
   label: string;
@@ -16,6 +17,8 @@ function formatNumber(n: number): string {
 }
 
 const MetricCard: React.FC<MetricCardProps> = ({ label, value, icon, color, bgColor, delay = 0 }) => {
+  const theme = useTheme();
+  const accent = getMetricAccent(theme, color, bgColor);
   const [displayed, setDisplayed] = React.useState(0);
 
   React.useEffect(() => {
@@ -53,13 +56,13 @@ const MetricCard: React.FC<MetricCardProps> = ({ label, value, icon, color, bgCo
         '&:hover': { boxShadow: (t) => t.shadows[2] },
       }}>
         <Box sx={{
-          width: 36, height: 36, borderRadius: '50%', bgcolor: bgColor,
+          width: 36, height: 36, borderRadius: '50%', bgcolor: accent.bg,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          mx: 'auto', mb: 0.75, color,
+          mx: 'auto', mb: 0.75, color: accent.color,
         }}>
           {icon}
         </Box>
-        <Typography variant="h5" fontWeight={800} fontFamily="'JetBrains Mono', monospace" sx={{ color, lineHeight: 1.2 }}>
+        <Typography variant="h5" fontWeight={800} fontFamily="'JetBrains Mono', monospace" sx={{ color: accent.color, lineHeight: 1.2 }}>
           {formatNumber(displayed)}
         </Typography>
         <Typography variant="caption" color="text.secondary" fontWeight={500}>

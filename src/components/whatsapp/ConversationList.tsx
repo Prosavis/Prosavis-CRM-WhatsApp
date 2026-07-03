@@ -25,6 +25,7 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  useTheme,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import SearchIcon from '@mui/icons-material/Search';
@@ -63,6 +64,7 @@ import {
   type WhatsAppTabCounts,
 } from '@/utils/whatsappInboxStats';
 import { useLongPress } from '@/hooks/useLongPress';
+import { coloredChipSx } from '@/utils/coloredChipStyles';
 
 export type BulkTagMode = 'add' | 'replace';
 
@@ -262,6 +264,7 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
   onToggleBulkSelect,
   onContextMenu,
 }) => {
+  const theme = useTheme();
   const longPress = useLongPress({ onLongPress: onEnterSelection });
 
   const handleClick = () => {
@@ -368,12 +371,7 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
                     key={tag.id}
                     label={tag.name}
                     size="small"
-                    sx={{
-                      height: 18,
-                      fontSize: '0.65rem',
-                      bgcolor: tag.color || '#1976d2',
-                      color: '#fff',
-                    }}
+                    sx={coloredChipSx(theme, tag.color, 'filled', { height: 18, fontSize: '0.65rem' })}
                   />
                 ))}
                 {convTags.length > 3 && (
@@ -434,6 +432,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
   onBulkPin,
   onBulkDelete,
 }) => {
+  const theme = useTheme();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<FilterType>(readStoredInboxFilter);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
@@ -763,9 +762,8 @@ const ConversationList: React.FC<ConversationListProps> = ({
                   label={tagMap.get(tid)?.name || tid}
                   size="small"
                   sx={{
-                    bgcolor: tagMap.get(tid)?.color || '#1976d2',
-                    color: '#fff',
                     height: 22,
+                    ...coloredChipSx(theme, tagMap.get(tid)?.color, 'filled'),
                   }}
                   onDelete={() =>
                     setSelectedTagIds((prev) => prev.filter((x) => x !== tid))

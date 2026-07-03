@@ -35,6 +35,7 @@ import {
   FormControlLabel,
   Radio,
   RadioGroup,
+  useTheme,
 } from '@mui/material';
 import {
   WhatsApp as WhatsAppIcon,
@@ -65,6 +66,7 @@ import {
 } from '@/services/whatsappService';
 import { directoryService } from '@/services/directoryService';
 import type { WhatsAppInboxMetrics } from '@/utils/whatsappInboxStats';
+import { getMetricAccent } from '@/utils/coloredChipStyles';
 import {
   WHATSAPP_FOCUS_CHAT_EVENT,
   dismissDesktopNotificationsOnboarding,
@@ -156,6 +158,7 @@ export const PURGE_WHATSAPP_LOG_CONFIRM_PHRASE = 'BORRAR_LOGS_WHATSAPP';
 const { phoneNumberId, wabaId, phoneDisplay, botLabel } = WHATSAPP_CLOUD_PRODUCTION;
 
 const WhatsAppCloudPage: React.FC = () => {
+  const theme = useTheme();
   const [searchParams, setSearchParams] = useSearchParams();
   const { playNavigation } = useSoundEffects();
   const { registerTabController, unregisterTabController } = useAdminTour();
@@ -592,7 +595,9 @@ const WhatsAppCloudPage: React.FC = () => {
 
           {/* KPIs */}
           <Grid container spacing={2} sx={{ mb: 3 }} data-tour="whatsapp-metrics-kpis">
-            {KPI_CARDS.map(({ key, label, icon, color, bgLight }) => (
+            {KPI_CARDS.map(({ key, label, icon, color, bgLight }) => {
+              const accent = getMetricAccent(theme, color, bgLight);
+              return (
               <Grid item xs={6} sm={4} md={2} key={key}>
                 <Card
                   elevation={0}
@@ -611,13 +616,13 @@ const WhatsAppCloudPage: React.FC = () => {
                         width: 44,
                         height: 44,
                         borderRadius: '50%',
-                        bgcolor: bgLight,
+                        bgcolor: accent.bg,
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         mx: 'auto',
                         mb: 1,
-                        color,
+                        color: accent.color,
                       }}
                     >
                       {React.cloneElement(icon, { sx: { fontSize: 22 } })}
@@ -625,7 +630,7 @@ const WhatsAppCloudPage: React.FC = () => {
                     {metricsLoading ? (
                       <CircularProgress size={22} sx={{ my: 0.5 }} />
                     ) : (
-                      <Typography variant="h4" fontWeight={800} sx={{ color, lineHeight: 1.2 }}>
+                      <Typography variant="h4" fontWeight={800} sx={{ color: accent.color, lineHeight: 1.2 }}>
                         {(metrics?.[key as keyof MetricsData] as number ?? 0).toLocaleString('es-CO')}
                       </Typography>
                     )}
@@ -635,7 +640,8 @@ const WhatsAppCloudPage: React.FC = () => {
                   </CardContent>
                 </Card>
               </Grid>
-            ))}
+            );
+            })}
           </Grid>
 
           {/* Tasa de respuesta y Directorio */}

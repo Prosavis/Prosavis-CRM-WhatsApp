@@ -10,6 +10,7 @@ import {
   Popover,
   Stack,
   Typography,
+  useTheme,
 } from '@mui/material';
 import LocalOfferOutlinedIcon from '@mui/icons-material/LocalOfferOutlined';
 import type { DirectoryEntry } from '@/types/lead';
@@ -17,6 +18,7 @@ import { directoryService } from '@/services/directoryService';
 import { listWhatsAppTags } from '@/services/whatsappService';
 import type { WhatsAppTag } from '@/types/whatsapp';
 import { getClassificationLabel, tagNamesToIds } from '@/utils/classificationLabels';
+import { coloredChipSx } from '@/utils/coloredChipStyles';
 
 export interface DirectoryClassificationTagPickerProps {
   entry: DirectoryEntry;
@@ -45,6 +47,7 @@ export const DirectoryClassificationTagPicker: React.FC<
   compact = false,
   label = 'Clasificación (tags)',
 }) => {
+  const theme = useTheme();
   const [catalog, setCatalog] = useState<WhatsAppTag[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -165,11 +168,7 @@ export const DirectoryClassificationTagPicker: React.FC<
               key={tag.id}
               label={tag.name}
               size="small"
-              sx={{
-                height: 22,
-                bgcolor: tag.color ? `${tag.color}22` : undefined,
-                borderColor: tag.color ?? undefined,
-              }}
+              sx={coloredChipSx(theme, tag.color, 'outlined', { height: 22 })}
               variant="outlined"
             />
           ))
@@ -219,8 +218,7 @@ export const DirectoryClassificationTagPicker: React.FC<
                       size="small"
                       sx={{
                         mr: 1,
-                        bgcolor: tag.color ? `${tag.color}22` : undefined,
-                        borderColor: tag.color ?? undefined,
+                        ...coloredChipSx(theme, tag.color, checked ? 'filled' : 'outlined'),
                       }}
                       variant={checked ? 'filled' : 'outlined'}
                     />

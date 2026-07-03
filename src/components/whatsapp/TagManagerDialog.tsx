@@ -250,9 +250,14 @@ const TagManagerDialog: React.FC<TagManagerDialogProps> = ({
                   cursor: 'pointer',
                   border:
                     (colorTarget === 'new' ? newColor : editColor) === c
-                      ? `3px solid ${theme.palette.text.primary}`
-                      : '2px solid transparent',
-                  '&:hover': { opacity: 0.8 },
+                      ? `3px solid ${theme.palette.mode === 'dark' ? theme.palette.common.white : theme.palette.text.primary}`
+                      : `2px solid ${theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.25)' : 'transparent'}`,
+                  boxShadow:
+                    (colorTarget === 'new' ? newColor : editColor) === c && theme.palette.mode === 'dark'
+                      ? `0 0 0 2px ${theme.palette.background.paper}, 0 0 10px ${c}`
+                      : undefined,
+                  '&:hover': { opacity: 0.85, transform: 'scale(1.08)' },
+                  transition: 'transform 0.15s ease, opacity 0.15s ease',
                 })}
               />
             ))}

@@ -24,6 +24,7 @@ import {
   Checkbox,
   FormControlLabel,
   Switch,
+  useTheme,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import BlockIcon from '@mui/icons-material/Block';
@@ -85,6 +86,7 @@ import { isForwardableMessage } from '@/services/forwardWhatsAppMessage';
 import { ContactAvatar } from '@/components/common/ContactAvatar';
 import { pickContactPhotoUrl } from '@/utils/contactAvatar';
 import { getLastInboundAt } from '@/utils/whatsappTemplateSuggestions';
+import { coloredChipSx } from '@/utils/coloredChipStyles';
 
 interface ChatAreaProps {
   conversation: WhatsAppConversation;
@@ -237,6 +239,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   myDisplayName,
   peerPresences = [],
 }) => {
+  const theme = useTheme();
   const [messages, setMessages] = useState<WhatsAppMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [suggestionDraft, setSuggestionDraft] = useState('');
@@ -1063,7 +1066,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                       key={tag.id}
                       label={tag.name}
                       size="small"
-                      sx={{ height: 18, fontSize: '0.65rem', bgcolor: tag.color || '#1976d2', color: '#fff' }}
+                      sx={coloredChipSx(theme, tag.color, 'filled', { height: 18, fontSize: '0.65rem' })}
                     />
                   );
                 })}
