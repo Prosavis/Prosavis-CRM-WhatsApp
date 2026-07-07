@@ -78,6 +78,7 @@ const ReminderMessageDetailDialog: React.FC<ReminderMessageDetailDialogProps> = 
       await retryReminderSend({
         appointmentId: row.appointmentId,
         recipientType: row.recipientType,
+        memberId: row.recipientMemberId,
       });
       onRetrySuccess?.();
       onClose();

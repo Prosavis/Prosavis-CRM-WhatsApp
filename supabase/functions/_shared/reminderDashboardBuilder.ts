@@ -41,6 +41,9 @@ export interface ReminderRow {
   appointmentId: string;
   recipientType: RecipientType;
   recipientKey: string | null;
+  /** UID del co-asignado específico (solo `recipientType: 'professional'`);
+   * desambigua filas cuando una cita tiene varios profesionales. */
+  recipientMemberId: string | null;
   recipientName: string;
   phone: string | null;
   phoneMasked: string | null;
@@ -273,6 +276,58 @@ function parseTimestamp(value: unknown): string | null {
   return null;
 }
 
+/**
+ * Nombres de todas las auxiliares co-asignadas, unidos en formato español
+ * ("Laura", "Laura y María", "Laura, María y Pedro"). Copia Deno de
+ * `buildProfessionalNamesDisplay` en `appointmentReminderShared.ts` (Firebase).
+ */
+function buildProfessionalNamesDisplay(data: Record<string, unknown>): string {
+  const rawNames = Array.isArray(data.assignedTeamMemberNames) ? data.assignedTeamMemberNames : [];
+  const assignedNames = rawNames
+    .map((name) => (typeof name === 'string' ? name.trim() : ''))
+    .filter((name) => name.length > 0);
+
+  const providerName = String(data.providerName ?? '').trim();
+  const names = assignedNames.length > 0
+    ? assignedNames
+    : providerName
+      ? [providerName]
+      : [];
+
+  if (names.length === 0) return 'Profesional';
+  if (names.length === 1) return names[0];
+  return `${names.slice(0, -1).join(', ')} y ${names[names.length - 1]}`;
+}
+
+interface AssignedMember {
+  id: string;
+  name: string | null;
+}
+
+/**
+ * IDs (y nombres, si están disponibles) de los profesionales co-asignados a
+ * una cita. Retrocompatible: si `assignedTeamMemberIds` está ausente o
+ * vacío, retorna solo `providerId`. Copia Deno de
+ * `getAppointmentAssignedMemberIds` (Firebase, `appointmentTeamAssignment.ts`).
+ */
+function getAssignedMembers(data: Record<string, unknown>): AssignedMember[] {
+  const rawIds = Array.isArray(data.assignedTeamMemberIds) ? data.assignedTeamMemberIds : [];
+  const ids = rawIds.filter(
+    (id): id is string => typeof id === 'string' && id.trim().length > 0,
+  );
+
+  if (ids.length > 0) {
+    const rawNames = Array.isArray(data.assignedTeamMemberNames) ? data.assignedTeamMemberNames : [];
+    return ids.map((id, index) => ({
+      id,
+      name: typeof rawNames[index] === 'string' ? (rawNames[index] as string).trim() || null : null,
+    }));
+  }
+
+  const providerId = String(data.providerId ?? '').trim();
+  return providerId ? [{ id: providerId, name: null }] : [];
+}
+
 function getAppointmentAddress(data: Record<string, unknown>): string | null {
   const serviceAddress = data.serviceAddress as Record<string, unknown> | undefined;
   if (serviceAddress?.addressLine && typeof serviceAddress.addressLine === 'string') {
@@ -309,8 +364,12 @@ function normalizeLogPhone(phone: string | null | undefined): string | null {
   return normalizeDirectoryPhoneE164(phone) ?? phone.replace(/\D/g, '');
 }
 
-function logMapKey(appointmentId: string, recipientType: RecipientType): string {
-  return `${appointmentId}:${recipientType}`;
+function logMapKey(
+  appointmentId: string,
+  recipientType: RecipientType,
+  memberId: string | null,
+): string {
+  return `${appointmentId}:${recipientType}:${memberId ?? ''}`;
 }
 
 async function fetchReminderLogs(
@@ -340,9 +399,10 @@ async function fetchReminderLogs(
 
     const appointmentId = String(payload.appointment_id ?? '').trim();
     const recipientType = payload.recipient_type as RecipientType | undefined;
+    const memberId = String(payload.member_id ?? '').trim() || null;
 
     if (appointmentId && recipientType) {
-      const key = logMapKey(appointmentId, recipientType);
+      const key = logMapKey(appointmentId, recipientType, memberId);
       if (!byAppointment.has(key)) byAppointment.set(key, row);
     }
 
@@ -367,11 +427,12 @@ async function fetchReminderLogs(
 function resolveLogForRow(
   appointmentId: string,
   recipientType: RecipientType,
+  memberId: string | null,
   phone: string | null,
   logMaps: { byAppointment: LogMap; byPhone: AppointmentPhoneIndex },
   options?: { allowPhoneFallback?: boolean },
 ): MessageLogRow | undefined {
-  const direct = logMaps.byAppointment.get(logMapKey(appointmentId, recipientType));
+  const direct = logMaps.byAppointment.get(logMapKey(appointmentId, recipientType, memberId));
   if (direct) return direct;
 
   if (options?.allowPhoneFallback === false) return undefined;
@@ -381,22 +442,46 @@ function resolveLogForRow(
   return logMaps.byPhone[recipientType].get(phoneKey);
 }
 
+/**
+ * `memberId` selecciona el estado de un co-asignado específico dentro de
+ * `professionalReminderStatus` (Fase 2, cita con >1 profesional); si se omite
+ * usa los campos planos legacy `recordatorioProfesional*` (un solo
+ * profesional). No aplica para `recipientType: 'client'`.
+ */
 function readRecipientTrackingFields(
   data: Record<string, unknown>,
   recipientType: RecipientType,
+  memberId?: string | null,
 ): {
+  sentAt: string | null;
   lastError: string | null;
   attemptCount: number;
   lastAttemptAt: string | null;
 } {
   if (recipientType === 'client') {
     return {
+      sentAt: parseTimestamp(data.recordatorio24hSentAt),
       lastError: String(data.recordatorio24hLastError ?? '').trim() || null,
       attemptCount: Number(data.recordatorio24hAttemptCount ?? 0) || 0,
       lastAttemptAt: parseTimestamp(data.recordatorio24hLastAttemptAt),
     };
   }
+
+  if (memberId) {
+    const statusMap = data.professionalReminderStatus as
+      | Record<string, Record<string, unknown>>
+      | undefined;
+    const status = statusMap?.[memberId];
+    return {
+      sentAt: parseTimestamp(status?.sentAt),
+      lastError: String(status?.lastError ?? '').trim() || null,
+      attemptCount: Number(status?.attemptCount ?? 0) || 0,
+      lastAttemptAt: parseTimestamp(status?.lastAttemptAt),
+    };
+  }
+
   return {
+    sentAt: parseTimestamp(data.recordatorioProfesionalSentAt),
     lastError: String(data.recordatorioProfesionalLastError ?? '').trim() || null,
     attemptCount: Number(data.recordatorioProfesionalAttemptCount ?? 0) || 0,
     lastAttemptAt: parseTimestamp(data.recordatorioProfesionalLastAttemptAt),
@@ -543,6 +628,11 @@ function resolveDeliveryStatus(params: {
   return 'pending';
 }
 
+/**
+ * `memberOverride` genera la fila de un co-asignado específico (Fase 2, cita
+ * con >1 profesional) en vez de la fila legacy de un solo profesional; se
+ * omite para `recipientType: 'client'` y para citas con un solo profesional.
+ */
 async function buildReminderRow(
   doc: { id: string; data: Record<string, unknown> },
   recipientType: RecipientType,
@@ -551,35 +641,38 @@ async function buildReminderRow(
   meta: ReturnType<typeof buildMeta>,
   supabase: SupabaseClient,
   prefs: RecipientPreferenceMap,
+  memberOverride?: AssignedMember,
 ): Promise<ReminderRow> {
   const data = doc.data;
   const appointmentId = doc.id;
   const appointmentStatus = String(data.status ?? 'UNKNOWN');
   const clientName = String(data.clientName ?? '').trim() || 'Cliente';
-  const professionalName = String(data.providerName ?? '').trim() || 'Sin profesional asignado';
+  const primaryProfessionalName = String(data.providerName ?? '').trim() || 'Sin profesional asignado';
+  const professionalNamesDisplay = buildProfessionalNamesDisplay(data);
   const scheduledDate = parseTimestamp(data.scheduledDate);
-  const sentAtField = recipientType === 'client'
-    ? 'recordatorio24hSentAt'
-    : 'recordatorioProfesionalSentAt';
-  const sentAt = parseTimestamp(data[sentAtField]);
   const templateName = recipientType === 'client' ? TEMPLATE_CLIENT : TEMPLATE_PROFESSIONAL;
-  const tracking = readRecipientTrackingFields(data, recipientType);
-  const recipientKey = await resolveRecipientKey(supabase, data, recipientType);
+  const tracking = readRecipientTrackingFields(data, recipientType, memberOverride?.id ?? null);
+  const sentAt = tracking.sentAt;
+
+  const recipientKey = memberOverride
+    ? memberOverride.id
+    : await resolveRecipientKey(supabase, data, recipientType);
   const remindersEnabled = getRemindersEnabled(prefs, recipientKey, recipientType);
+  const recipientMemberId = recipientType === 'professional' ? recipientKey : null;
 
   let phone: string | null = null;
   let missingProfessional = false;
   if (recipientType === 'client') {
     phone = await resolveClientPhoneForAppointment(supabase, data);
   } else {
-    const resolved = await resolveProfessionalPhoneForAppointment(data);
+    const resolved = await resolveProfessionalPhoneForAppointment(data, memberOverride?.id);
     phone = resolved.phone;
     missingProfessional = resolved.missingProfessional;
   }
 
   phone = normalizeDirectoryPhoneE164(phone) ?? phone;
 
-  const log = resolveLogForRow(appointmentId, recipientType, phone, logMaps, {
+  const log = resolveLogForRow(appointmentId, recipientType, recipientMemberId, phone, logMaps, {
     allowPhoneFallback: section !== 'upcoming',
   });
   const deliveryStatus = resolveDeliveryStatus({
@@ -603,12 +696,16 @@ async function buildReminderRow(
     deliveryStatus,
   });
 
-  const recipientName = recipientType === 'client' ? clientName : professionalName;
+  const memberDisplayName = memberOverride?.name?.trim() || 'Profesional';
+  const recipientName = recipientType === 'client'
+    ? clientName
+    : (memberOverride ? memberDisplayName : primaryProfessionalName);
 
   return {
     appointmentId,
     recipientType,
     recipientKey,
+    recipientMemberId,
     recipientName,
     phone,
     phoneMasked: phone,
@@ -625,7 +722,7 @@ async function buildReminderRow(
     messageBody: log?.message_body ?? null,
     conversationStableKey: log?.conversation_stable_key ?? null,
     address: getAppointmentAddress(data),
-    professionalName,
+    professionalName: professionalNamesDisplay,
     clientName,
     failureReason,
     attemptCount: tracking.attemptCount,
@@ -672,9 +769,19 @@ async function buildRowsForDocs(
     clients.push(
       await buildReminderRow(doc, 'client', section, logMaps, meta, supabase, prefs),
     );
-    professionals.push(
-      await buildReminderRow(doc, 'professional', section, logMaps, meta, supabase, prefs),
-    );
+
+    const members = getAssignedMembers(doc.data);
+    if (members.length <= 1) {
+      professionals.push(
+        await buildReminderRow(doc, 'professional', section, logMaps, meta, supabase, prefs),
+      );
+    } else {
+      for (const member of members) {
+        professionals.push(
+          await buildReminderRow(doc, 'professional', section, logMaps, meta, supabase, prefs, member),
+        );
+      }
+    }
   }
 
   return { clients, professionals };
@@ -686,9 +793,17 @@ async function collectPrefsForDocs(
 ): Promise<RecipientPreferenceMap> {
   const keys: Array<{ recipientKey: string; recipientType: RecipientType }> = [];
   for (const doc of docs) {
-    for (const recipientType of ['client', 'professional'] as RecipientType[]) {
-      const recipientKey = await resolveRecipientKey(supabase, doc.data, recipientType);
-      if (recipientKey) keys.push({ recipientKey, recipientType });
+    const clientKey = await resolveRecipientKey(supabase, doc.data, 'client');
+    if (clientKey) keys.push({ recipientKey: clientKey, recipientType: 'client' });
+
+    const members = getAssignedMembers(doc.data);
+    if (members.length <= 1) {
+      const professionalKey = await resolveRecipientKey(supabase, doc.data, 'professional');
+      if (professionalKey) keys.push({ recipientKey: professionalKey, recipientType: 'professional' });
+    } else {
+      for (const member of members) {
+        keys.push({ recipientKey: member.id, recipientType: 'professional' });
+      }
     }
   }
   return loadRecipientPreferences(supabase, keys);
@@ -778,9 +893,19 @@ export async function buildSnapshotRowsForServiceDate(
     rows.push(
       await buildReminderRow(doc, 'client', section, logMaps, meta, supabase, prefs),
     );
-    rows.push(
-      await buildReminderRow(doc, 'professional', section, logMaps, meta, supabase, prefs),
-    );
+
+    const members = getAssignedMembers(doc.data);
+    if (members.length <= 1) {
+      rows.push(
+        await buildReminderRow(doc, 'professional', section, logMaps, meta, supabase, prefs),
+      );
+    } else {
+      for (const member of members) {
+        rows.push(
+          await buildReminderRow(doc, 'professional', section, logMaps, meta, supabase, prefs, member),
+        );
+      }
+    }
   }
 
   return rows;
@@ -812,7 +937,7 @@ function buildRetryAppointmentPayload(
 ) {
   return {
     clientName: String(data.clientName ?? 'Cliente'),
-    professionalName: String(data.providerName ?? 'Profesional'),
+    professionalName: buildProfessionalNamesDisplay(data),
     scheduledDate: String(data.scheduledDate ?? ''),
     address: getAppointmentAddressFromData(data),
     durationMinutes: Number(data.duration ?? 0) || 0,
@@ -822,10 +947,16 @@ function buildRetryAppointmentPayload(
   };
 }
 
+/**
+ * `memberId` identifica al co-asignado a reintentar cuando la cita tiene más
+ * de un profesional (Fase 2); requerido en ese caso, ignorado para
+ * `recipientType: 'client'` y para citas con un solo profesional.
+ */
 export async function handleRetry(
   supabase: SupabaseClient,
   appointmentId: string,
   recipientType: RecipientType,
+  memberId?: string | null,
 ): Promise<Response> {
   const trimmedId = appointmentId.trim();
   if (!trimmedId) {
@@ -840,7 +971,18 @@ export async function handleRetry(
     return jsonResponse({ error: 'Cita no encontrada.' }, 404);
   }
 
-  const recipientKey = await resolveRecipientKey(supabase, data, recipientType);
+  const assignedMembers = recipientType === 'professional' ? getAssignedMembers(data) : [];
+  const isMultiMember = assignedMembers.length > 1;
+  const trimmedMemberId = memberId?.trim() || null;
+
+  if (isMultiMember && (!trimmedMemberId || !assignedMembers.some((m) => m.id === trimmedMemberId))) {
+    return jsonResponse({ error: 'memberId inválido para esta cita.' }, 400);
+  }
+
+  const effectiveMemberId = isMultiMember ? trimmedMemberId : null;
+
+  const recipientKey = effectiveMemberId
+    ?? await resolveRecipientKey(supabase, data, recipientType);
   if (recipientKey) {
     const prefs = await loadRecipientPreferences(supabase, [{ recipientKey, recipientType }]);
     const enabled = getRemindersEnabled(prefs, recipientKey, recipientType);
@@ -849,11 +991,8 @@ export async function handleRetry(
     }
   }
 
-  const sentAtField = recipientType === 'client'
-    ? 'recordatorio24hSentAt'
-    : 'recordatorioProfesionalSentAt';
-  const existingSentAt = parseTimestamp(data[sentAtField]);
-  if (existingSentAt) {
+  const tracking = readRecipientTrackingFields(data, recipientType, effectiveMemberId);
+  if (tracking.sentAt) {
     return jsonResponse({ error: 'El recordatorio ya fue enviado.' }, 409);
   }
 
@@ -861,7 +1000,7 @@ export async function handleRetry(
   if (recipientType === 'client') {
     phone = await resolveClientPhoneForAppointment(supabase, data);
   } else {
-    const resolved = await resolveProfessionalPhoneForAppointment(data);
+    const resolved = await resolveProfessionalPhoneForAppointment(data, effectiveMemberId ?? undefined);
     phone = resolved.phone;
     if (resolved.missingProfessional) {
       return jsonResponse({ error: 'Cita sin profesional asignado.' }, 400);
@@ -887,14 +1026,21 @@ export async function handleRetry(
         attemptCount: 'recordatorio24hAttemptCount',
         sentAt: 'recordatorio24hSentAt',
       }
-    : {
-        lastAttemptAt: 'recordatorioProfesionalLastAttemptAt',
-        lastError: 'recordatorioProfesionalLastError',
-        attemptCount: 'recordatorioProfesionalAttemptCount',
-        sentAt: 'recordatorioProfesionalSentAt',
-      };
+    : effectiveMemberId
+      ? {
+          lastAttemptAt: `professionalReminderStatus.${effectiveMemberId}.lastAttemptAt`,
+          lastError: `professionalReminderStatus.${effectiveMemberId}.lastError`,
+          attemptCount: `professionalReminderStatus.${effectiveMemberId}.attemptCount`,
+          sentAt: `professionalReminderStatus.${effectiveMemberId}.sentAt`,
+        }
+      : {
+          lastAttemptAt: 'recordatorioProfesionalLastAttemptAt',
+          lastError: 'recordatorioProfesionalLastError',
+          attemptCount: 'recordatorioProfesionalAttemptCount',
+          sentAt: 'recordatorioProfesionalSentAt',
+        };
 
-  const currentCount = Number(data[attemptFields.attemptCount] ?? 0) || 0;
+  const currentCount = tracking.attemptCount;
   const nowIso = new Date().toISOString();
 
   await patchFirestoreDocument('appointments', trimmedId, {
@@ -914,6 +1060,7 @@ export async function handleRetry(
         recipientPhone: phone,
         recipientType,
         appointmentData,
+        memberId: recipientType === 'professional' ? (recipientKey ?? undefined) : undefined,
       }),
     });
   } catch (error) {

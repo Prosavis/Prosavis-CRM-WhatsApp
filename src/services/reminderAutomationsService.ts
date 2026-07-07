@@ -44,6 +44,8 @@ export interface RetryReminderResult {
 export async function retryReminderSend(params: {
   appointmentId: string;
   recipientType: 'client' | 'professional';
+  /** UID del co-asignado a reintentar (citas con más de un profesional). */
+  memberId?: string | null;
 }): Promise<RetryReminderResult> {
   const { data, error } = await supabase.functions.invoke<RetryReminderResult>(
     'reminder-automations-monitor',
@@ -52,6 +54,7 @@ export async function retryReminderSend(params: {
         action: 'retry',
         appointmentId: params.appointmentId,
         recipientType: params.recipientType,
+        memberId: params.memberId ?? undefined,
       },
     },
   );

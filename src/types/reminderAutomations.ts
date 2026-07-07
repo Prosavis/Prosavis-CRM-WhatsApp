@@ -16,6 +16,9 @@ export interface ReminderRow {
   appointmentId: string;
   recipientType: ReminderRecipientType;
   recipientKey: string | null;
+  /** UID del co-asignado específico (solo `recipientType: 'professional'`);
+   * desambigua filas cuando una cita tiene varios profesionales. */
+  recipientMemberId: string | null;
   recipientName: string;
   phone: string | null;
   phoneMasked: string | null;
@@ -239,6 +242,9 @@ export function historyItemToReminderRow(item: HistoryBatchItem): ReminderRow {
     appointmentId: item.appointmentId,
     recipientType: item.recipientType,
     recipientKey: item.recipientKey,
+    // `recipient_key` de una fila "professional" ya es el UID del co-asignado
+    // (ver resolveRecipientKey), así que no requiere columna nueva en Supabase.
+    recipientMemberId: item.recipientType === 'professional' ? item.recipientKey : null,
     recipientName: item.recipientName ?? '—',
     phone: item.phone,
     phoneMasked: item.phone,

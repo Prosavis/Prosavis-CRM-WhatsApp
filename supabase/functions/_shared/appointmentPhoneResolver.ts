@@ -214,10 +214,16 @@ export async function resolveClientPhoneForAppointment(
   return null;
 }
 
+/**
+ * `uidOverride` permite resolver el teléfono de un co-asignado específico
+ * (Fase 2 de recordatorios multi-cleaner) en vez de derivarlo del
+ * profesional principal de la cita.
+ */
 export async function resolveProfessionalPhoneForAppointment(
   data: Record<string, unknown>,
+  uidOverride?: string,
 ): Promise<{ phone: string | null; missingProfessional: boolean }> {
-  const uid = String(data.teamMemberId ?? data.providerId ?? '').trim();
+  const uid = (uidOverride ?? String(data.teamMemberId ?? data.providerId ?? '')).trim();
   if (!uid) return { phone: null, missingProfessional: true };
   const phone = await getFirestoreUserPhone(uid);
   return { phone, missingProfessional: false };

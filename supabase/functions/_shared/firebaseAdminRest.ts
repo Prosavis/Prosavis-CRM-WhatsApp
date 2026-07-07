@@ -462,7 +462,33 @@ export async function deleteFirestoreDocument(
   }
 }
 
-/** Actualiza campos de un documento Firestore (patch parcial). */
+/**
+ * Escribe `value` en `root` siguiendo `pathParts` (dot-path), creando los
+ * `mapValue` intermedios necesarios. Permite actualizar campos anidados
+ * (ej. `professionalReminderStatus.<memberId>.sentAt`) vía REST, donde
+ * Firestore requiere que `document.fields` refleje la estructura anidada
+ * real (los puntos en `updateMask.fieldPaths` sí se interpretan como path,
+ * pero las claves de `fields` no).
+ */
+function setNestedFirestoreValue(
+  root: Record<string, FirestoreValue>,
+  pathParts: string[],
+  value: FirestoreValue,
+): void {
+  let current = root;
+  for (let i = 0; i < pathParts.length - 1; i++) {
+    const part = pathParts[i];
+    const existing = current[part] as { mapValue?: { fields?: Record<string, FirestoreValue> } } | undefined;
+    if (!existing?.mapValue) {
+      current[part] = { mapValue: { fields: {} } };
+    }
+    current = (current[part] as { mapValue: { fields: Record<string, FirestoreValue> } }).mapValue.fields;
+  }
+  current[pathParts[pathParts.length - 1]] = value;
+}
+
+/** Actualiza campos de un documento Firestore (patch parcial). Soporta
+ * dot-paths anidados (ej. `professionalReminderStatus.<memberId>.sentAt`). */
 export async function patchFirestoreDocument(
   collectionId: string,
   documentId: string,
@@ -481,7 +507,7 @@ export async function patchFirestoreDocument(
 
   const firestoreFields: Record<string, FirestoreValue> = {};
   for (const [key, value] of Object.entries(fields)) {
-    firestoreFields[key] = toFirestorePatchValue(value);
+    setNestedFirestoreValue(firestoreFields, key.split('.'), toFirestorePatchValue(value));
   }
 
   const res = await fetch(url, {

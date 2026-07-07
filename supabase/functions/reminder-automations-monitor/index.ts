@@ -103,7 +103,8 @@ Deno.serve(async (req) => {
     if (action === 'retry') {
       const appointmentId = String(body.appointmentId ?? '').trim();
       const recipientType = body.recipientType as RecipientType;
-      return await handleRetry(supabase, appointmentId, recipientType);
+      const memberId = body.memberId ? String(body.memberId).trim() : null;
+      return await handleRetry(supabase, appointmentId, recipientType, memberId);
     }
 
     if (action === 'history') {

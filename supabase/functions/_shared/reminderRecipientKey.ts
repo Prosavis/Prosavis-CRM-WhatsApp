@@ -12,13 +12,19 @@ type SupabaseClient = any;
 
 export type RecipientType = 'client' | 'professional';
 
+/**
+ * `uidOverride` permite resolver la key de un co-asignado específico (Fase 2
+ * de recordatorios multi-cleaner) en vez de derivarlo del profesional
+ * principal de la cita.
+ */
 export async function resolveRecipientKey(
   supabase: SupabaseClient,
   data: Record<string, unknown>,
   recipientType: RecipientType,
+  uidOverride?: string,
 ): Promise<string | null> {
   if (recipientType === 'professional') {
-    return String(data.teamMemberId ?? data.providerId ?? '').trim() || null;
+    return (uidOverride ?? String(data.teamMemberId ?? data.providerId ?? '')).trim() || null;
   }
 
   const clientId = String(data.clientId ?? '').trim();

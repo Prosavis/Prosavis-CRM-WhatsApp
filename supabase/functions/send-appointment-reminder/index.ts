@@ -50,6 +50,8 @@ interface ReminderPayload {
   recipientPhone: string;
   recipientType: 'client' | 'professional';
   appointmentData: AppointmentData;
+  /** UID del profesional destinatario (co-asignación multi-cleaner, Fase 2). */
+  memberId?: string;
 }
 
 // ──────────────────────────────────────────────
@@ -213,7 +215,7 @@ Deno.serve(async (req) => {
 
     // ── 2. Validar payload ──
     const body = await req.json().catch(() => ({})) as ReminderPayload;
-    const { recipientPhone, recipientType, appointmentData } = body;
+    const { recipientPhone, recipientType, appointmentData, memberId } = body;
 
     if (!recipientPhone || !recipientType || !appointmentData) {
       return jsonResponse(
@@ -355,6 +357,7 @@ Deno.serve(async (req) => {
           source: 'reminder_scheduler',
           recipient_type: recipientType,
           appointment_id: appointmentData.appointmentId,
+          member_id: memberId || null,
         },
       },
       /* agentUid= */ null,

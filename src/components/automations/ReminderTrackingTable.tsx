@@ -134,7 +134,10 @@ const ReminderTrackingTable: React.FC<ReminderTrackingTableProps> = ({
                     : 'Activar o desactivar recordatorio 24h para este destinatario';
 
                 return (
-                  <TableRow key={`${row.appointmentId}-${row.recipientType}`} hover>
+                  <TableRow
+                    key={`${row.appointmentId}-${row.recipientType}-${row.recipientMemberId ?? ''}`}
+                    hover
+                  >
                     <TableCell>
                       <StackCopyId id={row.appointmentId} />
                     </TableCell>
