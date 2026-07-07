@@ -1,6 +1,8 @@
 ---
 description: Skills obligatorias para Prosavis-CRM-WhatsApp (Supabase + Vercel + WABA)
-alwaysApply: true
+globs:
+  - Prosavis-CRM-WhatsApp/**
+alwaysApply: false
 ---
 
 # Skills obligatorias (CRM WhatsApp)
