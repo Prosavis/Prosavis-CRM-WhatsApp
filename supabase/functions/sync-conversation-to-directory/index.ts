@@ -1,4 +1,5 @@
 import { corsHeaders } from '../_shared/cors.ts';
+import { isUsableName } from '../_shared/contactDisplayName.ts';
 import {
   directoryPhoneKey,
   directoryPhoneLookupVariants,
@@ -42,12 +43,6 @@ function safeInt(value: unknown): number | null {
     return Number.isFinite(n) ? Math.max(0, n) : null;
   }
   return null;
-}
-
-function isUsableDirectoryName(name: string | null): boolean {
-  if (!name || name.trim().length < 2) return false;
-  if (!/\p{L}/u.test(name)) return false;
-  return !/\p{Extended_Pictographic}/u.test(name);
 }
 
 Deno.serve(async (req) => {
@@ -97,7 +92,8 @@ Deno.serve(async (req) => {
     // para que el nombre verificado prevalezca al propagarse a crm_directory.
     const waProfileName = safeString(record.whatsapp_profile_name);
     const contactName = safeString(record.contact_name);
-    const displayName = contactName || waProfileName;
+    const rawDisplayName = contactName || waProfileName;
+    const displayName = isUsableName(rawDisplayName) ? rawDisplayName : null;
 
     // --- Determinar si la conversación está activa ---
     const isActive = record.state === 'active';
@@ -157,7 +153,7 @@ Deno.serve(async (req) => {
     // Prioridad: existing record > WhatsApp data
     if (existingEntry) {
       const existingFullName = safeString(existingEntry.full_name as string | undefined);
-      if (isUsableDirectoryName(existingFullName)) {
+      if (isUsableName(existingFullName)) {
         delete entry.full_name;
       } else if (displayName && existingFullName && existingFullName !== displayName) {
         if (existingFullName.length > 3 && !/^\d+$/.test(existingFullName)) {

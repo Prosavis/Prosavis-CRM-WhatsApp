@@ -35,6 +35,7 @@ import { AppointmentService } from '@/services/appointmentService';
 import type { Appointment } from '@/types/appointment';
 import type { DirectoryChannel, DirectoryEntry } from '@/types/lead';
 import { normalizeDirectoryPhoneE164 } from '@/utils/directoryPhone';
+import { isUsableName } from '@/utils/contactDisplayName';
 
 const ENTRY_STATUSES = ['active', 'inactive', 'opt_out'];
 const QUALITY_TAGS = ['good', 'standard', 'bad'];
@@ -361,8 +362,8 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
           updates.phone = convPhone;
         }
 
-        const waName = conversation.whatsappProfileName || conversation.contactName;
-        if (waName && (!entry.fullName || entry.fullName.trim().length === 0)) {
+        const waName = conversation.contactName || conversation.whatsappProfileName;
+        if (isUsableName(waName) && !isUsableName(entry.fullName)) {
           updates.fullName = waName;
           updates.displayName = waName;
         }

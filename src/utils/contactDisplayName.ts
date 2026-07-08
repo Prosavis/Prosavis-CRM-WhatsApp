@@ -16,6 +16,18 @@ function isUsefulName(value: string | null | undefined, minLen = 2): boolean {
   return trimmed.length >= minLen;
 }
 
+/**
+ * True when a string is suitable as CRM directory full_name / display_name.
+ * Rejects empty/short, letter-less (emoji-only, symbols, phone-as-name), etc.
+ * Names with letters plus emoji (e.g. "Jules🍉") are accepted.
+ */
+export function isUsableName(value: string | null | undefined): boolean {
+  const trimmed = (value ?? '').trim();
+  if (trimmed.length < 2) return false;
+  if (!/\p{L}/u.test(trimmed)) return false;
+  return true;
+}
+
 /** Nombre canónico del directorio (display_name > full_name). */
 export function pickDirectoryDisplayName(entry: Pick<DirectoryEntry, 'displayName' | 'fullName'> | null | undefined): string {
   if (!entry) return '';
