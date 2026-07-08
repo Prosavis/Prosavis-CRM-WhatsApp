@@ -215,6 +215,19 @@ export async function resolveClientPhoneForAppointment(
 }
 
 /**
+ * UID del profesional principal de la cita (legacy, un solo profesional).
+ * `teamMemberId` casi siempre se persiste como cadena vacía (no ausente), por
+ * lo que el fallback a `providerId` debe tratar `''` como "sin valor" — un
+ * `??` (nullish coalescing) NO lo hace, ya que `''` no es `null`/`undefined`.
+ * Alineado con la versión Firebase (`teamMemberId || providerId`).
+ */
+export function resolvePrimaryProfessionalUid(data: Record<string, unknown>): string {
+  const teamMemberId = String(data.teamMemberId ?? '').trim();
+  if (teamMemberId) return teamMemberId;
+  return String(data.providerId ?? '').trim();
+}
+
+/**
  * `uidOverride` permite resolver el teléfono de un co-asignado específico
  * (Fase 2 de recordatorios multi-cleaner) en vez de derivarlo del
  * profesional principal de la cita.
@@ -223,7 +236,7 @@ export async function resolveProfessionalPhoneForAppointment(
   data: Record<string, unknown>,
   uidOverride?: string,
 ): Promise<{ phone: string | null; missingProfessional: boolean }> {
-  const uid = (uidOverride ?? String(data.teamMemberId ?? data.providerId ?? '')).trim();
+  const uid = (uidOverride?.trim() || resolvePrimaryProfessionalUid(data)).trim();
   if (!uid) return { phone: null, missingProfessional: true };
   const phone = await getFirestoreUserPhone(uid);
   return { phone, missingProfessional: false };

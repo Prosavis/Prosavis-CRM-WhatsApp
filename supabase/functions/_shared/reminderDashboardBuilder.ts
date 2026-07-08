@@ -672,8 +672,13 @@ async function buildReminderRow(
 
   phone = normalizeDirectoryPhoneE164(phone) ?? phone;
 
+  // El fallback por teléfono cruza logs cuando no hay match exacto por
+  // appointmentId. Para profesionales co-asignados (`recipientMemberId`
+  // presente) esto es peligroso: el mismo cleaner suele tener varias citas
+  // en la misma ventana de batch y el teléfono compartido puede atribuir a
+  // esta fila el envío real de OTRA cita, mostrando "Enviado" sin serlo.
   const log = resolveLogForRow(appointmentId, recipientType, recipientMemberId, phone, logMaps, {
-    allowPhoneFallback: section !== 'upcoming',
+    allowPhoneFallback: section !== 'upcoming' && !recipientMemberId,
   });
   const deliveryStatus = resolveDeliveryStatus({
     recipientType,

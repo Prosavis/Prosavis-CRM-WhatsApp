@@ -5,6 +5,7 @@
 import {
   isSentinelClientId,
   resolveDirectoryEntry,
+  resolvePrimaryProfessionalUid,
 } from './appointmentPhoneResolver.ts';
 
 // deno-lint-ignore no-explicit-any
@@ -24,7 +25,7 @@ export async function resolveRecipientKey(
   uidOverride?: string,
 ): Promise<string | null> {
   if (recipientType === 'professional') {
-    return (uidOverride ?? String(data.teamMemberId ?? data.providerId ?? '')).trim() || null;
+    return (uidOverride?.trim() || resolvePrimaryProfessionalUid(data)) || null;
   }
 
   const clientId = String(data.clientId ?? '').trim();
