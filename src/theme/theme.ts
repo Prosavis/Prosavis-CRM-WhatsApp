@@ -85,7 +85,7 @@ const darkPalette = {
 };
 
 // Función para crear tema dinámico
-const createProSavisTheme = (mode: PaletteMode) => {
+const createProsavisTheme = (mode: PaletteMode) => {
   const palette = mode === 'light' ? lightPalette : darkPalette;
 
   return createTheme({
@@ -453,18 +453,18 @@ const createProSavisTheme = (mode: PaletteMode) => {
 };
 
 // Temas preconfigurados
-export const lightTheme = createProSavisTheme('light');
-export const darkTheme = createProSavisTheme('dark');
+export const lightTheme = createProsavisTheme('light');
+export const darkTheme = createProsavisTheme('dark');
 
 // Tema por defecto
 export const theme = lightTheme;
 
 // Export para crear temas dinámicos
-export { createProSavisTheme };
+export { createProsavisTheme };
 export default theme;
 
 // Re-export de colores desde el sistema de diseño (única fuente de verdad)
-export const ProSavisColors = {
+export const ProsavisColors = {
   orange: DesignTokens.brand.primary.orange,
   blue: DesignTokens.brand.primary.blue,
   lightOrange: DesignTokens.brand.secondary.lightOrange,

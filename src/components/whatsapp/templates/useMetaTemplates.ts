@@ -48,7 +48,7 @@ function sortTemplates(templates: WhatsAppTemplateSummary[]): WhatsAppTemplateSu
   });
 }
 
-export function groupTemplatesByProSavisSection(
+export function groupTemplatesByProsavisSection(
   templates: WhatsAppTemplateSummary[],
 ): GroupedMetaTemplates[] {
   const grouped = new Map<WhatsAppTemplatePanelSection, WhatsAppTemplateSummary[]>();
@@ -133,7 +133,7 @@ export function useMetaTemplates(wabaId: string | undefined) {
     loading,
     error,
     reload: load,
-    groupByProSavis: groupTemplatesByProSavisSection,
+    groupByProsavis: groupTemplatesByProsavisSection,
     groupByMetaCategory: groupTemplatesByMetaCategory,
     metaCategorySections: META_CATEGORY_SECTIONS,
   };

@@ -24,7 +24,7 @@ const WhatsAppEmptyState: React.FC = () => (
       }}
     />
     <Typography variant="h5" color="text.secondary" fontWeight={300}>
-      ProSavis CRM
+      Prosavis CRM
     </Typography>
     <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 400, textAlign: 'center' }}>
       Selecciona una conversación del panel izquierdo para comenzar a chatear con tus contactos

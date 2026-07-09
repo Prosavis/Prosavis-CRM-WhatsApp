@@ -5,7 +5,7 @@ import { useTheme } from '@/context/ThemeContext';
 import AppShell from '@/components/layout/AppShell';
 import LoginPage from '@/components/auth/LoginPage';
 import WhatsAppCloudPage from '@/pages/whatsapp/WhatsAppCloudPage';
-import { getProSavisLogoSrc } from '@/utils/prosavisBrand';
+import { getProsavisLogoSrc } from '@/utils/prosavisBrand';
 
 function BrandedLoadingScreen() {
   const { mode } = useTheme();
@@ -15,8 +15,8 @@ function BrandedLoadingScreen() {
       <Stack spacing={2} alignItems="center">
         <Box
           component="img"
-          src={getProSavisLogoSrc(mode)}
-          alt="ProSavis"
+          src={getProsavisLogoSrc(mode)}
+          alt="Prosavis"
           sx={{ width: 72, height: 72, objectFit: 'contain' }}
         />
         <CircularProgress size={28} />

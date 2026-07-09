@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { ThemeProvider } from '@mui/material/styles';
 import { CssBaseline } from '@mui/material';
-import { createProSavisTheme } from '@/theme/theme';
+import { createProsavisTheme } from '@/theme/theme';
 
 type ThemeMode = 'light' | 'dark';
 
@@ -21,11 +21,11 @@ export const useTheme = () => {
   return context;
 };
 
-interface ProSavisThemeProviderProps {
+interface ProsavisThemeProviderProps {
   children: React.ReactNode;
 }
 
-export const ProSavisThemeProvider: React.FC<ProSavisThemeProviderProps> = ({ children }) => {
+export const ProsavisThemeProvider: React.FC<ProsavisThemeProviderProps> = ({ children }) => {
   // Inicializar con el tema guardado en localStorage o 'light' por defecto
   const [mode, setModeState] = useState<ThemeMode>(() => {
     const savedMode = localStorage.getItem('prosavis-theme-mode');
@@ -46,7 +46,7 @@ export const ProSavisThemeProvider: React.FC<ProSavisThemeProviderProps> = ({ ch
   };
 
   // Crear el tema dinámicamente basado en el modo actual
-  const currentTheme = React.useMemo(() => createProSavisTheme(mode), [mode]);
+  const currentTheme = React.useMemo(() => createProsavisTheme(mode), [mode]);
 
   const contextValue: ThemeContextType = {
     mode,
@@ -64,4 +64,4 @@ export const ProSavisThemeProvider: React.FC<ProSavisThemeProviderProps> = ({ ch
   );
 };
 
-export default ProSavisThemeProvider;
+export default ProsavisThemeProvider;

@@ -1,4 +1,4 @@
-﻿import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
+import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { requireCrmAdmin } from '../_shared/supabase.ts';
 import { formatError } from '../_shared/errors.ts';
 

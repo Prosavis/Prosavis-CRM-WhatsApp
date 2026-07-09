@@ -29,7 +29,7 @@
  * No importar desde theme.ts para evitar dependencias circulares.
  */
 export const DesignTokens = {
-  // Colores de marca ProSavis
+  // Colores de marca Prosavis
   brand: {
     primary: {
       orange: '#FF7700',

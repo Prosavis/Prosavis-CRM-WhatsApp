@@ -20,7 +20,7 @@ import { BORDER_RADIUS, COLORS, SIZES, SPACING } from '@/constants/styles';
 import { DesignTokens } from '@/constants/designSystem';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/hooks/useAuth';
-import { getProSavisLogoSrc } from '@/utils/prosavisBrand';
+import { getProsavisLogoSrc } from '@/utils/prosavisBrand';
 
 interface LoginPageProps {
   unauthorized?: boolean;
@@ -153,8 +153,8 @@ export default function LoginPage({ unauthorized = false }: LoginPageProps) {
                   >
                     <Box
                       component="img"
-                      src={getProSavisLogoSrc(mode)}
-                      alt="ProSavis"
+                      src={getProsavisLogoSrc(mode)}
+                      alt="Prosavis"
                       sx={{
                         width: { xs: 100, sm: 140 },
                         height: 'auto',
@@ -173,7 +173,7 @@ export default function LoginPage({ unauthorized = false }: LoginPageProps) {
                         mb: 1,
                       }}
                     >
-                      ProSavis
+                      Prosavis
                     </Typography>
                     <Typography
                       variant="body2"
@@ -343,7 +343,7 @@ export default function LoginPage({ unauthorized = false }: LoginPageProps) {
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.8 }}>
           <Box sx={{ mt: 4, textAlign: 'center', zIndex: 1, position: 'relative' }}>
             <Typography variant="caption" color="text.secondary" display="block">
-              © ProSavis · CRM independiente
+              © Prosavis · CRM independiente
             </Typography>
           </Box>
         </motion.div>

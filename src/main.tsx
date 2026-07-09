@@ -6,7 +6,7 @@ import { Toaster } from 'react-hot-toast';
 import { Analytics } from '@vercel/analytics/react';
 import App from '@/App';
 import { AuthProvider } from '@/context/AuthContext';
-import { ProSavisThemeProvider } from '@/context/ThemeContext';
+import { ProsavisThemeProvider } from '@/context/ThemeContext';
 import { FaviconUpdater } from '@/components/common/FaviconUpdater';
 import './index.css';
 
@@ -22,7 +22,7 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <Analytics />
-    <ProSavisThemeProvider>
+    <ProsavisThemeProvider>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <AuthProvider>
@@ -32,6 +32,6 @@ createRoot(document.getElementById('root')!).render(
           </AuthProvider>
         </BrowserRouter>
       </QueryClientProvider>
-    </ProSavisThemeProvider>
+    </ProsavisThemeProvider>
   </StrictMode>,
 );

@@ -25,7 +25,7 @@ import {
 import ThemeToggle from '@/components/common/ThemeToggle';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/hooks/useAuth';
-import { getProSavisLogoSrc } from '@/utils/prosavisBrand';
+import { getProsavisLogoSrc } from '@/utils/prosavisBrand';
 import WhatsAppInternalContactsButton from './WhatsAppInternalContactsButton';
 
 export interface WhatsAppTopBarProps {
@@ -80,8 +80,8 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
     >
       <Box
         component="img"
-        src={getProSavisLogoSrc(mode)}
-        alt="ProSavis"
+        src={getProsavisLogoSrc(mode)}
+        alt="Prosavis"
         sx={{
           width: 32,
           height: 32,

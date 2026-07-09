@@ -25,7 +25,7 @@ const TEMPLATE_DISPLAY_NAMES: Record<string, string> = {
   react_cliente_antigua_fecha: 'Cliente con fecha antigua',
   react_cliente_hace_tiempo: 'Cliente hace tiempo',
   react_cliente_misma_profesional: 'Misma profesional',
-  outreach_intro_prosavis: 'Intro ProSavis',
+  outreach_intro_prosavis: 'Intro Prosavis',
   outreach_invitacion_agendar: 'Invitación a agendar',
   outreach_respuesta_si_quiere_precios: 'Respuesta precios',
   welcome_greeting: 'Bienvenida',

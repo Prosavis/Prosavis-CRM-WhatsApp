@@ -1,4 +1,4 @@
--- Auditoría de duplicados en crm_directory (ProSavis Limpieza / CDM Client)
+-- Auditoría de duplicados en crm_directory (Prosavis Limpieza / CDM Client)
 -- Uso: npx supabase db query --linked -f scripts/audit-directory-duplicates.sql
 
 -- 1) Duplicados por phone_key (requiere columna aplicada por migración 20260610120000)

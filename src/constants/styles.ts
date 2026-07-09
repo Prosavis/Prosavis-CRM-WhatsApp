@@ -1,5 +1,5 @@
 import { DesignTokens } from '@/constants/designSystem';
-import { ProSavisColors } from '@/theme/theme';
+import { ProsavisColors } from '@/theme/theme';
 
 export const SPACING = {
   xs: '4px',
@@ -22,12 +22,12 @@ export const BORDER_RADIUS = {
 
 export const COLORS = {
   brand: {
-    orange: ProSavisColors.orange,
-    blue: ProSavisColors.blue,
-    lightOrange: ProSavisColors.lightOrange,
-    darkOrange: ProSavisColors.darkOrange,
-    lightBlue: ProSavisColors.lightBlue,
-    darkBlue: ProSavisColors.darkBlue,
+    orange: ProsavisColors.orange,
+    blue: ProsavisColors.blue,
+    lightOrange: ProsavisColors.lightOrange,
+    darkOrange: ProsavisColors.darkOrange,
+    lightBlue: ProsavisColors.lightBlue,
+    darkBlue: ProsavisColors.darkBlue,
   },
   dark: {
     background: {
