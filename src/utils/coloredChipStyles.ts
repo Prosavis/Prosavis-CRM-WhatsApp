@@ -53,10 +53,15 @@ export function coloredChipSx(
   return {
     ...(options?.height !== undefined ? { height: options.height } : {}),
     ...(options?.fontSize ? { fontSize: options.fontSize } : {}),
-    bgcolor: alpha(base, bgAlpha),
-    color: textColor,
-    borderColor: alpha(base, borderAlpha),
-    fontWeight: 600,
+    // Selectores con clase para ganar a styleOverrides globales de MuiChip.
+    '&.MuiChip-root, &.MuiChip-filled, &.MuiChip-outlined': {
+      bgcolor: alpha(base, bgAlpha),
+      backgroundColor: alpha(base, bgAlpha),
+      color: textColor,
+      borderColor: alpha(base, borderAlpha),
+      border: `1px solid ${alpha(base, borderAlpha)}`,
+      fontWeight: 600,
+    },
     '& .MuiChip-icon': { color: textColor },
     '& .MuiChip-deleteIcon': {
       color: alpha(textColor, 0.78),

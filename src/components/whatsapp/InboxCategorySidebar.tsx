@@ -57,7 +57,8 @@ const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
   onConfigureOutOfCoverage,
 }) => {
   const theme = useTheme();
-  const width = collapsed ? 56 : 220;
+  // Ancho suficiente para "Fuera de cobertura" + conteo + engranaje sin truncar.
+  const width = collapsed ? 56 : 268;
 
   return (
     <Box
@@ -145,7 +146,9 @@ const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
                   borderRadius: 1.5,
                   minHeight: 40,
                   justifyContent: collapsed ? 'center' : 'flex-start',
-                  px: collapsed ? 0.75 : 1.25,
+                  px: collapsed ? 0.75 : 1,
+                  py: 0.75,
+                  alignItems: 'flex-start',
                   '&.Mui-selected': {
                     bgcolor: (t) => alpha(t.palette.primary.main, 0.12),
                     '&:hover': {
@@ -156,7 +159,8 @@ const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
               >
                 <ListItemIcon
                   sx={{
-                    minWidth: collapsed ? 0 : 36,
+                    minWidth: collapsed ? 0 : 32,
+                    mt: collapsed ? 0 : 0.15,
                     color: selected ? 'primary.main' : 'text.secondary',
                     justifyContent: 'center',
                   }}
@@ -169,8 +173,13 @@ const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
                     primaryTypographyProps={{
                       variant: 'body2',
                       fontWeight: selected ? 600 : 500,
-                      noWrap: true,
+                      sx: {
+                        whiteSpace: 'normal',
+                        lineHeight: 1.25,
+                        wordBreak: 'break-word',
+                      },
                     }}
+                    sx={{ my: 0, mr: 0.5 }}
                   />
                 )}
                 {!collapsed && (
@@ -180,29 +189,29 @@ const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
                       fontWeight: selected ? 700 : 500,
                       fontVariantNumeric: 'tabular-nums',
                       color: selected ? 'primary.main' : 'text.secondary',
-                      ml: 0.5,
+                      ml: 0.25,
                       flexShrink: 0,
                     }}
                   >
                     {count}
                   </Typography>
                 )}
+                {showConfig && !collapsed && (
+                  <Tooltip title="Configurar tags de esta categoría">
+                    <IconButton
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onConfigureOutOfCoverage?.();
+                      }}
+                      aria-label="Configurar tags de Fuera de cobertura"
+                      sx={{ flexShrink: 0, ml: 0.25, p: 0.35 }}
+                    >
+                      <SettingsOutlinedIcon sx={{ fontSize: 15 }} />
+                    </IconButton>
+                  </Tooltip>
+                )}
               </ListItemButton>
-              {showConfig && !collapsed && (
-                <Tooltip title="Configurar tags de esta categoría">
-                  <IconButton
-                    size="small"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onConfigureOutOfCoverage?.();
-                    }}
-                    aria-label="Configurar tags de Fuera de cobertura"
-                    sx={{ flexShrink: 0 }}
-                  >
-                    <SettingsOutlinedIcon sx={{ fontSize: 16 }} />
-                  </IconButton>
-                </Tooltip>
-              )}
             </Box>
           );
 

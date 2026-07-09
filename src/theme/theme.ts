@@ -331,15 +331,7 @@ const createProSavisTheme = (mode: PaletteMode) => {
           root: {
             borderRadius: DesignTokens.borderRadius.sm,
             fontWeight: DesignTokens.typography.fontWeight.medium,
-            '&.MuiChip-filled': {
-              backgroundColor:
-                mode === 'dark' ? 'rgba(255, 119, 0, 0.15)' : undefined,
-              color: mode === 'dark' ? '#FFA040' : undefined,
-              border:
-                mode === 'dark'
-                  ? '1px solid rgba(255, 119, 0, 0.3)'
-                  : undefined,
-            },
+            // No forzar color naranja en dark: los tags usan coloredChipSx con su color propio.
           },
         },
       },
