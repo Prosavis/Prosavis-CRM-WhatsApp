@@ -10,8 +10,6 @@ import {
   Badge,
   Typography,
   Chip,
-  ToggleButtonGroup,
-  ToggleButton,
   Popover,
   Menu,
   MenuItem,
@@ -25,6 +23,8 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  ToggleButton,
+  ToggleButtonGroup,
   useTheme,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
@@ -42,16 +42,17 @@ import MarkChatUnreadIcon from '@mui/icons-material/MarkChatUnread';
 import PushPinOutlinedIcon from '@mui/icons-material/PushPinOutlined';
 import DeleteForeverOutlinedIcon from '@mui/icons-material/DeleteForeverOutlined';
 import BlockIcon from '@mui/icons-material/Block';
-import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import CloseIcon from '@mui/icons-material/Close';
 import CheckBoxOutlinedIcon from '@mui/icons-material/CheckBoxOutlined';
 import SelectAllIcon from '@mui/icons-material/SelectAll';
+import FilterListIcon from '@mui/icons-material/FilterList';
 import type {
   WhatsAppConversation,
   WhatsAppTag,
   WhatsAppAdminPresence,
 } from '@/services/whatsappService';
 import OutboundPreviewTicks from './OutboundPreviewTicks';
+import InboxCategorySidebar from './InboxCategorySidebar';
 import { ContactAvatar } from '@/components/common/ContactAvatar';
 import {
   getDirectoryMetaForConversation,
@@ -60,21 +61,24 @@ import {
 import { pickContactPhotoUrl } from '@/utils/contactAvatar';
 import { resolveContactDisplayName } from '@/utils/contactDisplayName';
 import {
-  isWhatsAppConversationLastActiveWithin24h,
+  conversationMatchesInboxCategory,
+  conversationMatchesSelectedTags,
+  getSecondaryFilterTags,
+  getTabCountForCategory,
   type WhatsAppTabCounts,
 } from '@/utils/whatsappInboxStats';
+import {
+  getInboxCategoryDefinition,
+  INBOX_FILTER_STORAGE_KEY,
+  INBOX_SIDEBAR_COLLAPSED_KEY,
+  VALID_INBOX_CATEGORIES,
+  type InboxCategoryId,
+  type InboxTagCategoryId,
+} from '@/constants/inboxCategories';
 import { useLongPress } from '@/hooks/useLongPress';
 import { coloredChipSx } from '@/utils/coloredChipStyles';
 
 export type BulkTagMode = 'add' | 'replace';
-
-function conversationMatchesSelectedTags(
-  c: WhatsAppConversation,
-  selectedTagIds: string[],
-): boolean {
-  if (selectedTagIds.length === 0) return true;
-  return selectedTagIds.every((tid) => c.tagIds?.includes(tid));
-}
 
 function countConversationsMatchingTags(
   conversations: WhatsAppConversation[],
@@ -87,11 +91,34 @@ function countConversationsMatchingTags(
   ).length;
 }
 
+function readStoredInboxFilter(): InboxCategoryId {
+  try {
+    const stored = sessionStorage.getItem(INBOX_FILTER_STORAGE_KEY);
+    if (stored && (VALID_INBOX_CATEGORIES as readonly string[]).includes(stored)) {
+      return stored as InboxCategoryId;
+    }
+    // Migración: pestaña antigua "tagged" → Todos
+    if (stored === 'tagged') return 'all';
+  } catch {
+    // sessionStorage puede estar bloqueado
+  }
+  return 'last24h';
+}
+
+function readStoredSidebarCollapsed(): boolean {
+  try {
+    return localStorage.getItem(INBOX_SIDEBAR_COLLAPSED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 interface ConversationListProps {
   conversations: WhatsAppConversation[];
   tabCounts: WhatsAppTabCounts;
   tagCountsById: Record<string, number>;
   archivedTagCountsById: Record<string, number>;
+  categoryTagIds: Record<InboxTagCategoryId, string[]>;
   selectedId: string | null;
   onSelect: (conversation: WhatsAppConversation) => void;
   loading?: boolean;
@@ -145,90 +172,6 @@ function formatRelativeTime(date?: Date): string {
   if (diffDays === 1) return 'Ayer';
   if (diffDays < 7) return date.toLocaleDateString('es-CO', { weekday: 'short' });
   return date.toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: '2-digit' });
-}
-
-interface InboxFilterTabLabelProps {
-  label: string;
-  count: number;
-  selected: boolean;
-  icon?: React.ReactNode;
-}
-
-function InboxFilterTabLabel({ label, count, selected, icon }: InboxFilterTabLabelProps) {
-  return (
-    <Box
-      sx={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: 0.35,
-        py: 0.2,
-        minWidth: 50,
-        maxWidth: 122,
-        minHeight: 40,
-      }}
-    >
-      <Box
-        sx={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'center',
-          gap: 0.4,
-          width: '100%',
-        }}
-      >
-        {icon ? (
-          <Box sx={{ flexShrink: 0, display: 'flex', alignItems: 'center', height: 18, mt: 0.05 }}>
-            {icon}
-          </Box>
-        ) : null}
-        <Typography
-          component="span"
-          variant="caption"
-          sx={{
-            lineHeight: 1.2,
-            textAlign: 'center',
-            whiteSpace: 'normal',
-            wordBreak: 'break-word',
-            flex: icon ? 1 : undefined,
-            minWidth: 0,
-          }}
-        >
-          {label}
-        </Typography>
-      </Box>
-      <Typography
-        component="span"
-        variant="caption"
-        sx={{
-          fontWeight: selected ? 700 : 500,
-          fontSize: '0.72rem',
-          lineHeight: 1,
-          fontVariantNumeric: 'tabular-nums',
-          color: selected ? 'primary.main' : 'text.secondary',
-        }}
-      >
-        ({count})
-      </Typography>
-    </Box>
-  );
-}
-
-type FilterType = 'last24h' | 'all' | 'unread' | 'tagged' | 'archived';
-
-const INBOX_FILTER_STORAGE_KEY = 'whatsapp-inbox-filter';
-const VALID_INBOX_FILTERS: FilterType[] = ['last24h', 'all', 'unread', 'tagged', 'archived'];
-
-function readStoredInboxFilter(): FilterType {
-  try {
-    const stored = sessionStorage.getItem(INBOX_FILTER_STORAGE_KEY);
-    if (stored && VALID_INBOX_FILTERS.includes(stored as FilterType)) {
-      return stored as FilterType;
-    }
-  } catch {
-    // sessionStorage puede estar bloqueado
-  }
-  return 'last24h';
 }
 
 interface ConversationRowProps {
@@ -413,6 +356,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
   tabCounts,
   tagCountsById,
   archivedTagCountsById,
+  categoryTagIds,
   selectedId,
   onSelect,
   loading,
@@ -434,7 +378,8 @@ const ConversationList: React.FC<ConversationListProps> = ({
 }) => {
   const theme = useTheme();
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<FilterType>(readStoredInboxFilter);
+  const [filter, setFilter] = useState<InboxCategoryId>(readStoredInboxFilter);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readStoredSidebarCollapsed);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -442,6 +387,13 @@ const ConversationList: React.FC<ConversationListProps> = ({
   const [bulkTagDialogOpen, setBulkTagDialogOpen] = useState(false);
   const [bulkTagMode, setBulkTagMode] = useState<BulkTagMode>('add');
   const [bulkTagSelection, setBulkTagSelection] = useState<string[]>([]);
+  const [tagMenuAnchor, setTagMenuAnchor] = useState<null | HTMLElement>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    mouseX: number;
+    mouseY: number;
+    conversation: WhatsAppConversation;
+  } | null>(null);
+  const [assignTagsAnchor, setAssignTagsAnchor] = useState<null | HTMLElement>(null);
 
   useEffect(() => {
     try {
@@ -450,13 +402,14 @@ const ConversationList: React.FC<ConversationListProps> = ({
       // sessionStorage puede estar bloqueado
     }
   }, [filter]);
-  const [tagMenuAnchor, setTagMenuAnchor] = useState<null | HTMLElement>(null);
-  const [contextMenu, setContextMenu] = useState<{
-    mouseX: number;
-    mouseY: number;
-    conversation: WhatsAppConversation;
-  } | null>(null);
-  const [assignTagsAnchor, setAssignTagsAnchor] = useState<null | HTMLElement>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(INBOX_SIDEBAR_COLLAPSED_KEY, sidebarCollapsed ? '1' : '0');
+    } catch {
+      // localStorage puede estar bloqueado
+    }
+  }, [sidebarCollapsed]);
 
   const directoryMetaByPhoneKey = useDirectoryContactMeta(conversations);
 
@@ -466,6 +419,14 @@ const ConversationList: React.FC<ConversationListProps> = ({
     return map;
   }, [tags]);
 
+  const secondaryTags = useMemo(
+    () => getSecondaryFilterTags(tags, categoryTagIds) as WhatsAppTag[],
+    [tags, categoryTagIds],
+  );
+
+  const categoryDef = getInboxCategoryDefinition(filter);
+  const categoryCount = getTabCountForCategory(tabCounts, filter);
+
   const toggleTagId = useCallback((id: string) => {
     setSelectedTagIds((prev) => {
       const i = prev.indexOf(id);
@@ -474,26 +435,16 @@ const ConversationList: React.FC<ConversationListProps> = ({
     });
   }, []);
 
+  const handleCategoryChange = useCallback((next: InboxCategoryId) => {
+    setFilter(next);
+  }, []);
+
   const filtered = useMemo(() => {
-    let result = conversations;
+    let result = conversations.filter((c) =>
+      conversationMatchesInboxCategory(c, filter, categoryTagIds),
+    );
 
-    if (filter === 'archived') {
-      result = result.filter((c) => c.isArchived);
-    } else {
-      result = result.filter((c) => !c.isArchived);
-    }
-
-    if (filter === 'last24h') {
-      result = result.filter((c) => isWhatsAppConversationLastActiveWithin24h(c));
-    } else if (filter === 'unread') {
-      result = result.filter((c) => c.unreadCount > 0 || c.crmForceUnread);
-    } else if (filter === 'tagged') {
-      if (selectedTagIds.length > 0) {
-        result = result.filter((c) => conversationMatchesSelectedTags(c, selectedTagIds));
-      } else {
-        result = result.filter((c) => c.tagIds && c.tagIds.length > 0);
-      }
-    } else if (filter === 'archived' && selectedTagIds.length > 0) {
+    if (selectedTagIds.length > 0) {
       result = result.filter((c) => conversationMatchesSelectedTags(c, selectedTagIds));
     }
 
@@ -521,18 +472,17 @@ const ConversationList: React.FC<ConversationListProps> = ({
     });
 
     return result;
-  }, [conversations, search, filter, selectedTagIds, directoryMetaByPhoneKey]);
+  }, [conversations, search, filter, selectedTagIds, directoryMetaByPhoneKey, categoryTagIds]);
 
   const archivedMatchingSelectedTags = useMemo(
     () => countConversationsMatchingTags(conversations, selectedTagIds, true),
     [conversations, selectedTagIds],
   );
 
-  const showSelectedTagChips =
-    selectedTagIds.length > 0 && (filter === 'tagged' || filter === 'archived');
+  const showSelectedTagChips = selectedTagIds.length > 0;
 
   const showArchivedTagHint =
-    filter === 'tagged'
+    filter !== 'archived'
     && selectedTagIds.length > 0
     && !loading
     && filtered.length === 0
@@ -543,7 +493,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
   }, []);
 
   const handleTagFilterClick = (e: React.MouseEvent<HTMLElement>) => {
-    if ((filter === 'tagged' || filter === 'archived') && tags.length > 0) {
+    if (secondaryTags.length > 0 || onManageTags) {
       setTagMenuAnchor(e.currentTarget);
     }
   };
@@ -640,7 +590,16 @@ const ConversationList: React.FC<ConversationListProps> = ({
   }, []);
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', bgcolor: 'background.paper' }}>
+    <Box sx={{ display: 'flex', height: '100%', bgcolor: 'background.paper', minHeight: 0 }}>
+      <InboxCategorySidebar
+        category={filter}
+        onCategoryChange={handleCategoryChange}
+        tabCounts={tabCounts}
+        collapsed={sidebarCollapsed}
+        onCollapsedChange={setSidebarCollapsed}
+      />
+
+      <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0 }}>
       <Box sx={{ p: 1.5, borderBottom: 1, borderColor: 'divider' }}>
         <Box sx={{ display: 'flex', gap: 0.5, mb: 1 }}>
           <TextField
@@ -665,6 +624,23 @@ const ConversationList: React.FC<ConversationListProps> = ({
               },
             }}
           />
+          <Tooltip title="Filtrar por tags">
+            <IconButton
+              size="small"
+              onClick={handleTagFilterClick}
+              color={selectedTagIds.length > 0 ? 'primary' : 'default'}
+              sx={{ flexShrink: 0 }}
+              aria-label="Filtrar por tags"
+            >
+              <Badge
+                color="primary"
+                badgeContent={selectedTagIds.length || undefined}
+                overlap="circular"
+              >
+                <FilterListIcon />
+              </Badge>
+            </IconButton>
+          </Tooltip>
           {onNewContact && (
             <Tooltip title="Nuevo contacto">
               <IconButton size="small" onClick={onNewContact} sx={{ flexShrink: 0 }}>
@@ -673,109 +649,48 @@ const ConversationList: React.FC<ConversationListProps> = ({
             </Tooltip>
           )}
         </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
-          <Box
-            sx={{
-              width: '100%',
-              maxWidth: '100%',
-              overflowX: 'auto',
-              overflowY: 'hidden',
-              WebkitOverflowScrolling: 'touch',
-              pb: 0.25,
-              mx: -0.25,
-              px: 0.25,
-              '&::-webkit-scrollbar': { height: 6 },
-              '&::-webkit-scrollbar-thumb': {
-                borderRadius: 3,
-                bgcolor: (t) => alpha(t.palette.text.secondary, 0.35),
-              },
-            }}
-          >
-            <ToggleButtonGroup
-              value={filter}
-              exclusive
-              onChange={(_, val) => {
-                if (val) {
-                  setFilter(val);
-                  if (val !== 'tagged' && val !== 'archived') {
-                    setSelectedTagIds([]);
-                  }
-                }
-              }}
-              size="small"
-              sx={{
-                flexWrap: 'nowrap',
-                width: 'max-content',
-                maxWidth: 'none',
-                '& .MuiToggleButton-root': {
-                  textTransform: 'none',
-                  px: { xs: 0.45, sm: 0.65 },
-                  py: 0.45,
-                },
-              }}
-            >
-            <ToggleButton
-              value="last24h"
-              aria-label="Últimas 24 horas: actividad reciente en ventana móvil de 24 horas"
-              title="Conversaciones con actividad en las últimas 24 horas (ventana móvil, no el día calendario). El número inferior es la cantidad de chats en ese período."
-            >
-              <InboxFilterTabLabel
-                label="Últimas 24 horas"
-                count={tabCounts.last24h}
-                selected={filter === 'last24h'}
-                icon={<AccessTimeIcon sx={{ fontSize: 16 }} />}
-              />
-            </ToggleButton>
-            <ToggleButton value="all">
-              <InboxFilterTabLabel label="Todos" count={tabCounts.all} selected={filter === 'all'} />
-            </ToggleButton>
-            <ToggleButton value="unread">
-              <InboxFilterTabLabel
-                label="No leídos"
-                count={tabCounts.unread}
-                selected={filter === 'unread'}
-              />
-            </ToggleButton>
-            <ToggleButton value="tagged" onClick={handleTagFilterClick}>
-              <InboxFilterTabLabel
-                label="Tags"
-                count={tabCounts.tagged}
-                selected={filter === 'tagged'}
-                icon={<LocalOfferIcon sx={{ fontSize: 16 }} />}
-              />
-            </ToggleButton>
-            <ToggleButton value="archived" onClick={handleTagFilterClick}>
-              <InboxFilterTabLabel
-                label="Archivados"
-                count={tabCounts.archived}
-                selected={filter === 'archived'}
-                icon={<ArchiveIcon sx={{ fontSize: 16 }} />}
-              />
-            </ToggleButton>
-            </ToggleButtonGroup>
-          </Box>
-          {showSelectedTagChips && (
-            <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', alignItems: 'center', maxWidth: '100%' }}>
-              {selectedTagIds.map((tid) => (
-                <Chip
-                  key={tid}
-                  label={tagMap.get(tid)?.name || tid}
-                  size="small"
-                  sx={{
-                    height: 22,
-                    ...coloredChipSx(theme, tagMap.get(tid)?.color, 'filled'),
-                  }}
-                  onDelete={() =>
-                    setSelectedTagIds((prev) => prev.filter((x) => x !== tid))
-                  }
-                />
-              ))}
-              <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center' }}>
-                {filtered.length} resultado{filtered.length === 1 ? '' : 's'}
-              </Typography>
-            </Box>
+
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap', mb: showSelectedTagChips ? 0.75 : 0 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
+            {categoryDef.label}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+            {filtered.length === categoryCount
+              ? `${categoryCount}`
+              : `${filtered.length} de ${categoryCount}`}
+          </Typography>
+          {selectedTagIds.length > 0 && (
+            <Typography variant="caption" color="text.secondary">
+              · filtrado por tags
+            </Typography>
           )}
         </Box>
+
+        {showSelectedTagChips && (
+          <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', alignItems: 'center' }}>
+            {selectedTagIds.map((tid) => (
+              <Chip
+                key={tid}
+                label={tagMap.get(tid)?.name || tid}
+                size="small"
+                sx={{
+                  height: 22,
+                  ...coloredChipSx(theme, tagMap.get(tid)?.color, 'filled'),
+                }}
+                onDelete={() =>
+                  setSelectedTagIds((prev) => prev.filter((x) => x !== tid))
+                }
+              />
+            ))}
+            <Button
+              size="small"
+              onClick={() => setSelectedTagIds([])}
+              sx={{ textTransform: 'none', minWidth: 0, px: 0.75 }}
+            >
+              Limpiar
+            </Button>
+          </Box>
+        )}
       </Box>
 
       {selectionMode && (
@@ -883,39 +798,51 @@ const ConversationList: React.FC<ConversationListProps> = ({
       >
         <List dense sx={{ py: 0 }}>
           <ListItemButton selected={selectedTagIds.length === 0} onClick={() => setSelectedTagIds([])}>
-            <ListItemText primary="Todos los tags (cualquier etiqueta)" />
+            <ListItemText
+              primary="Sin filtro de tags"
+              secondary="Mostrar todos los chats de esta categoría"
+            />
           </ListItemButton>
-          {tags.map((tag) => {
-            const checked = selectedTagIds.includes(tag.id);
-            const cnt = filter === 'archived'
-              ? (archivedTagCountsById[tag.id] ?? 0)
-              : (tagCountsById[tag.id] ?? 0);
-            return (
-              <ListItemButton key={tag.id} onClick={() => toggleTagId(tag.id)}>
-                <Checkbox
-                  checked={checked}
-                  tabIndex={-1}
-                  disableRipple
-                  sx={{ mr: 0.5, p: 0.25, pointerEvents: 'none' }}
-                  size="small"
-                />
-                <Box
-                  sx={{
-                    width: 12,
-                    height: 12,
-                    borderRadius: '50%',
-                    bgcolor: tag.color || '#1976d2',
-                    mr: 1,
-                    flexShrink: 0,
-                  }}
-                />
-                <ListItemText primary={tag.name} sx={{ flex: '1 1 auto', minWidth: 0 }} />
-                <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0, ml: 1 }}>
-                  {cnt}
-                </Typography>
-              </ListItemButton>
-            );
-          })}
+          {secondaryTags.length === 0 ? (
+            <ListItemButton disabled>
+              <ListItemText
+                primary="No hay tags adicionales"
+                secondary="Los tags de categoría (Agendado, etc.) se eligen en la barra izquierda"
+              />
+            </ListItemButton>
+          ) : (
+            secondaryTags.map((tag) => {
+              const checked = selectedTagIds.includes(tag.id);
+              const cnt = filter === 'archived'
+                ? (archivedTagCountsById[tag.id] ?? 0)
+                : (tagCountsById[tag.id] ?? 0);
+              return (
+                <ListItemButton key={tag.id} onClick={() => toggleTagId(tag.id)}>
+                  <Checkbox
+                    checked={checked}
+                    tabIndex={-1}
+                    disableRipple
+                    sx={{ mr: 0.5, p: 0.25, pointerEvents: 'none' }}
+                    size="small"
+                  />
+                  <Box
+                    sx={{
+                      width: 12,
+                      height: 12,
+                      borderRadius: '50%',
+                      bgcolor: tag.color || '#1976d2',
+                      mr: 1,
+                      flexShrink: 0,
+                    }}
+                  />
+                  <ListItemText primary={tag.name} sx={{ flex: '1 1 auto', minWidth: 0 }} />
+                  <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0, ml: 1 }}>
+                    {cnt}
+                  </Typography>
+                </ListItemButton>
+              );
+            })
+          )}
           {onManageTags && (
             <ListItemButton
               sx={{ borderTop: 1, borderColor: 'divider' }}
@@ -1215,7 +1142,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
             {showArchivedTagHint ? (
               <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1.5 }}>
                 <Typography variant="body2" color="text.secondary">
-                  No hay conversaciones activas con este tag.
+                  No hay conversaciones en esta categoría con este tag.
                   {' '}
                   {archivedMatchingSelectedTags}
                   {' '}
@@ -1239,6 +1166,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
           </Box>
         )}
       </List>
+      </Box>
     </Box>
   );
 };

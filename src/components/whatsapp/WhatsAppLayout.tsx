@@ -185,7 +185,10 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
 
   const contactCtx = useWhatsAppContactContext(selectedConversation);
 
-  const inboxMetrics = useMemo(() => computeWhatsAppInboxMetrics(conversations), [conversations]);
+  const inboxMetrics = useMemo(
+    () => computeWhatsAppInboxMetrics(conversations, tags),
+    [conversations, tags],
+  );
 
   useEffect(() => {
     onInboxMetrics?.(inboxMetrics);
@@ -703,8 +706,9 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
         <Box
           data-tour="whatsapp-inbox-list"
           sx={{
-            width: 440,
+            width: { xs: '100%', sm: 520, md: 600 },
             minWidth: 320,
+            maxWidth: 720,
             borderRight: 1,
             borderColor: 'divider',
             flexShrink: 0,
@@ -731,6 +735,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
             tabCounts={inboxMetrics.tabCounts}
             tagCountsById={inboxMetrics.tagCountsById}
             archivedTagCountsById={inboxMetrics.archivedTagCountsById}
+            categoryTagIds={inboxMetrics.categoryTagIds}
             selectedId={selectedConversation?.id ?? null}
             onSelect={handleConversationSelect}
             loading={loading}
