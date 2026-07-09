@@ -79,11 +79,39 @@ describe('whatsappInboxStats', () => {
     expect(tabCounts.archived).toBe(1);
   });
 
+  it('trabajo resuelve Marian y Job; fuera_cobertura acepta override de ciudades', () => {
+    const TAG_MARIAN = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
+    const TAG_JOB = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';
+    const TAG_BOGOTA = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
+    const localCatalog = [
+      { id: TAG_MARIAN, name: 'Marian' },
+      { id: TAG_JOB, name: 'Job' },
+      { id: TAG_BOGOTA, name: 'Bogotá' },
+      { id: TAG_A, name: 'Cerritos' },
+    ];
+    const conversations: WhatsAppConversation[] = [
+      mockConversation({ id: 'm1', tagIds: [TAG_MARIAN] }),
+      mockConversation({ id: 'j1', tagIds: [TAG_JOB] }),
+      mockConversation({ id: 'b1', tagIds: [TAG_BOGOTA] }),
+      mockConversation({ id: 'c1', tagIds: [TAG_A] }),
+    ];
+
+    const byAlias = computeTabCounts(conversations, localCatalog);
+    expect(byAlias.trabajo).toBe(2);
+    expect(byAlias.fueraCobertura).toBe(1);
+
+    const withOverride = resolveAllCategoryTagIds(localCatalog, {
+      fuera_cobertura: [TAG_BOGOTA],
+    });
+    expect(withOverride.fuera_cobertura).toEqual([TAG_BOGOTA]);
+    expect(withOverride.trabajo.sort()).toEqual([TAG_MARIAN, TAG_JOB].sort());
+  });
+
   it('resolveCategoryTagIds acepta aliases case-insensitive', () => {
     const tags = [
       { id: '1', name: 'AGENDADOS' },
-      { id: '2', name: 'Trabajo/CV' },
-      { id: '3', name: '  Fuera   de  cobertura ' },
+      { id: '2', name: 'Marian' },
+      { id: '3', name: '  Bogotá ' },
     ];
     expect(resolveCategoryTagIds('agendados', tags)).toEqual(['1']);
     expect(resolveCategoryTagIds('trabajo', tags)).toEqual(['2']);

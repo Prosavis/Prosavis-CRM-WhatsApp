@@ -19,6 +19,7 @@ import LocationOffIcon from '@mui/icons-material/LocationOff';
 import WorkOutlineIcon from '@mui/icons-material/WorkOutline';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
 import {
   INBOX_CATEGORIES,
   type InboxCategoryId,
@@ -44,6 +45,7 @@ export interface InboxCategorySidebarProps {
   tabCounts: WhatsAppTabCounts;
   collapsed: boolean;
   onCollapsedChange: (collapsed: boolean) => void;
+  onConfigureOutOfCoverage?: () => void;
 }
 
 const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
@@ -52,6 +54,7 @@ const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
   tabCounts,
   collapsed,
   onCollapsedChange,
+  onConfigureOutOfCoverage,
 }) => {
   const theme = useTheme();
   const width = collapsed ? 56 : 220;
@@ -119,72 +122,98 @@ const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
           const selected = category === item.id;
           const count = getTabCountForCategory(tabCounts, item.id);
           const icon = CATEGORY_ICONS[item.id];
-          const button = (
-            <ListItemButton
+          const showConfig = item.id === 'fuera_cobertura' && Boolean(onConfigureOutOfCoverage);
+
+          const row = (
+            <Box
               key={item.id}
-              selected={selected}
-              onClick={() => onCategoryChange(item.id)}
-              aria-label={`${item.label}: ${count}`}
-              title={item.description}
               sx={{
+                display: 'flex',
+                alignItems: 'center',
                 mx: collapsed ? 0.5 : 0.75,
                 my: 0.15,
-                borderRadius: 1.5,
-                minHeight: 40,
-                justifyContent: collapsed ? 'center' : 'flex-start',
-                px: collapsed ? 0.75 : 1.25,
-                '&.Mui-selected': {
-                  bgcolor: (t) => alpha(t.palette.primary.main, 0.12),
-                  '&:hover': {
-                    bgcolor: (t) => alpha(t.palette.primary.main, 0.18),
-                  },
-                },
+                gap: 0.25,
               }}
             >
-              <ListItemIcon
+              <ListItemButton
+                selected={selected}
+                onClick={() => onCategoryChange(item.id)}
+                aria-label={`${item.label}: ${count}`}
+                title={item.description}
                 sx={{
-                  minWidth: collapsed ? 0 : 36,
-                  color: selected ? 'primary.main' : 'text.secondary',
-                  justifyContent: 'center',
+                  flex: 1,
+                  borderRadius: 1.5,
+                  minHeight: 40,
+                  justifyContent: collapsed ? 'center' : 'flex-start',
+                  px: collapsed ? 0.75 : 1.25,
+                  '&.Mui-selected': {
+                    bgcolor: (t) => alpha(t.palette.primary.main, 0.12),
+                    '&:hover': {
+                      bgcolor: (t) => alpha(t.palette.primary.main, 0.18),
+                    },
+                  },
                 }}
               >
-                {icon}
-              </ListItemIcon>
-              {!collapsed && (
-                <ListItemText
-                  primary={item.label}
-                  primaryTypographyProps={{
-                    variant: 'body2',
-                    fontWeight: selected ? 600 : 500,
-                    noWrap: true,
-                  }}
-                />
-              )}
-              {!collapsed && (
-                <Typography
-                  variant="caption"
+                <ListItemIcon
                   sx={{
-                    fontWeight: selected ? 700 : 500,
-                    fontVariantNumeric: 'tabular-nums',
+                    minWidth: collapsed ? 0 : 36,
                     color: selected ? 'primary.main' : 'text.secondary',
-                    ml: 0.5,
-                    flexShrink: 0,
+                    justifyContent: 'center',
                   }}
                 >
-                  {count}
-                </Typography>
+                  {icon}
+                </ListItemIcon>
+                {!collapsed && (
+                  <ListItemText
+                    primary={item.label}
+                    primaryTypographyProps={{
+                      variant: 'body2',
+                      fontWeight: selected ? 600 : 500,
+                      noWrap: true,
+                    }}
+                  />
+                )}
+                {!collapsed && (
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      fontWeight: selected ? 700 : 500,
+                      fontVariantNumeric: 'tabular-nums',
+                      color: selected ? 'primary.main' : 'text.secondary',
+                      ml: 0.5,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {count}
+                  </Typography>
+                )}
+              </ListItemButton>
+              {showConfig && !collapsed && (
+                <Tooltip title="Configurar tags de esta categoría">
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onConfigureOutOfCoverage?.();
+                    }}
+                    aria-label="Configurar tags de Fuera de cobertura"
+                    sx={{ flexShrink: 0 }}
+                  >
+                    <SettingsOutlinedIcon sx={{ fontSize: 16 }} />
+                  </IconButton>
+                </Tooltip>
               )}
-            </ListItemButton>
+            </Box>
           );
 
           if (collapsed) {
             return (
               <Tooltip key={item.id} title={`${item.label} (${count})`} placement="right">
-                {button}
+                {row}
               </Tooltip>
             );
           }
-          return button;
+          return row;
         })}
       </List>
     </Box>

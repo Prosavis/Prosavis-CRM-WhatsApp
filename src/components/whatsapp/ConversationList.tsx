@@ -138,6 +138,7 @@ interface ConversationListProps {
   onBulkMarkRead?: (conversationIds: string[], read: boolean) => Promise<void>;
   onBulkPin?: (conversationIds: string[], pin: boolean) => Promise<void>;
   onBulkDelete?: (conversationIds: string[]) => Promise<void>;
+  onConfigureOutOfCoverage?: () => void;
 }
 
 /** Resumen humano para línea secundaria: prioriza "escribiendo" sobre "viendo". */
@@ -375,6 +376,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
   onBulkMarkRead,
   onBulkPin,
   onBulkDelete,
+  onConfigureOutOfCoverage,
 }) => {
   const theme = useTheme();
   const [search, setSearch] = useState('');
@@ -597,6 +599,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
         tabCounts={tabCounts}
         collapsed={sidebarCollapsed}
         onCollapsedChange={setSidebarCollapsed}
+        onConfigureOutOfCoverage={onConfigureOutOfCoverage}
       />
 
       <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0 }}>

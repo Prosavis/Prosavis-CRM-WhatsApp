@@ -21,12 +21,31 @@ export const INBOX_TAG_CATEGORY_IDS: InboxTagCategoryId[] = [
   'trabajo',
 ];
 
-/** Nombres de tag aceptados (normalizados: trim + lower + espacios colapsados). */
+/**
+ * Nombres de tag aceptados por defecto (normalizados: trim + lower + espacios colapsados).
+ * `fuera_cobertura` también se puede ampliar/reemplazar vía `whatsapp_inbox_category_settings`.
+ */
 export const INBOX_CATEGORY_TAG_ALIASES: Record<InboxTagCategoryId, readonly string[]> = {
   agendados: ['agendado', 'agendados'],
-  fuera_cobertura: ['fuera de cobertura'],
-  trabajo: ['trabajo / cv', 'trabajo/cv', 'trabajo'],
+  fuera_cobertura: [
+    'fuera de cobertura',
+    'bogotá',
+    'bogota',
+    'quindío',
+    'quindio',
+    'armenia',
+    'cartago',
+    'santa rosa',
+  ],
+  trabajo: ['marian', 'job', 'jobs', 'trabajo / cv', 'trabajo/cv', 'trabajo'],
 };
+
+/** Categorías cuya lista de tags se puede editar en UI (compartida en Supabase). */
+export const CONFIGURABLE_INBOX_TAG_CATEGORIES: readonly InboxTagCategoryId[] = [
+  'fuera_cobertura',
+];
+
+export const INBOX_CATEGORY_SETTINGS_KEY = 'fuera_cobertura' as const;
 
 export interface InboxCategoryDefinition {
   id: InboxCategoryId;
@@ -71,13 +90,13 @@ export const INBOX_CATEGORIES: readonly InboxCategoryDefinition[] = [
     id: 'fuera_cobertura',
     label: 'Fuera de cobertura',
     shortLabel: 'Cobertura',
-    description: 'Chats con tag Fuera de cobertura',
+    description: 'Ciudades/localidades sin cobertura (tags configurables)',
   },
   {
     id: 'trabajo',
     label: 'Trabajo / CV',
     shortLabel: 'Trabajo',
-    description: 'Chats con tag Trabajo / CV',
+    description: 'Chats con tags Marian o Job',
   },
 ] as const;
 

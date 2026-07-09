@@ -22,6 +22,7 @@ import {
   deleteWhatsAppConversationPermanently,
   markAsRead,
   patchWhatsAppConversationAdmin,
+  getInboxCategorySettings,
   DELETE_WHATSAPP_CONVERSATION_CONFIRM_PHRASE,
   type WhatsAppConversation,
   type WhatsAppTag,
@@ -30,8 +31,10 @@ import {
 } from '@/services/whatsappService';
 import TagManagerDialog from './TagManagerDialog';
 import NewContactDialog from './NewContactDialog';
+import OutOfCoverageTagsDialog from './OutOfCoverageTagsDialog';
 import {
   computeWhatsAppInboxMetrics,
+  type CategoryTagIdOverrides,
   type WhatsAppInboxMetrics,
 } from '@/utils/whatsappInboxStats';
 import { clearAllComposerDrafts } from '@/utils/messageComposerDraftStore';
@@ -147,6 +150,8 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   const [snippets, setSnippets] = useState<WhatsAppSnippet[]>([]);
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const [newContactOpen, setNewContactOpen] = useState(false);
+  const [outOfCoverageDialogOpen, setOutOfCoverageDialogOpen] = useState(false);
+  const [categoryTagOverrides, setCategoryTagOverrides] = useState<CategoryTagIdOverrides>({});
 
   const [inboundAlert, setInboundAlert] = useState<{ message: string; conversationId: string } | null>(null);
   const [inboundPulse, setInboundPulse] = useState(false);
@@ -186,8 +191,8 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   const contactCtx = useWhatsAppContactContext(selectedConversation);
 
   const inboxMetrics = useMemo(
-    () => computeWhatsAppInboxMetrics(conversations, tags),
-    [conversations, tags],
+    () => computeWhatsAppInboxMetrics(conversations, tags, categoryTagOverrides),
+    [conversations, tags, categoryTagOverrides],
   );
 
   useEffect(() => {
@@ -266,6 +271,17 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     }
   }, []);
 
+  const loadCategorySettings = useCallback(async () => {
+    try {
+      const settings = await getInboxCategorySettings('fuera_cobertura');
+      if (settings) {
+        setCategoryTagOverrides({ fuera_cobertura: settings.tagIds });
+      }
+    } catch (err) {
+      console.error('Error loading inbox category settings:', err);
+    }
+  }, []);
+
   const loadSnippets = useCallback(async () => {
     try {
       const result = await listWhatsAppSnippets();
@@ -278,6 +294,10 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   useEffect(() => {
     loadTags();
   }, [loadTags]);
+
+  useEffect(() => {
+    void loadCategorySettings();
+  }, [loadCategorySettings]);
 
   useEffect(() => {
     void loadSnippets();
@@ -754,6 +774,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
             onBulkMarkRead={handleBulkMarkRead}
             onBulkPin={handleBulkPin}
             onBulkDelete={handleBulkDelete}
+            onConfigureOutOfCoverage={() => setOutOfCoverageDialogOpen(true)}
           />
         </Box>
 
@@ -860,6 +881,17 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
         tags={tags}
         tagCounts={inboxMetrics.tagCountsById}
         onTagsChanged={loadTags}
+      />
+
+      <OutOfCoverageTagsDialog
+        open={outOfCoverageDialogOpen}
+        onClose={() => setOutOfCoverageDialogOpen(false)}
+        tags={tags}
+        currentTagIds={inboxMetrics.categoryTagIds.fuera_cobertura}
+        onSaved={(tagIds) => {
+          setCategoryTagOverrides({ fuera_cobertura: tagIds });
+          notifyAction('Tags de Fuera de cobertura actualizados', 'success');
+        }}
       />
     </Box>
   );

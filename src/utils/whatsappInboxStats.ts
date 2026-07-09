@@ -58,11 +58,25 @@ export function resolveCategoryTagIds(
     .map((t) => t.id);
 }
 
+export type CategoryTagIdOverrides = Partial<Record<InboxTagCategoryId, string[]>>;
+
+/**
+ * Resuelve IDs por categoría.
+ * Si hay override (p. ej. Fuera de cobertura desde Supabase), usa esos IDs
+ * filtrados al catálogo activo; si el override está vacío, cae a aliases.
+ */
 export function resolveAllCategoryTagIds(
   tags: TagLike[],
+  overrides?: CategoryTagIdOverrides,
 ): Record<InboxTagCategoryId, string[]> {
+  const knownIds = new Set(tags.map((t) => t.id));
   const out = {} as Record<InboxTagCategoryId, string[]>;
   for (const id of INBOX_TAG_CATEGORY_IDS) {
+    const override = overrides?.[id];
+    if (override && override.length > 0) {
+      out[id] = override.filter((tagId) => knownIds.has(tagId));
+      if (out[id].length > 0) continue;
+    }
     out[id] = resolveCategoryTagIds(id, tags);
   }
   return out;
@@ -130,8 +144,9 @@ export function conversationMatchesInboxCategory(
 export function computeTabCounts(
   conversations: WhatsAppConversation[],
   tags: TagLike[] = [],
+  overrides?: CategoryTagIdOverrides,
 ): WhatsAppTabCounts {
-  const categoryTagIds = resolveAllCategoryTagIds(tags);
+  const categoryTagIds = resolveAllCategoryTagIds(tags, overrides);
   let last24h = 0;
   let all = 0;
   let unread = 0;
@@ -191,11 +206,12 @@ export function computeArchivedTagCounts(conversations: WhatsAppConversation[]):
 export function computeWhatsAppInboxMetrics(
   conversations: WhatsAppConversation[],
   tags: TagLike[] = [],
+  overrides?: CategoryTagIdOverrides,
 ): WhatsAppInboxMetrics {
-  const categoryTagIds = resolveAllCategoryTagIds(tags);
+  const categoryTagIds = resolveAllCategoryTagIds(tags, overrides);
   return {
     totalConversations: conversations.length,
-    tabCounts: computeTabCounts(conversations, tags),
+    tabCounts: computeTabCounts(conversations, tags, overrides),
     tagCountsById: computeTagCounts(conversations),
     archivedTagCountsById: computeArchivedTagCounts(conversations),
     categoryTagIds,

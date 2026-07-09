@@ -1214,6 +1214,52 @@ export async function assignWhatsAppTags(
   return { success: true };
 }
 
+export type InboxConfigurableCategoryId = 'fuera_cobertura';
+
+export interface WhatsAppInboxCategorySettings {
+  categoryId: InboxConfigurableCategoryId;
+  tagIds: string[];
+  updatedAt?: Date;
+  updatedBy?: string;
+}
+
+export async function getInboxCategorySettings(
+  categoryId: InboxConfigurableCategoryId = 'fuera_cobertura',
+): Promise<WhatsAppInboxCategorySettings | null> {
+  const { data, error } = await supabase
+    .from('whatsapp_inbox_category_settings')
+    .select('category_id, tag_ids, updated_at, updated_by')
+    .eq('category_id', categoryId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return {
+    categoryId: data.category_id as InboxConfigurableCategoryId,
+    tagIds: (data.tag_ids as string[] | null) ?? [],
+    updatedAt: data.updated_at ? new Date(data.updated_at) : undefined,
+    updatedBy: data.updated_by ?? undefined,
+  };
+}
+
+export async function saveInboxCategorySettings(
+  categoryId: InboxConfigurableCategoryId,
+  tagIds: string[],
+  updatedBy?: string | null,
+): Promise<{ success: boolean }> {
+  const unique = [...new Set(tagIds.filter(Boolean))];
+  const { error } = await supabase.from('whatsapp_inbox_category_settings').upsert(
+    {
+      category_id: categoryId,
+      tag_ids: unique,
+      updated_by: updatedBy ?? null,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'category_id' },
+  );
+  if (error) throw error;
+  return { success: true };
+}
+
 function mapStickerDates(sticker: WhatsAppSticker): WhatsAppSticker {
   return {
     ...sticker,
