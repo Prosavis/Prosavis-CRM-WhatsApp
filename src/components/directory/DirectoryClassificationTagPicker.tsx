@@ -189,7 +189,8 @@ export const DirectoryClassificationTagPicker: React.FC<
       </Stack>
       {!compact && (
         <FormHelperText>
-          El tipo del contacto se define con los tags de WhatsApp (ej. Cliente Potencial, Agendado).
+          El tipo del contacto se define con tags del directorio (catálogo compartido del CRM; ej.
+          Cliente Potencial, Agendado).
         </FormHelperText>
       )}
 
