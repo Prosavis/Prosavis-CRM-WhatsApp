@@ -1,9 +1,12 @@
 /**
  * Etiquetas visuales para clasificación del directorio (tags WhatsApp + legacy).
+ * Fuente de verdad de “empresa”: tag WhatsApp `Empresas` (no enum `company`).
  */
 
 const LEGACY_LABELS: Record<string, string> = {
   company: 'Empresa',
+  empresas: 'Empresas',
+  empresa: 'Empresa',
   user: 'Usuario',
   lead: 'Prospecto',
   unknown: 'Sin clasificar',

@@ -31,7 +31,7 @@ export type LeadChannel = 'WHATSAPP' | 'IN_APP';
 // New DirectoryEntry types (matches crm_directory schema)
 // ──────────────────────────────────────────────
 
-export type DirectoryClassification = 'company' | 'user' | 'lead' | 'unknown';
+export type DirectoryClassification = string;
 export type DirectoryQualityTag = 'good' | 'standard' | 'bad';
 export type DirectoryStatus = 'active' | 'inactive' | 'opt_out';
 export type DirectoryChannel = 'WHATSAPP' | 'IN_APP';

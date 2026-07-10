@@ -17,6 +17,7 @@ const TAG_B = '22222222-2222-2222-2222-222222222222';
 const TAG_AGENDADO = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 const TAG_COBERTURA = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
 const TAG_TRABAJO = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
+const TAG_EMPRESAS = '656473d8-4ae3-4c53-a5e3-81d9217537c2';
 
 function mockConversation(
   partial: Partial<WhatsAppConversation> & { id: string },
@@ -34,6 +35,7 @@ const catalog = [
   { id: TAG_AGENDADO, name: 'Agendado' },
   { id: TAG_COBERTURA, name: 'Fuera de cobertura' },
   { id: TAG_TRABAJO, name: 'Trabajo / CV' },
+  { id: TAG_EMPRESAS, name: 'Empresas' },
 ];
 
 describe('whatsappInboxStats', () => {
@@ -68,6 +70,7 @@ describe('whatsappInboxStats', () => {
       mockConversation({ id: 'a2', tagIds: [TAG_AGENDADO, TAG_COBERTURA] }),
       mockConversation({ id: 'a3', tagIds: [TAG_TRABAJO] }),
       mockConversation({ id: 'a4', tagIds: [TAG_A] }),
+      mockConversation({ id: 'a5', tagIds: [TAG_EMPRESAS] }),
       mockConversation({ id: 'arch', isArchived: true, tagIds: [TAG_AGENDADO] }),
     ];
 
@@ -75,7 +78,8 @@ describe('whatsappInboxStats', () => {
     expect(tabCounts.agendados).toBe(2);
     expect(tabCounts.fueraCobertura).toBe(1);
     expect(tabCounts.trabajo).toBe(1);
-    expect(tabCounts.all).toBe(4);
+    expect(tabCounts.empresas).toBe(1);
+    expect(tabCounts.all).toBe(5);
     expect(tabCounts.archived).toBe(1);
   });
 
@@ -112,21 +116,24 @@ describe('whatsappInboxStats', () => {
       { id: '1', name: 'AGENDADOS' },
       { id: '2', name: 'Marian' },
       { id: '3', name: '  Bogotá ' },
+      { id: '4', name: 'EMPRESAS' },
     ];
     expect(resolveCategoryTagIds('agendados', tags)).toEqual(['1']);
     expect(resolveCategoryTagIds('trabajo', tags)).toEqual(['2']);
     expect(resolveCategoryTagIds('fuera_cobertura', tags)).toEqual(['3']);
+    expect(resolveCategoryTagIds('empresas', tags)).toEqual(['4']);
   });
 
   it('conversationMatchesInboxCategory: chat con varios tags aparece en cada categoría activa', () => {
     const c = mockConversation({
       id: 'multi',
-      tagIds: [TAG_AGENDADO, TAG_COBERTURA],
+      tagIds: [TAG_AGENDADO, TAG_COBERTURA, TAG_EMPRESAS],
     });
     const categoryTagIds = resolveAllCategoryTagIds(catalog);
     expect(conversationMatchesInboxCategory(c, 'agendados', categoryTagIds)).toBe(true);
     expect(conversationMatchesInboxCategory(c, 'fuera_cobertura', categoryTagIds)).toBe(true);
     expect(conversationMatchesInboxCategory(c, 'trabajo', categoryTagIds)).toBe(false);
+    expect(conversationMatchesInboxCategory(c, 'empresas', categoryTagIds)).toBe(true);
     expect(conversationMatchesInboxCategory(c, 'all', categoryTagIds)).toBe(true);
   });
 
@@ -135,6 +142,7 @@ describe('whatsappInboxStats', () => {
     const secondary = getSecondaryFilterTags(catalog, categoryTagIds);
     expect(secondary.map((t) => t.id).sort()).toEqual([TAG_A, TAG_B].sort());
     expect(collectCategoryOwnedTagIds(categoryTagIds).has(TAG_AGENDADO)).toBe(true);
+    expect(collectCategoryOwnedTagIds(categoryTagIds).has(TAG_EMPRESAS)).toBe(true);
   });
 
   it('computeWhatsAppInboxMetrics expone categoryTagIds y mapas de tags', () => {

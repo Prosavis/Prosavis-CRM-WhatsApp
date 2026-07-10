@@ -10,15 +10,17 @@ export type InboxCategoryId =
   | 'archived'
   | 'agendados'
   | 'fuera_cobertura'
-  | 'trabajo';
+  | 'trabajo'
+  | 'empresas';
 
 /** Categorías cuyo filtro es “tiene alguno de estos tags”. */
-export type InboxTagCategoryId = 'agendados' | 'fuera_cobertura' | 'trabajo';
+export type InboxTagCategoryId = 'agendados' | 'fuera_cobertura' | 'trabajo' | 'empresas';
 
 export const INBOX_TAG_CATEGORY_IDS: InboxTagCategoryId[] = [
   'agendados',
   'fuera_cobertura',
   'trabajo',
+  'empresas',
 ];
 
 /**
@@ -38,6 +40,8 @@ export const INBOX_CATEGORY_TAG_ALIASES: Record<InboxTagCategoryId, readonly str
     'santa rosa',
   ],
   trabajo: ['marian', 'job', 'jobs', 'trabajo / cv', 'trabajo/cv', 'trabajo'],
+  /** Tag canónico suite-wide: WhatsApp `Empresas`. */
+  empresas: ['empresas'],
 };
 
 /** Categorías cuya lista de tags se puede editar en UI (compartida en Supabase). */
@@ -97,6 +101,12 @@ export const INBOX_CATEGORIES: readonly InboxCategoryDefinition[] = [
     label: 'Trabajo / CV',
     shortLabel: 'Trabajo',
     description: 'Chats con tags Marian o Job',
+  },
+  {
+    id: 'empresas',
+    label: 'Empresas',
+    shortLabel: 'Empresas',
+    description: 'Chats con tag Empresas',
   },
 ] as const;
 

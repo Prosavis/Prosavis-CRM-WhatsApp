@@ -56,13 +56,15 @@ export const BULK_QUALITY_TAG_LABELS: Record<string, string> = {
   bad: 'Mala',
 };
 
-export const BULK_CLASSIFICATION_OPTIONS = ['user', 'company', 'lead', 'unknown'] as const;
+export const BULK_CLASSIFICATION_OPTIONS = ['user', 'lead', 'unknown'] as const;
 
 export const BULK_CLASSIFICATION_LABELS: Record<string, string> = {
   user: 'Usuario',
-  company: 'Empresa',
   lead: 'Lead',
   unknown: 'Desconocido',
+  /** Solo lectura legacy en resúmenes / datos antiguos. */
+  company: 'Empresa',
+  Empresas: 'Empresas',
 };
 
 export interface BulkAudienceAdvancedFilters {

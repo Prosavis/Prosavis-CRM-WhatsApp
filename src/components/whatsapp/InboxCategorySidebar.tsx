@@ -17,6 +17,7 @@ import ArchiveIcon from '@mui/icons-material/Archive';
 import EventAvailableIcon from '@mui/icons-material/EventAvailable';
 import LocationOffIcon from '@mui/icons-material/LocationOff';
 import WorkOutlineIcon from '@mui/icons-material/WorkOutline';
+import BusinessOutlinedIcon from '@mui/icons-material/BusinessOutlined';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
@@ -37,6 +38,7 @@ const CATEGORY_ICONS: Record<InboxCategoryId, React.ReactNode> = {
   agendados: <EventAvailableIcon fontSize="small" />,
   fuera_cobertura: <LocationOffIcon fontSize="small" />,
   trabajo: <WorkOutlineIcon fontSize="small" />,
+  empresas: <BusinessOutlinedIcon fontSize="small" />,
 };
 
 export interface InboxCategorySidebarProps {

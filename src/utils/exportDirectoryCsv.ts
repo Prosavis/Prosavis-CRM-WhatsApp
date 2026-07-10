@@ -3,6 +3,7 @@ import { DIRECTORY_STATUS_LABELS } from '@/utils/directoryContactStatus';
 
 const CLASSIFICATION_LABELS: Record<string, string> = {
   user: 'Usuario',
+  Empresas: 'Empresas',
   company: 'Empresa',
   lead: 'Lead',
   unknown: 'Desconocido',

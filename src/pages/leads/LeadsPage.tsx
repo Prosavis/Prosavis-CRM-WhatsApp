@@ -451,7 +451,7 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
             >
               <MenuItem value="">Todas</MenuItem>
               <MenuItem value="user">Usuario</MenuItem>
-              <MenuItem value="company">Empresa</MenuItem>
+              <MenuItem value="Empresas">Empresas</MenuItem>
               <MenuItem value="lead">Lead</MenuItem>
               <MenuItem value="unknown">Desconocido</MenuItem>
             </Select>

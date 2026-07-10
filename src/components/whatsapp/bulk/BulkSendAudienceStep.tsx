@@ -64,6 +64,7 @@ import BulkSendAdvancedFilters from './BulkSendAdvancedFilters';
 
 const CLASSIFICATION_LABELS: Record<string, string> = {
   user: 'Usuario',
+  Empresas: 'Empresas',
   company: 'Empresa',
   lead: 'Lead',
   unknown: 'Desconocido',

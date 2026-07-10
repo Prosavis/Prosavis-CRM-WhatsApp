@@ -29,6 +29,7 @@ export interface WhatsAppTabCounts {
   agendados: number;
   fueraCobertura: number;
   trabajo: number;
+  empresas: number;
 }
 
 export interface WhatsAppInboxMetrics {
@@ -134,6 +135,8 @@ export function conversationMatchesInboxCategory(
       return conversationHasAnyTag(c, categoryTagIds.fuera_cobertura);
     case 'trabajo':
       return conversationHasAnyTag(c, categoryTagIds.trabajo);
+    case 'empresas':
+      return conversationHasAnyTag(c, categoryTagIds.empresas);
     default: {
       const _exhaustive: never = category;
       return _exhaustive;
@@ -154,6 +157,7 @@ export function computeTabCounts(
   let agendados = 0;
   let fueraCobertura = 0;
   let trabajo = 0;
+  let empresas = 0;
   const nowMs = Date.now();
 
   for (const c of conversations) {
@@ -171,9 +175,10 @@ export function computeTabCounts(
     if (conversationHasAnyTag(c, categoryTagIds.agendados)) agendados += 1;
     if (conversationHasAnyTag(c, categoryTagIds.fuera_cobertura)) fueraCobertura += 1;
     if (conversationHasAnyTag(c, categoryTagIds.trabajo)) trabajo += 1;
+    if (conversationHasAnyTag(c, categoryTagIds.empresas)) empresas += 1;
   }
 
-  return { last24h, all, unread, archived, agendados, fueraCobertura, trabajo };
+  return { last24h, all, unread, archived, agendados, fueraCobertura, trabajo, empresas };
 }
 
 function computeTagCountsForArchiveState(
@@ -237,6 +242,8 @@ export function getTabCountForCategory(
       return tabCounts.fueraCobertura;
     case 'trabajo':
       return tabCounts.trabajo;
+    case 'empresas':
+      return tabCounts.empresas;
     default: {
       const _exhaustive: never = category;
       return _exhaustive;

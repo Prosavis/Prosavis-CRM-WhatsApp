@@ -56,14 +56,14 @@ import {
 
 const CLASSIFICATION_CHIP_COLORS: Record<string, 'default' | 'primary' | 'info' | 'warning' | 'success'> = {
   user: 'primary',
-  company: 'info',
+  Empresas: 'info',
   lead: 'warning',
   unknown: 'default',
 };
 
 const CLASSIFICATION_LABELS: Record<string, string> = {
   user: 'Usuario',
-  company: 'Empresa',
+  Empresas: 'Empresas',
   lead: 'Lead',
   unknown: 'Desconocido',
 };

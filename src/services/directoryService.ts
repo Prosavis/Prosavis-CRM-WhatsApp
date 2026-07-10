@@ -372,7 +372,16 @@ export const directoryService = {
       query = query.eq('status', filters.status);
     }
     if (filters?.source) query = query.eq('source', filters.source);
-    if (filters?.classification) query = query.eq('classification', filters.classification);
+    if (filters?.classification) {
+      const c = filters.classification.trim();
+      const lower = c.toLowerCase();
+      // Empresa = tag WhatsApp canónico `Empresas` (no enum legacy `company`).
+      if (lower === 'empresas' || lower === 'empresa' || lower === 'company') {
+        query = query.contains('tags', ['Empresas']);
+      } else {
+        query = query.eq('classification', c);
+      }
+    }
     if (filters?.qualityTag) query = query.eq('quality_tag', filters.qualityTag);
     if (typeof filters?.optOut === 'boolean') query = query.eq('opt_out', filters.optOut);
     if (filters?.assignedTo) query = query.eq('whatsapp_assigned_to', filters.assignedTo);
