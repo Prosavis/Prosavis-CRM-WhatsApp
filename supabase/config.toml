@@ -84,6 +84,9 @@ verify_jwt = false
 [functions.ensure-whatsapp-conversation-from-lead]
 verify_jwt = false
 
+[functions.backfill-whatsapp-conversation-line]
+verify_jwt = false
+
 [functions.delete-whatsapp-message-log-entry]
 verify_jwt = false
 

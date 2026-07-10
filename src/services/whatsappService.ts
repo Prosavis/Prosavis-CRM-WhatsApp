@@ -1083,6 +1083,25 @@ export async function ensureWhatsAppConversationFromLead(params: {
   );
 }
 
+export interface BackfillConversationLineResult {
+  success: boolean;
+  dryRun: boolean;
+  phoneNumberId: string;
+  orphanCount: number;
+  updatedCount: number;
+}
+
+/** Asigna phone_number_id a chats huérfanos (null) para que el inbox los liste. */
+export async function backfillWhatsAppConversationLine(params?: {
+  phoneNumberId?: string;
+  dryRun?: boolean;
+}): Promise<BackfillConversationLineResult> {
+  return invokeFn<BackfillConversationLineResult>('backfill-whatsapp-conversation-line', {
+    ...(params?.phoneNumberId ? { phoneNumberId: params.phoneNumberId } : {}),
+    ...(params?.dryRun != null ? { dryRun: params.dryRun } : {}),
+  });
+}
+
 // --- Borrado de mensajes ---
 
 export async function deleteWhatsAppMessages(

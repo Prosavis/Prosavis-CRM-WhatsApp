@@ -24,6 +24,7 @@ import {
   patchWhatsAppConversationAdmin,
   getInboxCategorySettings,
   DELETE_WHATSAPP_CONVERSATION_CONFIRM_PHRASE,
+  backfillWhatsAppConversationLine,
   type WhatsAppConversation,
   type WhatsAppTag,
   type WhatsAppSnippet,
@@ -234,6 +235,50 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   const handleRetryInbox = useCallback(() => {
     setSubscriptionKey((key) => key + 1);
   }, []);
+
+  useEffect(() => {
+    if (authLoading || !session?.access_token || !phoneNumberId) return;
+
+    const storageKey = `wa_line_backfill_v1_${phoneNumberId}`;
+    try {
+      if (sessionStorage.getItem(storageKey) === '1') return;
+    } catch {
+      /* private mode / blocked storage */
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const dry = await backfillWhatsAppConversationLine({
+          phoneNumberId,
+          dryRun: true,
+        });
+        if (cancelled) return;
+        if (dry.orphanCount > 0) {
+          const result = await backfillWhatsAppConversationLine({
+            phoneNumberId,
+            dryRun: false,
+          });
+          if (cancelled) return;
+          if (result.updatedCount > 0) {
+            const convs = await refetchConversations(phoneNumberId);
+            if (!cancelled) setConversations(convs);
+          }
+        }
+        try {
+          sessionStorage.setItem(storageKey, '1');
+        } catch {
+          /* ignore */
+        }
+      } catch (err) {
+        console.error('Auto-backfill conversation line failed:', err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, session?.access_token, phoneNumberId]);
 
   useEffect(() => {
     if (authLoading || !session?.access_token) {

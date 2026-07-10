@@ -11,6 +11,7 @@ import SmartSuggestionsPanel from './monitor/sections/SmartSuggestionsPanel';
 import HeavyChatsSection from './monitor/sections/HeavyChatsSection';
 import OptimizationSection from './monitor/sections/OptimizationSection';
 import OrphansSection from './monitor/sections/OrphansSection';
+import ConversationLineHealthSection from './monitor/sections/ConversationLineHealthSection';
 import ConnectionsSection from './monitor/sections/ConnectionsSection';
 import MetricsGrid from './monitor/metrics/MetricsGrid';
 import MonitorSkeleton from './monitor/ui/MonitorSkeleton';
@@ -86,10 +87,11 @@ const MonitorTab: React.FC = () => {
 
           <Box sx={{
             display: 'grid',
-            gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' },
+            gridTemplateColumns: { xs: '1fr', md: 'repeat(2, 1fr)', lg: 'repeat(4, 1fr)' },
             gap: 2,
             alignItems: 'stretch',
           }}>
+            <ConversationLineHealthSection />
             <OrphansSection suggestions={suggestions} />
             <ConnectionsSection connections={connections} />
             <StorageLimitsSection />
