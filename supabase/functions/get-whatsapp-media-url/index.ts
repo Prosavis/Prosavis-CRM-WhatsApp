@@ -108,6 +108,18 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: 'mediaId, mediaAssetId o storagePath es requerido.' }, 400);
     }
 
+    // Stickers outbound guardan storage_path con prefijo whatsapp-stickers/
+    // pero el objeto vive en ese bucket sin el prefijo.
+    if (
+      resolvedBucketId === 'whatsapp-stickers' ||
+      resolvedStoragePath.startsWith('whatsapp-stickers/')
+    ) {
+      resolvedBucketId = 'whatsapp-stickers';
+      resolvedStoragePath = resolvedStoragePath.startsWith('whatsapp-stickers/')
+        ? resolvedStoragePath.slice('whatsapp-stickers/'.length)
+        : resolvedStoragePath;
+    }
+
     const signedUrl = await createWhatsAppMediaSignedUrl(
       supabase,
       resolvedStoragePath,

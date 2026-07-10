@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import {
   Alert,
@@ -7,12 +7,10 @@ import {
   CardContent,
   CircularProgress,
   Container,
-  InputAdornment,
   Stack,
-  TextField,
   Typography,
 } from '@mui/material';
-import { Email as EmailIcon, Lock as LockIcon } from '@mui/icons-material';
+import { Google as GoogleIcon } from '@mui/icons-material';
 import { motion } from 'framer-motion';
 import AnimatedCard from '@/components/common/AnimatedCard';
 import ThemeToggle from '@/components/common/ThemeToggle';
@@ -27,10 +25,8 @@ interface LoginPageProps {
 }
 
 export default function LoginPage({ unauthorized = false }: LoginPageProps) {
-  const { signIn, user, isAdmin, loading } = useAuth();
+  const { signInWithGoogle, user, isAdmin, loading } = useAuth();
   const { mode } = useTheme();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,16 +34,15 @@ export default function LoginPage({ unauthorized = false }: LoginPageProps) {
     return <Navigate to="/whatsapp" replace />;
   }
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleGoogleLogin = async () => {
     setSubmitting(true);
     setError(null);
-
     try {
-      await signIn(email, password);
+      await signInWithGoogle();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo iniciar sesión.');
-    } finally {
+      setError(
+        err instanceof Error ? err.message : 'No se pudo iniciar sesión con Google.'
+      );
       setSubmitting(false);
     }
   };
@@ -228,92 +223,59 @@ export default function LoginPage({ unauthorized = false }: LoginPageProps) {
                           fontSize: SIZES.fontSize.sm,
                         }}
                       >
-                        Accede con tu cuenta de administrador
+                        Accede con tu cuenta de Google autorizada
                       </Typography>
                     </Box>
 
-                    <Stack component="form" spacing={2.5} onSubmit={handleSubmit}>
+                    <Stack spacing={2.5}>
                       {unauthorized && (
                         <Alert severity="warning">
-                          Tu usuario existe, pero no tiene un perfil activo en admin_profiles.
+                          Tu cuenta de Google no tiene un perfil activo de administrador CRM.
                         </Alert>
                       )}
+
                       {error && <Alert severity="error">{error}</Alert>}
 
-                      <TextField
-                        fullWidth
-                        label="Correo electrónico"
-                        type="email"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        autoComplete="email"
-                        disabled={submitting}
-                        InputProps={{
-                          startAdornment: (
-                            <InputAdornment position="start">
-                              <EmailIcon
-                                sx={{
-                                  color:
-                                    mode === 'dark'
-                                      ? 'rgba(255, 119, 0, 0.7)'
-                                      : DesignTokens.brand.primary.blue,
-                                }}
-                              />
-                            </InputAdornment>
-                          ),
-                        }}
-                        sx={{ '& .MuiOutlinedInput-root': { borderRadius: BORDER_RADIUS.md } }}
-                      />
-                      <TextField
-                        fullWidth
-                        label="Contraseña"
-                        type="password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        autoComplete="current-password"
-                        disabled={submitting}
-                        InputProps={{
-                          startAdornment: (
-                            <InputAdornment position="start">
-                              <LockIcon
-                                sx={{
-                                  color:
-                                    mode === 'dark'
-                                      ? 'rgba(255, 119, 0, 0.7)'
-                                      : DesignTokens.brand.primary.blue,
-                                }}
-                              />
-                            </InputAdornment>
-                          ),
-                        }}
-                        sx={{ '& .MuiOutlinedInput-root': { borderRadius: BORDER_RADIUS.md } }}
-                      />
                       <Button
                         fullWidth
-                        type="submit"
                         size="large"
                         variant="contained"
-                        disabled={submitting}
+                        onClick={handleGoogleLogin}
+                        disabled={submitting || loading}
                         startIcon={
-                          submitting ? <CircularProgress size={20} color="inherit" /> : <LockIcon />
+                          submitting ? (
+                            <CircularProgress size={20} color="inherit" />
+                          ) : (
+                            <GoogleIcon />
+                          )
                         }
                         sx={{
                           py: 2,
                           borderRadius: BORDER_RADIUS.md,
                           fontWeight: DesignTokens.typography.fontWeight.semibold,
                           fontSize: SIZES.fontSize.md,
-                          background: `linear-gradient(135deg, ${DesignTokens.brand.primary.orange} 0%, ${DesignTokens.brand.secondary.lightOrange} 100%)`,
+                          background: '#4285f4',
                           color: DesignTokens.dark.text.primary,
-                          boxShadow: '0 4px 15px rgba(255, 119, 0, 0.3)',
+                          boxShadow: '0 4px 15px rgba(66, 133, 244, 0.3)',
                           '&:hover': {
-                            background: `linear-gradient(135deg, ${DesignTokens.brand.secondary.darkOrange} 0%, ${DesignTokens.brand.primary.orange} 100%)`,
-                            boxShadow: '0 6px 20px rgba(255, 119, 0, 0.4)',
+                            background: '#3367d6',
+                            boxShadow: '0 6px 20px rgba(66, 133, 244, 0.4)',
                             transform: 'translateY(-2px)',
+                          },
+                          '&:disabled': {
+                            background:
+                              mode === 'dark'
+                                ? 'rgba(255, 255, 255, 0.1)'
+                                : 'rgba(0, 0, 0, 0.1)',
+                            color:
+                              mode === 'dark'
+                                ? 'rgba(255, 255, 255, 0.3)'
+                                : 'rgba(0, 0, 0, 0.3)',
                           },
                           transition: DesignTokens.transitions.default,
                         }}
                       >
-                        {submitting ? 'Iniciando sesión...' : 'Iniciar sesión'}
+                        {submitting ? 'Conectando...' : 'Continuar con Google'}
                       </Button>
 
                       <Box
@@ -322,14 +284,22 @@ export default function LoginPage({ unauthorized = false }: LoginPageProps) {
                           p: 2,
                           borderRadius: BORDER_RADIUS.md,
                           backgroundColor:
-                            mode === 'dark' ? 'rgba(255, 119, 0, 0.05)' : 'rgba(255, 119, 0, 0.03)',
+                            mode === 'dark'
+                              ? 'rgba(255, 119, 0, 0.05)'
+                              : 'rgba(255, 119, 0, 0.03)',
                           border: `1px solid ${
-                            mode === 'dark' ? 'rgba(255, 119, 0, 0.1)' : 'rgba(255, 119, 0, 0.08)'
+                            mode === 'dark'
+                              ? 'rgba(255, 119, 0, 0.1)'
+                              : 'rgba(255, 119, 0, 0.08)'
                           }`,
                         }}
                       >
-                        <Typography variant="caption" color="text.secondary" display="block">
-                          Solo para administradores autorizados
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          sx={{ fontSize: SIZES.fontSize.xs, lineHeight: 1.5 }}
+                        >
+                          Solo Google · administradores autorizados
                         </Typography>
                       </Box>
                     </Stack>
@@ -338,14 +308,6 @@ export default function LoginPage({ unauthorized = false }: LoginPageProps) {
               </Box>
             </CardContent>
           </AnimatedCard>
-        </motion.div>
-
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.8 }}>
-          <Box sx={{ mt: 4, textAlign: 'center', zIndex: 1, position: 'relative' }}>
-            <Typography variant="caption" color="text.secondary" display="block">
-              © Prosavis · CRM independiente
-            </Typography>
-          </Box>
         </motion.div>
       </Box>
     </Container>

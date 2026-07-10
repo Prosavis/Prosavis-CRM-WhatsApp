@@ -15,7 +15,7 @@ export interface AuthContextValue {
   profile: AdminProfile | null;
   loading: boolean;
   isAdmin: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
 }
 

@@ -3,6 +3,23 @@ import type { Session } from '@supabase/supabase-js';
 import { AuthContext, type AdminProfile, type AuthContextValue } from '@/context/auth-context';
 import { supabase } from '@/config/supabase';
 
+const AUTHORIZED_ADMIN_EMAILS = [
+  'admin@prosavis.com',
+  'support@prosavis.com',
+  'oliverafrancy@gmail.com',
+] as const;
+
+const UNAUTHORIZED_MESSAGE =
+  'No tienes permisos para acceder al CRM WhatsApp.';
+
+function normalizeEmail(email?: string | null): string {
+  return (email ?? '').trim().toLowerCase();
+}
+
+function isAuthorizedEmail(email?: string | null): boolean {
+  const normalized = normalizeEmail(email);
+  return (AUTHORIZED_ADMIN_EMAILS as readonly string[]).includes(normalized);
+}
 
 async function loadProfile(userId: string): Promise<AdminProfile | null> {
   const { data, error } = await supabase
@@ -26,6 +43,26 @@ async function loadProfile(userId: string): Promise<AdminProfile | null> {
   };
 }
 
+async function ensureAdminProfile(): Promise<AdminProfile | null> {
+  const { data, error } = await supabase.rpc('ensure_crm_admin_profile');
+  if (error) {
+    console.error('ensure_crm_admin_profile failed:', error);
+    return null;
+  }
+  if (!data) return null;
+
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    email: row.email,
+    displayName: row.display_name ?? undefined,
+    role: row.role,
+    isActive: row.is_active,
+  };
+}
+
 export function AuthProvider({ children }: PropsWithChildren) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<AdminProfile | null>(null);
@@ -39,8 +76,20 @@ export function AuthProvider({ children }: PropsWithChildren) {
       return;
     }
 
+    const email = nextSession.user.email;
+    if (!isAuthorizedEmail(email)) {
+      await supabase.auth.signOut();
+      setSession(null);
+      setProfile(null);
+      throw new Error(UNAUTHORIZED_MESSAGE);
+    }
+
     try {
-      setProfile(await loadProfile(nextSession.user.id));
+      let nextProfile = await loadProfile(nextSession.user.id);
+      if (!nextProfile) {
+        nextProfile = await ensureAdminProfile();
+      }
+      setProfile(nextProfile);
     } catch (error) {
       console.error('No se pudo cargar el perfil de administrador:', error);
       setProfile(null);
@@ -54,7 +103,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
       .getSession()
       .then(async ({ data }) => {
         if (!mounted) return;
-        await refreshProfile(data.session);
+        try {
+          await refreshProfile(data.session);
+        } catch (error) {
+          console.error(error);
+        }
       })
       .finally(() => {
         if (mounted) setLoading(false);
@@ -63,7 +116,15 @@ export function AuthProvider({ children }: PropsWithChildren) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      void refreshProfile(nextSession);
+      void (async () => {
+        try {
+          await refreshProfile(nextSession);
+        } catch (error) {
+          console.error(error);
+        } finally {
+          if (mounted) setLoading(false);
+        }
+      })();
     });
 
     return () => {
@@ -72,8 +133,17 @@ export function AuthProvider({ children }: PropsWithChildren) {
     };
   }, [refreshProfile]);
 
-  const signIn = useCallback(async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const signInWithGoogle = useCallback(async () => {
+    const redirectTo = `${window.location.origin}/login`;
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo,
+        queryParams: {
+          prompt: 'select_account',
+        },
+      },
+    });
     if (error) throw error;
   }, []);
 
@@ -89,12 +159,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
       profile,
       loading,
       isAdmin: !!profile && ['admin', 'super_admin'].includes(profile.role),
-      signIn,
+      signInWithGoogle,
       signOut,
     }),
-    [loading, profile, session, signIn, signOut],
+    [loading, profile, session, signInWithGoogle, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
-

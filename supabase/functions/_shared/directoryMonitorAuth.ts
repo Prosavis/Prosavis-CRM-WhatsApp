@@ -28,7 +28,6 @@ const FALLBACK_ADMIN_EMAILS = [
   'admin@prosavis.com',
   'support@prosavis.com',
   'oliverafrancy@gmail.com',
-  'prosavis28@gmail.com',
 ];
 
 let cachedAdminEmails: string[] | null = null;

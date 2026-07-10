@@ -430,11 +430,20 @@ export async function sendWhatsAppMediaOutbound(
 
   let mediaUrlForMeta = params.mediaUrl;
   if (params.storagePath?.trim()) {
-    mediaUrlForMeta = await createWhatsAppMediaSignedUrl(
-      supabase,
-      params.storagePath.trim(),
-      OUTBOUND_META_SIGNED_URL_EXPIRES_SECONDS,
-    );
+    // Stickers viven en bucket whatsapp-stickers (path con o sin prefijo);
+    // el resto de media sale de whatsapp-media.
+    mediaUrlForMeta =
+      params.mediaType === 'sticker'
+        ? await createStickerSignedUrl(
+            supabase,
+            params.storagePath.trim(),
+            OUTBOUND_META_SIGNED_URL_EXPIRES_SECONDS,
+          )
+        : await createWhatsAppMediaSignedUrl(
+            supabase,
+            params.storagePath.trim(),
+            OUTBOUND_META_SIGNED_URL_EXPIRES_SECONDS,
+          );
   }
 
   const metaResult = await sendToMeta({

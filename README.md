@@ -33,10 +33,13 @@ npm run dev
 
 La app corre en `http://localhost:3001`.
 
-**Admin local** (solo seed de desarrollo, ver `supabase/seed.sql`):
+**Admin** (Google OAuth, allowlist):
 
-- Correo: `support@prosavis.com`
-- Contraseña: la definida en el seed (no usar en producción).
+- `admin@prosavis.com` (`super_admin`)
+- `support@prosavis.com` (`super_admin`)
+- `oliverafrancy@gmail.com` (`admin`)
+
+Habilitar el proveedor **Google** en Supabase Auth (Dashboard → Authentication → Providers) y agregar la URL de callback de la app (`https://prosavis-crm-whatsapp.vercel.app/login` y `http://localhost:3001/login`).
 
 ## Variables de entorno
 
@@ -213,4 +216,4 @@ Build y type-check pasan en el estado actual del repo.
 
 ## Admin producción
 
-Usuario inicial remoto: `support@prosavis.com` (`super_admin`). La contraseña se gestiona en Supabase Auth (no va en el repositorio).
+Usuario inicial remoto: `support@prosavis.com` (`super_admin`). Acceso vía Google OAuth (allowlist).
