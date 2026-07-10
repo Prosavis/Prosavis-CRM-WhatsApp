@@ -46,14 +46,34 @@ const ReminderRunEventsTable: React.FC<ReminderRunEventsTableProps> = ({
 
   if (events.length === 0) {
     return (
-      <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
-        Sin detalle de ejecución (snapshot legacy).
-      </Typography>
+      <Box
+        sx={{
+          py: 3,
+          px: 2,
+          textAlign: 'center',
+          borderRadius: 1.5,
+          border: '1px dashed',
+          borderColor: 'divider',
+          bgcolor: 'action.hover',
+        }}
+      >
+        <Typography variant="body2" fontWeight={600} gutterBottom>
+          Sin detalle por mensaje
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          Esta corrida es anterior al registro detallado. Revisa la pestaña de estado final para ver
+          el corte de citas.
+        </Typography>
+      </Box>
     );
   }
 
   const recipientLabel = (type: ReminderRecipientType) =>
     type === 'client' ? 'Cliente' : 'Cleaner';
+
+  const sentCount = events.filter((e) => e.outcome === 'sent').length;
+  const failedCount = events.filter((e) => e.outcome === 'failed').length;
+  const skippedCount = events.filter((e) => e.outcome.startsWith('skipped_')).length;
 
   return (
     <Box>
@@ -62,10 +82,10 @@ const ReminderRunEventsTable: React.FC<ReminderRunEventsTableProps> = ({
         onChange={(_, value: EventFilter) => setFilter(value)}
         sx={{ mb: 1, minHeight: 36, '& .MuiTab-root': { minHeight: 36, py: 0.5 } }}
       >
-        <Tab label="Todos" value="all" sx={{ textTransform: 'none' }} />
-        <Tab label="Enviados" value="sent" sx={{ textTransform: 'none' }} />
-        <Tab label="Fallidos" value="failed" sx={{ textTransform: 'none' }} />
-        <Tab label="Omitidos" value="skipped" sx={{ textTransform: 'none' }} />
+        <Tab label={`Todos (${events.length})`} value="all" sx={{ textTransform: 'none' }} />
+        <Tab label={`Enviados (${sentCount})`} value="sent" sx={{ textTransform: 'none' }} />
+        <Tab label={`Fallidos (${failedCount})`} value="failed" sx={{ textTransform: 'none' }} />
+        <Tab label={`Omitidos (${skippedCount})`} value="skipped" sx={{ textTransform: 'none' }} />
       </Tabs>
 
       <TableContainer>
@@ -73,10 +93,10 @@ const ReminderRunEventsTable: React.FC<ReminderRunEventsTableProps> = ({
           <TableHead>
             <TableRow>
               <TableCell>Cita</TableCell>
-              {showRecipientType && <TableCell>Tipo</TableCell>}
+              {showRecipientType && <TableCell>Para</TableCell>}
               <TableCell>Resultado</TableCell>
-              <TableCell>Error</TableCell>
-              <TableCell>WA ID</TableCell>
+              <TableCell>Motivo</TableCell>
+              <TableCell>Intento</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -98,13 +118,13 @@ const ReminderRunEventsTable: React.FC<ReminderRunEventsTableProps> = ({
                   />
                 </TableCell>
                 <TableCell>
-                  <Typography variant="caption" color="text.secondary" sx={{ maxWidth: 200, display: 'block' }}>
-                    {event.errorMessage ?? '—'}
+                  <Typography variant="caption" color="text.secondary" sx={{ maxWidth: 240, display: 'block' }}>
+                    {event.errorMessage ?? (event.outcome === 'sent' ? 'Enviado correctamente' : '—')}
                   </Typography>
                 </TableCell>
                 <TableCell>
-                  <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>
-                    {event.waMessageId ?? '—'}
+                  <Typography variant="caption" color="text.secondary">
+                    {event.attemptNumber != null ? `#${event.attemptNumber}` : '—'}
                   </Typography>
                 </TableCell>
               </TableRow>
@@ -116,7 +136,7 @@ const ReminderRunEventsTable: React.FC<ReminderRunEventsTableProps> = ({
       {filtered.length === 0 && (
         <Stack alignItems="center" sx={{ py: 2 }}>
           <Typography variant="body2" color="text.secondary">
-            Sin filas para este filtro.
+            No hay mensajes en este filtro.
           </Typography>
         </Stack>
       )}
