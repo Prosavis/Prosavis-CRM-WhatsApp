@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import {
   Box,
   Chip,
+  CircularProgress,
   FormControl,
   FormControlLabel,
   IconButton,
@@ -20,6 +21,8 @@ import {
 } from '@mui/material';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import WhatsAppIcon from '@mui/icons-material/WhatsApp';
+import { useNavigate } from 'react-router-dom';
 import type { ReminderDeliveryStatus, ReminderRow } from '@/types/reminderAutomations';
 import {
   formatReminderSentDisplay,
@@ -28,6 +31,7 @@ import {
   reminderStatusTooltip,
 } from '@/types/reminderAutomations';
 import { normalizeDirectoryPhoneE164 } from '@/utils/directoryPhone';
+import { openWhatsAppInbox } from '@/utils/openWhatsAppInbox';
 
 function formatServiceDate(iso: string | null): string {
   if (!iso) return '—';
@@ -69,12 +73,30 @@ const ReminderTrackingTable: React.FC<ReminderTrackingTableProps> = ({
   toggleLoadingKey,
   readOnly = false,
 }) => {
+  const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState<ReminderDeliveryStatus | 'all'>('all');
+  const [openingKey, setOpeningKey] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     if (statusFilter === 'all') return rows;
     return rows.filter((r) => r.deliveryStatus === statusFilter);
   }, [rows, statusFilter]);
+
+  const handleOpenInbox = async (row: ReminderRow) => {
+    const key = `${row.appointmentId}-${row.recipientType}-${row.recipientMemberId ?? ''}`;
+    if (openingKey || (!row.conversationStableKey && !row.phone)) return;
+    setOpeningKey(key);
+    try {
+      await openWhatsAppInbox({
+        navigate,
+        phone: row.phone,
+        conversationStableKey: row.conversationStableKey,
+        name: row.recipientName,
+      });
+    } finally {
+      setOpeningKey(null);
+    }
+  };
 
   return (
     <Box>
@@ -122,6 +144,7 @@ const ReminderTrackingTable: React.FC<ReminderTrackingTableProps> = ({
               </TableRow>
             ) : (
               filtered.map((row) => {
+                const rowKey = `${row.appointmentId}-${row.recipientType}-${row.recipientMemberId ?? ''}`;
                 const toggleKey = row.recipientKey
                   ? `${row.recipientKey}:${row.recipientType}`
                   : null;
@@ -135,7 +158,7 @@ const ReminderTrackingTable: React.FC<ReminderTrackingTableProps> = ({
 
                 return (
                   <TableRow
-                    key={`${row.appointmentId}-${row.recipientType}-${row.recipientMemberId ?? ''}`}
+                    key={rowKey}
                     hover
                   >
                     <TableCell>
@@ -181,6 +204,25 @@ const ReminderTrackingTable: React.FC<ReminderTrackingTableProps> = ({
                               }
                               label=""
                             />
+                          </Tooltip>
+                        )}
+                        {(row.conversationStableKey || row.phone) && (
+                          <Tooltip title="Abrir en Inbox">
+                            <span>
+                              <IconButton
+                                size="small"
+                                color="success"
+                                disabled={openingKey === rowKey}
+                                aria-label={`Abrir en inbox: ${row.recipientName}`}
+                                onClick={() => void handleOpenInbox(row)}
+                              >
+                                {openingKey === rowKey ? (
+                                  <CircularProgress size={16} />
+                                ) : (
+                                  <WhatsAppIcon fontSize="small" />
+                                )}
+                              </IconButton>
+                            </span>
                           </Tooltip>
                         )}
                         <Tooltip title="Ver detalle">

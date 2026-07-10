@@ -297,7 +297,9 @@ async function fetchConversations(phoneNumberId?: string): Promise<WhatsAppConve
       .range(from, to);
 
     if (phoneNumberId) {
-      query = query.eq('phone_number_id', phoneNumberId);
+      // Incluir null: recordatorios/bulk antiguos crearon chats sin phone_number_id
+      // y el filtro estricto los ocultaba del inbox aunque el mensaje existiera.
+      query = query.or(`phone_number_id.eq.${phoneNumberId},phone_number_id.is.null`);
     }
 
     const { data, error } = await query;

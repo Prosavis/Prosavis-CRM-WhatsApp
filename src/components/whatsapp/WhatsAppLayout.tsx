@@ -195,6 +195,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   const notifyAudioRef = useRef<HTMLAudioElement | null>(null);
   const inboundBaselineReadyRef = useRef(false);
   const inboundPrevSnapshotRef = useRef<Map<string, { at: number }>>(new Map());
+  const focusRefetchAttemptedRef = useRef<string | null>(null);
 
   // Presencia entre admins (otras pestañas / otros usuarios viendo el inbox).
   const [presenceEntries, setPresenceEntries] = useState<WhatsAppAdminPresence[]>([]);
@@ -470,6 +471,33 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
       }
     }
   }, [focusConversation, conversations]);
+
+  // Si el deep-link no encuentra el chat (p. ej. recién creado / phone_number_id backfill),
+  // forzar un refetch único para que entre en la lista.
+  useEffect(() => {
+    const focusToken = `${focusConversation ?? ''}|${focusPhone ?? ''}`;
+    if (!focusConversation && !focusPhone) {
+      focusRefetchAttemptedRef.current = null;
+      return;
+    }
+    if (conversations.length === 0) return;
+    const matched = conversations.some(
+      (c) =>
+        (focusConversation && conversationMatchesFocusKey(focusConversation, c)) ||
+        (focusPhone && conversationMatchesFocusPhone(focusPhone, c)),
+    );
+    if (matched) {
+      focusRefetchAttemptedRef.current = focusToken;
+      return;
+    }
+    if (focusRefetchAttemptedRef.current === focusToken) return;
+    focusRefetchAttemptedRef.current = focusToken;
+    void refetchConversations(phoneNumberId)
+      .then((convs) => setConversations(convs))
+      .catch(() => {
+        /* ignore */
+      });
+  }, [focusConversation, focusPhone, conversations, phoneNumberId]);
 
   const recipientPhoneForTemplates = selectedConversation
     ? selectedConversation.contactPhone || selectedConversation.phone || ''

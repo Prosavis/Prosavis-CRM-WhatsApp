@@ -14,6 +14,7 @@ import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { getServiceClient } from '../_shared/supabase.ts';
 import {
   assertMetaSendEnabled,
+  ensureConversation,
   formatError,
   getGraphCredentials,
   isRecipientBlocked,
@@ -132,38 +133,20 @@ function validateE164ishPhone(input: string): string {
 
 /**
  * Asegura que la conversación exista en whatsapp_conversations antes de insertar el log.
+ * Debe incluir phone_number_id para que el inbox (filtrado por línea WABA) la liste.
  */
 async function ensureConversationExists(
   supabase: ReturnType<typeof getServiceClient>,
   stableKey: string,
   phone: string,
-  contactName?: string,
+  contactName: string | undefined,
+  phoneNumberId: string,
 ): Promise<void> {
-  const { error } = await supabase
-    .from('whatsapp_conversations')
-    .upsert(
-      {
-        stable_key: stableKey,
-        phone,
-        contact_name: contactName || phone,
-        contact_phone: phone,
-        state: 'active',
-        unread_count: 0,
-        tag_ids: [],
-        is_archived: false,
-        is_pinned: false,
-        crm_force_unread: false,
-        metadata: {},
-      },
-      { onConflict: 'stable_key', ignoreDuplicates: true },
-    );
-  if (error) {
-    if (error.code === '23505') {
-      // Unique violation = race condition, otro proceso creó la conversación — ok
-      return;
-    }
-    console.error('ensureConversationExists error', JSON.stringify({ code: error.code, message: error.message, details: error.details }));
-    // No lanzamos error — la función principal puede continuar e intentar el log
+  try {
+    await ensureConversation(supabase, stableKey, phone, phoneNumberId, contactName);
+  } catch (error) {
+    console.error('ensureConversationExists error', formatError(error));
+    // No lanzamos — la función principal puede continuar e intentar el log
   }
 }
 
@@ -335,7 +318,13 @@ Deno.serve(async (req) => {
     const recipient = resolveRecipient(phone);
 
     // Asegurar que la conversación exista antes de insertar el log
-    await ensureConversationExists(supabase, stableKey, phone, appointmentData.clientName);
+    await ensureConversationExists(
+      supabase,
+      stableKey,
+      phone,
+      appointmentData.clientName,
+      graph.phoneNumberId,
+    );
 
     const persisted = await persistOutboundLog(
       supabase,

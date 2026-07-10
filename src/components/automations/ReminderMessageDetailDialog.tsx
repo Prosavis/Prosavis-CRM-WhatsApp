@@ -25,8 +25,7 @@ import {
   reminderStatusTooltip,
 } from '@/types/reminderAutomations';
 import { retryReminderSend } from '@/services/reminderAutomationsService';
-import { ensureWhatsAppConversationFromLead } from '@/services/whatsappService';
-import { WHATSAPP_CLOUD_PRODUCTION } from '@/constants/whatsappCloudAccounts';
+import { openWhatsAppInbox } from '@/utils/openWhatsAppInbox';
 
 function formatIso(iso: string | null): string {
   if (!iso) return '—';
@@ -71,31 +70,13 @@ const ReminderMessageDetailDialog: React.FC<ReminderMessageDetailDialogProps> = 
     if (!canOpenInbox || openingInbox) return;
     setOpeningInbox(true);
     try {
-      let conversationKey = row.conversationStableKey;
-      if (row.phone) {
-        try {
-          const result = await ensureWhatsAppConversationFromLead({
-            phone: row.phone,
-            name: row.recipientName,
-            phoneNumberId: WHATSAPP_CLOUD_PRODUCTION.phoneNumberId,
-          });
-          if (!conversationKey && result.conversationId) {
-            conversationKey = result.conversationId;
-          }
-        } catch (err) {
-          console.error('Error ensuring conversation for reminder inbox:', err);
-        }
-      }
-      if (!conversationKey && row.phone) {
-        conversationKey = row.phone.replace(/\D/g, '');
-      }
-      if (!conversationKey) return;
-
-      const params = new URLSearchParams();
-      params.set('conversation', conversationKey);
-      if (row.phone) params.set('focusPhone', row.phone);
-      navigate(`/whatsapp?${params.toString()}`);
-      onClose();
+      const opened = await openWhatsAppInbox({
+        navigate,
+        phone: row.phone,
+        conversationStableKey: row.conversationStableKey,
+        name: row.recipientName,
+      });
+      if (opened) onClose();
     } finally {
       setOpeningInbox(false);
     }
