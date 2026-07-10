@@ -143,6 +143,8 @@ interface WhatsAppLayoutProps {
   focusConversation?: string;
   /** Llamar al cerrar el chat que coincidía con `focusConversation` (p. ej. quitar el query de la URL). */
   onClearFocusConversation?: () => void;
+  /** Quita conversation + focusPhone de la URL (deep-link de un solo uso). */
+  onClearFocusDeepLink?: () => void;
   /** Métricas del inbox (contactos totales, tabs, tags) para cabeceras externas o analítica. */
   onInboxMetrics?: (metrics: WhatsAppInboxMetrics) => void;
 }
@@ -154,6 +156,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   onClearFocusPhone,
   focusConversation,
   onClearFocusConversation,
+  onClearFocusDeepLink,
   onInboxMetrics,
 }) => {
   const theme = useTheme();
@@ -197,6 +200,8 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   const inboundBaselineReadyRef = useRef(false);
   const inboundPrevSnapshotRef = useRef<Map<string, { at: number }>>(new Map());
   const focusRefetchAttemptedRef = useRef<string | null>(null);
+  /** Token del deep-link ya aplicado (evita re-seleccionar mientras se limpia la URL). */
+  const appliedDeepLinkTokenRef = useRef<string | null>(null);
 
   // Presencia entre admins (otras pestañas / otros usuarios viendo el inbox).
   const [presenceEntries, setPresenceEntries] = useState<WhatsAppAdminPresence[]>([]);
@@ -500,41 +505,37 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   }, [livePeerPresences, selectedConversation]);
 
   useEffect(() => {
-    if (focusPhone && conversations.length > 0) {
-      const match = conversations.find((c) => conversationMatchesFocusPhone(focusPhone, c));
-      if (match) {
-        setSelectedConversation(match);
-      }
-    }
-  }, [focusPhone, conversations]);
-
-  useEffect(() => {
-    if (focusConversation && conversations.length > 0) {
-      const match = conversations.find((c) => conversationMatchesFocusKey(focusConversation, c));
-      if (match) {
-        setSelectedConversation(match);
-      }
-    }
-  }, [focusConversation, conversations]);
-
-  // Si el deep-link no encuentra el chat (p. ej. recién creado / phone_number_id backfill),
-  // forzar un refetch único para que entre en la lista.
-  useEffect(() => {
-    const focusToken = `${focusConversation ?? ''}|${focusPhone ?? ''}`;
     if (!focusConversation && !focusPhone) {
+      appliedDeepLinkTokenRef.current = null;
       focusRefetchAttemptedRef.current = null;
       return;
     }
     if (conversations.length === 0) return;
-    const matched = conversations.some(
+
+    const focusToken = `${focusConversation ?? ''}|${focusPhone ?? ''}`;
+    // Ya aplicamos este deep-link: no volver a forzar selección (evita pelear con clics del usuario).
+    if (appliedDeepLinkTokenRef.current === focusToken) return;
+
+    const match = conversations.find(
       (c) =>
-        (focusConversation && conversationMatchesFocusKey(focusConversation, c)) ||
-        (focusPhone && conversationMatchesFocusPhone(focusPhone, c)),
+        (Boolean(focusConversation) && conversationMatchesFocusKey(focusConversation, c)) ||
+        (Boolean(focusPhone) && conversationMatchesFocusPhone(focusPhone, c)),
     );
-    if (matched) {
-      focusRefetchAttemptedRef.current = focusToken;
+
+    if (match) {
+      appliedDeepLinkTokenRef.current = focusToken;
+      setSelectedConversation(match);
+      // One-shot: limpia la URL para que el inbox vuelva a ser selección libre.
+      if (onClearFocusDeepLink) {
+        onClearFocusDeepLink();
+      } else {
+        onClearFocusPhone?.();
+        onClearFocusConversation?.();
+      }
       return;
     }
+
+    // Sin match aún: un refetch único (chat recién creado / backfill de línea).
     if (focusRefetchAttemptedRef.current === focusToken) return;
     focusRefetchAttemptedRef.current = focusToken;
     void refetchConversations(phoneNumberId)
@@ -542,7 +543,15 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
       .catch(() => {
         /* ignore */
       });
-  }, [focusConversation, focusPhone, conversations, phoneNumberId]);
+  }, [
+    focusConversation,
+    focusPhone,
+    conversations,
+    phoneNumberId,
+    onClearFocusDeepLink,
+    onClearFocusPhone,
+    onClearFocusConversation,
+  ]);
 
   const recipientPhoneForTemplates = selectedConversation
     ? selectedConversation.contactPhone || selectedConversation.phone || ''
@@ -584,30 +593,52 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
 
   const handleOpenInboundChat = useCallback(() => {
     if (!inboundAlert) return;
+    if (focusPhone || focusConversation) {
+      if (onClearFocusDeepLink) onClearFocusDeepLink();
+      else {
+        onClearFocusPhone?.();
+        onClearFocusConversation?.();
+      }
+    }
     const c = conversations.find((x) => x.id === inboundAlert.conversationId);
     if (c) setSelectedConversation(c);
     setInboundAlert(null);
-  }, [inboundAlert, conversations]);
+  }, [
+    inboundAlert,
+    conversations,
+    focusPhone,
+    focusConversation,
+    onClearFocusDeepLink,
+    onClearFocusPhone,
+    onClearFocusConversation,
+  ]);
 
   const handleConversationSelect = useCallback(
     (conversation: WhatsAppConversation) => {
+      // Cualquier clic manual invalida el deep-link pegado en la URL.
+      if (focusPhone || focusConversation) {
+        if (onClearFocusDeepLink) {
+          onClearFocusDeepLink();
+        } else {
+          onClearFocusPhone?.();
+          onClearFocusConversation?.();
+        }
+      }
+
       if (selectedConversation?.id === conversation.id) {
-        if (focusPhone && onClearFocusPhone && conversationMatchesFocusPhone(focusPhone, conversation)) {
-          onClearFocusPhone();
-        }
-        if (
-          focusConversation &&
-          onClearFocusConversation &&
-          conversationMatchesFocusKey(focusConversation, conversation)
-        ) {
-          onClearFocusConversation();
-        }
         setSelectedConversation(null);
         return;
       }
       setSelectedConversation(conversation);
     },
-    [selectedConversation?.id, focusPhone, onClearFocusPhone, focusConversation, onClearFocusConversation],
+    [
+      selectedConversation?.id,
+      focusPhone,
+      focusConversation,
+      onClearFocusDeepLink,
+      onClearFocusPhone,
+      onClearFocusConversation,
+    ],
   );
 
   const handleContextMarkReadToggle = useCallback(async (conversation: WhatsAppConversation) => {
@@ -874,6 +905,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
         <Box data-tour="whatsapp-inbox-chat" sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
           {selectedConversation ? (
             <ChatArea
+              key={selectedConversation.id}
               conversation={selectedConversation}
               phoneNumberId={phoneNumberId}
               wabaId={wabaId}

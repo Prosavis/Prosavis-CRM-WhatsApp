@@ -282,6 +282,16 @@ const WhatsAppCloudPage: React.FC = () => {
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams]);
 
+  /** Deep-link one-shot: quita conversation + focusPhone juntos (evita pelear con la selección manual). */
+  const handleClearFocusDeepLink = useCallback(() => {
+    const next = new URLSearchParams(searchParams);
+    const hadFocus = next.has('focusPhone') || next.has('conversation');
+    if (!hadFocus) return;
+    next.delete('focusPhone');
+    next.delete('conversation');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
   const handleFocusChatFromNotification = useCallback(
     (phone: string) => {
       const next = new URLSearchParams(searchParams);
@@ -461,6 +471,7 @@ const WhatsAppCloudPage: React.FC = () => {
             onClearFocusPhone={handleClearFocusPhone}
             focusConversation={focusConversation}
             onClearFocusConversation={handleClearFocusConversation}
+            onClearFocusDeepLink={handleClearFocusDeepLink}
             onInboxMetrics={handleInboxMetrics}
           />
         </Box>
