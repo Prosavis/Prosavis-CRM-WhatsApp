@@ -51,6 +51,7 @@ import type {
   WhatsAppTag,
   WhatsAppAdminPresence,
 } from '@/services/whatsappService';
+import { summarizePeerPresences } from '@/utils/whatsappAdminPresence';
 import OutboundPreviewTicks from './OutboundPreviewTicks';
 import InboxCategorySidebar from './InboxCategorySidebar';
 import { ContactAvatar } from '@/components/common/ContactAvatar';
@@ -139,28 +140,6 @@ interface ConversationListProps {
   onBulkPin?: (conversationIds: string[], pin: boolean) => Promise<void>;
   onBulkDelete?: (conversationIds: string[]) => Promise<void>;
   onConfigureOutOfCoverage?: () => void;
-}
-
-/** Resumen humano para línea secundaria: prioriza "escribiendo" sobre "viendo". */
-function summarizePeerPresences(peers: WhatsAppAdminPresence[]): {
-  text: string;
-  typing: boolean;
-} | null {
-  if (!peers.length) return null;
-  const typing = peers.filter((p) => p.activity === 'typing');
-  const viewing = peers.filter((p) => p.activity !== 'typing');
-  const formatNames = (list: WhatsAppAdminPresence[]) => {
-    const names = list.map((p) => (p.displayName || 'admin').trim()).filter(Boolean);
-    if (names.length === 1) return names[0];
-    if (names.length === 2) return `${names[0]} y ${names[1]}`;
-    return `${names[0]} y ${names.length - 1} más`;
-  };
-  if (typing.length > 0) {
-    const verb = typing.length === 1 ? 'está escribiendo…' : 'están escribiendo…';
-    return { text: `${formatNames(typing)} ${verb}`, typing: true };
-  }
-  const verb = viewing.length === 1 ? 'en este chat' : 'en este chat';
-  return { text: `${formatNames(viewing)} ${verb}`, typing: false };
 }
 
 function formatRelativeTime(date?: Date): string {

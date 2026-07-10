@@ -1714,12 +1714,20 @@ export interface WhatsAppAdminPresence {
 export const PRESENCE_TTL_MS = 45_000;
 
 function mapPresenceRow(row: PresenceRow): WhatsAppAdminPresence {
+  const activity: WhatsAppAdminPresenceActivity = row.typing
+    ? 'typing'
+    : row.status === 'viewing'
+      ? 'viewing'
+      : row.status === 'typing'
+        ? 'typing'
+        : 'none';
   return {
-    uid: row.admin_uid ?? row.id,
-    phoneNumberId: row.conversation_stable_key ? null : null,
+    uid: row.admin_uid,
+    phoneNumberId: null,
     conversationId: row.conversation_stable_key,
+    // admin_email column stores the CRM display_name shown to peers
     displayName: row.admin_email,
-    activity: (row.typing ? 'typing' : row.status === 'viewing' ? 'viewing' : 'none') as WhatsAppAdminPresenceActivity,
+    activity,
     updatedAt: toDate(row.last_seen_at),
   };
 }
@@ -1735,10 +1743,16 @@ export function subscribeToWhatsAppAdminPresence(
       const { data, error } = await supabase.from('whatsapp_admin_presence').select('*');
       if (error) throw error;
       const now = Date.now();
-      const entries = (data ?? [])
-        .map(mapPresenceRow)
-        .filter((e) => e.updatedAt && now - e.updatedAt.getTime() < PRESENCE_TTL_MS);
-      onNext(entries);
+      const byUid = new Map<string, WhatsAppAdminPresence>();
+      for (const row of data ?? []) {
+        const entry = mapPresenceRow(row);
+        if (!entry.updatedAt || now - entry.updatedAt.getTime() >= PRESENCE_TTL_MS) continue;
+        const prev = byUid.get(entry.uid);
+        if (!prev || (entry.updatedAt?.getTime() ?? 0) >= (prev.updatedAt?.getTime() ?? 0)) {
+          byUid.set(entry.uid, entry);
+        }
+      }
+      onNext(Array.from(byUid.values()));
     } catch (error) {
       onError?.(error instanceof Error ? error : new Error(String(error)));
     }
@@ -1761,14 +1775,23 @@ export async function setMyWhatsAppPresence(
   uid: string,
   partial: Partial<Omit<WhatsAppAdminPresence, 'uid' | 'updatedAt'>>,
 ): Promise<void> {
-  const { error } = await supabase.from('whatsapp_admin_presence').upsert({
-    admin_uid: uid,
-    conversation_stable_key: partial.conversationId ?? null,
-    admin_email: partial.displayName ?? null,
-    status: partial.activity === 'typing' ? 'typing' : partial.activity === 'viewing' ? 'viewing' : 'none',
-    typing: partial.activity === 'typing',
-    last_seen_at: new Date().toISOString(),
-  });
+  const conversationId = partial.conversationId?.trim();
+  if (!conversationId) {
+    await clearMyWhatsAppPresence(uid);
+    return;
+  }
+
+  const { error } = await supabase.from('whatsapp_admin_presence').upsert(
+    {
+      admin_uid: uid,
+      conversation_stable_key: conversationId,
+      admin_email: partial.displayName ?? null,
+      status: partial.activity === 'typing' ? 'typing' : partial.activity === 'viewing' ? 'viewing' : 'none',
+      typing: partial.activity === 'typing',
+      last_seen_at: new Date().toISOString(),
+    },
+    { onConflict: 'admin_uid' },
+  );
   if (error) throw error;
 }
 

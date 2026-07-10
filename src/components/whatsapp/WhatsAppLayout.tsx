@@ -38,6 +38,7 @@ import {
   type CategoryTagIdOverrides,
   type WhatsAppInboxMetrics,
 } from '@/utils/whatsappInboxStats';
+import { dedupePresencesByUid } from '@/utils/whatsappAdminPresence';
 import { clearAllComposerDrafts } from '@/utils/messageComposerDraftStore';
 import { areSoundsEnabled, getSoundVolume } from '@/utils/soundPreferences';
 import {
@@ -478,13 +479,14 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
 
   const livePeerPresences = useMemo(() => {
     const now = Date.now();
-    return presenceEntries.filter((p) => {
+    const live = presenceEntries.filter((p) => {
       if (!p.uid || p.uid === myUid) return false;
       if (!p.updatedAt) return false;
       if (now - p.updatedAt.getTime() > PRESENCE_TTL_MS) return false;
       if (p.activity === 'none' || !p.conversationId) return false;
       return true;
     });
+    return dedupePresencesByUid(live);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presenceEntries, myUid, presenceTick]);
 

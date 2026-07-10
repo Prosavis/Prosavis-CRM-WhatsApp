@@ -130,7 +130,7 @@ export interface Database {
         Row: {
           id: string;
           conversation_stable_key: string;
-          admin_uid: string | null;
+          admin_uid: string;
           admin_email: string | null;
           status: string | null;
           typing: boolean;
@@ -138,6 +138,7 @@ export interface Database {
         };
         Insert: Partial<Database['public']['Tables']['whatsapp_admin_presence']['Row']> & {
           conversation_stable_key: string;
+          admin_uid: string;
         };
         Update: Partial<Database['public']['Tables']['whatsapp_admin_presence']['Row']>;
       };

@@ -89,6 +89,7 @@ import { pickContactPhotoUrl } from '@/utils/contactAvatar';
 import { getLastInboundAt } from '@/utils/whatsappTemplateSuggestions';
 import { coloredChipSx } from '@/utils/coloredChipStyles';
 import { prepareWhatsAppSticker } from '@/utils/prepareWhatsAppSticker';
+import { summarizePeerPresences } from '@/utils/whatsappAdminPresence';
 
 interface ChatAreaProps {
   conversation: WhatsAppConversation;
@@ -114,28 +115,6 @@ interface ChatAreaProps {
   myDisplayName?: string;
   /** Otros admins (excluye al usuario actual) actualmente activos en este chat. */
   peerPresences?: WhatsAppAdminPresence[];
-}
-
-/** Resumen humano para el banner del chat: prioriza "escribiendo" sobre "viendo". */
-function summarizePeerPresencesForBanner(peers: WhatsAppAdminPresence[]): {
-  text: string;
-  typing: boolean;
-} | null {
-  if (!peers.length) return null;
-  const typing = peers.filter((p) => p.activity === 'typing');
-  const viewing = peers.filter((p) => p.activity !== 'typing');
-  const formatNames = (list: WhatsAppAdminPresence[]) => {
-    const names = list.map((p) => (p.displayName || 'admin').trim()).filter(Boolean);
-    if (names.length === 1) return names[0];
-    if (names.length === 2) return `${names[0]} y ${names[1]}`;
-    return `${names[0]} y ${names.length - 1} más`;
-  };
-  if (typing.length > 0) {
-    const verb = typing.length === 1 ? 'está escribiendo…' : 'están escribiendo…';
-    return { text: `${formatNames(typing)} ${verb}`, typing: true };
-  }
-  const verb = viewing.length === 1 ? 'está viendo este chat' : 'están viendo este chat';
-  return { text: `${formatNames(viewing)} ${verb}`, typing: false };
 }
 
 function groupMessagesByDate(messages: WhatsAppMessage[]): Map<string, WhatsAppMessage[]> {
@@ -405,7 +384,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   );
 
   const peerBanner = useMemo(
-    () => summarizePeerPresencesForBanner(peerPresences),
+    () => summarizePeerPresences(peerPresences),
     [peerPresences],
   );
 
