@@ -87,6 +87,7 @@ import { ContactAvatar } from '@/components/common/ContactAvatar';
 import { pickContactPhotoUrl } from '@/utils/contactAvatar';
 import { getLastInboundAt } from '@/utils/whatsappTemplateSuggestions';
 import { coloredChipSx } from '@/utils/coloredChipStyles';
+import { prepareWhatsAppSticker } from '@/utils/prepareWhatsAppSticker';
 
 interface ChatAreaProps {
   conversation: WhatsAppConversation;
@@ -201,21 +202,6 @@ function deriveReactionsByTarget(
       [...actorMap.values()].filter((reaction) => reaction.emoji.trim()),
     ]),
   );
-}
-
-async function detectAnimatedWebp(file: File): Promise<boolean> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  for (let i = 0; i <= bytes.length - 4; i += 1) {
-    if (
-      bytes[i] === 0x41 &&
-      bytes[i + 1] === 0x4e &&
-      bytes[i + 2] === 0x49 &&
-      bytes[i + 3] === 0x4d
-    ) {
-      return true;
-    }
-  }
-  return false;
 }
 
 const ChatArea: React.FC<ChatAreaProps> = ({
@@ -484,30 +470,22 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   );
 
   const handleUploadSticker = useCallback(async (file: File) => {
-    const isWebp = file.type === 'image/webp' || file.name.toLowerCase().endsWith('.webp');
-    if (!isWebp) {
-      throw new Error('Solo se permiten stickers .webp');
-    }
-    const isAnimated = await detectAnimatedWebp(file);
-    const maxBytes = isAnimated ? 500 * 1024 : 100 * 1024;
-    if (file.size > maxBytes) {
-      throw new Error(isAnimated ? 'El sticker animado supera 500 KB' : 'El sticker estático supera 100 KB');
-    }
+    const { file: stickerFile, isAnimated } = await prepareWhatsAppSticker(file);
 
-    const safeName = file.name.replace(/[^\w.\-]+/g, '_');
+    const safeName = stickerFile.name.replace(/[^\w.\-]+/g, '_');
     const storagePath = `whatsapp-stickers/${Date.now()}_${safeName}`;
     const objectPath = storagePath.replace(/^whatsapp-stickers\//, '');
     const { publicUrl: downloadUrl } = await uploadWhatsAppStorageFile(
       'whatsapp-stickers',
       objectPath,
-      file,
+      stickerFile,
     );
     await createWhatsAppSticker({
-      name: file.name.replace(/\.webp$/i, '').slice(0, 80) || 'Sticker',
+      name: stickerFile.name.replace(/\.webp$/i, '').slice(0, 80) || 'Sticker',
       storagePath,
       downloadUrl,
       mimeType: 'image/webp',
-      sizeBytes: file.size,
+      sizeBytes: stickerFile.size,
       isAnimated,
     });
     await loadStickers();
