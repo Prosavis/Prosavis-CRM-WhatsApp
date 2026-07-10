@@ -34,6 +34,7 @@ import PeopleIcon from '@mui/icons-material/People';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SearchIcon from '@mui/icons-material/Search';
 import TroubleshootIcon from '@mui/icons-material/Troubleshoot';
+import WhatsAppIcon from '@mui/icons-material/WhatsApp';
 import { directoryService } from '@/services/directoryService';
 import { directoryMonitorService } from '@/services/directoryMonitorService';
 import { ContactAvatar } from '@/components/common/ContactAvatar';
@@ -105,9 +106,14 @@ interface DirectoryStats {
 interface WhatsAppDirectoryContactsDialogProps {
   open: boolean;
   onClose: () => void;
+  onOpenInInbox?: (phone: string, name?: string) => void;
 }
 
-const WhatsAppDirectoryContactsDialog: React.FC<WhatsAppDirectoryContactsDialogProps> = ({ open, onClose }) => {
+const WhatsAppDirectoryContactsDialog: React.FC<WhatsAppDirectoryContactsDialogProps> = ({
+  open,
+  onClose,
+  onOpenInInbox,
+}) => {
   const theme = useTheme();
   const fullScreen = useMediaQuery(theme.breakpoints.down('md'));
 
@@ -512,12 +518,17 @@ const WhatsAppDirectoryContactsDialog: React.FC<WhatsAppDirectoryContactsDialogP
                     Mensajes
                   </TableSortLabel>
                 </TableCell>
+                {onOpenInInbox && (
+                  <TableCell sx={{ fontWeight: 700, minWidth: 72 }} align="center">
+                    Acciones
+                  </TableCell>
+                )}
               </TableRow>
             </TableHead>
             <TableBody>
               {entries.length === 0 && !loading && (
                 <TableRow>
-                  <TableCell colSpan={8} align="center" sx={{ py: 6 }}>
+                  <TableCell colSpan={onOpenInInbox ? 9 : 8} align="center" sx={{ py: 6 }}>
                     <Typography color="text.secondary">
                       {hasFilters ? 'No se encontraron contactos con los filtros actuales.' : 'No hay contactos en el directorio.'}
                     </Typography>
@@ -643,6 +654,36 @@ const WhatsAppDirectoryContactsDialog: React.FC<WhatsAppDirectoryContactsDialogP
                       {entry.messagesCount}
                     </Typography>
                   </TableCell>
+
+                  {onOpenInInbox && (
+                    <TableCell align="center" onClick={(e) => e.stopPropagation()}>
+                      <Tooltip
+                        title={
+                          !entry.phone
+                            ? 'Sin teléfono'
+                            : entry.status === 'opt_out'
+                              ? 'Contacto con opt-out'
+                              : 'Abrir en Inbox'
+                        }
+                      >
+                        <span>
+                          <IconButton
+                            size="small"
+                            color="success"
+                            disabled={!entry.phone || entry.status === 'opt_out'}
+                            aria-label={`Abrir en inbox: ${entry.fullName || entry.phone || 'contacto'}`}
+                            onClick={() => {
+                              if (!entry.phone || entry.status === 'opt_out') return;
+                              onOpenInInbox(entry.phone, entry.fullName || entry.displayName || undefined);
+                              onClose();
+                            }}
+                          >
+                            <WhatsAppIcon fontSize="small" />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    </TableCell>
+                  )}
                 </TableRow>
                 );
               })}

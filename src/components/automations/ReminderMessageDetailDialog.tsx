@@ -25,6 +25,8 @@ import {
   reminderStatusTooltip,
 } from '@/types/reminderAutomations';
 import { retryReminderSend } from '@/services/reminderAutomationsService';
+import { ensureWhatsAppConversationFromLead } from '@/services/whatsappService';
+import { WHATSAPP_CLOUD_PRODUCTION } from '@/constants/whatsappCloudAccounts';
 
 function formatIso(iso: string | null): string {
   if (!iso) return '—';
@@ -59,13 +61,44 @@ const ReminderMessageDetailDialog: React.FC<ReminderMessageDetailDialogProps> = 
   const navigate = useNavigate();
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
+  const [openingInbox, setOpeningInbox] = useState(false);
 
   if (!row) return null;
 
-  const openInbox = () => {
-    if (!row.conversationStableKey) return;
-    navigate(`/whatsapp?conversation=${encodeURIComponent(row.conversationStableKey)}`);
-    onClose();
+  const canOpenInbox = Boolean(row.conversationStableKey || row.phone);
+
+  const openInbox = async () => {
+    if (!canOpenInbox || openingInbox) return;
+    setOpeningInbox(true);
+    try {
+      let conversationKey = row.conversationStableKey;
+      if (row.phone) {
+        try {
+          const result = await ensureWhatsAppConversationFromLead({
+            phone: row.phone,
+            name: row.recipientName,
+            phoneNumberId: WHATSAPP_CLOUD_PRODUCTION.phoneNumberId,
+          });
+          if (!conversationKey && result.conversationId) {
+            conversationKey = result.conversationId;
+          }
+        } catch (err) {
+          console.error('Error ensuring conversation for reminder inbox:', err);
+        }
+      }
+      if (!conversationKey && row.phone) {
+        conversationKey = row.phone.replace(/\D/g, '');
+      }
+      if (!conversationKey) return;
+
+      const params = new URLSearchParams();
+      params.set('conversation', conversationKey);
+      if (row.phone) params.set('focusPhone', row.phone);
+      navigate(`/whatsapp?${params.toString()}`);
+      onClose();
+    } finally {
+      setOpeningInbox(false);
+    }
   };
 
   const showRetryButton = !hideRetry && RETRYABLE_STATUSES.has(row.deliveryStatus);
@@ -223,10 +256,11 @@ const ReminderMessageDetailDialog: React.FC<ReminderMessageDetailDialogProps> = 
             Reintentar envío
           </Button>
         )}
-        {row.conversationStableKey && (
+        {canOpenInbox && (
           <Button
-            startIcon={<OpenInNewIcon />}
-            onClick={openInbox}
+            startIcon={openingInbox ? <CircularProgress size={16} /> : <OpenInNewIcon />}
+            onClick={() => void openInbox()}
+            disabled={openingInbox}
             sx={{ textTransform: 'none' }}
           >
             Abrir en Inbox

@@ -102,17 +102,35 @@ function notifyBulkResult(
   }
 }
 
+function digitsOnly(value: string | undefined | null): string {
+  return (value ?? '').replace(/\D/g, '');
+}
+
 function conversationMatchesFocusPhone(
   focusPhone: string | undefined,
   c: WhatsAppConversation,
 ): boolean {
   if (!focusPhone) return false;
   if (c.phone === focusPhone || c.contactPhone === focusPhone) return true;
-  const fd = focusPhone.replace(/\D/g, '');
+  const fd = digitsOnly(focusPhone);
   if (!fd) return false;
-  const p1 = (c.phone ?? '').replace(/\D/g, '');
-  const p2 = (c.contactPhone ?? '').replace(/\D/g, '');
-  return fd === p1 || fd === p2;
+  return fd === digitsOnly(c.phone) || fd === digitsOnly(c.contactPhone);
+}
+
+/** Match deep-link `?conversation=` against stable_key or phone digits. */
+function conversationMatchesFocusKey(
+  focusKey: string | undefined,
+  c: WhatsAppConversation,
+): boolean {
+  if (!focusKey) return false;
+  if (c.id === focusKey) return true;
+  const kd = digitsOnly(focusKey);
+  if (!kd) return false;
+  return (
+    kd === digitsOnly(c.id) ||
+    kd === digitsOnly(c.phone) ||
+    kd === digitsOnly(c.contactPhone)
+  );
 }
 
 interface WhatsAppLayoutProps {
@@ -437,9 +455,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
 
   useEffect(() => {
     if (focusPhone && conversations.length > 0) {
-      const match = conversations.find(
-        (c) => c.phone === focusPhone || c.contactPhone === focusPhone,
-      );
+      const match = conversations.find((c) => conversationMatchesFocusPhone(focusPhone, c));
       if (match) {
         setSelectedConversation(match);
       }
@@ -448,7 +464,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
 
   useEffect(() => {
     if (focusConversation && conversations.length > 0) {
-      const match = conversations.find((c) => c.id === focusConversation);
+      const match = conversations.find((c) => conversationMatchesFocusKey(focusConversation, c));
       if (match) {
         setSelectedConversation(match);
       }
@@ -506,7 +522,11 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
         if (focusPhone && onClearFocusPhone && conversationMatchesFocusPhone(focusPhone, conversation)) {
           onClearFocusPhone();
         }
-        if (focusConversation && onClearFocusConversation && conversation.id === focusConversation) {
+        if (
+          focusConversation &&
+          onClearFocusConversation &&
+          conversationMatchesFocusKey(focusConversation, conversation)
+        ) {
           onClearFocusConversation();
         }
         setSelectedConversation(null);

@@ -252,20 +252,23 @@ const WhatsAppCloudPage: React.FC = () => {
   const focusConversation = searchParams.get('conversation') || undefined;
 
   const handleOpenLeadInInbox = useCallback(async (phone: string, name?: string) => {
+    let conversationId: string | undefined;
     try {
-      await ensureWhatsAppConversationFromLead({
+      const result = await ensureWhatsAppConversationFromLead({
         phone,
         name,
         phoneNumberId,
       });
+      conversationId = result.conversationId;
     } catch (err) {
       console.error('Error ensuring conversation:', err);
     }
     const next = new URLSearchParams(searchParams);
     next.delete('tab');
     next.set('focusPhone', phone);
+    next.set('conversation', conversationId || phone.replace(/\D/g, '') || phone);
     setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, phoneNumberId]);
 
   const handleClearFocusPhone = useCallback(() => {
     const next = new URLSearchParams(searchParams);
@@ -1104,6 +1107,7 @@ const WhatsAppCloudPage: React.FC = () => {
       <WhatsAppDirectoryContactsDialog
         open={directoryDialogOpen}
         onClose={() => setDirectoryDialogOpen(false)}
+        onOpenInInbox={handleOpenLeadInInbox}
       />
     </>
   );
