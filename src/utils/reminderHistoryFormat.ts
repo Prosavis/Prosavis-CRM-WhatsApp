@@ -124,24 +124,62 @@ export function getSkipBreakdown(stats: ExecutionStats): SkipBreakdownItem[] {
 }
 
 export interface DayHealth {
+  /** Total de mensajes enviados con éxito en el día (suma de todas las corridas). */
   sent: number;
+  /** Fallos que quedaron al cierre (última corrida). */
   failed: number;
+  /** Omitidos reales al cierre (sin contar “ya enviados” de reintentos). */
   skipped: number;
   attempted: number;
+  /** Desglose de enviados por corrida, p. ej. "10 en el principal + 2 en reintentos". */
+  sentBreakdown: string | null;
   status: 'ok' | 'partial' | 'failed' | 'empty';
   statusLabel: string;
 }
 
-/** Salud del día = resultado de la última corrida (estado final tras reintentos). */
+/**
+ * Resumen del día:
+ * - enviados = suma de todas las corridas (lo que realmente salió)
+ * - fallidos / omitidos = estado al cierre (última corrida), omitidos sin “ya enviados”
+ */
 export function getDayHealth(runsAsc: HistoryBatchRun[]): DayHealth {
   if (runsAsc.length === 0) {
-    return { sent: 0, failed: 0, skipped: 0, attempted: 0, status: 'empty', statusLabel: 'Sin datos' };
+    return {
+      sent: 0,
+      failed: 0,
+      skipped: 0,
+      attempted: 0,
+      sentBreakdown: null,
+      status: 'empty',
+      statusLabel: 'Sin datos',
+    };
   }
+
+  const sent = runsAsc.reduce((sum, run) => sum + run.executionStats.sent, 0);
+  const attempted = runsAsc.reduce((sum, run) => sum + run.executionStats.attempted, 0);
   const last = runsAsc[runsAsc.length - 1];
-  const stats = last.executionStats;
-  const skipped = totalSkipped(stats);
-  const sent = stats.sent;
-  const failed = stats.failed;
+  const failed = last.executionStats.failed;
+  // En reintentos, “ya enviados” infla omitidos; el resumen del día solo cuenta omisiones reales.
+  const skipped =
+    last.executionStats.skippedDisabled +
+    last.executionStats.skippedMissingPhone +
+    last.executionStats.skippedMissingProfessional +
+    last.executionStats.skippedMaxAttempts;
+
+  const primarySent = runsAsc
+    .filter((r) => r.runKind === 'primary')
+    .reduce((sum, r) => sum + r.executionStats.sent, 0);
+  const retrySent = runsAsc
+    .filter((r) => r.runKind !== 'primary')
+    .reduce((sum, r) => sum + r.executionStats.sent, 0);
+
+  let sentBreakdown: string | null = null;
+  if (sent > 0 && runsAsc.length > 1 && retrySent > 0) {
+    const parts: string[] = [];
+    if (primarySent > 0) parts.push(`${primarySent} en el principal`);
+    if (retrySent > 0) parts.push(`${retrySent} en reintentos`);
+    sentBreakdown = parts.join(' + ');
+  }
 
   let status: DayHealth['status'] = 'empty';
   let statusLabel = 'Sin envíos';
@@ -154,13 +192,17 @@ export function getDayHealth(runsAsc: HistoryBatchRun[]): DayHealth {
   } else if (sent > 0) {
     status = 'ok';
     statusLabel = 'Completado';
+  } else if (skipped > 0) {
+    status = 'empty';
+    statusLabel = 'Sin envíos';
   }
 
   return {
     sent,
     failed,
     skipped,
-    attempted: stats.attempted,
+    attempted,
+    sentBreakdown,
     status,
     statusLabel,
   };

@@ -72,7 +72,6 @@ const ReminderHistoryDayCard: React.FC<ReminderHistoryDayCardProps> = ({
 
   const health = useMemo(() => getDayHealth(runsAsc), [runsAsc]);
   const runCount = runsAsc.length;
-  const primaryCount = runsAsc.filter((r) => r.runKind === 'primary').length;
   const retryCount = runsAsc.filter((r) => r.runKind === 'retry').length;
 
   const getRunTab = (runId: string): RunDetailTab => runTabById[runId] ?? 'execution';
@@ -138,35 +137,37 @@ const ReminderHistoryDayCard: React.FC<ReminderHistoryDayCardProps> = ({
           </Stack>
 
           <Typography variant="body2" color="text.secondary">
-            Resultado final tras {runCount} {runCount === 1 ? 'corrida' : 'corridas'}
-            {primaryCount > 0 ? ` · ${primaryCount} principal` : ''}
-            {retryCount > 0 ? ` · ${retryCount} ${retryCount === 1 ? 'reintento' : 'reintentos'}` : ''}
+            {health.sent > 0
+              ? `${health.sent} recordatorio${health.sent === 1 ? '' : 's'} enviado${health.sent === 1 ? '' : 's'} en total`
+              : 'Ningún recordatorio enviado'}
+            {' · '}
+            {runCount} {runCount === 1 ? 'corrida' : 'corridas'}
+            {retryCount > 0 ? ` (${retryCount} ${retryCount === 1 ? 'reintento' : 'reintentos'})` : ''}
           </Typography>
 
           <Stack direction="row" flexWrap="wrap" gap={0.75}>
             <Chip
               size="small"
               color="success"
-              variant="filled"
+              variant={health.sent > 0 ? 'filled' : 'outlined'}
               label={`${health.sent} enviados`}
-              sx={{ fontWeight: 600 }}
+              sx={{ fontWeight: 600, opacity: health.sent > 0 ? 1 : 0.55 }}
             />
-            {health.failed > 0 && (
-              <Chip
-                size="small"
-                color="error"
-                variant="filled"
-                label={`${health.failed} fallidos`}
-                sx={{ fontWeight: 600 }}
-              />
-            )}
+            <Chip
+              size="small"
+              color="error"
+              variant={health.failed > 0 ? 'filled' : 'outlined'}
+              label={`${health.failed} fallidos`}
+              sx={{ fontWeight: 600, opacity: health.failed > 0 ? 1 : 0.55 }}
+            />
             {health.skipped > 0 && (
-              <Tooltip title="Omitidos: ya enviados, sin teléfono, desactivados, etc.">
+              <Tooltip title="Omitidos reales al cierre: sin teléfono, desactivados, sin cleaner o límite de intentos (no incluye los que ya se habían enviado).">
                 <Chip
                   size="small"
-                  color="default"
+                  color="warning"
                   variant="outlined"
                   label={`${health.skipped} omitidos`}
+                  sx={{ fontWeight: 600 }}
                 />
               </Tooltip>
             )}
@@ -180,6 +181,32 @@ const ReminderHistoryDayCard: React.FC<ReminderHistoryDayCardProps> = ({
 
       <Collapse in={dayOpen}>
         <Box sx={{ px: 2.5, pb: 2.5, pt: 0.5 }}>
+          {health.sent > 0 && (
+            <Box
+              sx={{
+                mb: 1.5,
+                px: 1.5,
+                py: 1.25,
+                borderRadius: 1.5,
+                bgcolor: 'rgba(76, 175, 80, 0.08)',
+                border: '1px solid',
+                borderColor: 'rgba(76, 175, 80, 0.25)',
+              }}
+            >
+              <Typography variant="body2" fontWeight={700} color="success.dark">
+                Total del día: {health.sent} enviado{health.sent === 1 ? '' : 's'}
+                {health.sentBreakdown ? ` (${health.sentBreakdown})` : ''}
+              </Typography>
+              {(health.failed > 0 || health.skipped > 0) && (
+                <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.25 }}>
+                  {health.failed > 0 ? `${health.failed} quedaron fallidos` : ''}
+                  {health.failed > 0 && health.skipped > 0 ? ' · ' : ''}
+                  {health.skipped > 0 ? `${health.skipped} omitidos al cierre` : ''}
+                </Typography>
+              )}
+            </Box>
+          )}
+
           <Typography
             variant="caption"
             color="text.secondary"
