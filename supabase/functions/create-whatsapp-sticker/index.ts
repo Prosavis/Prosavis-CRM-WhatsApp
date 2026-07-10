@@ -15,6 +15,7 @@ function assertStickerPayload(params: {
   mimeType?: string;
   sizeBytes?: number;
   isAnimated?: boolean;
+  folderId?: string | null;
 }) {
   const name = (params.name || '').trim();
   const storagePath = (params.storagePath || '').trim();
@@ -22,6 +23,10 @@ function assertStickerPayload(params: {
   const mimeType = (params.mimeType || '').trim().toLowerCase();
   const sizeBytes = Number(params.sizeBytes);
   const isAnimated = params.isAnimated === true;
+  const folderId =
+    typeof params.folderId === 'string' && params.folderId.trim()
+      ? params.folderId.trim()
+      : null;
 
   if (!name || name.length > MAX_STICKER_NAME_LENGTH) {
     throw new Error(`Nombre requerido (máx ${MAX_STICKER_NAME_LENGTH} caracteres).`);
@@ -32,7 +37,7 @@ function assertStickerPayload(params: {
   if (!storagePath.startsWith('whatsapp-stickers/')) {
     throw new Error('storagePath inválido para stickers.');
   }
-  if (!downloadUrl.startsWith('https://')) {
+  if (downloadUrl && !downloadUrl.startsWith('https://')) {
     throw new Error('downloadUrl inválido.');
   }
   if (mimeType !== 'image/webp') {
@@ -48,7 +53,7 @@ function assertStickerPayload(params: {
     );
   }
 
-  return { name, storagePath, downloadUrl, sizeBytes, isAnimated };
+  return { name, storagePath, downloadUrl, sizeBytes, isAnimated, folderId };
 }
 
 Deno.serve(async (req) => {
@@ -64,17 +69,43 @@ Deno.serve(async (req) => {
       mimeType: body.mimeType,
       sizeBytes: body.sizeBytes,
       isAnimated: body.isAnimated,
+      folderId: body.folderId,
     });
+
+    if (payload.folderId) {
+      const { data: folder, error: folderError } = await supabase
+        .from('whatsapp_sticker_folders')
+        .select('id')
+        .eq('id', payload.folderId)
+        .maybeSingle();
+      if (folderError) throw folderError;
+      if (!folder) throw new Error('La carpeta no existe.');
+    }
+
+    let sortQuery = supabase
+      .from('whatsapp_stickers')
+      .select('sort_order')
+      .eq('archived', false)
+      .order('sort_order', { ascending: false })
+      .limit(1);
+    sortQuery = payload.folderId
+      ? sortQuery.eq('folder_id', payload.folderId)
+      : sortQuery.is('folder_id', null);
+    const { data: maxRow } = await sortQuery.maybeSingle();
+
+    const nextSort = Number(maxRow?.sort_order ?? -1) + 1;
 
     const { data, error } = await supabase
       .from('whatsapp_stickers')
       .insert({
         name: payload.name,
         storage_path: payload.storagePath,
-        download_url: payload.downloadUrl,
+        download_url: payload.downloadUrl || null,
         mime_type: 'image/webp',
         size_bytes: payload.sizeBytes,
         is_animated: payload.isAnimated,
+        folder_id: payload.folderId,
+        sort_order: nextSort,
         created_by: user.id,
         archived: false,
         favorite_by_uids: [],

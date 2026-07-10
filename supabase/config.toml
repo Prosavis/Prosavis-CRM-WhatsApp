@@ -124,6 +124,15 @@ verify_jwt = false
 [functions.update-whatsapp-sticker]
 verify_jwt = false
 
+[functions.delete-whatsapp-sticker]
+verify_jwt = false
+
+[functions.manage-whatsapp-sticker-folders]
+verify_jwt = false
+
+[functions.reorder-whatsapp-stickers]
+verify_jwt = false
+
 [functions.list-whatsapp-snippets]
 verify_jwt = false
 

@@ -77,6 +77,7 @@ import {
   type BookingContextData,
   type WhatsAppAdminPresence,
   type WhatsAppSticker,
+  type WhatsAppStickerFolder,
 } from '@/services/whatsappService';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import EditIcon from '@mui/icons-material/Edit';
@@ -273,6 +274,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     return window.localStorage.getItem(voiceTranscriptionStorageKey) === 'true';
   });
   const [stickers, setStickers] = useState<WhatsAppSticker[]>([]);
+  const [stickerFolders, setStickerFolders] = useState<WhatsAppStickerFolder[]>([]);
   const [stickersLoading, setStickersLoading] = useState(false);
 
   useEffect(() => {
@@ -327,9 +329,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const loadStickers = useCallback(async () => {
     setStickersLoading(true);
     try {
-      setStickers(await listWhatsAppStickers());
+      const library = await listWhatsAppStickers();
+      setStickerFolders(library.folders);
+      setStickers(library.stickers);
     } catch (err) {
       console.warn('WhatsApp stickers library is unavailable:', err);
+      setStickerFolders([]);
       setStickers([]);
     } finally {
       setStickersLoading(false);
@@ -469,7 +474,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     [stableKey, phoneNumberId, replyToMessage],
   );
 
-  const handleUploadSticker = useCallback(async (file: File) => {
+  const handleUploadSticker = useCallback(async (
+    file: File,
+    options: { name: string; folderId: string | null },
+  ) => {
     const { file: stickerFile, isAnimated } = await prepareWhatsAppSticker(file);
 
     const safeName = stickerFile.name.replace(/[^\w.\-]+/g, '_');
@@ -481,12 +489,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       stickerFile,
     );
     await createWhatsAppSticker({
-      name: stickerFile.name.replace(/\.webp$/i, '').slice(0, 80) || 'Sticker',
+      name: options.name.trim().slice(0, 80) || stickerFile.name.replace(/\.webp$/i, '').slice(0, 80) || 'Sticker',
       storagePath,
       downloadUrl,
       mimeType: 'image/webp',
       sizeBytes: stickerFile.size,
       isAnimated,
+      folderId: options.folderId,
     });
     await loadStickers();
   }, [loadStickers]);
@@ -1301,6 +1310,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             snippets={snippets}
             onTypingChange={handleTypingChange}
             stickers={stickers}
+            stickerFolders={stickerFolders}
             stickersLoading={stickersLoading}
             onRefreshStickers={loadStickers}
             onUploadSticker={handleUploadSticker}

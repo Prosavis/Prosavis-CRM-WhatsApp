@@ -25,6 +25,27 @@ Deno.serve(async (req) => {
 
     if (typeof body.archived === 'boolean') patch.archived = body.archived;
 
+    if ('folderId' in body) {
+      const folderId =
+        typeof body.folderId === 'string' && body.folderId.trim()
+          ? body.folderId.trim()
+          : null;
+      if (folderId) {
+        const { data: folder, error: folderError } = await supabase
+          .from('whatsapp_sticker_folders')
+          .select('id')
+          .eq('id', folderId)
+          .maybeSingle();
+        if (folderError) throw folderError;
+        if (!folder) return jsonResponse({ error: 'La carpeta no existe.' }, 400);
+      }
+      patch.folder_id = folderId;
+    }
+
+    if (typeof body.sortOrder === 'number' && Number.isFinite(body.sortOrder)) {
+      patch.sort_order = Math.max(0, Math.floor(body.sortOrder));
+    }
+
     if (typeof body.favorite === 'boolean') {
       const { data: existing, error: readError } = await supabase
         .from('whatsapp_stickers')

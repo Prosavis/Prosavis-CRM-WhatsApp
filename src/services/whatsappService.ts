@@ -240,6 +240,15 @@ export interface WhatsAppTag {
   archived?: boolean;
 }
 
+export interface WhatsAppStickerFolder {
+  id: string;
+  name: string;
+  sortOrder: number;
+  createdAt?: Date;
+  createdByUid?: string;
+  updatedAt?: Date;
+}
+
 export interface WhatsAppSticker {
   id: string;
   name: string;
@@ -248,6 +257,8 @@ export interface WhatsAppSticker {
   mimeType: 'image/webp';
   sizeBytes: number;
   isAnimated?: boolean;
+  folderId?: string | null;
+  sortOrder?: number;
   createdAt?: Date;
   createdByUid?: string;
   updatedAt?: Date;
@@ -1299,9 +1310,37 @@ function mapStickerDates(sticker: WhatsAppSticker): WhatsAppSticker {
   };
 }
 
-export async function listWhatsAppStickers(): Promise<WhatsAppSticker[]> {
-  const data = await invokeFn<{ stickers?: WhatsAppSticker[] }>('list-whatsapp-stickers', {});
-  return (data.stickers || []).map(mapStickerDates);
+function mapFolderDates(folder: WhatsAppStickerFolder): WhatsAppStickerFolder {
+  return {
+    ...folder,
+    sortOrder: Number(folder.sortOrder ?? 0),
+    createdAt:
+      folder.createdAt instanceof Date
+        ? folder.createdAt
+        : folder.createdAt
+          ? new Date(String(folder.createdAt))
+          : undefined,
+    updatedAt:
+      folder.updatedAt instanceof Date
+        ? folder.updatedAt
+        : folder.updatedAt
+          ? new Date(String(folder.updatedAt))
+          : undefined,
+  };
+}
+
+export async function listWhatsAppStickers(): Promise<{
+  folders: WhatsAppStickerFolder[];
+  stickers: WhatsAppSticker[];
+}> {
+  const data = await invokeFn<{
+    folders?: WhatsAppStickerFolder[];
+    stickers?: WhatsAppSticker[];
+  }>('list-whatsapp-stickers', {});
+  return {
+    folders: (data.folders || []).map(mapFolderDates),
+    stickers: (data.stickers || []).map(mapStickerDates),
+  };
 }
 
 export async function createWhatsAppSticker(params: {
@@ -1311,15 +1350,52 @@ export async function createWhatsAppSticker(params: {
   mimeType: 'image/webp';
   sizeBytes: number;
   isAnimated?: boolean;
+  folderId?: string | null;
 }): Promise<{ success: boolean; id: string }> {
   return invokeFn<{ success: boolean; id: string }>('create-whatsapp-sticker', params);
 }
 
 export async function updateWhatsAppSticker(
   stickerId: string,
-  patch: { name?: string; favorite?: boolean; archived?: boolean },
+  patch: {
+    name?: string;
+    favorite?: boolean;
+    archived?: boolean;
+    folderId?: string | null;
+    sortOrder?: number;
+  },
 ): Promise<{ success: boolean }> {
   return invokeFn<{ success: boolean }>('update-whatsapp-sticker', { stickerId, ...patch });
+}
+
+export async function deleteWhatsAppSticker(
+  stickerId: string,
+): Promise<{ success: boolean }> {
+  return invokeFn<{ success: boolean }>('delete-whatsapp-sticker', { stickerId });
+}
+
+export async function manageWhatsAppStickerFolder(params: {
+  action: 'create' | 'update' | 'delete' | 'reorder';
+  folderId?: string;
+  name?: string;
+  sortOrder?: number;
+  orderedIds?: string[];
+}): Promise<{ success: boolean; folder?: WhatsAppStickerFolder }> {
+  const data = await invokeFn<{ success: boolean; folder?: WhatsAppStickerFolder }>(
+    'manage-whatsapp-sticker-folders',
+    params,
+  );
+  return {
+    success: data.success,
+    folder: data.folder ? mapFolderDates(data.folder) : undefined,
+  };
+}
+
+export async function reorderWhatsAppStickers(params: {
+  folderId?: string | null;
+  orderedIds: string[];
+}): Promise<{ success: boolean }> {
+  return invokeFn<{ success: boolean }>('reorder-whatsapp-stickers', params);
 }
 
 // --- Operator Snippets ---

@@ -40,9 +40,11 @@ import StickyNote2Icon from '@mui/icons-material/StickyNote2';
 import {
   resolveOutboundMediaSpec,
   type WhatsAppSticker,
+  type WhatsAppStickerFolder,
   type WhatsAppOutboundMediaType,
   type WhatsAppSnippet,
 } from '@/services/whatsappService';
+import StickerLibraryPicker from './StickerLibraryPicker';
 import {
   isVoiceRecorderSupported,
   startVoiceRecording,
@@ -103,9 +105,13 @@ interface MessageInputProps {
    */
   onTypingChange?: (isTyping: boolean) => void;
   stickers?: WhatsAppSticker[];
+  stickerFolders?: WhatsAppStickerFolder[];
   stickersLoading?: boolean;
   onRefreshStickers?: () => Promise<void> | void;
-  onUploadSticker?: (file: File) => Promise<void>;
+  onUploadSticker?: (
+    file: File,
+    options: { name: string; folderId: string | null },
+  ) => Promise<void>;
   onSendSticker?: (sticker: WhatsAppSticker) => Promise<void>;
 }
 
@@ -179,6 +185,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   snippets,
   onTypingChange,
   stickers = [],
+  stickerFolders = [],
   stickersLoading = false,
   onRefreshStickers,
   onUploadSticker,
@@ -204,7 +211,6 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const recordingTimerRef = useRef<number | null>(null);
 
   const lexicalEditorRef = useRef<WhatsAppLexicalEditorHandle | null>(null);
-  const stickerInputRef = useRef<HTMLInputElement>(null);
   const fileInputRefs = useRef<Record<SupportedMediaType, HTMLInputElement | null>>({
     image: null,
     audio: null,
@@ -355,16 +361,20 @@ const MessageInput: React.FC<MessageInputProps> = ({
     lexicalEditorRef.current?.wrapSelection(before, after);
   }, []);
 
-  const handleStickerFileSelected = useCallback(async (file: File) => {
+  const handleStickerFileSelected = useCallback(async (
+    file: File,
+    options: { name: string; folderId: string | null },
+  ) => {
     if (!onUploadSticker) return;
     setStickerUploading(true);
     setSendError(null);
     try {
-      await onUploadSticker(file);
+      await onUploadSticker(file, options);
       await onRefreshStickers?.();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'No se pudo subir el sticker';
       setSendError(message);
+      throw err;
     } finally {
       setStickerUploading(false);
     }
@@ -1179,79 +1189,23 @@ const MessageInput: React.FC<MessageInputProps> = ({
         onClose={() => setStickerAnchorEl(null)}
         anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
         transformOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-        PaperProps={{ sx: { width: 320, maxWidth: '90vw' } }}
+        PaperProps={{ sx: { maxWidth: '92vw' } }}
       >
-        <Box sx={{ p: 1.5 }}>
-          <Box sx={{ alignItems: 'center', display: 'flex', gap: 1, mb: 1 }}>
-            <Typography variant="subtitle2" sx={{ flex: 1 }}>
-              Stickers compartidos
-            </Typography>
-            {stickersLoading && <CircularProgress size={16} />}
-            <Button
-              size="small"
-              disabled={stickerUploading || !onUploadSticker}
-              onClick={() => stickerInputRef.current?.click()}
-            >
-              Subir .webp
-            </Button>
-            <input
-              ref={stickerInputRef}
-              type="file"
-              accept="image/webp,.webp"
-              hidden
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                event.target.value = '';
-                if (file) void handleStickerFileSelected(file);
-              }}
-            />
-          </Box>
-          {stickers.length === 0 && !stickersLoading ? (
-            <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
-              Aún no hay stickers compartidos.
-            </Typography>
-          ) : (
-            <Box
-              sx={{
-                display: 'grid',
-                gap: 1,
-                gridTemplateColumns: 'repeat(3, 1fr)',
-                maxHeight: 260,
-                overflow: 'auto',
-              }}
-            >
-              {stickers.map((sticker) => (
-                <Button
-                  key={sticker.id}
-                  disabled={sending}
-                  onClick={() => void handleSendSticker(sticker)}
-                  sx={{
-                    alignItems: 'center',
-                    border: 1,
-                    borderColor: 'divider',
-                    borderRadius: 2,
-                    display: 'flex',
-                    height: 84,
-                    justifyContent: 'center',
-                    p: 0.5,
-                  }}
-                >
-                  <Box
-                    component="img"
-                    src={sticker.downloadUrl}
-                    alt={sticker.name}
-                    sx={{ maxHeight: 72, maxWidth: 72, objectFit: 'contain' }}
-                  />
-                </Button>
-              ))}
-            </Box>
-          )}
-          {stickerUploading && (
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-              Subiendo sticker...
-            </Typography>
-          )}
-        </Box>
+        <StickerLibraryPicker
+          folders={stickerFolders}
+          stickers={stickers}
+          loading={stickersLoading}
+          sending={sending}
+          uploading={stickerUploading}
+          onRefresh={async () => {
+            await onRefreshStickers?.();
+          }}
+          onUpload={handleStickerFileSelected}
+          onSend={async (sticker) => {
+            await handleSendSticker(sticker);
+          }}
+          onError={(message) => setSendError(message)}
+        />
       </Popover>
     </Box>
   );
