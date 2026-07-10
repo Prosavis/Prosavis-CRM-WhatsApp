@@ -137,11 +137,11 @@ export interface ReminderHistoryResponse {
 export const BATCH_EVENT_OUTCOME_LABEL: Record<BatchEventOutcome, string> = {
   sent: 'Enviado',
   failed: 'Fallido',
-  skipped_already_sent: 'Ya enviado',
-  skipped_disabled: 'Desactivado',
+  skipped_already_sent: 'Ya tenía recordatorio',
+  skipped_disabled: 'Recordatorios apagados',
   skipped_missing_phone: 'Sin teléfono',
-  skipped_missing_professional: 'Sin profesional',
-  skipped_max_attempts: 'Máx. intentos',
+  skipped_missing_professional: 'Sin cleaner asignado',
+  skipped_max_attempts: 'Límite de intentos',
 };
 
 export const BATCH_EVENT_OUTCOME_COLOR: Record<
