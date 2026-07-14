@@ -17,9 +17,15 @@ export type BatchEventOutcome =
   | 'skipped_missing_professional'
   | 'skipped_max_attempts';
 
+export type BatchEventDisplayOutcome =
+  | BatchEventOutcome
+  | 'delivered'
+  | 'in_transit';
+
 export interface ExecutionStats {
   sent: number;
   failed: number;
+  inTransit: number;
   skippedAlreadySent: number;
   skippedDisabled: number;
   skippedMissingPhone: number;
@@ -177,9 +183,14 @@ export interface HistoryBatchEvent {
   appointmentId: string;
   recipientType: 'client' | 'professional';
   outcome: BatchEventOutcome;
+  displayOutcome: BatchEventDisplayOutcome;
   errorMessage: string | null;
   waMessageId: string | null;
   attemptNumber: number | null;
+  recipientName: string | null;
+  clientName: string | null;
+  professionalName: string | null;
+  logStatus: string | null;
 }
 
 export interface ReminderHistoryResponse {
@@ -193,6 +204,7 @@ function emptyExecutionStats(): ExecutionStats {
   return {
     sent: 0,
     failed: 0,
+    inTransit: 0,
     skippedAlreadySent: 0,
     skippedDisabled: 0,
     skippedMissingPhone: 0,
@@ -208,6 +220,7 @@ function parseExecutionStats(raw: unknown): ExecutionStats {
   return {
     sent: Number(stats.sent ?? 0) || 0,
     failed: Number(stats.failed ?? 0) || 0,
+    inTransit: Number(stats.inTransit ?? 0) || 0,
     skippedAlreadySent: Number(stats.skippedAlreadySent ?? 0) || 0,
     skippedDisabled: Number(stats.skippedDisabled ?? 0) || 0,
     skippedMissingPhone: Number(stats.skippedMissingPhone ?? 0) || 0,
@@ -280,16 +293,203 @@ function mapHistoryItem(row: Record<string, unknown>): HistoryBatchItem {
 }
 
 function mapHistoryEvent(row: Record<string, unknown>): HistoryBatchEvent {
+  const outcome = row.outcome as BatchEventOutcome;
   return {
     id: String(row.id),
     batchRunId: String(row.batch_run_id),
     appointmentId: String(row.appointment_id),
     recipientType: row.recipient_type as 'client' | 'professional',
-    outcome: row.outcome as BatchEventOutcome,
+    outcome,
+    displayOutcome: outcome,
     errorMessage: row.error_message ? String(row.error_message) : null,
     waMessageId: row.wa_message_id ? String(row.wa_message_id) : null,
     attemptNumber: row.attempt_number != null ? Number(row.attempt_number) : null,
+    recipientName: null,
+    clientName: null,
+    professionalName: null,
+    logStatus: null,
   };
+}
+
+type LiveLogRow = {
+  wa_message_id: string;
+  status: string;
+  error_message: string | null;
+};
+
+const DELIVERED_LOG_STATUSES = new Set(['delivered', 'read']);
+const TRANSIT_LOG_STATUSES = new Set(['sent', 'accepted']);
+
+function itemLookupKey(
+  batchRunId: string,
+  appointmentId: string,
+  recipientType: string,
+): string {
+  return `${batchRunId}|${appointmentId}|${recipientType}`;
+}
+
+function reconcileDisplayOutcome(
+  outcome: BatchEventOutcome,
+  live: LiveLogRow | undefined,
+): { displayOutcome: BatchEventDisplayOutcome; errorMessage: string | null; logStatus: string | null } {
+  if (outcome.startsWith('skipped_')) {
+    return { displayOutcome: outcome, errorMessage: null, logStatus: live?.status ?? null };
+  }
+  if (outcome === 'failed') {
+    return {
+      displayOutcome: 'failed',
+      errorMessage: live?.error_message ?? null,
+      logStatus: live?.status ?? 'failed',
+    };
+  }
+
+  // outcome === 'sent' — reconciliar con log vivo
+  if (!live) {
+    return { displayOutcome: 'in_transit', errorMessage: null, logStatus: null };
+  }
+  if (live.status === 'failed') {
+    return {
+      displayOutcome: 'failed',
+      errorMessage: live.error_message,
+      logStatus: live.status,
+    };
+  }
+  if (DELIVERED_LOG_STATUSES.has(live.status)) {
+    return {
+      displayOutcome: 'delivered',
+      errorMessage: null,
+      logStatus: live.status,
+    };
+  }
+  if (TRANSIT_LOG_STATUSES.has(live.status)) {
+    return {
+      displayOutcome: 'in_transit',
+      errorMessage: null,
+      logStatus: live.status,
+    };
+  }
+  return {
+    displayOutcome: 'in_transit',
+    errorMessage: live.error_message,
+    logStatus: live.status,
+  };
+}
+
+function reconcileItemDeliveryStatus(
+  item: HistoryBatchItem,
+  live: LiveLogRow | undefined,
+): HistoryBatchItem {
+  const next = { ...item };
+
+  if (live) {
+    next.logStatus = live.status;
+    next.logErrorMessage = live.error_message;
+  }
+
+  const frozen = item.deliveryStatus;
+  // Solo reconciliar filas que pretenden haber enviado o están en estados ambiguos.
+  const reconcileable = new Set([
+    'sent',
+    'sent_unverified',
+    'in_transit',
+    'failed',
+    'pending',
+  ]);
+  if (!reconcileable.has(frozen) && frozen !== 'not_attempted') {
+    return next;
+  }
+
+  if (live?.status === 'failed') {
+    next.deliveryStatus = 'failed';
+    next.failureReason = live.error_message ?? next.failureReason ?? 'Fallo de entrega Meta';
+    return next;
+  }
+  if (live && DELIVERED_LOG_STATUSES.has(live.status)) {
+    next.deliveryStatus = 'sent';
+    if (next.failureReason && frozen === 'failed') next.failureReason = null;
+    return next;
+  }
+  if (live && TRANSIT_LOG_STATUSES.has(live.status)) {
+    next.deliveryStatus = 'in_transit';
+    return next;
+  }
+  if (item.waMessageId || item.sentAt) {
+    // Aceptado / con sentAt pero sin confirmación de entrega.
+    if (frozen === 'sent' || frozen === 'sent_unverified' || frozen === 'in_transit') {
+      next.deliveryStatus = 'in_transit';
+    }
+  }
+  return next;
+}
+
+function recomputeExecutionStatsFromEvents(events: HistoryBatchEvent[]): ExecutionStats {
+  const stats = emptyExecutionStats();
+  for (const event of events) {
+    stats.attempted += 1;
+    switch (event.displayOutcome) {
+      case 'delivered':
+      case 'sent':
+        stats.sent += 1;
+        break;
+      case 'in_transit':
+        stats.inTransit += 1;
+        break;
+      case 'failed':
+        stats.failed += 1;
+        break;
+      case 'skipped_already_sent':
+        stats.skippedAlreadySent += 1;
+        break;
+      case 'skipped_disabled':
+        stats.skippedDisabled += 1;
+        break;
+      case 'skipped_missing_phone':
+        stats.skippedMissingPhone += 1;
+        break;
+      case 'skipped_missing_professional':
+        stats.skippedMissingProfessional += 1;
+        break;
+      case 'skipped_max_attempts':
+        stats.skippedMaxAttempts += 1;
+        break;
+      default: {
+        const _exhaustive: never = event.displayOutcome;
+        void _exhaustive;
+        break;
+      }
+    }
+  }
+  return stats;
+}
+
+async function loadLiveLogsByWaMessageId(
+  supabase: SupabaseClient,
+  waMessageIds: string[],
+): Promise<Map<string, LiveLogRow>> {
+  const map = new Map<string, LiveLogRow>();
+  const unique = [...new Set(waMessageIds.filter(Boolean))];
+  if (unique.length === 0) return map;
+
+  // Chunk para evitar límites de URL/IN
+  const chunkSize = 100;
+  for (let i = 0; i < unique.length; i += chunkSize) {
+    const chunk = unique.slice(i, i + chunkSize);
+    const { data, error } = await supabase
+      .from('whatsapp_message_log')
+      .select('wa_message_id, status, error_message')
+      .in('wa_message_id', chunk);
+    if (error) throw new Error(formatError(error));
+    for (const row of (data ?? []) as LiveLogRow[]) {
+      if (row.wa_message_id) {
+        map.set(row.wa_message_id, {
+          wa_message_id: row.wa_message_id,
+          status: String(row.status ?? ''),
+          error_message: row.error_message ? String(row.error_message) : null,
+        });
+      }
+    }
+  }
+  return map;
 }
 
 export async function fetchReminderHistory(
@@ -348,18 +548,92 @@ export async function fetchReminderHistory(
   if (eventsResult.error) throw new Error(formatError(eventsResult.error));
 
   const itemsByRun: Record<string, HistoryBatchItem[]> = {};
+  const itemByKey = new Map<string, HistoryBatchItem>();
   for (const row of (itemsResult.data ?? []) as Record<string, unknown>[]) {
     const item = mapHistoryItem(row);
     if (!itemsByRun[item.batchRunId]) itemsByRun[item.batchRunId] = [];
     itemsByRun[item.batchRunId].push(item);
+    itemByKey.set(
+      itemLookupKey(item.batchRunId, item.appointmentId, item.recipientType),
+      item,
+    );
   }
 
-  const eventsByRun: Record<string, HistoryBatchEvent[]> = {};
+  const rawEvents: HistoryBatchEvent[] = [];
   for (const row of (eventsResult.data ?? []) as Record<string, unknown>[]) {
     const event = mapHistoryEvent(row);
     if (params.recipientType && event.recipientType !== params.recipientType) continue;
-    if (!eventsByRun[event.batchRunId]) eventsByRun[event.batchRunId] = [];
-    eventsByRun[event.batchRunId].push(event);
+    rawEvents.push(event);
+  }
+
+  const waIds: string[] = [];
+  for (const item of itemByKey.values()) {
+    if (item.waMessageId) waIds.push(item.waMessageId);
+  }
+  for (const event of rawEvents) {
+    if (event.waMessageId) waIds.push(event.waMessageId);
+  }
+  const liveLogs = await loadLiveLogsByWaMessageId(supabase, waIds);
+
+  // Reconciliar items con log vivo
+  for (const [runId, items] of Object.entries(itemsByRun)) {
+    itemsByRun[runId] = items.map((item) => {
+      const live = item.waMessageId ? liveLogs.get(item.waMessageId) : undefined;
+      const reconciled = reconcileItemDeliveryStatus(item, live);
+      itemByKey.set(
+        itemLookupKey(reconciled.batchRunId, reconciled.appointmentId, reconciled.recipientType),
+        reconciled,
+      );
+      return reconciled;
+    });
+  }
+
+  const eventsByRun: Record<string, HistoryBatchEvent[]> = {};
+  for (const event of rawEvents) {
+    const item = itemByKey.get(
+      itemLookupKey(event.batchRunId, event.appointmentId, event.recipientType),
+    );
+    const live = event.waMessageId
+      ? liveLogs.get(event.waMessageId)
+      : item?.waMessageId
+        ? liveLogs.get(item.waMessageId)
+        : undefined;
+    const reconciled = reconcileDisplayOutcome(event.outcome, live);
+    const enriched: HistoryBatchEvent = {
+      ...event,
+      displayOutcome: reconciled.displayOutcome,
+      errorMessage: reconciled.errorMessage ?? event.errorMessage,
+      logStatus: reconciled.logStatus,
+      recipientName: item?.recipientName ?? null,
+      clientName: item?.clientName ?? null,
+      professionalName: item?.professionalName ?? null,
+      waMessageId: event.waMessageId ?? item?.waMessageId ?? null,
+    };
+    if (!eventsByRun[enriched.batchRunId]) eventsByRun[enriched.batchRunId] = [];
+    eventsByRun[enriched.batchRunId].push(enriched);
+  }
+
+  // Recalcular executionStats de cada corrida con outcomes efectivos
+  for (const run of mappedRuns) {
+    const events = eventsByRun[run.id];
+    if (events && events.length > 0) {
+      const effective = recomputeExecutionStatsFromEvents(events);
+      // Conservar omitidos del snapshot si no hay eventos skipped (corridas viejas).
+      run.executionStats = {
+        ...run.executionStats,
+        sent: effective.sent,
+        failed: effective.failed,
+        inTransit: effective.inTransit,
+        attempted: Math.max(run.executionStats.attempted, effective.attempted),
+        skippedAlreadySent: effective.skippedAlreadySent || run.executionStats.skippedAlreadySent,
+        skippedDisabled: effective.skippedDisabled || run.executionStats.skippedDisabled,
+        skippedMissingPhone:
+          effective.skippedMissingPhone || run.executionStats.skippedMissingPhone,
+        skippedMissingProfessional:
+          effective.skippedMissingProfessional || run.executionStats.skippedMissingProfessional,
+        skippedMaxAttempts: effective.skippedMaxAttempts || run.executionStats.skippedMaxAttempts,
+      };
+    }
   }
 
   const runsByServiceDate = new Map<string, HistoryBatchRun[]>();

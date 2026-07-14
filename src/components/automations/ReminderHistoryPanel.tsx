@@ -229,7 +229,7 @@ const ReminderHistoryPanel: React.FC = () => {
                 {runs.length === 1 ? 'corrida' : 'corridas'}
               </Typography>
 
-              {dayGroups.map((group, index) => (
+              {dayGroups.map((group) => (
                 <ReminderHistoryDayCard
                   key={group.serviceDate}
                   serviceDate={group.serviceDate}
@@ -237,7 +237,7 @@ const ReminderHistoryPanel: React.FC = () => {
                   eventsByRun={data?.eventsByRun ?? {}}
                   rowsByRun={rowsByRun}
                   showRecipientType={recipientFilter === 'all'}
-                  defaultExpanded={index === 0}
+                  defaultExpanded={false}
                   onViewDetail={setDetailRow}
                 />
               ))}

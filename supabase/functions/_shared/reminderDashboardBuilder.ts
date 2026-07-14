@@ -31,6 +31,7 @@ export type ReminderDeliveryStatus =
   | 'missing_phone'
   | 'missing_professional'
   | 'sent'
+  | 'in_transit'
   | 'failed'
   | 'sent_unverified'
   | 'skipped'
@@ -489,12 +490,24 @@ function readRecipientTrackingFields(
 }
 
 const SUCCESSFUL_LOG_STATUSES = new Set(['sent', 'delivered', 'read', 'accepted']);
+const DELIVERED_LOG_STATUSES = new Set(['delivered', 'read']);
+const TRANSIT_LOG_STATUSES = new Set(['sent', 'accepted']);
 
 function isReminderLogSuccessful(log: MessageLogRow | undefined): boolean {
   if (!log) return false;
   if (log.status === 'failed') return false;
   if (log.wa_message_id) return true;
   return SUCCESSFUL_LOG_STATUSES.has(log.status);
+}
+
+function isReminderLogDelivered(log: MessageLogRow | undefined): boolean {
+  if (!log || log.status === 'failed') return false;
+  return DELIVERED_LOG_STATUSES.has(log.status);
+}
+
+function isReminderLogInTransit(log: MessageLogRow | undefined): boolean {
+  if (!log || log.status === 'failed') return false;
+  return TRANSIT_LOG_STATUSES.has(log.status);
 }
 
 function isCancelledOrRejected(appointmentStatus: string): boolean {
@@ -528,8 +541,30 @@ function wasReminderSent(params: {
   scheduledDate: string | null;
 }): boolean {
   if (params.log?.status === 'failed') return false;
-  if (isSentAtValidForReminderCycle(params.sentAt, params.scheduledDate)) return true;
-  return isLogValidForReminderCycle(params.log, params.scheduledDate);
+  // Éxito = entregado o leído en el teléfono (no basta con accepted/sent de Meta).
+  if (isReminderLogDelivered(params.log) && isLogValidForReminderCycle(params.log, params.scheduledDate)) {
+    return true;
+  }
+  return false;
+}
+
+function wasReminderInTransit(params: {
+  sentAt: string | null;
+  log: MessageLogRow | undefined;
+  scheduledDate: string | null;
+}): boolean {
+  if (params.log?.status === 'failed') return false;
+  if (isReminderLogDelivered(params.log)) return false;
+  if (isReminderLogInTransit(params.log) && isLogValidForReminderCycle(params.log, params.scheduledDate)) {
+    return true;
+  }
+  // sentAt válido sin log de entrega aún → en tránsito
+  if (isSentAtValidForReminderCycle(params.sentAt, params.scheduledDate)) {
+    if (!params.log || TRANSIT_LOG_STATUSES.has(params.log.status) || isReminderLogSuccessful(params.log)) {
+      return !isReminderLogDelivered(params.log);
+    }
+  }
+  return false;
 }
 
 function resolveFailureReason(params: {
@@ -553,6 +588,9 @@ function resolveFailureReason(params: {
   }
   if (params.log?.error_message) return params.log.error_message;
   if (params.lastError) return params.lastError;
+  if (params.deliveryStatus === 'in_transit') {
+    return 'Meta aceptó el mensaje; pendiente de confirmación de entrega';
+  }
   if (params.deliveryStatus === 'not_attempted') {
     return 'No se registró intento en el batch de las 6 PM';
   }
@@ -604,6 +642,14 @@ function resolveDeliveryStatus(params: {
 
   if (logFailed) return 'failed';
 
+  if (wasReminderInTransit({
+    sentAt: params.sentAt,
+    log: params.log,
+    scheduledDate: params.scheduledDate,
+  })) {
+    return 'in_transit';
+  }
+
   if (params.section === 'lastRun' && isCancelledOrRejected(status)) {
     return 'skipped';
   }
@@ -613,7 +659,7 @@ function resolveDeliveryStatus(params: {
       || Date.now() > new Date(params.meta.lastBatchRunAt).getTime() + 5 * 60_000;
     if (!hasSentAt && batchPassed && !hasAttempt && !params.log) return 'not_attempted';
     if (!hasSentAt && batchPassed) return 'failed';
-    if (hasSentAt) return 'sent_unverified';
+    if (hasSentAt) return 'in_transit';
     return batchPassed ? 'failed' : 'pending';
   }
 
@@ -742,6 +788,7 @@ function emptySummary(): Record<ReminderDeliveryStatus, number> {
     missing_phone: 0,
     missing_professional: 0,
     sent: 0,
+    in_transit: 0,
     failed: 0,
     sent_unverified: 0,
     skipped: 0,
@@ -1127,6 +1174,7 @@ export async function handleRetry(
       executionStats: {
         sent: 1,
         failed: 0,
+        inTransit: 0,
         skippedAlreadySent: 0,
         skippedDisabled: 0,
         skippedMissingPhone: 0,

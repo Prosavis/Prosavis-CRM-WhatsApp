@@ -4,6 +4,7 @@ export type ReminderDeliveryStatus =
   | 'missing_phone'
   | 'missing_professional'
   | 'sent'
+  | 'in_transit'
   | 'failed'
   | 'sent_unverified'
   | 'skipped'
@@ -69,8 +70,11 @@ export interface HistoryBatchRun {
 }
 
 export interface ExecutionStats {
+  /** Entregados (delivered/read tras reconciliación). */
   sent: number;
   failed: number;
+  /** Aceptados por Meta sin confirmación de entrega al teléfono. */
+  inTransit: number;
   skippedAlreadySent: number;
   skippedDisabled: number;
   skippedMissingPhone: number;
@@ -88,15 +92,28 @@ export type BatchEventOutcome =
   | 'skipped_missing_professional'
   | 'skipped_max_attempts';
 
+/** Outcome efectivo de entrega (reconciliado con el log vivo de Meta). */
+export type BatchEventDisplayOutcome =
+  | BatchEventOutcome
+  | 'delivered'
+  | 'in_transit';
+
 export interface HistoryBatchEvent {
   id: string;
   batchRunId: string;
   appointmentId: string;
   recipientType: ReminderRecipientType;
+  /** Resultado del intento al cerrar el batch (congelado). */
   outcome: BatchEventOutcome;
+  /** Estado de entrega efectivo (log vivo de Meta). */
+  displayOutcome: BatchEventDisplayOutcome;
   errorMessage: string | null;
   waMessageId: string | null;
   attemptNumber: number | null;
+  recipientName: string | null;
+  clientName: string | null;
+  professionalName: string | null;
+  logStatus: string | null;
 }
 
 export interface HistoryBatchItem {
@@ -134,8 +151,10 @@ export interface ReminderHistoryResponse {
   deltasByRunId: Record<string, string | null>;
 }
 
-export const BATCH_EVENT_OUTCOME_LABEL: Record<BatchEventOutcome, string> = {
+export const BATCH_EVENT_OUTCOME_LABEL: Record<BatchEventDisplayOutcome, string> = {
   sent: 'Enviado',
+  delivered: 'Entregado',
+  in_transit: 'En tránsito',
   failed: 'Fallido',
   skipped_already_sent: 'Ya tenía recordatorio',
   skipped_disabled: 'Recordatorios apagados',
@@ -145,10 +164,12 @@ export const BATCH_EVENT_OUTCOME_LABEL: Record<BatchEventOutcome, string> = {
 };
 
 export const BATCH_EVENT_OUTCOME_COLOR: Record<
-  BatchEventOutcome,
+  BatchEventDisplayOutcome,
   'default' | 'success' | 'error' | 'warning' | 'info'
 > = {
   sent: 'success',
+  delivered: 'success',
+  in_transit: 'warning',
   failed: 'error',
   skipped_already_sent: 'info',
   skipped_disabled: 'default',
@@ -159,7 +180,8 @@ export const BATCH_EVENT_OUTCOME_COLOR: Record<
 
 export function formatExecutionStatsNarrative(stats: ExecutionStats): string {
   const parts: string[] = [];
-  if (stats.sent > 0) parts.push(`${stats.sent} enviados`);
+  if (stats.sent > 0) parts.push(`${stats.sent} entregados`);
+  if (stats.inTransit > 0) parts.push(`${stats.inTransit} en tránsito`);
   if (stats.failed > 0) parts.push(`${stats.failed} fallidos`);
   const skipped =
     stats.skippedAlreadySent +
@@ -176,7 +198,8 @@ export const REMINDER_STATUS_LABEL: Record<ReminderDeliveryStatus, string> = {
   ready: 'Listo',
   missing_phone: 'Sin teléfono',
   missing_professional: 'Sin profesional',
-  sent: 'Enviado',
+  sent: 'Entregado',
+  in_transit: 'En tránsito',
   failed: 'Fallido',
   sent_unverified: 'Enviado (sin log)',
   skipped: 'Omitido',
@@ -193,6 +216,7 @@ export const REMINDER_STATUS_COLOR: Record<
   missing_phone: 'warning',
   missing_professional: 'warning',
   sent: 'success',
+  in_transit: 'warning',
   failed: 'error',
   sent_unverified: 'warning',
   skipped: 'default',
@@ -212,8 +236,25 @@ export function formatReminderSentDisplay(row: ReminderRow): string {
   if (NO_SEND_DELIVERY_STATUSES.has(row.deliveryStatus)) {
     return row.failureReason ?? '—';
   }
-  if (row.deliveryStatus !== 'sent' && row.deliveryStatus !== 'sent_unverified') {
+  if (
+    row.deliveryStatus !== 'sent' &&
+    row.deliveryStatus !== 'sent_unverified' &&
+    row.deliveryStatus !== 'in_transit'
+  ) {
     return '—';
+  }
+  if (row.deliveryStatus === 'in_transit') {
+    const iso = row.sentAt ?? row.logCreatedAt;
+    const when = iso
+      ? new Date(iso).toLocaleString('es-CO', {
+          day: 'numeric',
+          month: 'short',
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZone: 'America/Bogota',
+        })
+      : null;
+    return when ? `En tránsito · ${when}` : 'En tránsito (pendiente de entrega)';
   }
   const iso = row.sentAt ?? row.logCreatedAt;
   if (!iso) return '—';
@@ -227,6 +268,15 @@ export function formatReminderSentDisplay(row: ReminderRow): string {
 }
 
 export function reminderStatusTooltip(row: ReminderRow): string | undefined {
+  if (row.deliveryStatus === 'in_transit') {
+    return 'Meta aceptó el mensaje; aún no hay confirmación de entrega al teléfono';
+  }
+  if (row.deliveryStatus === 'sent' && row.logStatus === 'read') {
+    return 'Entregado y leído';
+  }
+  if (row.deliveryStatus === 'sent' && row.logStatus === 'delivered') {
+    return 'Entregado al teléfono';
+  }
   if (row.failureReason) return row.failureReason;
   if (
     row.deliveryStatus === 'sent' &&

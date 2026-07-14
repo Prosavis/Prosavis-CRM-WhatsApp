@@ -177,7 +177,7 @@ const ReminderMessageDetailDialog: React.FC<ReminderMessageDetailDialogProps> = 
           </Box>
 
           {row.failureReason &&
-            !['sent', 'ready', 'pending'].includes(row.deliveryStatus) && (
+            !['sent', 'ready', 'pending', 'in_transit'].includes(row.deliveryStatus) && (
             <Box>
               <Typography variant="overline" color="error">
                 Motivo del fallo

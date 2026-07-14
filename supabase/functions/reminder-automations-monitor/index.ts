@@ -67,6 +67,7 @@ Deno.serve(async (req) => {
           ? {
             sent: Number(executionStats.sent ?? 0) || 0,
             failed: Number(executionStats.failed ?? 0) || 0,
+            inTransit: Number(executionStats.inTransit ?? 0) || 0,
             skippedAlreadySent: Number(executionStats.skippedAlreadySent ?? 0) || 0,
             skippedDisabled: Number(executionStats.skippedDisabled ?? 0) || 0,
             skippedMissingPhone: Number(executionStats.skippedMissingPhone ?? 0) || 0,

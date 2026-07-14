@@ -19,6 +19,7 @@ const SUMMARY_ORDER: ReminderDeliveryStatus[] = [
   'ready',
   'pending',
   'sent',
+  'in_transit',
   'failed',
   'disabled',
   'not_attempted',

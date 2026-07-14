@@ -124,14 +124,16 @@ export function getSkipBreakdown(stats: ExecutionStats): SkipBreakdownItem[] {
 }
 
 export interface DayHealth {
-  /** Total de mensajes enviados con éxito en el día (suma de todas las corridas). */
+  /** Total de mensajes entregados (delivered/read) en el día. */
   sent: number;
+  /** Aceptados por Meta sin confirmación de entrega. */
+  inTransit: number;
   /** Fallos que quedaron al cierre (última corrida). */
   failed: number;
   /** Omitidos reales al cierre (sin contar “ya enviados” de reintentos). */
   skipped: number;
   attempted: number;
-  /** Desglose de enviados por corrida, p. ej. "10 en el principal + 2 en reintentos". */
+  /** Desglose de entregados por corrida, p. ej. "10 en el principal + 2 en reintentos". */
   sentBreakdown: string | null;
   status: 'ok' | 'partial' | 'failed' | 'empty';
   statusLabel: string;
@@ -139,13 +141,14 @@ export interface DayHealth {
 
 /**
  * Resumen del día:
- * - enviados = suma de todas las corridas (lo que realmente salió)
+ * - entregados / en tránsito = suma de todas las corridas (stats ya reconciliados)
  * - fallidos / omitidos = estado al cierre (última corrida), omitidos sin “ya enviados”
  */
 export function getDayHealth(runsAsc: HistoryBatchRun[]): DayHealth {
   if (runsAsc.length === 0) {
     return {
       sent: 0,
+      inTransit: 0,
       failed: 0,
       skipped: 0,
       attempted: 0,
@@ -156,6 +159,7 @@ export function getDayHealth(runsAsc: HistoryBatchRun[]): DayHealth {
   }
 
   const sent = runsAsc.reduce((sum, run) => sum + run.executionStats.sent, 0);
+  const inTransit = runsAsc.reduce((sum, run) => sum + (run.executionStats.inTransit ?? 0), 0);
   const attempted = runsAsc.reduce((sum, run) => sum + run.executionStats.attempted, 0);
   const last = runsAsc[runsAsc.length - 1];
   const failed = last.executionStats.failed;
@@ -183,12 +187,12 @@ export function getDayHealth(runsAsc: HistoryBatchRun[]): DayHealth {
 
   let status: DayHealth['status'] = 'empty';
   let statusLabel = 'Sin envíos';
-  if (failed > 0 && sent === 0) {
+  if (failed > 0 && sent === 0 && inTransit === 0) {
     status = 'failed';
     statusLabel = 'Con fallos';
-  } else if (failed > 0) {
+  } else if (failed > 0 || inTransit > 0) {
     status = 'partial';
-    statusLabel = 'Parcial';
+    statusLabel = failed > 0 ? 'Parcial' : 'En tránsito';
   } else if (sent > 0) {
     status = 'ok';
     statusLabel = 'Completado';
@@ -199,6 +203,7 @@ export function getDayHealth(runsAsc: HistoryBatchRun[]): DayHealth {
 
   return {
     sent,
+    inTransit,
     failed,
     skipped,
     attempted,
@@ -221,14 +226,20 @@ export function formatFriendlyDelta(
   const b = curr.executionStats;
 
   if (curr.runKind === 'retry' || curr.runKind === 'manual') {
-    if (b.sent > 0 && b.failed === 0) {
-      return `Completó ${b.sent} envío${b.sent === 1 ? '' : 's'} pendiente${b.sent === 1 ? '' : 's'}`;
+    if (b.sent > 0 && b.failed === 0 && (b.inTransit ?? 0) === 0) {
+      return `Completó ${b.sent} entrega${b.sent === 1 ? '' : 's'} pendiente${b.sent === 1 ? '' : 's'}`;
     }
-    if (b.sent > 0 && b.failed > 0) {
-      return `Avanzó ${b.sent} · aún ${b.failed} con error`;
+    if (b.sent > 0 && (b.failed > 0 || (b.inTransit ?? 0) > 0)) {
+      const parts = [`Avanzó ${b.sent}`];
+      if (b.failed > 0) parts.push(`aún ${b.failed} con error`);
+      if ((b.inTransit ?? 0) > 0) parts.push(`${b.inTransit} en tránsito`);
+      return parts.join(' · ');
     }
     if (b.sent === 0 && b.failed > 0) {
       return `No pudo completar ${b.failed} pendiente${b.failed === 1 ? '' : 's'}`;
+    }
+    if (b.sent === 0 && (b.inTransit ?? 0) > 0) {
+      return `${b.inTransit} en tránsito (sin entrega confirmada)`;
     }
     if (b.sent === 0 && totalSkipped(b) > 0) {
       return 'Nada nuevo por enviar (ya cubiertos u omitidos)';

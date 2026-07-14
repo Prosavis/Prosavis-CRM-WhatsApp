@@ -138,8 +138,10 @@ const ReminderHistoryDayCard: React.FC<ReminderHistoryDayCardProps> = ({
 
           <Typography variant="body2" color="text.secondary">
             {health.sent > 0
-              ? `${health.sent} recordatorio${health.sent === 1 ? '' : 's'} enviado${health.sent === 1 ? '' : 's'} en total`
-              : 'Ningún recordatorio enviado'}
+              ? `${health.sent} recordatorio${health.sent === 1 ? '' : 's'} entregado${health.sent === 1 ? '' : 's'} en total`
+              : health.inTransit > 0
+                ? 'Ningún recordatorio confirmado como entregado'
+                : 'Ningún recordatorio enviado'}
             {' · '}
             {runCount} {runCount === 1 ? 'corrida' : 'corridas'}
             {retryCount > 0 ? ` (${retryCount} ${retryCount === 1 ? 'reintento' : 'reintentos'})` : ''}
@@ -150,9 +152,18 @@ const ReminderHistoryDayCard: React.FC<ReminderHistoryDayCardProps> = ({
               size="small"
               color="success"
               variant={health.sent > 0 ? 'filled' : 'outlined'}
-              label={`${health.sent} enviados`}
+              label={`${health.sent} entregados`}
               sx={{ fontWeight: 600, opacity: health.sent > 0 ? 1 : 0.55 }}
             />
+            {(health.inTransit > 0 || health.sent > 0 || health.failed > 0) && (
+              <Chip
+                size="small"
+                color="warning"
+                variant={health.inTransit > 0 ? 'filled' : 'outlined'}
+                label={`${health.inTransit} en tránsito`}
+                sx={{ fontWeight: 600, opacity: health.inTransit > 0 ? 1 : 0.55 }}
+              />
+            )}
             <Chip
               size="small"
               color="error"
@@ -194,11 +205,13 @@ const ReminderHistoryDayCard: React.FC<ReminderHistoryDayCardProps> = ({
               }}
             >
               <Typography variant="body2" fontWeight={700} color="success.dark">
-                Total del día: {health.sent} enviado{health.sent === 1 ? '' : 's'}
+                Total del día: {health.sent} entregado{health.sent === 1 ? '' : 's'}
                 {health.sentBreakdown ? ` (${health.sentBreakdown})` : ''}
               </Typography>
-              {(health.failed > 0 || health.skipped > 0) && (
+              {(health.failed > 0 || health.skipped > 0 || health.inTransit > 0) && (
                 <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.25 }}>
+                  {health.inTransit > 0 ? `${health.inTransit} en tránsito` : ''}
+                  {health.inTransit > 0 && (health.failed > 0 || health.skipped > 0) ? ' · ' : ''}
                   {health.failed > 0 ? `${health.failed} quedaron fallidos` : ''}
                   {health.failed > 0 && health.skipped > 0 ? ' · ' : ''}
                   {health.skipped > 0 ? `${health.skipped} omitidos al cierre` : ''}
@@ -290,9 +303,18 @@ const ReminderHistoryDayCard: React.FC<ReminderHistoryDayCardProps> = ({
                           size="small"
                           color="success"
                           variant="outlined"
-                          label={`${run.executionStats.sent} enviados`}
+                          label={`${run.executionStats.sent} entregados`}
                           sx={{ height: 22 }}
                         />
+                        {(run.executionStats.inTransit ?? 0) > 0 && (
+                          <Chip
+                            size="small"
+                            color="warning"
+                            variant="outlined"
+                            label={`${run.executionStats.inTransit} en tránsito`}
+                            sx={{ height: 22 }}
+                          />
+                        )}
                         {run.executionStats.failed > 0 && (
                           <Chip
                             size="small"
