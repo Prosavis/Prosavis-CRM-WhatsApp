@@ -9,7 +9,7 @@ Aplicativo independiente para operar Inbox, Métricas, Leads y Descuentos de Wha
 - [MIGRACION_SUPABASE_CRM.md](https://github.com/Prosavis/prosavis-firebase/blob/main/docs/whatsapp/MIGRACION_SUPABASE_CRM.md) — cutover, runbook, rollback
 - [WHATSAPP_CRM_SUPABASE_ARQUITECTURA.md](https://github.com/Prosavis/prosavis-firebase/blob/main/docs/whatsapp/WHATSAPP_CRM_SUPABASE_ARQUITECTURA.md) — schema, Edge Functions, Storage
 - [crm-supabase-etl-runbook.md](https://github.com/Prosavis/prosavis-firebase/blob/main/docs/operacion-y-despliegue/crm-supabase-etl-runbook.md) — scripts ETL, validación, capacidad
-- [guia-operativa-meta-whatsapp.md](https://github.com/Prosavis/prosavis-firebase/blob/main/docs/operacion-y-despliegue/guia-operativa-meta-whatsapp.md) — webhook Meta, plantillas WABA
+- [guia-operativa-meta-whatsapp.md](https://github.com/Prosavis/prosavis-firebase/blob/main/docs/operacion-y-despliegue/guia-operativa-meta-whatsapp.md) — webhook Meta, plantillas WABA, **coexistencia Coex (§J)**
 
 Ruta local en monorepo: `prosavis-firebase/docs/whatsapp/` y `docs/operacion-y-despliegue/`.
 
