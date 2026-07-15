@@ -3,23 +3,8 @@ import type { Session } from '@supabase/supabase-js';
 import { AuthContext, type AdminProfile, type AuthContextValue } from '@/context/auth-context';
 import { supabase } from '@/config/supabase';
 
-const AUTHORIZED_ADMIN_EMAILS = [
-  'admin@prosavis.com',
-  'support@prosavis.com',
-  'oliverafrancy@gmail.com',
-] as const;
-
 const UNAUTHORIZED_MESSAGE =
   'No tienes permisos para acceder al CRM WhatsApp.';
-
-function normalizeEmail(email?: string | null): string {
-  return (email ?? '').trim().toLowerCase();
-}
-
-function isAuthorizedEmail(email?: string | null): boolean {
-  const normalized = normalizeEmail(email);
-  return (AUTHORIZED_ADMIN_EMAILS as readonly string[]).includes(normalized);
-}
 
 async function loadProfile(userId: string): Promise<AdminProfile | null> {
   const { data, error } = await supabase
@@ -43,6 +28,7 @@ async function loadProfile(userId: string): Promise<AdminProfile | null> {
   };
 }
 
+/** Allowlist solo en RPC `ensure_crm_admin_profile` (servidor), no en el bundle. */
 async function ensureAdminProfile(): Promise<AdminProfile | null> {
   const { data, error } = await supabase.rpc('ensure_crm_admin_profile');
   if (error) {
@@ -76,21 +62,22 @@ export function AuthProvider({ children }: PropsWithChildren) {
       return;
     }
 
-    const email = nextSession.user.email;
-    if (!isAuthorizedEmail(email)) {
-      await supabase.auth.signOut();
-      setSession(null);
-      setProfile(null);
-      throw new Error(UNAUTHORIZED_MESSAGE);
-    }
-
     try {
       let nextProfile = await loadProfile(nextSession.user.id);
       if (!nextProfile) {
         nextProfile = await ensureAdminProfile();
       }
+      if (!nextProfile) {
+        await supabase.auth.signOut();
+        setSession(null);
+        setProfile(null);
+        throw new Error(UNAUTHORIZED_MESSAGE);
+      }
       setProfile(nextProfile);
     } catch (error) {
+      if (error instanceof Error && error.message === UNAUTHORIZED_MESSAGE) {
+        throw error;
+      }
       console.error('No se pudo cargar el perfil de administrador:', error);
       setProfile(null);
     }
