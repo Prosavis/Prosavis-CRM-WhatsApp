@@ -5,7 +5,6 @@ import {
   TextFields as TextIcon,
   People as PeopleIcon,
   Business as BusinessIcon,
-  CalendarMonth as CalendarIcon,
   PhotoLibrary as PhotoIcon,
   Block as BlockIcon,
   Campaign as CampaignIcon,
@@ -24,7 +23,7 @@ const MetricsGrid: React.FC<MetricsGridProps> = ({ metrics, loading }) => {
   if (loading) {
     return (
       <Grid container spacing={2}>
-        {Array.from({ length: 11 }).map((_, i) => (
+        {Array.from({ length: 10 }).map((_, i) => (
           <Grid item xs={6} sm={4} md={3} lg={2} key={i}>
             <Box sx={{
               p: 2, border: '1px solid', borderColor: 'divider',
@@ -57,7 +56,6 @@ const MetricsGrid: React.FC<MetricsGridProps> = ({ metrics, loading }) => {
     { label: 'Activas', value: metrics.activeConversations, icon: <ChatIcon fontSize="small" />, color: '#00897b', bg: '#e0f2f1' },
     { label: 'Leads', value: metrics.leads, icon: <PeopleIcon fontSize="small" />, color: '#ed6c02', bg: '#fff3e0' },
     { label: 'Clientes', value: metrics.clients, icon: <BusinessIcon fontSize="small" />, color: '#7b1fa2', bg: '#f3e5f5' },
-    { label: 'Citas', value: metrics.appointments, icon: <CalendarIcon fontSize="small" />, color: '#1565c0', bg: '#e3f2fd' },
     { label: 'Assets', value: metrics.mediaAssets, icon: <PhotoIcon fontSize="small" />, color: '#2e7d32', bg: '#e8f5e9' },
     { label: 'Blocklist', value: metrics.blocklisted, icon: <BlockIcon fontSize="small" />, color: '#d32f2f', bg: '#ffebee' },
     { label: 'Broadcasts', value: metrics.broadcastJobs, icon: <CampaignIcon fontSize="small" />, color: '#6a1b9a', bg: '#f3e5f5' },

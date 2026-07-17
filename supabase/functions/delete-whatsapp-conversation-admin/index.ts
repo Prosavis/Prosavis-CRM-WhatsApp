@@ -7,6 +7,7 @@ import {
   stickerStorageObjectPath,
 } from '../_shared/whatsappOutbound.ts';
 import { normalizePhone } from '../_shared/whatsappIdentity.ts';
+import { applyBlockedTagToDirectory } from '../_shared/directoryBlocklistSync.ts';
 
 export const DELETE_WHATSAPP_CONVERSATION_CONFIRM_PHRASE = 'ELIMINAR_CONVERSACION_WHATSAPP';
 const LOG_BATCH = 200;
@@ -122,6 +123,18 @@ Deno.serve(async (req) => {
             created_by: user.id,
           },
           { onConflict: 'phone' },
+        );
+      }
+      try {
+        await applyBlockedTagToDirectory(
+          supabase,
+          stableKeys,
+          'Bloqueado al eliminar conversación WhatsApp',
+        );
+      } catch (tagErr) {
+        console.error(
+          '[delete-whatsapp-conversation-admin] directory tag sync failed',
+          tagErr,
         );
       }
       try {

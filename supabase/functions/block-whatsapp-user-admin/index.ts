@@ -2,6 +2,7 @@
 import { requireCrmAdmin } from '../_shared/supabase.ts';
 import { blockOnMeta, formatError, getGraphCredentials } from '../_shared/whatsappOutbound.ts';
 import { normalizePhone } from '../_shared/whatsappIdentity.ts';
+import { applyBlockedTagToDirectory } from '../_shared/directoryBlocklistSync.ts';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -43,6 +44,18 @@ Deno.serve(async (req) => {
       if (!error) blocklistEntries += 1;
     }
 
+    // Inbox → directorio: tag Bloqueado (+ nota si no hay motivo previo).
+    let directoryTagged = 0;
+    try {
+      directoryTagged = await applyBlockedTagToDirectory(
+        supabase,
+        keys,
+        'Bloqueado desde inbox WhatsApp',
+      );
+    } catch (tagErr) {
+      console.error('[block-whatsapp-user-admin] directory tag sync failed', tagErr);
+    }
+
     const phones = [...keys].filter((key) => /^[0-9]+$/.test(key));
     let metaBlockAttempted = false;
     let metaBlockSuccess = false;
@@ -63,6 +76,7 @@ Deno.serve(async (req) => {
     return jsonResponse({
       success: true,
       blocklistEntries,
+      directoryTagged,
       metaBlockAttempted,
       metaBlockSuccess,
       ...(metaErrorCode ? { metaErrorCode } : {}),

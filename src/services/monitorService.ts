@@ -99,7 +99,6 @@ export interface GeneralMetrics {
   leads: number;
   mediaAssets: number;
   clients: number;
-  appointments: number;
   activeConversations: number;
   blocklisted: number;
   broadcastJobs: number;
@@ -347,7 +346,6 @@ export async function getGeneralMetrics(): Promise<GeneralMetrics> {
     leads,
     mediaAssets,
     clients,
-    appointments,
     activeConv,
     blocklisted,
     broadcastJobs,
@@ -359,7 +357,6 @@ export async function getGeneralMetrics(): Promise<GeneralMetrics> {
     safeCount('crm_directory'),
     safeCount('whatsapp_media_assets'),
     safeCount('crm_clients'),
-    safeCount('crm_appointments'),
     safeCount('whatsapp_conversations', { column: 'is_archived', value: false }),
     safeCount('whatsapp_blocklist'),
     safeCount('whatsapp_broadcast_jobs'),
@@ -373,7 +370,6 @@ export async function getGeneralMetrics(): Promise<GeneralMetrics> {
     leads,
     mediaAssets,
     clients,
-    appointments,
     activeConversations: activeConv,
     blocklisted,
     broadcastJobs,

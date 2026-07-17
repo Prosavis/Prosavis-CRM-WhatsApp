@@ -1,6 +1,7 @@
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '@/config/supabase';
 import type { Database } from '@/types/database';
+import type { WhatsAppMetrics } from '@/types/whatsapp';
 
 type ConversationRow = Database['public']['Tables']['whatsapp_conversations']['Row'];
 type MessageRow = Database['public']['Tables']['whatsapp_message_log']['Row'];
@@ -15,28 +16,46 @@ const DEFAULT_MESSAGE_LIMIT = 200;
 const CONVERSATIONS_PAGE_SIZE = 1000;
 const CONVERSATIONS_MAX_PAGES = 50;
 
+function formatInvokeError(raw: unknown, fallback: string): string {
+  if (typeof raw === 'string' && raw.trim()) return raw;
+  if (raw instanceof Error && raw.message) return raw.message;
+  if (typeof raw === 'object' && raw) {
+    const obj = raw as { message?: unknown; error?: unknown; stage?: unknown };
+    if (typeof obj.error === 'string' && obj.error.trim()) {
+      return typeof obj.stage === 'string' ? `[${obj.stage}] ${obj.error}` : obj.error;
+    }
+    if (typeof obj.message === 'string' && obj.message.trim()) return obj.message;
+    try {
+      return JSON.stringify(raw);
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
+}
+
 async function invokeFn<T>(name: string, body?: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.functions.invoke<T>(name, { body });
   if (error) {
+    // Prefer parsed body when present (response stream may already be consumed).
+    if (data && typeof data === 'object') {
+      const message = formatInvokeError(data, error.message);
+      const enriched = new Error(message) as Error & { statusCode?: number };
+      const ctx = error as { context?: Response };
+      if (ctx.context?.status) enriched.statusCode = ctx.context.status;
+      throw enriched;
+    }
     const ctx = error as { context?: Response };
     const response = ctx.context;
     if (response) {
       try {
         const payload = await response.json();
-        const message =
-          typeof payload === 'object' && payload && 'error' in payload
-            ? String((payload as { error: unknown }).error)
-            : JSON.stringify(payload);
-        const code =
-          typeof payload === 'object' && payload && 'code' in payload
-            ? String((payload as { code: unknown }).code)
-            : undefined;
-        const enriched = new Error(message || error.message) as Error & {
+        const message = formatInvokeError(payload, error.message);
+        const enriched = new Error(message) as Error & {
           statusCode?: number;
           code?: string;
         };
         enriched.statusCode = response.status;
-        if (code) enriched.code = code;
         throw enriched;
       } catch (parseError) {
         if (parseError instanceof Error && parseError.message !== error.message) {
@@ -44,10 +63,18 @@ async function invokeFn<T>(name: string, body?: Record<string, unknown>): Promis
         }
       }
     }
-    throw error;
+    throw new Error(formatInvokeError(error, error.message || `Error en ${name}`));
   }
   if (data === null || data === undefined) {
     throw new Error(`La funcion ${name} no devolvio datos.`);
+  }
+  if (
+    typeof data === 'object' &&
+    data &&
+    'error' in data &&
+    (data as { error?: unknown }).error
+  ) {
+    throw new Error(formatInvokeError(data, `Error en ${name}`));
   }
   return data;
 }
@@ -1824,8 +1851,14 @@ export async function listWhatsAppMessageLog(filters: {
   return (rows ?? []).map(mapMessageRow);
 }
 
-export async function getWhatsAppMetrics(days = 30, phoneNumberId?: string) {
-  return invokeFn('get-whatsapp-metrics', { days, phoneNumberId });
+export async function getWhatsAppMetrics(
+  days = 30,
+  phoneNumberId?: string,
+): Promise<WhatsAppMetrics> {
+  return invokeFn<WhatsAppMetrics>('get-whatsapp-metrics', {
+    days,
+    phoneNumberId,
+  });
 }
 
 export async function purgeWhatsAppMessageLog(params: {
