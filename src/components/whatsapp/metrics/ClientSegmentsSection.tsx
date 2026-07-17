@@ -27,7 +27,11 @@ import type {
   DirectoryClientMetricRow,
 } from '@/types/whatsapp';
 import { getClassificationLabel } from './utils/clientClassification';
-import { downloadCsv } from './utils/exportMetricsCsv';
+import {
+  addStyledSheet,
+  downloadWorkbook,
+  excelGeneratedAtLine,
+} from './utils/exportMetricsExcel';
 import MetricsSection from './MetricsSection';
 
 export type ClientSegmentKey =
@@ -210,34 +214,68 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
   };
 
   const handleDownload = () => {
-    const rows = (selected ? filtered : clients).map((c) => [
+    const list = selected ? filtered : clients;
+    const segmentLabel = selected
+      ? CARDS.find((c) => c.key === selected)?.label ?? selected
+      : 'Todos los contactos';
+
+    const resumenRows = CARDS.map((card) => {
+      const count = segments ? card.pick(segments) : 0;
+      const base = segments
+        ? card.base === 'clients'
+          ? segments.clients
+          : segments.total
+        : 0;
+      const pct = base > 0 ? Math.round((count / base) * 1000) / 10 : 0;
+      return [card.label, count, card.key === 'potential' ? null : pct];
+    });
+
+    const clientRows = list.map((c) => [
       c.name ?? '',
       c.phone ?? '',
-      c.classification ?? '',
-      (c.tags ?? []).join('|'),
-      c.isClient ? 'sí' : 'no',
+      getClassificationLabel(c.classification),
+      (c.tags ?? []).join(', '),
+      c.isClient ? 'Sí' : 'No',
       clientEstado(c),
       c.blacklistReason ?? '',
-      c.lastAppointmentDate ?? '',
-      c.isCompany ? 'sí' : 'no',
-      c.isRecurring ? 'sí' : 'no',
+      c.lastAppointmentDate ?? null,
+      c.isCompany ? 'Sí' : 'No',
+      c.isRecurring ? 'Sí' : 'No',
     ]);
-    downloadCsv(
-      `clientes-${selected ?? 'todos'}.csv`,
-      [
-        'nombre',
-        'telefono',
-        'clasificacion',
-        'tags',
-        'es_cliente',
-        'estado',
-        'motivo_blacklist',
-        'ultima_cita',
-        'empresa',
-        'recurrente',
-      ],
-      rows,
-    );
+
+    void downloadWorkbook(`clientes-${selected ?? 'todos'}.xlsx`, (wb) => {
+      addStyledSheet(wb, {
+        name: 'Resumen',
+        title: 'Segmentos de clientes',
+        subtitle: 'Conteos por segmento del directorio (audiencia y clientes reales).',
+        meta: [excelGeneratedAtLine()],
+        columns: [
+          { header: 'Segmento', type: 'text' },
+          { header: 'Conteo', type: 'int' },
+          { header: '% de su base', type: 'percent' },
+        ],
+        rows: resumenRows,
+      });
+      addStyledSheet(wb, {
+        name: 'Clientes',
+        title: `Clientes · ${segmentLabel}`,
+        subtitle: `${list.length.toLocaleString('es-CO')} contacto(s) exportado(s).`,
+        meta: [excelGeneratedAtLine()],
+        columns: [
+          { header: 'Nombre', type: 'text' },
+          { header: 'Teléfono', type: 'text' },
+          { header: 'Clasificación', type: 'text' },
+          { header: 'Tags', type: 'text', width: 30 },
+          { header: 'Es cliente', type: 'text' },
+          { header: 'Estado', type: 'text' },
+          { header: 'Motivo lista negra', type: 'text', width: 30 },
+          { header: 'Última cita', type: 'date' },
+          { header: 'Empresa', type: 'text' },
+          { header: 'Recurrente', type: 'text' },
+        ],
+        rows: clientRows,
+      });
+    });
   };
 
   const colSpan =
@@ -250,7 +288,7 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
       expanded={detailOpen}
       onExpandedChange={setDetailOpen}
       onDownload={handleDownload}
-      downloadLabel="Descargar clientes CSV"
+      downloadLabel="Descargar clientes Excel"
       detail={
         selected ? (
           <Box ref={drillRef}>

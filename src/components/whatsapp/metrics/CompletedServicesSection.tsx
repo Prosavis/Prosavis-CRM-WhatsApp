@@ -5,6 +5,7 @@ import {
   Button,
   Chip,
   Divider,
+  Grid,
   Stack,
   Table,
   TableBody,
@@ -16,16 +17,18 @@ import {
   Typography,
   useTheme,
 } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import TrendingFlatIcon from '@mui/icons-material/TrendingFlat';
 import CloseIcon from '@mui/icons-material/Close';
 import {
+  Area,
   Bar,
   CartesianGrid,
   Cell,
   ComposedChart,
-  Line,
+  LabelList,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -33,7 +36,6 @@ import {
 } from 'recharts';
 import type {
   CompletedAppointmentDetail,
-  CompletedComparison,
   CompletedServicesTimeseriesPoint,
   MetricsGranularSeries,
   WhatsAppMetrics,
@@ -44,8 +46,27 @@ import {
   labelCompletedSeries,
   type MetricsGranularity,
 } from './utils/aggregateBuckets';
-import { downloadCsv } from './utils/exportMetricsCsv';
+import {
+  addStyledSheet,
+  downloadWorkbook,
+  excelGeneratedAtLine,
+} from './utils/exportMetricsExcel';
+import {
+  AreaGradient,
+  BarGradient,
+  ChartTooltipCard,
+  chartAxisTick,
+  chartColor,
+  chartGridStroke,
+  formatAxisInt,
+} from './utils/chartTheme';
 import MetricsSection from './MetricsSection';
+
+const GRANULARITY_LABEL: Record<MetricsGranularity, string> = {
+  day: 'Día',
+  week: 'Semana',
+  month: 'Mes',
+};
 
 interface CompletedServicesSectionProps {
   series?: MetricsGranularSeries<CompletedServicesTimeseriesPoint>;
@@ -122,34 +143,72 @@ function shortMonthLabel(monthKey: string): string {
   });
 }
 
-interface ComparisonChipProps {
+/** Una "lente" de comparación honesta: actual vs previo con su explicación. */
+interface ComparisonLens {
+  key: string;
   title: string;
-  comparison: CompletedComparison;
-  detail: string;
+  current: number;
+  previous: number;
+  growth: number | null;
+  explanation: string;
+  /** Fuerza color neutro (p. ej. la lente de periodo en curso parcial). */
+  neutral?: boolean;
 }
 
-const ComparisonChip: React.FC<ComparisonChipProps> = ({ title, comparison, detail }) => {
-  const { growth } = comparison;
+const ComparisonCard: React.FC<{ lens: ComparisonLens }> = ({ lens }) => {
+  const theme = useTheme();
+  const { growth, neutral } = lens;
   const hasGrowth = growth != null;
-  const positive = hasGrowth && growth >= 0;
-  const icon = !hasGrowth ? (
-    <TrendingFlatIcon />
-  ) : positive ? (
-    <TrendingUpIcon />
-  ) : (
-    <TrendingDownIcon />
-  );
-  const growthText = hasGrowth ? `${positive ? '+' : ''}${growth}%` : 's/d';
+  const sign = !hasGrowth ? 0 : growth > 0 ? 1 : growth < 0 ? -1 : 0;
+  const color =
+    neutral || sign === 0
+      ? theme.palette.text.secondary
+      : sign > 0
+        ? theme.palette.success.main
+        : theme.palette.error.main;
+  const Icon =
+    !hasGrowth || sign === 0
+      ? TrendingFlatIcon
+      : sign > 0
+        ? TrendingUpIcon
+        : TrendingDownIcon;
+  const growthText = hasGrowth ? `${growth > 0 ? '+' : ''}${growth}%` : 's/d';
   return (
-    <MuiTooltip title={detail}>
-      <Chip
-        size="small"
-        icon={icon}
-        color={!hasGrowth ? 'default' : positive ? 'success' : 'error'}
-        variant={hasGrowth ? 'filled' : 'outlined'}
-        label={`${title}: ${growthText}`}
-      />
-    </MuiTooltip>
+    <Box
+      sx={{
+        height: '100%',
+        p: 1.5,
+        borderRadius: 2,
+        border: '1px solid',
+        borderColor: 'divider',
+        bgcolor: 'background.paper',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 0.5,
+        transition: 'border-color 0.2s, box-shadow 0.2s',
+        '&:hover': { borderColor: alpha(color, 0.5), boxShadow: 1 },
+      }}
+    >
+      <Typography variant="caption" color="text.secondary" fontWeight={700}>
+        {lens.title}
+      </Typography>
+      <Stack direction="row" alignItems="center" spacing={0.5}>
+        <Icon sx={{ fontSize: 20, color }} />
+        <Typography variant="h6" fontWeight={800} sx={{ color, lineHeight: 1.1 }}>
+          {growthText}
+        </Typography>
+      </Stack>
+      <Typography variant="caption" color="text.secondary">
+        {formatInt(lens.current)} actual · {formatInt(lens.previous)} previo
+      </Typography>
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        sx={{ mt: 'auto', pt: 0.5, lineHeight: 1.35, opacity: 0.85 }}
+      >
+        {lens.explanation}
+      </Typography>
+    </Box>
   );
 };
 
@@ -162,27 +221,11 @@ const CompletedChartTooltip: React.FC<CompletedChartTooltipProps> = ({ active, p
   if (!active || !payload || payload.length === 0) return null;
   const point = payload[0].payload;
   return (
-    <Box
-      sx={{
-        bgcolor: 'background.paper',
-        border: '1px solid',
-        borderColor: 'divider',
-        borderRadius: 1,
-        p: 1,
-        boxShadow: 2,
-      }}
-    >
-      <Typography variant="body2" fontWeight={600}>
-        {point.label}
-        {point.isPartial ? ' (en curso)' : ''}
-      </Typography>
-      <Typography variant="body2" color="text.secondary">
-        Completados: <strong>{formatInt(point.completed)}</strong>
-      </Typography>
-      <Typography variant="caption" color="primary.main">
-        Clic para ver citas
-      </Typography>
-    </Box>
+    <ChartTooltipCard
+      title={`${point.label}${point.isPartial ? ' (en curso)' : ''}`}
+      rows={[{ label: 'Completados', value: formatInt(point.completed), color: '#2e7d32' }]}
+      hint="Clic para ver citas"
+    />
   );
 };
 
@@ -228,8 +271,84 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
   );
 
   const comparisons = meta?.comparisons;
-  const latestGrowth =
-    chartData.length > 0 ? chartData[chartData.length - 1].growth : null;
+
+  const barColor = chartColor(theme, '#2e7d32');
+  const barSelectedColor = chartColor(theme, '#1b5e20', 0.22);
+  const trendColor = chartColor(theme, '#1565c0');
+
+  const comparisonLenses = useMemo<ComparisonLens[]>(() => {
+    const lenses: ComparisonLens[] = [];
+    if (comparisons) {
+      lenses.push({
+        key: 'mtd',
+        title: 'Mes a la fecha',
+        current: comparisons.mtd.current,
+        previous: comparisons.mtd.previous,
+        growth: comparisons.mtd.growth,
+        explanation:
+          'Los días transcurridos de este mes vs los mismos días del mes anterior.',
+      });
+      lenses.push({
+        key: 'rolling30d',
+        title: 'Últimos 30 días',
+        current: comparisons.rolling30d.current,
+        previous: comparisons.rolling30d.previous,
+        growth: comparisons.rolling30d.growth,
+        explanation: 'Los últimos 30 días vs los 30 días inmediatamente previos.',
+      });
+      if (comparisons.lastClosedMonth) {
+        lenses.push({
+          key: 'lastClosedMonth',
+          title: `Último mes cerrado (${shortMonthLabel(comparisons.lastClosedMonth.month)})`,
+          current: comparisons.lastClosedMonth.current,
+          previous: comparisons.lastClosedMonth.previous,
+          growth: comparisons.lastClosedMonth.growth,
+          explanation:
+            'El último mes completo vs el mes cerrado anterior — periodos completos, plenamente comparables.',
+        });
+      }
+    }
+    if (chartData.length >= 2) {
+      const last = chartData[chartData.length - 1];
+      const prev = chartData[chartData.length - 2];
+      lenses.push({
+        key: 'lastPeriod',
+        title: 'Variación último periodo',
+        current: last.completed,
+        previous: prev.completed,
+        growth: last.growth,
+        neutral: true,
+        explanation:
+          'Compara el periodo en curso (parcial) vs el anterior según la granularidad; puede exagerar caídas/subidas — es otra forma de leer los mismos datos.',
+      });
+    }
+    return lenses;
+  }, [comparisons, chartData]);
+
+  const renderBarLabel = (props: {
+    x?: number | string;
+    y?: number | string;
+    width?: number | string;
+    value?: number | string | boolean | null;
+  }): React.ReactElement => {
+    const x = Number(props.x ?? 0);
+    const y = Number(props.y ?? 0);
+    const width = Number(props.width ?? 0);
+    const value = Number(props.value ?? 0);
+    if (!value || width < 22) return <g />;
+    return (
+      <text
+        x={x + width / 2}
+        y={y - 6}
+        textAnchor="middle"
+        fontSize={11}
+        fontWeight={600}
+        fill={theme.palette.text.secondary}
+      >
+        {formatInt(value)}
+      </text>
+    );
+  };
 
   const selectedRow = useMemo(
     () => chartData.find((row) => row.bucket === selectedBucket) ?? null,
@@ -251,49 +370,95 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
   };
 
   const handleDownload = () => {
-    downloadCsv(
-      `servicios-completados-${granularity}.csv`,
-      ['periodo', 'completados', 'crecimiento_pct', 'en_curso'],
-      chartData.map((row) => [
-        row.bucket,
-        row.completed,
-        row.growth ?? '',
-        row.isPartial ? 'si' : 'no',
-      ]),
-    );
+    const granLabel = GRANULARITY_LABEL[granularity];
+    void downloadWorkbook(`servicios-completados-${granularity}.xlsx`, (wb) => {
+      addStyledSheet(wb, {
+        name: 'Serie',
+        title: 'Servicios completados',
+        subtitle: `Citas COMPLETED agrupadas por ${granLabel.toLowerCase()} (ventana de 6 meses).`,
+        meta: [
+          excelGeneratedAtLine(),
+          `Granularidad: ${granLabel}`,
+          `Total en vista: ${formatInt(totalInView)}`,
+        ],
+        columns: [
+          { header: 'Periodo', type: 'text' },
+          { header: 'Completados', type: 'int' },
+          { header: 'Crecimiento %', type: 'percent' },
+          { header: 'En curso', type: 'text' },
+        ],
+        rows: chartData.map((row) => [
+          row.label,
+          row.completed,
+          row.growth,
+          row.isPartial ? 'Sí' : 'No',
+        ]),
+      });
+      if (comparisonLenses.length > 0) {
+        addStyledSheet(wb, {
+          name: 'Comparaciones',
+          title: 'Comparaciones',
+          subtitle:
+            'Distintas lentes honestas para leer la evolución de servicios completados.',
+          meta: [excelGeneratedAtLine()],
+          columns: [
+            { header: 'Lente', type: 'text' },
+            { header: 'Actual', type: 'int' },
+            { header: 'Previo', type: 'int' },
+            { header: 'Variación %', type: 'percent' },
+            { header: 'Qué mide', type: 'text', width: 62 },
+          ],
+          rows: comparisonLenses.map((lens) => [
+            lens.title,
+            lens.current,
+            lens.previous,
+            lens.growth,
+            lens.explanation,
+          ]),
+        });
+      }
+    });
   };
 
   const handleDrillDownDownload = () => {
     if (!selectedRow) return;
-    downloadCsv(
-      `citas-completadas-${selectedRow.bucket}.csv`,
-      [
-        'fecha_hora',
-        'cliente',
-        'telefono',
-        'profesional',
-        'duracion_min',
-        'monto',
-        'pagado',
-        'pendiente',
-        'estado_pago',
-        'direccion',
-        'id',
-      ],
-      selectedAppointments.map((appt) => [
-        formatDateTime(appt.scheduledDate),
-        appt.clientName ?? '',
-        appt.clientPhone ?? '',
-        appt.providerName ?? '',
-        appt.duration ?? '',
-        appt.totalAmount ?? '',
-        appt.paidAmount ?? '',
-        appt.pendingAmount ?? '',
-        appt.paymentStatus ?? '',
-        appt.addressLine ?? '',
-        appt.id,
-      ]),
-    );
+    const rows = selectedAppointments.map((appt) => [
+      new Date(appt.scheduledDate),
+      appt.clientName ?? '',
+      appt.clientPhone ?? '',
+      appt.providerName ?? '',
+      appt.duration ?? null,
+      appt.totalAmount ?? null,
+      appt.paidAmount ?? null,
+      appt.pendingAmount ?? null,
+      formatPaymentStatus(appt.paymentStatus),
+      appt.addressLine ?? '',
+      appt.id,
+    ]);
+    void downloadWorkbook(`citas-${selectedRow.bucket}.xlsx`, (wb) => {
+      addStyledSheet(wb, {
+        name: 'Citas',
+        title: `Citas completadas · ${selectedRow.label}`,
+        subtitle: `${formatInt(
+          selectedAppointments.length,
+        )} cita(s) COMPLETED en el periodo seleccionado.`,
+        meta: [excelGeneratedAtLine()],
+        columns: [
+          { header: 'Fecha / hora', type: 'datetime' },
+          { header: 'Cliente', type: 'text' },
+          { header: 'Teléfono', type: 'text' },
+          { header: 'Profesional', type: 'text' },
+          { header: 'Duración (min)', type: 'int' },
+          { header: 'Monto', type: 'currency' },
+          { header: 'Pagado', type: 'currency' },
+          { header: 'Pendiente', type: 'currency' },
+          { header: 'Estado pago', type: 'text' },
+          { header: 'Dirección', type: 'text' },
+          { header: 'ID', type: 'text' },
+        ],
+        rows,
+      });
+    });
   };
 
   return (
@@ -303,6 +468,7 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
       granularity={granularity}
       onGranularityChange={handleGranularityChange}
       onDownload={handleDownload}
+      downloadLabel="Descargar Excel"
       detail={
         <TableContainer>
           <Table size="small">
@@ -377,49 +543,21 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
         </Alert>
       )}
 
-      <Stack direction="row" spacing={1} sx={{ mb: 1.5 }} alignItems="center" flexWrap="wrap" useFlexGap>
-        {comparisons ? (
-          <>
-            <ComparisonChip
-              title="Mes a la fecha"
-              comparison={comparisons.mtd}
-              detail={`${formatInt(comparisons.mtd.current)} este mes vs ${formatInt(
-                comparisons.mtd.previous,
-              )} en los mismos días del mes anterior.`}
-            />
-            <ComparisonChip
-              title="Últimos 30 días"
-              comparison={comparisons.rolling30d}
-              detail={`${formatInt(comparisons.rolling30d.current)} en los últimos 30 días vs ${formatInt(
-                comparisons.rolling30d.previous,
-              )} en los 30 días previos.`}
-            />
-            {comparisons.lastClosedMonth && (
-              <ComparisonChip
-                title={`Último mes cerrado (${shortMonthLabel(comparisons.lastClosedMonth.month)})`}
-                comparison={comparisons.lastClosedMonth}
-                detail={`${formatInt(comparisons.lastClosedMonth.current)} en ${shortMonthLabel(
-                  comparisons.lastClosedMonth.month,
-                )} vs ${formatInt(comparisons.lastClosedMonth.previous)} en el mes cerrado anterior.`}
-              />
-            )}
-          </>
-        ) : (
-          latestGrowth != null && (
-            <Chip
-              size="small"
-              icon={latestGrowth >= 0 ? <TrendingUpIcon /> : <TrendingDownIcon />}
-              color={latestGrowth >= 0 ? 'success' : 'error'}
-              label={`${latestGrowth >= 0 ? '+' : ''}${latestGrowth}% último periodo`}
-            />
-          )
-        )}
-        {!loading && chartData.length > 0 && (
-          <Typography variant="body2" color="text.secondary">
-            Completados en vista: <strong>{formatInt(totalInView)}</strong>
-          </Typography>
-        )}
-      </Stack>
+      {!loading && chartData.length > 0 && (
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+          Completados en vista: <strong>{formatInt(totalInView)}</strong>
+        </Typography>
+      )}
+
+      {comparisonLenses.length > 0 && (
+        <Grid container spacing={1.5} sx={{ mb: 2 }}>
+          {comparisonLenses.map((lens) => (
+            <Grid item xs={12} sm={6} md={3} key={lens.key}>
+              <ComparisonCard lens={lens} />
+            </Grid>
+          ))}
+        </Grid>
+      )}
 
       {loading ? (
         <Typography variant="body2" color="text.secondary">
@@ -431,39 +569,75 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
           <code>Firestore appointments.scheduledDate</code>.
         </Typography>
       ) : (
-        <Box sx={{ width: '100%', height: 300 }}>
+        <Box sx={{ width: '100%', height: 320 }}>
           <ResponsiveContainer>
-            <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={theme.palette.divider} />
-              <XAxis dataKey="label" tick={{ fontSize: 12 }} />
-              <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-              <Tooltip content={<CompletedChartTooltip />} cursor={{ fill: theme.palette.action.hover }} />
+            <ComposedChart data={chartData} margin={{ top: 24, right: 12, left: 0, bottom: 0 }}>
+              <defs>
+                <BarGradient id="completedBar" color={barColor} />
+                <BarGradient id="completedBarSelected" color={barSelectedColor} from={1} to={0.72} />
+                <AreaGradient id="completedTrend" color={trendColor} />
+              </defs>
+              <CartesianGrid
+                vertical={false}
+                stroke={chartGridStroke(theme)}
+                strokeDasharray="3 3"
+              />
+              <XAxis
+                dataKey="label"
+                tick={chartAxisTick(theme)}
+                tickLine={false}
+                axisLine={{ stroke: chartGridStroke(theme) }}
+              />
+              <YAxis
+                allowDecimals={false}
+                width={40}
+                tick={chartAxisTick(theme)}
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={formatAxisInt}
+              />
+              <Tooltip
+                content={<CompletedChartTooltip />}
+                cursor={{ fill: alpha(theme.palette.text.primary, 0.05) }}
+              />
+              <Area
+                type="monotone"
+                dataKey="completed"
+                name="Tendencia"
+                stroke={trendColor}
+                strokeWidth={2}
+                fill="url(#completedTrend)"
+                dot={false}
+                activeDot={false}
+                legendType="none"
+                isAnimationActive={false}
+              />
               <Bar
                 dataKey="completed"
                 name="Completados"
-                radius={[4, 4, 0, 0]}
+                radius={[6, 6, 0, 0]}
                 cursor="pointer"
+                maxBarSize={64}
                 onClick={handleBarClick}
+                animationDuration={800}
               >
                 {chartData.map((row) => (
                   <Cell
                     key={row.bucket}
-                    fill={row.bucket === selectedBucket ? '#1b5e20' : '#2e7d32'}
-                    fillOpacity={
-                      selectedBucket && row.bucket !== selectedBucket ? 0.45 : 1
+                    fill={
+                      row.bucket === selectedBucket
+                        ? 'url(#completedBarSelected)'
+                        : 'url(#completedBar)'
                     }
+                    fillOpacity={
+                      selectedBucket && row.bucket !== selectedBucket ? 0.4 : 1
+                    }
+                    stroke={row.bucket === selectedBucket ? barSelectedColor : 'transparent'}
+                    strokeWidth={row.bucket === selectedBucket ? 1.5 : 0}
                   />
                 ))}
+                <LabelList dataKey="completed" content={renderBarLabel} />
               </Bar>
-              <Line
-                type="monotone"
-                dataKey="completed"
-                name="Tendencia"
-                stroke="#1565c0"
-                strokeDasharray="4 4"
-                dot={false}
-                legendType="none"
-              />
             </ComposedChart>
           </ResponsiveContainer>
         </Box>
@@ -494,7 +668,7 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
                 onClick={handleDrillDownDownload}
                 disabled={selectedAppointments.length === 0}
               >
-                Descargar CSV
+                Descargar Excel
               </Button>
               <Button
                 size="small"

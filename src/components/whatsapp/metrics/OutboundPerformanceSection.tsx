@@ -27,6 +27,7 @@ import {
   Typography,
   useTheme,
 } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import {
   Send as SendIcon,
   MarkEmailRead as ReadIcon,
@@ -43,7 +44,11 @@ import type { OutboundMetricsBucket, WhatsAppMetrics } from '@/types/whatsapp';
 import { getMetricAccent } from '@/utils/coloredChipStyles';
 import BroadcastJobsSection from './BroadcastJobsSection';
 import MetricsSection from './MetricsSection';
-import { downloadCsv } from './utils/exportMetricsCsv';
+import {
+  addStyledSheet,
+  downloadWorkbook,
+  excelGeneratedAtLine,
+} from './utils/exportMetricsExcel';
 
 export interface MessageLogRow {
   id: string;
@@ -157,19 +162,135 @@ const OutboundPerformanceSection: React.FC<OutboundPerformanceSectionProps> = ({
     return pages;
   };
 
+  const outboundColumns = [
+    { header: 'Enviados (sin fallos)', type: 'int' as const },
+    { header: 'Entregados', type: 'int' as const },
+    { header: 'Leídos', type: 'int' as const },
+    { header: 'Fallidos', type: 'int' as const },
+  ];
+
   const handleDownloadTables = () => {
-    const campaignRows = Object.entries(metrics?.byCampaign ?? {}).map(([name, data]) => [
-      name,
-      outboundOk(data),
-      data.delivered,
-      data.read,
-      data.failed,
-    ]);
-    downloadCsv(
-      'outbound-por-campana.csv',
-      ['campana', 'enviados_ok', 'entregados', 'leidos', 'fallidos'],
-      campaignRows,
-    );
+    const meta = [excelGeneratedAtLine(), `Periodo: últimos ${days} días`];
+    void downloadWorkbook('rendimiento-outbound.xlsx', (wb) => {
+      addStyledSheet(wb, {
+        name: 'Resumen KPIs',
+        title: 'Rendimiento outbound',
+        subtitle: 'Indicadores clave de los envíos de WhatsApp en el periodo.',
+        meta,
+        columns: [
+          { header: 'Métrica', type: 'text' },
+          { header: 'Valor', type: 'int' },
+        ],
+        rows: [
+          ['Enviados (sin fallos)', metrics?.totalSent ?? 0],
+          ['En el dispositivo (entregados + leídos)', metrics?.reachedDevice ?? 0],
+          ['Leídos', metrics?.totalRead ?? 0],
+          ['Fallidos', metrics?.totalFailed ?? 0],
+          ['Respuestas', metrics?.totalResponses ?? 0],
+          ['Opt-out', metrics?.optOutCount ?? 0],
+          ['Tasa de respuesta (%)', Math.min(100, metrics?.responseRate ?? 0)],
+        ],
+      });
+
+      if (metrics && Object.keys(metrics.byCampaign).length > 0) {
+        addStyledSheet(wb, {
+          name: 'Por campaña',
+          title: 'Envíos por campaña',
+          meta,
+          columns: [{ header: 'Campaña', type: 'text', width: 32 }, ...outboundColumns],
+          rows: Object.entries(metrics.byCampaign).map(([name, data]) => [
+            name,
+            outboundOk(data),
+            data.delivered,
+            data.read,
+            data.failed,
+          ]),
+        });
+      }
+
+      if (metrics?.byKind) {
+        addStyledSheet(wb, {
+          name: 'Por tipo',
+          title: 'Envíos por tipo de mensaje',
+          meta,
+          columns: [{ header: 'Tipo', type: 'text', width: 24 }, ...outboundColumns],
+          rows: [
+            ['Sesión 24h', metrics.byKind.session],
+            ['Plantilla / campaña', metrics.byKind.template],
+          ].map(([label, data]) => [
+            label as string,
+            (data as OutboundMetricsBucket).outboundOk,
+            (data as OutboundMetricsBucket).delivered,
+            (data as OutboundMetricsBucket).read,
+            (data as OutboundMetricsBucket).failed,
+          ]),
+        });
+      }
+
+      if (metrics?.byTemplate && Object.keys(metrics.byTemplate).length > 0) {
+        addStyledSheet(wb, {
+          name: 'Por plantilla',
+          title: 'Envíos por plantilla (Meta)',
+          meta,
+          columns: [{ header: 'Plantilla', type: 'text', width: 32 }, ...outboundColumns],
+          rows: Object.entries(metrics.byTemplate).map(([name, data]) => [
+            name,
+            data.outboundOk,
+            data.delivered,
+            data.read,
+            data.failed,
+          ]),
+        });
+      }
+
+      if (metrics) {
+        addStyledSheet(wb, {
+          name: 'Embudo directorio',
+          title: 'Embudo directorio (secuencias / pendientes)',
+          meta,
+          columns: [
+            { header: 'Etapa', type: 'text' },
+            { header: 'Contactos', type: 'int' },
+          ],
+          rows: [
+            ['Total', metrics.leads.total],
+            ['En seguimiento', metrics.leads.enSeguimiento],
+            ['En rebooking', metrics.leads.enRebooking],
+            ['Con cita pendiente', metrics.leads.agendados],
+            ['Opt-out', metrics.leads.optOut],
+          ],
+        });
+      }
+    });
+  };
+
+  const handleDownloadLogs = () => {
+    void downloadWorkbook('registro-mensajes.xlsx', (wb) => {
+      addStyledSheet(wb, {
+        name: 'Mensajes',
+        title: 'Registro de mensajes',
+        subtitle: `${filteredLogs.length.toLocaleString('es-CO')} registro(s) según el filtro actual.`,
+        meta: [excelGeneratedAtLine(), `Periodo: últimos ${days} días`],
+        columns: [
+          { header: 'Fecha', type: 'datetime' },
+          { header: 'Destinatario', type: 'text' },
+          { header: 'Plantilla', type: 'text', width: 24 },
+          { header: 'Estado', type: 'text' },
+          { header: 'Dirección', type: 'text' },
+          { header: 'Campaña', type: 'text' },
+          { header: 'Error', type: 'text', width: 36 },
+        ],
+        rows: filteredLogs.map((log) => [
+          log.createdAt,
+          log.recipientPhone || log.recipientBsuid || '',
+          log.templateName || '',
+          log.status,
+          log.direction || '',
+          log.campaignType || '',
+          log.errorMessage || '',
+        ]),
+      });
+    });
   };
 
   return (
@@ -178,7 +299,7 @@ const OutboundPerformanceSection: React.FC<OutboundPerformanceSectionProps> = ({
         title="Rendimiento outbound"
         subtitle="Envíos WhatsApp, tasa de respuesta y desglose por campaña / plantilla."
         onDownload={handleDownloadTables}
-        downloadLabel="Descargar campañas CSV"
+        downloadLabel="Descargar rendimiento Excel"
         defaultExpanded
         detail={
           <Stack spacing={2}>
@@ -304,6 +425,12 @@ const OutboundPerformanceSection: React.FC<OutboundPerformanceSectionProps> = ({
                     border: '1px solid',
                     borderColor: 'divider',
                     borderRadius: 2,
+                    transition: 'box-shadow 0.2s, border-color 0.2s, transform 0.2s',
+                    '&:hover': {
+                      boxShadow: 3,
+                      borderColor: alpha(accent.color, 0.5),
+                      transform: 'translateY(-2px)',
+                    },
                   }}
                 >
                   <CardContent sx={{ textAlign: 'center', py: 2.5, px: 1.5 }}>
@@ -449,26 +576,8 @@ const OutboundPerformanceSection: React.FC<OutboundPerformanceSectionProps> = ({
                 Limpiar filtros
               </Button>
             )}
-            <Button
-              size="small"
-              variant="outlined"
-              onClick={() => {
-                downloadCsv(
-                  'registro-mensajes.csv',
-                  ['fecha', 'destinatario', 'plantilla', 'estado', 'direccion', 'campana', 'error'],
-                  filteredLogs.map((log) => [
-                    log.createdAt.toISOString(),
-                    log.recipientPhone || log.recipientBsuid || '',
-                    log.templateName || '',
-                    log.status,
-                    log.direction || '',
-                    log.campaignType || '',
-                    log.errorMessage || '',
-                  ]),
-                );
-              }}
-            >
-              CSV
+            <Button size="small" variant="outlined" onClick={handleDownloadLogs}>
+              Excel
             </Button>
           </Box>
 

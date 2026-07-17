@@ -13,6 +13,7 @@ import {
   Typography,
   useTheme,
 } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import {
   Bar,
   CartesianGrid,
@@ -28,7 +29,20 @@ import {
   labelInboundSeries,
   type MetricsGranularity,
 } from './utils/aggregateBuckets';
-import { downloadCsv } from './utils/exportMetricsCsv';
+import {
+  addStyledSheet,
+  downloadWorkbook,
+  excelGeneratedAtLine,
+} from './utils/exportMetricsExcel';
+import {
+  BarGradient,
+  ChartTooltipCard,
+  chartAxisTick,
+  chartColor,
+  chartGridStroke,
+  formatAxisInt,
+  type TooltipRowSpec,
+} from './utils/chartTheme';
 import MetricsSection from './MetricsSection';
 
 interface InboundActivitySectionProps {
@@ -39,12 +53,39 @@ interface InboundActivitySectionProps {
 type InboundViewMode = 'clients' | 'messages';
 
 const EXISTING_BLUE = '#1565c0';
-const NEW_BLUE = '#64b5f6';
+const NEW_BLUE = '#42a5f5';
 const MESSAGES_TEAL = '#00897b';
+
+const GRANULARITY_LABEL: Record<MetricsGranularity, string> = {
+  day: 'Día',
+  week: 'Semana',
+  month: 'Mes',
+};
 
 function formatInt(n: number): string {
   return n.toLocaleString('es-CO');
 }
+
+interface InboundTooltipProps {
+  active?: boolean;
+  label?: string;
+  payload?: Array<{ name: string; value: number; color: string }>;
+  mode: InboundViewMode;
+}
+
+const InboundTooltip: React.FC<InboundTooltipProps> = ({ active, label, payload, mode }) => {
+  if (!active || !payload || payload.length === 0) return null;
+  const rows: TooltipRowSpec[] = payload.map((p) => ({
+    label: p.name,
+    value: formatInt(p.value ?? 0),
+    color: p.color,
+  }));
+  if (mode === 'clients') {
+    const total = payload.reduce((sum, p) => sum + (p.value ?? 0), 0);
+    rows.push({ label: 'Total', value: formatInt(total) });
+  }
+  return <ChartTooltipCard title={String(label ?? '')} rows={rows} />;
+};
 
 const InboundActivitySection: React.FC<InboundActivitySectionProps> = ({
   series,
@@ -53,6 +94,10 @@ const InboundActivitySection: React.FC<InboundActivitySectionProps> = ({
   const theme = useTheme();
   const [granularity, setGranularity] = useState<MetricsGranularity>('day');
   const [viewMode, setViewMode] = useState<InboundViewMode>('clients');
+
+  const existingColor = chartColor(theme, EXISTING_BLUE);
+  const newColor = chartColor(theme, NEW_BLUE, 0.18);
+  const messagesColor = chartColor(theme, MESSAGES_TEAL);
 
   const data = useMemo(() => {
     if (!series) return [];
@@ -73,24 +118,67 @@ const InboundActivitySection: React.FC<InboundActivitySectionProps> = ({
   }, [data]);
 
   const handleDownload = () => {
+    const granLabel = GRANULARITY_LABEL[granularity];
     if (viewMode === 'messages') {
-      downloadCsv(
-        `mensajes-recibidos-${granularity}.csv`,
-        ['periodo', 'mensajes_total'],
-        data.map((row) => [row.bucket, row.messagesReceived]),
-      );
+      void downloadWorkbook(`mensajes-recibidos-${granularity}.xlsx`, (wb) => {
+        addStyledSheet(wb, {
+          name: 'Serie',
+          title: 'Mensajes recibidos',
+          subtitle: `Total de mensajes inbound agrupados por ${granLabel.toLowerCase()}.`,
+          meta: [excelGeneratedAtLine(), `Granularidad: ${granLabel}`],
+          columns: [
+            { header: 'Periodo', type: 'text' },
+            { header: 'Mensajes', type: 'int' },
+          ],
+          rows: data.map((row) => [row.label, row.messagesReceived]),
+        });
+        addStyledSheet(wb, {
+          name: 'Totales',
+          title: 'Totales del periodo',
+          meta: [excelGeneratedAtLine()],
+          columns: [
+            { header: 'Métrica', type: 'text' },
+            { header: 'Valor', type: 'int' },
+          ],
+          rows: [['Mensajes recibidos', totals.messagesReceived]],
+        });
+      });
       return;
     }
-    downloadCsv(
-      `clientes-recibidos-${granularity}.csv`,
-      ['periodo', 'clientes', 'nuevos', 'existentes'],
-      data.map((row) => [
-        row.bucket,
-        row.uniquePeople,
-        row.newPeople,
-        row.existingPeople,
-      ]),
-    );
+    void downloadWorkbook(`clientes-recibidos-${granularity}.xlsx`, (wb) => {
+      addStyledSheet(wb, {
+        name: 'Serie',
+        title: 'Clientes recibidos',
+        subtitle: `Personas únicas que escribieron por ${granLabel.toLowerCase()} (nuevos vs existentes).`,
+        meta: [excelGeneratedAtLine(), `Granularidad: ${granLabel}`],
+        columns: [
+          { header: 'Periodo', type: 'text' },
+          { header: 'Clientes', type: 'int' },
+          { header: 'Nuevos', type: 'int' },
+          { header: 'Existentes', type: 'int' },
+        ],
+        rows: data.map((row) => [
+          row.label,
+          row.uniquePeople,
+          row.newPeople,
+          row.existingPeople,
+        ]),
+      });
+      addStyledSheet(wb, {
+        name: 'Totales',
+        title: 'Totales del periodo',
+        meta: [excelGeneratedAtLine()],
+        columns: [
+          { header: 'Métrica', type: 'text' },
+          { header: 'Valor', type: 'int' },
+        ],
+        rows: [
+          ['Clientes únicos', totals.uniquePeople],
+          ['Nuevos', totals.newPeople],
+          ['Existentes', totals.existingPeople],
+        ],
+      });
+    });
   };
 
   const detailTable =
@@ -181,7 +269,7 @@ const InboundActivitySection: React.FC<InboundActivitySectionProps> = ({
       toolbarExtra={viewToggle}
       onDownload={handleDownload}
       downloadLabel={
-        viewMode === 'messages' ? 'Descargar mensajes CSV' : 'Descargar clientes CSV'
+        viewMode === 'messages' ? 'Descargar mensajes Excel' : 'Descargar clientes Excel'
       }
       defaultExpanded={false}
       detail={detailTable}
@@ -200,35 +288,64 @@ const InboundActivitySection: React.FC<InboundActivitySectionProps> = ({
         <>
           <Box sx={{ width: '100%', height: 320 }}>
             <ResponsiveContainer>
-              <ComposedChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={theme.palette.divider} />
-                <XAxis dataKey="label" tick={{ fontSize: 12 }} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                <Tooltip />
-                <Legend />
+              <ComposedChart data={data} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
+                <defs>
+                  <BarGradient id="inboundExisting" color={existingColor} />
+                  <BarGradient id="inboundNew" color={newColor} />
+                  <BarGradient id="inboundMessages" color={messagesColor} />
+                </defs>
+                <CartesianGrid
+                  vertical={false}
+                  stroke={chartGridStroke(theme)}
+                  strokeDasharray="3 3"
+                />
+                <XAxis
+                  dataKey="label"
+                  tick={chartAxisTick(theme)}
+                  tickLine={false}
+                  axisLine={{ stroke: chartGridStroke(theme) }}
+                />
+                <YAxis
+                  allowDecimals={false}
+                  width={44}
+                  tick={chartAxisTick(theme)}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={formatAxisInt}
+                />
+                <Tooltip
+                  content={<InboundTooltip mode={viewMode} />}
+                  cursor={{ fill: alpha(theme.palette.text.primary, 0.05) }}
+                />
+                <Legend iconType="circle" wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
                 {viewMode === 'clients' ? (
                   <>
                     <Bar
                       dataKey="existingPeople"
                       name="Existentes"
                       stackId="people"
-                      fill={EXISTING_BLUE}
-                      radius={[0, 0, 0, 0]}
+                      fill="url(#inboundExisting)"
+                      maxBarSize={48}
+                      animationDuration={700}
                     />
                     <Bar
                       dataKey="newPeople"
                       name="Nuevos"
                       stackId="people"
-                      fill={NEW_BLUE}
-                      radius={[4, 4, 0, 0]}
+                      fill="url(#inboundNew)"
+                      radius={[6, 6, 0, 0]}
+                      maxBarSize={48}
+                      animationDuration={700}
                     />
                   </>
                 ) : (
                   <Bar
                     dataKey="messagesReceived"
                     name="Mensajes"
-                    fill={MESSAGES_TEAL}
-                    radius={[4, 4, 0, 0]}
+                    fill="url(#inboundMessages)"
+                    radius={[6, 6, 0, 0]}
+                    maxBarSize={56}
+                    animationDuration={700}
                   />
                 )}
               </ComposedChart>
@@ -252,13 +369,13 @@ const InboundActivitySection: React.FC<InboundActivitySectionProps> = ({
               <>
                 <Typography variant="body2">
                   Existentes:{' '}
-                  <Box component="span" fontWeight={700} color={EXISTING_BLUE}>
+                  <Box component="span" fontWeight={700} color={existingColor}>
                     {formatInt(totals.existingPeople)}
                   </Box>
                 </Typography>
                 <Typography variant="body2">
                   Nuevos:{' '}
-                  <Box component="span" fontWeight={700} color={NEW_BLUE}>
+                  <Box component="span" fontWeight={700} color={newColor}>
                     {formatInt(totals.newPeople)}
                   </Box>
                 </Typography>
@@ -269,7 +386,7 @@ const InboundActivitySection: React.FC<InboundActivitySectionProps> = ({
             ) : (
               <Typography variant="body2">
                 Mensajes recibidos:{' '}
-                <Box component="span" fontWeight={700} color={MESSAGES_TEAL}>
+                <Box component="span" fontWeight={700} color={messagesColor}>
                   {formatInt(totals.messagesReceived)}
                 </Box>
               </Typography>

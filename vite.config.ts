@@ -36,7 +36,10 @@ export default defineConfig({
   server: {
     port: 3001,
     strictPort: true,
-    open: true,
+    // Evita fallos de WebSocket HMR en Windows (localhost → IPv6 ::1 vs 127.0.0.1)
+    host: '127.0.0.1',
+    open: 'http://localhost:3001/',
+    hmr: { protocol: 'ws', host: '127.0.0.1', port: 3001, clientPort: 3001 },
   },
   preview: {
     port: 3001,

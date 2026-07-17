@@ -26,6 +26,7 @@
     "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^2.0.0",
     "date-fns": "^4.3.0",
+    "exceljs": "^4.4.0",
     "firebase": "^11.10.0",
     "framer-motion": "^12.23.15",
     "lexical": "^0.44.0",

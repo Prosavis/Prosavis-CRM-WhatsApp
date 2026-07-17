@@ -28,6 +28,7 @@ import {
 import CampaignIcon from '@mui/icons-material/Campaign';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import CloseIcon from '@mui/icons-material/Close';
+import DownloadIcon from '@mui/icons-material/Download';
 import {
   listBroadcastJobs,
   listBroadcastRecipients,
@@ -35,6 +36,11 @@ import {
   type BroadcastRecipientDetail,
   type BroadcastRecipientStatus,
 } from '@/services/whatsappService';
+import {
+  addStyledSheet,
+  downloadWorkbook,
+  excelGeneratedAtLine,
+} from './utils/exportMetricsExcel';
 
 const RECIPIENT_STATUS_LABEL: Record<BroadcastRecipientStatus, string> = {
   pending: 'Pendiente',
@@ -154,6 +160,37 @@ const BroadcastJobsSection: React.FC<BroadcastJobsSectionProps> = ({
         ? job.richBodyPreview.slice(0, 80) + (job.richBodyPreview.length > 80 ? '…' : '')
         : '—';
 
+  const handleDownload = () => {
+    void downloadWorkbook('envios-masivos.xlsx', (wb) => {
+      addStyledSheet(wb, {
+        name: 'Envíos',
+        title: 'Envíos masivos (panel)',
+        subtitle: `${jobs.length.toLocaleString('es-CO')} envío(s) en los últimos ${days} días.`,
+        meta: [excelGeneratedAtLine(), `Periodo: últimos ${days} días`],
+        columns: [
+          { header: 'Fecha', type: 'datetime' },
+          { header: 'Estado', type: 'text' },
+          { header: 'Mensaje', type: 'text', width: 40 },
+          { header: 'Total', type: 'int' },
+          { header: 'Enviados', type: 'int' },
+          { header: 'Fallidos', type: 'int' },
+          { header: 'Omitidos', type: 'int' },
+          { header: 'Pendientes', type: 'int' },
+        ],
+        rows: jobs.map((job) => [
+          job.createdAt,
+          JOB_STATUS_LABEL[job.status] ?? job.status,
+          jobPreview(job),
+          job.totalRecipients,
+          job.sent,
+          job.failed,
+          job.skipped,
+          job.pending,
+        ]),
+      });
+    });
+  };
+
   const recipientTotalPages = Math.max(1, Math.ceil(recipientsTotal / RECIPIENTS_PAGE_SIZE));
 
   return (
@@ -172,6 +209,18 @@ const BroadcastJobsSection: React.FC<BroadcastJobsSectionProps> = ({
             <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
               Últimos {days} días · detalle por destinatario
             </Typography>
+            <Tooltip title="Descargar envíos Excel">
+              <span>
+                <IconButton
+                  size="small"
+                  onClick={handleDownload}
+                  disabled={loading || jobs.length === 0}
+                  aria-label="Descargar envíos Excel"
+                >
+                  <DownloadIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
           </Box>
 
           {error && !detailJob && (
