@@ -689,7 +689,7 @@ Deno.serve(async (req) => {
     }
 
     // Cliente real = agendó ≥1 vez (cita Firebase).
-    // Blacklist = cliente con tag Decline/🚫/Bloqueado O en whatsapp_blocklist.
+    // Blacklist = tag Decline/🚫/Bloqueado O en whatsapp_blocklist (incluye no-clientes).
     // Activo/inactivo = clientes NO blacklisted, según ventana 30 días.
     let clients = 0;
     let company = 0;
@@ -728,7 +728,7 @@ Deno.serve(async (req) => {
       if (isClient && isRecurring) recurring += 1;
       if (isActive) active += 1;
       if (isInactive) inactive += 1;
-      if (isClient && isBlacklisted) blacklist += 1;
+      if (isBlacklisted) blacklist += 1;
 
       return {
         id: e.id,

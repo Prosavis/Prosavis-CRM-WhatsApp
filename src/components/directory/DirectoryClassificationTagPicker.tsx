@@ -20,8 +20,15 @@ import type { WhatsAppTag } from '@/types/whatsapp';
 import { getClassificationLabel, tagNamesToIds } from '@/utils/classificationLabels';
 import { coloredChipSx } from '@/utils/coloredChipStyles';
 
+/** Forma mínima para editar tags (DirectoryEntry o fila de métricas). */
+export type ClassificationTagPickerEntry = {
+  id: string;
+  classification?: string | null;
+  tags?: string[];
+};
+
 export interface DirectoryClassificationTagPickerProps {
-  entry: DirectoryEntry;
+  entry: ClassificationTagPickerEntry;
   disabled?: boolean;
   /** Modo controlado: ids seleccionados */
   value?: string[];

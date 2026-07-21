@@ -4,7 +4,6 @@ import {
   Button,
   Card,
   CardContent,
-  Chip,
   CircularProgress,
   Grid,
   Stack,
@@ -29,7 +28,7 @@ import type {
   ClientSegmentsMetrics,
   DirectoryClientMetricRow,
 } from '@/types/whatsapp';
-import { getClassificationLabel } from './utils/clientClassification';
+import DirectoryClassificationTagPicker from '@/components/directory/DirectoryClassificationTagPicker';
 import {
   addStyledSheet,
   downloadWorkbook,
@@ -50,6 +49,8 @@ interface ClientSegmentsSectionProps {
   segments?: ClientSegmentsMetrics;
   clients?: DirectoryClientMetricRow[];
   loading: boolean;
+  /** Tras editar tags, refresca KPIs/segmentos. */
+  onReload?: () => void;
 }
 
 const CARDS: Array<{
@@ -142,7 +143,7 @@ function matchesSegment(client: DirectoryClientMetricRow, key: ClientSegmentKey)
     case 'inactive':
       return client.isClient && !client.isActive && !client.isBlacklisted;
     case 'blacklist':
-      return client.isClient && client.isBlacklisted;
+      return client.isBlacklisted;
     default: {
       const _exhaustive: never = key;
       return _exhaustive;
@@ -179,6 +180,7 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
   segments,
   clients = [],
   loading,
+  onReload,
 }) => {
   const [, setSearchParams] = useSearchParams();
   const [selected, setSelected] = React.useState<ClientSegmentKey | null>(null);
@@ -249,7 +251,6 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
     const clientRows = list.map((c) => [
       c.name ?? '',
       c.phone ?? '',
-      getClassificationLabel(c.classification),
       (c.tags ?? []).join(', '),
       c.isClient ? 'Sí' : 'No',
       clientEstado(c),
@@ -280,7 +281,6 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
         columns: [
           { header: 'Nombre', type: 'text' },
           { header: 'Teléfono', type: 'text' },
-          { header: 'Clasificación', type: 'text' },
           { header: 'Tags', type: 'text', width: 30 },
           { header: 'Es cliente', type: 'text' },
           { header: 'Estado', type: 'text' },
@@ -295,12 +295,12 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
   };
 
   const colSpan =
-    4 + (showAppointmentColumn ? 1 : 0) + (showReasonColumn ? 1 : 0);
+    3 + (showAppointmentColumn ? 1 : 0) + (showReasonColumn ? 1 : 0);
 
   return (
     <MetricsSection
       title="Clientes"
-      subtitle="Público de interés = directorio sin TEST. Cliente = agendó ≥1 vez (Firebase). Activo = última cita ≤ 30 días; inactivo = > 30 días. Lista negra = Decline/🚫/Bloqueado o bloqueado en inbox (no cuenta en activos/inactivos). Clic en un KPI para el detalle."
+      subtitle="Público de interés = directorio activo sin TEST/opt-out. Cliente = agendó ≥1 vez (Firebase, 24 meses). Activo = última cita ≤ 30 días; inactivo = > 30 días. Lista negra = Decline/🚫/Bloqueado o bloqueado en inbox — incluye no-clientes; no cuenta en activos/inactivos. Clic en un KPI para el detalle; edita tags en la columna Tags."
       expanded={detailOpen}
       onExpandedChange={setDetailOpen}
       onDownload={handleDownload}
@@ -338,7 +338,6 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
                   <TableRow>
                     <TableCell>Nombre</TableCell>
                     <TableCell>Teléfono</TableCell>
-                    <TableCell>Clasificación</TableCell>
                     {showAppointmentColumn && <TableCell>Última cita</TableCell>}
                     {showReasonColumn && <TableCell>Motivo</TableCell>}
                     <TableCell>Tags</TableCell>
@@ -352,13 +351,6 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
                         <TableCell>{client.name || '—'}</TableCell>
                         <TableCell sx={{ fontFamily: 'monospace', fontSize: 13 }}>
                           {client.phone || '—'}
-                        </TableCell>
-                        <TableCell>
-                          <Chip
-                            size="small"
-                            label={getClassificationLabel(client.classification)}
-                            variant="outlined"
-                          />
                         </TableCell>
                         {showAppointmentColumn && (
                           <TableCell>
@@ -382,12 +374,17 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
                             </Typography>
                           </TableCell>
                         )}
-                        <TableCell>
-                          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                            {(client.tags ?? []).slice(0, 4).map((tag) => (
-                              <Chip key={tag} size="small" label={tag} />
-                            ))}
-                          </Stack>
+                        <TableCell sx={{ minWidth: 180 }}>
+                          <DirectoryClassificationTagPicker
+                            entry={{
+                              id: client.id,
+                              classification: client.classification,
+                              tags: client.tags ?? [],
+                            }}
+                            compact
+                            autoSave
+                            onSaved={() => onReload?.()}
+                          />
                         </TableCell>
                       </TableRow>
                     );

@@ -272,6 +272,7 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
         segments={metrics?.clientSegments}
         clients={metrics?.directoryClients}
         loading={metricsLoading}
+        onReload={() => void loadMetrics()}
       />
 
       <InboundActivitySection
