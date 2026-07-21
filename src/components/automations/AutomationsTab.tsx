@@ -4,20 +4,24 @@ import { useReminderAutomationsDashboard } from '@/hooks/useReminderAutomationsD
 import ReminderSummaryHeader from './ReminderSummaryHeader';
 import ReminderRecipientPanel from './ReminderRecipientPanel';
 import ReminderHistoryPanel from './ReminderHistoryPanel';
+import ReactivationPanel from './ReactivationPanel';
 
 const AutomationsTab: React.FC = () => {
   const { data, isLoading, isFetching, error, refetch } = useReminderAutomationsDashboard();
   const [subTab, setSubTab] = useState(0);
+  const showReminderHeader = subTab === 0 || subTab === 1 || subTab === 2;
 
   return (
     <Box sx={{ px: { xs: 0.5, sm: 0 } }}>
-      <ReminderSummaryHeader
-        dashboard={data}
-        loading={isLoading || isFetching}
-        onRefresh={() => void refetch()}
-      />
+      {showReminderHeader && (
+        <ReminderSummaryHeader
+          dashboard={data}
+          loading={isLoading || isFetching}
+          onRefresh={() => void refetch()}
+        />
+      )}
 
-      {error && subTab !== 2 && (
+      {error && subTab !== 2 && subTab !== 3 && (
         <Alert
           severity="error"
           sx={{ mb: 2 }}
@@ -40,6 +44,7 @@ const AutomationsTab: React.FC = () => {
         <Tab label="Clientes" sx={{ textTransform: 'none', fontWeight: 600 }} />
         <Tab label="Cleaners" sx={{ textTransform: 'none', fontWeight: 600 }} />
         <Tab label="Historial" sx={{ textTransform: 'none', fontWeight: 600 }} />
+        <Tab label="Reactivaciones" sx={{ textTransform: 'none', fontWeight: 600 }} />
       </Tabs>
 
       {subTab === 0 && data && (
@@ -59,6 +64,7 @@ const AutomationsTab: React.FC = () => {
         />
       )}
       {subTab === 2 && <ReminderHistoryPanel />}
+      {subTab === 3 && <ReactivationPanel />}
     </Box>
   );
 };

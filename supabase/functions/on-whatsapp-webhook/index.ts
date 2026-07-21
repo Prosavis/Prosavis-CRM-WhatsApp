@@ -9,6 +9,8 @@ import {
   WhatsAppMediaError,
 } from '../_shared/whatsappMediaStorage.ts';
 import { UNARCHIVE_CONVERSATION_PATCH } from '../_shared/whatsappOutbound.ts';
+import { directoryPhoneKey } from '../_shared/directoryPhone.ts';
+import { REACTIVATION_SEQUENCE } from '../_shared/reactivationCadence.ts';
 
 const encoder = new TextEncoder();
 type JsonRecord = Record<string, unknown>;
@@ -433,7 +435,79 @@ async function processInboundMessage(params: {
     });
   }
 
+  // Actualiza directorio: last_response_at + opt-out por "PARAR".
+  await syncDirectoryOnInbound({
+    supabase: params.supabase,
+    senderPhone,
+    messageBody: content.messageBody,
+    createdAt,
+  });
+
   return 'inserted';
+}
+
+function isStopKeyword(text: string | null | undefined): boolean {
+  if (!text) return false;
+  const normalized = text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+  return (
+    normalized === 'parar' ||
+    normalized === 'stop' ||
+    normalized === 'cancelar' ||
+    normalized === 'baja' ||
+    normalized === 'unsubscribe'
+  );
+}
+
+async function syncDirectoryOnInbound(params: {
+  supabase: ReturnType<typeof getServiceClient>;
+  senderPhone: string;
+  messageBody: string | null;
+  createdAt: string;
+}): Promise<void> {
+  try {
+    const phoneKey = directoryPhoneKey(params.senderPhone);
+    const digits = params.senderPhone.replace(/\D/g, '');
+    let query = params.supabase
+      .from('crm_directory')
+      .select('id,active_sequence,opt_out')
+      .limit(1);
+
+    if (phoneKey) {
+      query = query.or(`phone_key.eq.${phoneKey},phone.eq.${params.senderPhone},phone.eq.${digits}`);
+    } else {
+      query = query.or(`phone.eq.${params.senderPhone},phone.eq.${digits}`);
+    }
+
+    const { data: entry, error } = await query.maybeSingle();
+    if (error || !entry) return;
+
+    const patch: Record<string, unknown> = {
+      last_response_at: params.createdAt,
+      last_response_text: params.messageBody?.slice(0, 500) ?? null,
+    };
+
+    if (isStopKeyword(params.messageBody)) {
+      patch.opt_out = true;
+      patch.status = 'opt_out';
+      if (entry.active_sequence === REACTIVATION_SEQUENCE) {
+        patch.active_sequence = 'NINGUNA';
+        patch.sequence_step = 0;
+      }
+      console.log('[on-whatsapp-webhook] opt-out por keyword PARAR/STOP', {
+        directoryId: entry.id,
+      });
+    }
+
+    await params.supabase.from('crm_directory').update(patch).eq('id', entry.id);
+  } catch (err) {
+    console.error('[on-whatsapp-webhook] syncDirectoryOnInbound failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 function getStatusErrorMessage(status: JsonRecord): string | null {

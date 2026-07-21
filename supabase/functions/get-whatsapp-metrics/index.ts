@@ -1,6 +1,5 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { requireCrmAdmin } from '../_shared/supabase.ts';
-import { directoryPhoneKey } from '../_shared/directoryPhone.ts';
 import {
   hasAgendadoTag,
   hasBlacklistTag,
@@ -9,6 +8,16 @@ import {
   isTestContact,
 } from '../_shared/clientClassification.ts';
 import { runFirestoreQuery } from '../_shared/firebaseAdminRest.ts';
+import {
+  ACTIVE_CLIENT_WINDOW_DAYS,
+  CLIENT_APPOINTMENT_LOOKBACK_MONTHS,
+  asTagArray,
+  buildClientAppointmentsQuery,
+  phoneLookupKey,
+  resolveLastAppointment as resolveLastAppointmentFromIndex,
+  scheduledDateToIso,
+  type LastAppointmentIndex,
+} from '../_shared/clientSegments.ts';
 
 interface MessageLogRow {
   direction: 'inbound' | 'outbound';
@@ -43,11 +52,6 @@ interface BlocklistRow {
   bsuid: string | null;
   reason: string | null;
 }
-
-/** Ventana (meses) para detectar clientes reales y su última cita. */
-const CLIENT_APPOINTMENT_LOOKBACK_MONTHS = 24;
-/** Días para considerar a un cliente "activo" (agendó recientemente). */
-const ACTIVE_CLIENT_WINDOW_DAYS = 30;
 
 interface OutboundBucket {
   sent: number;
@@ -180,27 +184,6 @@ function accumulate(bucket: OutboundBucket, status: string): void {
   }
 }
 
-function phoneLookupKey(value: string | null | undefined): string | null {
-  if (!value) return null;
-  return directoryPhoneKey(value) ?? (value.replace(/\D/g, '').slice(-10) || null);
-}
-
-function asTagArray(tags: unknown): string[] {
-  if (!tags) return [];
-  if (Array.isArray(tags)) return tags.filter((t): t is string => typeof t === 'string');
-  if (typeof tags === 'string') return tags.split(',').map((t) => t.trim()).filter(Boolean);
-  return [];
-}
-
-function scheduledDateToIso(value: unknown): string | null {
-  if (!value) return null;
-  if (typeof value === 'string') {
-    const d = new Date(value);
-    return Number.isNaN(d.getTime()) ? null : d.toISOString();
-  }
-  return null;
-}
-
 function asTrimmedString(value: unknown): string | null {
   if (typeof value === 'string') {
     const trimmed = value.trim();
@@ -317,44 +300,6 @@ function buildCompletedAppointmentsQuery(
     });
   }
 
-  return {
-    where: {
-      compositeFilter: { op: 'AND', filters },
-    },
-  };
-}
-
-/**
- * Citas (cualquier estado) desde `startIso` para determinar clientes reales
- * (agendaron al menos una vez) y su última fecha agendada (activo/inactivo).
- */
-function buildClientAppointmentsQuery(
-  startIso: string,
-  serviceId?: string,
-): Record<string, unknown> {
-  const filters: Record<string, unknown>[] = [
-    {
-      fieldFilter: {
-        field: { fieldPath: 'scheduledDate' },
-        op: 'GREATER_THAN_OR_EQUAL',
-        value: { timestampValue: startIso },
-      },
-    },
-  ];
-
-  if (serviceId) {
-    filters.unshift({
-      fieldFilter: {
-        field: { fieldPath: 'serviceId' },
-        op: 'EQUAL',
-        value: { stringValue: serviceId },
-      },
-    });
-  }
-
-  if (filters.length === 1) {
-    return { where: filters[0] };
-  }
   return {
     where: {
       compositeFilter: { op: 'AND', filters },
@@ -515,8 +460,11 @@ Deno.serve(async (req) => {
     // Clientes reales + última cita: citas (cualquier estado) en ventana amplia.
     // Se agrupan por teléfono normalizado y por app_user_id (uid Firebase).
     stage = 'query_client_appointments';
-    const lastApptByPhoneKey = new Map<string, string>();
-    const lastApptByAppUser = new Map<string, string>();
+    let lastAppointmentIndex: LastAppointmentIndex = {
+      byPhoneKey: new Map(),
+      byAppUser: new Map(),
+      appointmentCount: 0,
+    };
     let clientAppointmentRows = 0;
     try {
       const clientFrom = new Date(to);
@@ -541,9 +489,13 @@ Deno.serve(async (req) => {
           typeof doc.data.clientId === 'string' && doc.data.clientId.trim()
             ? doc.data.clientId.trim()
             : null;
-        trackMax(lastApptByPhoneKey, phoneKey, iso);
-        trackMax(lastApptByAppUser, appUser, iso);
+        trackMax(lastAppointmentIndex.byPhoneKey, phoneKey, iso);
+        trackMax(lastAppointmentIndex.byAppUser, appUser, iso);
       }
+      lastAppointmentIndex = {
+        ...lastAppointmentIndex,
+        appointmentCount: clientAppointmentRows,
+      };
     } catch (clientApptErr) {
       console.error('Firestore client appointments query failed', clientApptErr);
     }
@@ -551,24 +503,8 @@ Deno.serve(async (req) => {
       to.getTime() - ACTIVE_CLIENT_WINDOW_DAYS * 24 * 60 * 60 * 1000,
     ).toISOString();
 
-    /** Última cita del contacto (por phone_key/phone o app_user_id) o null. */
     function resolveLastAppointment(entry: DirectoryRow): string | null {
-      const candidates: string[] = [];
-      const pkFromPhone = phoneLookupKey(entry.phone);
-      if (entry.phone_key) {
-        const iso = lastApptByPhoneKey.get(entry.phone_key);
-        if (iso) candidates.push(iso);
-      }
-      if (pkFromPhone) {
-        const iso = lastApptByPhoneKey.get(pkFromPhone);
-        if (iso) candidates.push(iso);
-      }
-      if (entry.app_user_id) {
-        const iso = lastApptByAppUser.get(entry.app_user_id);
-        if (iso) candidates.push(iso);
-      }
-      if (candidates.length === 0) return null;
-      return candidates.reduce((max, cur) => (cur > max ? cur : max));
+      return resolveLastAppointmentFromIndex(entry, lastAppointmentIndex);
     }
 
     stage = 'aggregate_outbound';

@@ -191,5 +191,12 @@ verify_jwt = false
 [functions.reminder-automations-monitor]
 verify_jwt = false
 
+# Worker de reactivaciones (x-api-key desde Firebase scheduler).
+[functions.run-whatsapp-reactivations]
+verify_jwt = false
+
+[functions.reactivation-automations-monitor]
+verify_jwt = false
+
 [functions.discount-codes-admin]
 verify_jwt = false

@@ -73,6 +73,7 @@ const TEMPLATE_SECTION_BY_NAME: Record<string, WhatsAppTemplatePanelSection> = {
   react_cliente_antigua_fecha: 'reactivation',
   react_cliente_hace_tiempo: 'reactivation',
   react_cliente_misma_profesional: 'reactivation',
+  react_reagendar_suave: 'reactivation',
 
   outreach_intro_prosavis: 'cold_outreach',
   outreach_invitacion_agendar: 'cold_outreach',

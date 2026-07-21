@@ -1,0 +1,66 @@
+/**
+ * Espejo ligero de la lógica de gaps del worker Deno
+ * (_shared/reactivationCadence.ts) para validar la cadencia sin Deno.
+ */
+
+import { describe, expect, it } from 'vitest';
+
+const STEPS = [
+  { step: 1, gapDaysFromPrevious: 0 },
+  { step: 2, gapDaysFromPrevious: 7 },
+  { step: 3, gapDaysFromPrevious: 7 },
+  { step: 4, gapDaysFromPrevious: 14 },
+  { step: 5, gapDaysFromPrevious: 28 },
+  { step: 6, gapDaysFromPrevious: 28 },
+];
+
+function nextStepNumber(currentStep: number): number | null {
+  if (currentStep < 1) return 1;
+  if (currentStep >= 6) return null;
+  return currentStep + 1;
+}
+
+function resolveDueStep(params: {
+  sequenceStep: number;
+  daysSinceLastContact: number | null;
+}): number | null {
+  const next = nextStepNumber(params.sequenceStep);
+  if (!next) return null;
+  const def = STEPS.find((s) => s.step === next);
+  if (!def) return null;
+  if (next === 1) return 1;
+  if (params.daysSinceLastContact == null) return next;
+  if (params.daysSinceLastContact >= def.gapDaysFromPrevious) return next;
+  return null;
+}
+
+describe('reactivation cadence gaps', () => {
+  it('enrolls with step 1 when not in sequence', () => {
+    expect(resolveDueStep({ sequenceStep: 0, daysSinceLastContact: null })).toBe(1);
+  });
+
+  it('waits 7 days between step 1 and 2', () => {
+    expect(resolveDueStep({ sequenceStep: 1, daysSinceLastContact: 6 })).toBeNull();
+    expect(resolveDueStep({ sequenceStep: 1, daysSinceLastContact: 7 })).toBe(2);
+  });
+
+  it('waits 14 days between step 3 and 4', () => {
+    expect(resolveDueStep({ sequenceStep: 3, daysSinceLastContact: 13 })).toBeNull();
+    expect(resolveDueStep({ sequenceStep: 3, daysSinceLastContact: 14 })).toBe(4);
+  });
+
+  it('waits 28 days for monthly steps', () => {
+    expect(resolveDueStep({ sequenceStep: 4, daysSinceLastContact: 27 })).toBeNull();
+    expect(resolveDueStep({ sequenceStep: 4, daysSinceLastContact: 28 })).toBe(5);
+    expect(resolveDueStep({ sequenceStep: 5, daysSinceLastContact: 28 })).toBe(6);
+  });
+
+  it('stops after step 6', () => {
+    expect(resolveDueStep({ sequenceStep: 6, daysSinceLastContact: 100 })).toBeNull();
+  });
+
+  it('totals ~84 days of enrollment cadence', () => {
+    const total = STEPS.reduce((sum, s) => sum + s.gapDaysFromPrevious, 0);
+    expect(total).toBe(84);
+  });
+});
