@@ -1,4 +1,72 @@
-import type { WhatsAppAdminPresence } from '@/services/whatsappService';
+import type {
+  WhatsAppAdminPresence,
+  WhatsAppAdminPresenceActivity,
+} from '@/services/whatsappService';
+
+/** Payload published via Supabase Realtime Presence `track()`. */
+export interface WhatsAppPresenceTrackPayload {
+  uid: string;
+  displayName: string;
+  conversationId: string;
+  activity: 'viewing' | 'typing';
+  phoneNumberId: string;
+  updatedAt: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function parsePresenceMeta(raw: unknown): WhatsAppAdminPresence | null {
+  if (!isRecord(raw)) return null;
+  const uid = typeof raw.uid === 'string' ? raw.uid.trim() : '';
+  if (!uid) return null;
+
+  const conversationId =
+    typeof raw.conversationId === 'string' ? raw.conversationId.trim() : '';
+  const activityRaw = typeof raw.activity === 'string' ? raw.activity : 'none';
+  const activity: WhatsAppAdminPresenceActivity =
+    activityRaw === 'typing' || activityRaw === 'viewing' || activityRaw === 'none'
+      ? activityRaw
+      : 'none';
+
+  const updatedAt =
+    typeof raw.updatedAt === 'string' && raw.updatedAt
+      ? new Date(raw.updatedAt)
+      : undefined;
+
+  return {
+    uid,
+    phoneNumberId: typeof raw.phoneNumberId === 'string' ? raw.phoneNumberId : null,
+    conversationId: conversationId || null,
+    displayName: typeof raw.displayName === 'string' ? raw.displayName : null,
+    activity,
+    updatedAt: updatedAt && !Number.isNaN(updatedAt.getTime()) ? updatedAt : undefined,
+  };
+}
+
+/**
+ * Maps `channel.presenceState()` into the UI presence contract.
+ * Keeps the freshest meta per admin uid.
+ */
+export function presenceStateToEntries(
+  state: Record<string, unknown[] | undefined>,
+): WhatsAppAdminPresence[] {
+  const byUid = new Map<string, WhatsAppAdminPresence>();
+  for (const metas of Object.values(state)) {
+    if (!Array.isArray(metas)) continue;
+    for (const raw of metas) {
+      const entry = parsePresenceMeta(raw);
+      if (!entry) continue;
+      if (entry.activity === 'none' || !entry.conversationId) continue;
+      const prev = byUid.get(entry.uid);
+      if (!prev || (entry.updatedAt?.getTime() ?? 0) >= (prev.updatedAt?.getTime() ?? 0)) {
+        byUid.set(entry.uid, entry);
+      }
+    }
+  }
+  return Array.from(byUid.values());
+}
 
 /** Keep the freshest row per admin uid (defensive against legacy duplicates). */
 export function dedupePresencesByUid(entries: WhatsAppAdminPresence[]): WhatsAppAdminPresence[] {

@@ -2,11 +2,14 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '@/config/supabase';
 import type { Database } from '@/types/database';
 import type { WhatsAppMetrics } from '@/types/whatsapp';
+import {
+  presenceStateToEntries,
+  type WhatsAppPresenceTrackPayload,
+} from '@/utils/whatsappAdminPresence';
 
 type ConversationRow = Database['public']['Tables']['whatsapp_conversations']['Row'];
 type MessageRow = Database['public']['Tables']['whatsapp_message_log']['Row'];
 type TagRow = Database['public']['Tables']['whatsapp_chat_tags']['Row'];
-type PresenceRow = Database['public']['Tables']['whatsapp_admin_presence']['Row'];
 
 type Unsubscribe = () => void;
 
@@ -1721,9 +1724,8 @@ const EXT_TO_MIME: Record<string, string> = {
 
 // =============================================================================
 // PRESENCIA MULTI-ADMIN (inbox WhatsApp)
-// Cada pestaña admin escribe su propio doc en `whatsapp_admin_presence/{uid}`
-// y se suscribe al resto filtrando por `phoneNumberId`. El TTL se filtra
-// en cliente (entradas con updatedAt > PRESENCE_TTL_MS se ignoran).
+// Canal Realtime Presence por línea (`whatsapp-admin-presence:{phoneNumberId}`).
+// Estado efímero vía track/untrack — sin PostgREST ni heartbeat SQL.
 // =============================================================================
 
 export type WhatsAppAdminPresenceActivity = 'viewing' | 'typing' | 'none';
@@ -1737,64 +1739,125 @@ export interface WhatsAppAdminPresence {
   updatedAt?: Date;
 }
 
-/** Ventana en ms para considerar una presencia como "viva" (clientes con reloj desincronizado). */
-export const PRESENCE_TTL_MS = 45_000;
+type PresenceSession = {
+  channel: RealtimeChannel;
+  phoneNumberId: string;
+  uid: string;
+  lastPayload: WhatsAppPresenceTrackPayload | null;
+  subscribed: Promise<void>;
+};
 
-function mapPresenceRow(row: PresenceRow): WhatsAppAdminPresence {
-  const activity: WhatsAppAdminPresenceActivity = row.typing
-    ? 'typing'
-    : row.status === 'viewing'
-      ? 'viewing'
-      : row.status === 'typing'
-        ? 'typing'
-        : 'none';
-  return {
-    uid: row.admin_uid,
-    phoneNumberId: null,
-    conversationId: row.conversation_stable_key,
-    // admin_email column stores the CRM display_name shown to peers
-    displayName: row.admin_email,
-    activity,
-    updatedAt: toDate(row.last_seen_at),
-  };
+let presenceSession: PresenceSession | null = null;
+
+function emitPresenceState(
+  channel: RealtimeChannel,
+  onNext: (entries: WhatsAppAdminPresence[]) => void,
+): void {
+  onNext(presenceStateToEntries(channel.presenceState() as Record<string, unknown[] | undefined>));
 }
 
+async function awaitPresenceSession(uid: string): Promise<PresenceSession | null> {
+  const session = presenceSession;
+  if (!session || session.uid !== uid) return null;
+  try {
+    await session.subscribed;
+  } catch {
+    return null;
+  }
+  return presenceSession?.uid === uid ? presenceSession : null;
+}
+
+/**
+ * Suscribe al canal Presence de la línea. `uid` es la presence key (un estado por admin).
+ * Re-track automático al volver a visible si había payload local.
+ */
 export function subscribeToWhatsAppAdminPresence(
   phoneNumberId: string,
+  uid: string,
   onNext: (entries: WhatsAppAdminPresence[]) => void,
   onError?: (error: Error) => void,
 ): Unsubscribe {
-  let channel: RealtimeChannel | null = null;
-  const load = async () => {
+  if (presenceSession) {
+    const prev = presenceSession;
+    presenceSession = null;
+    void prev.channel.untrack().catch(() => undefined);
+    void supabase.removeChannel(prev.channel);
+  }
+
+  let resolveSubscribed!: () => void;
+  let rejectSubscribed!: (error: Error) => void;
+  const subscribed = new Promise<void>((resolve, reject) => {
+    resolveSubscribed = resolve;
+    rejectSubscribed = reject;
+  });
+  // Evita unhandled rejection si nadie await-ea al fallar el subscribe.
+  void subscribed.catch(() => undefined);
+
+  const channel = supabase.channel(`whatsapp-admin-presence:${phoneNumberId}`, {
+    config: { presence: { key: uid } },
+  });
+
+  const session: PresenceSession = {
+    channel,
+    phoneNumberId,
+    uid,
+    lastPayload: null,
+    subscribed,
+  };
+  presenceSession = session;
+
+  const publish = () => {
     try {
-      const { data, error } = await supabase.from('whatsapp_admin_presence').select('*');
-      if (error) throw error;
-      const now = Date.now();
-      const byUid = new Map<string, WhatsAppAdminPresence>();
-      for (const row of data ?? []) {
-        const entry = mapPresenceRow(row);
-        if (!entry.updatedAt || now - entry.updatedAt.getTime() >= PRESENCE_TTL_MS) continue;
-        const prev = byUid.get(entry.uid);
-        if (!prev || (entry.updatedAt?.getTime() ?? 0) >= (prev.updatedAt?.getTime() ?? 0)) {
-          byUid.set(entry.uid, entry);
-        }
-      }
-      onNext(Array.from(byUid.values()));
+      emitPresenceState(channel, onNext);
     } catch (error) {
       onError?.(error instanceof Error ? error : new Error(String(error)));
     }
   };
-  void load();
-  channel = supabase
-    .channel(`whatsapp-presence:${phoneNumberId}`)
-    .on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'whatsapp_admin_presence' },
-      () => void load(),
-    )
-    .subscribe();
+
+  channel
+    .on('presence', { event: 'sync' }, publish)
+    .on('presence', { event: 'join' }, publish)
+    .on('presence', { event: 'leave' }, publish)
+    .subscribe((status, err) => {
+      if (status === 'SUBSCRIBED') {
+        resolveSubscribed();
+        publish();
+        return;
+      }
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        const error = err instanceof Error ? err : new Error(`Presence channel ${status}`);
+        rejectSubscribed(error);
+        onError?.(error);
+      }
+    });
+
+  const onVisibility = () => {
+    if (typeof document === 'undefined') return;
+    if (document.visibilityState !== 'visible') return;
+    const current = presenceSession;
+    if (!current || current.channel !== channel || !current.lastPayload) return;
+    const refreshed: WhatsAppPresenceTrackPayload = {
+      ...current.lastPayload,
+      updatedAt: new Date().toISOString(),
+    };
+    current.lastPayload = refreshed;
+    void current.channel.track(refreshed).catch((trackErr) => {
+      onError?.(trackErr instanceof Error ? trackErr : new Error(String(trackErr)));
+    });
+  };
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', onVisibility);
+  }
+
   return () => {
-    if (channel) void supabase.removeChannel(channel);
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', onVisibility);
+    }
+    if (presenceSession?.channel === channel) {
+      presenceSession = null;
+    }
+    void channel.untrack().catch(() => undefined);
+    void supabase.removeChannel(channel);
   };
 }
 
@@ -1808,25 +1871,45 @@ export async function setMyWhatsAppPresence(
     return;
   }
 
-  const { error } = await supabase.from('whatsapp_admin_presence').upsert(
-    {
-      admin_uid: uid,
-      conversation_stable_key: conversationId,
-      admin_email: partial.displayName ?? null,
-      status: partial.activity === 'typing' ? 'typing' : partial.activity === 'viewing' ? 'viewing' : 'none',
-      typing: partial.activity === 'typing',
-      last_seen_at: new Date().toISOString(),
-    },
-    { onConflict: 'admin_uid' },
-  );
-  if (error) throw error;
+  const session = await awaitPresenceSession(uid);
+  if (!session) {
+    console.warn('[setMyWhatsAppPresence] no active presence session for uid');
+    return;
+  }
+
+  const phoneNumberId = (partial.phoneNumberId ?? session.phoneNumberId)?.trim();
+  if (!phoneNumberId) {
+    console.warn('[setMyWhatsAppPresence] missing phoneNumberId');
+    return;
+  }
+
+  const activity = partial.activity === 'typing' ? 'typing' : 'viewing';
+  const payload: WhatsAppPresenceTrackPayload = {
+    uid,
+    displayName: (partial.displayName ?? 'Administrador').trim() || 'Administrador',
+    conversationId,
+    activity,
+    phoneNumberId,
+    updatedAt: new Date().toISOString(),
+  };
+  session.lastPayload = payload;
+  const status = await session.channel.track(payload);
+  if (status !== 'ok') {
+    throw new Error(`Presence track failed: ${status}`);
+  }
 }
 
 export async function clearMyWhatsAppPresence(uid: string): Promise<void> {
+  const session = await awaitPresenceSession(uid);
+  if (!session) return;
+  session.lastPayload = null;
   try {
-    await supabase.from('whatsapp_admin_presence').delete().eq('admin_uid', uid);
+    const status = await session.channel.untrack();
+    if (status !== 'ok') {
+      console.warn('[clearMyWhatsAppPresence] untrack failed:', status);
+    }
   } catch (err) {
-    console.warn('[clearMyWhatsAppPresence] delete failed:', err);
+    console.warn('[clearMyWhatsAppPresence] untrack failed:', err);
   }
 }
 

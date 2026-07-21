@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { WhatsAppAdminPresence } from '@/services/whatsappService';
-import { dedupePresencesByUid, summarizePeerPresences } from '@/utils/whatsappAdminPresence';
+import {
+  dedupePresencesByUid,
+  presenceStateToEntries,
+  summarizePeerPresences,
+} from '@/utils/whatsappAdminPresence';
 
 function presence(
   partial: Partial<WhatsAppAdminPresence> & Pick<WhatsAppAdminPresence, 'uid' | 'activity'>,
@@ -56,6 +60,82 @@ describe('whatsappAdminPresence', () => {
     expect(summary).toEqual({
       text: 'Soporte Prosavis y Francy Olivera están escribiendo…',
       typing: true,
+    });
+  });
+
+  describe('presenceStateToEntries', () => {
+    it('maps presenceState metas and keeps the freshest meta per uid', () => {
+      const entries = presenceStateToEntries({
+        admin_a: [
+          {
+            uid: 'admin_a',
+            displayName: 'Marian',
+            conversationId: '573000000001',
+            activity: 'viewing',
+            phoneNumberId: 'line-1',
+            updatedAt: '2026-07-21T12:00:00.000Z',
+          },
+          {
+            uid: 'admin_a',
+            displayName: 'Marian',
+            conversationId: '573000000002',
+            activity: 'typing',
+            phoneNumberId: 'line-1',
+            updatedAt: '2026-07-21T12:01:00.000Z',
+          },
+        ],
+        admin_b: [
+          {
+            uid: 'admin_b',
+            displayName: 'Francy',
+            conversationId: '573000000003',
+            activity: 'viewing',
+            phoneNumberId: 'line-1',
+            updatedAt: '2026-07-21T12:00:30.000Z',
+          },
+        ],
+      });
+
+      expect(entries).toHaveLength(2);
+      const a = entries.find((e) => e.uid === 'admin_a');
+      const b = entries.find((e) => e.uid === 'admin_b');
+      expect(a).toMatchObject({
+        conversationId: '573000000002',
+        activity: 'typing',
+        displayName: 'Marian',
+        phoneNumberId: 'line-1',
+      });
+      expect(b).toMatchObject({
+        conversationId: '573000000003',
+        activity: 'viewing',
+        displayName: 'Francy',
+      });
+    });
+
+    it('skips none activity, missing conversationId, and invalid metas', () => {
+      const entries = presenceStateToEntries({
+        ghost: [{ uid: 'ghost', activity: 'none', conversationId: 'x' }],
+        empty: [{ uid: 'empty', activity: 'viewing', conversationId: '' }],
+        bad: [{ foo: 'bar' }],
+        ok: [
+          {
+            uid: 'ok',
+            displayName: 'Admin',
+            conversationId: '573000000099',
+            activity: 'viewing',
+            phoneNumberId: 'line-1',
+            updatedAt: '2026-07-21T12:00:00.000Z',
+          },
+        ],
+      });
+
+      expect(entries).toEqual([
+        expect.objectContaining({
+          uid: 'ok',
+          conversationId: '573000000099',
+          activity: 'viewing',
+        }),
+      ]);
     });
   });
 });

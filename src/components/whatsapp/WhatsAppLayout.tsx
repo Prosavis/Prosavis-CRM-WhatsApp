@@ -14,7 +14,6 @@ import {
   refetchConversations,
   subscribeToWhatsAppAdminPresence,
   clearMyWhatsAppPresence,
-  PRESENCE_TTL_MS,
   listWhatsAppTags,
   listWhatsAppSnippets,
   assignWhatsAppTags,
@@ -206,7 +205,6 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
 
   // Presencia entre admins (otras pestañas / otros usuarios viendo el inbox).
   const [presenceEntries, setPresenceEntries] = useState<WhatsAppAdminPresence[]>([]);
-  const [presenceTick, setPresenceTick] = useState(0);
 
   const myUid = user?.id ?? null;
   const myDisplayName = useMemo(
@@ -459,16 +457,12 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     }
     const unsub = subscribeToWhatsAppAdminPresence(
       phoneNumberId,
+      myUid,
       (entries) => setPresenceEntries(entries),
       (err) => console.error('Error en listener de presencia WhatsApp:', err),
     );
     return () => unsub();
   }, [phoneNumberId, myUid]);
-
-  useEffect(() => {
-    const id = window.setInterval(() => setPresenceTick((t) => t + 1), 10_000);
-    return () => window.clearInterval(id);
-  }, []);
 
   useEffect(() => {
     if (!myUid) return;
@@ -478,17 +472,13 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   }, [myUid]);
 
   const livePeerPresences = useMemo(() => {
-    const now = Date.now();
     const live = presenceEntries.filter((p) => {
       if (!p.uid || p.uid === myUid) return false;
-      if (!p.updatedAt) return false;
-      if (now - p.updatedAt.getTime() > PRESENCE_TTL_MS) return false;
       if (p.activity === 'none' || !p.conversationId) return false;
       return true;
     });
     return dedupePresencesByUid(live);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [presenceEntries, myUid, presenceTick]);
+  }, [presenceEntries, myUid]);
 
   const presenceByConversationId = useMemo(() => {
     const map: Record<string, WhatsAppAdminPresence[]> = {};

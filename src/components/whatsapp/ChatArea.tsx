@@ -335,10 +335,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // === Presencia: marcar "viendo" al entrar / cambiar de chat + heartbeat ===
-  // `currentActivityRef` mantiene la última actividad anunciada para que el heartbeat
-  // refresque el `updatedAt` con el mismo estado (típicamente 'viewing' salvo cuando
-  // el compositor está en modo 'typing').
+  // === Presencia: track/untrack en canal Realtime (sin heartbeat SQL) ===
   const currentActivityRef = useRef<'viewing' | 'typing'>('viewing');
 
   useEffect(() => {
@@ -351,18 +348,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       activity: 'viewing',
     });
 
-    const heartbeat = window.setInterval(() => {
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
-      void setMyWhatsAppPresence(myUid, {
-        phoneNumberId,
-        conversationId: conversation.id,
-        displayName: myDisplayName || 'Administrador',
-        activity: currentActivityRef.current,
-      });
-    }, 15_000);
-
     return () => {
-      window.clearInterval(heartbeat);
       if (myUid) void clearMyWhatsAppPresence(myUid);
     };
   }, [conversation.id, myUid, myDisplayName, phoneNumberId]);
