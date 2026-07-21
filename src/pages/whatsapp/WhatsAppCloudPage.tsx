@@ -4,7 +4,6 @@ import { useAdminTour } from '@/context/AdminTourContext';
 import { Box, CircularProgress, Alert, Button } from '@mui/material';
 import WhatsAppLayout from '@/components/whatsapp/WhatsAppLayout';
 import WhatsAppTopBar from '@/components/whatsapp/WhatsAppTopBar';
-import WhatsAppDirectoryContactsDialog from '@/components/whatsapp/WhatsAppDirectoryContactsDialog';
 import WhatsAppBulkSendDialog from '@/components/whatsapp/bulk/WhatsAppBulkSendDialog';
 import MetricsTab, {
   PURGE_WHATSAPP_LOG_CONFIRM_PHRASE,
@@ -13,7 +12,6 @@ import { WHATSAPP_CLOUD_PRODUCTION } from '@/constants/whatsappCloudAccounts';
 import useSoundEffects from '@/hooks/useSoundEffects';
 import { ensureWhatsAppConversationFromLead } from '@/services/whatsappService';
 import { directoryService } from '@/services/directoryService';
-import type { WhatsAppInboxMetrics } from '@/utils/whatsappInboxStats';
 import {
   WHATSAPP_FOCUS_CHAT_EVENT,
   dismissDesktopNotificationsOnboarding,
@@ -97,9 +95,7 @@ const WhatsAppCloudPage: React.FC = () => {
     return () => unregisterTabController('/whatsapp-cloud');
   }, [registerTabController, unregisterTabController, activeTab, setSearchParams]);
 
-  const [inboxTotalContacts, setInboxTotalContacts] = useState<number | null>(null);
   const [directoryTotalContacts, setDirectoryTotalContacts] = useState<number | null>(null);
-  const [directoryDialogOpen, setDirectoryDialogOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [showNotificationsOnboarding, setShowNotificationsOnboarding] = useState(
     () =>
@@ -185,10 +181,6 @@ const WhatsAppCloudPage: React.FC = () => {
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams, handleDismissNotificationsOnboarding]);
 
-  const handleInboxMetrics = useCallback((metrics: WhatsAppInboxMetrics) => {
-    setInboxTotalContacts(metrics.totalConversations);
-  }, []);
-
   const fetchDirectoryStats = useCallback(async () => {
     try {
       const stats = await directoryService.getStats();
@@ -207,9 +199,7 @@ const WhatsAppCloudPage: React.FC = () => {
       <WhatsAppTopBar
         activeTab={activeTab}
         onTabChange={handleMainTabChange}
-        inboxTotalContacts={inboxTotalContacts}
         directoryTotalContacts={directoryTotalContacts}
-        onOpenDirectory={() => setDirectoryDialogOpen(true)}
         onOpenBulk={() => setBulkOpen(true)}
       />
 
@@ -242,7 +232,6 @@ const WhatsAppCloudPage: React.FC = () => {
             focusConversation={focusConversation}
             onClearFocusConversation={handleClearFocusConversation}
             onClearFocusDeepLink={handleClearFocusDeepLink}
-            onInboxMetrics={handleInboxMetrics}
           />
         </Box>
 
@@ -345,11 +334,6 @@ const WhatsAppCloudPage: React.FC = () => {
         }}
       />
 
-      <WhatsAppDirectoryContactsDialog
-        open={directoryDialogOpen}
-        onClose={() => setDirectoryDialogOpen(false)}
-        onOpenInInbox={handleOpenLeadInInbox}
-      />
     </>
   );
 };

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   Box,
   Button,
@@ -31,34 +31,41 @@ import WhatsAppInternalContactsButton from './WhatsAppInternalContactsButton';
 export interface WhatsAppTopBarProps {
   activeTab: number;
   onTabChange: (_: React.SyntheticEvent, value: number) => void;
-  inboxTotalContacts: number | null;
   directoryTotalContacts: number | null;
-  onOpenDirectory: () => void;
   onOpenBulk: () => void;
 }
 
-const TAB_ITEMS = [
-  { icon: <InboxIcon fontSize="small" />, label: 'Inbox' },
-  { icon: <BarChartIcon fontSize="small" />, label: 'Métricas' },
-  { icon: <ContactPhoneIcon fontSize="small" />, label: 'Directorio' },
-  { icon: <ConfirmationNumberIcon fontSize="small" />, label: 'Descuentos' },
-  { icon: <SettingsIcon fontSize="small" />, label: 'Configuración' },
-  { icon: <MonitorHeartIcon fontSize="small" />, label: 'Monitoreo' },
-  { icon: <AutoAwesomeIcon fontSize="small" />, label: 'Automatizaciones' },
-] as const;
+function buildTabItems(directoryTotalContacts: number | null) {
+  const directoryLabel =
+    directoryTotalContacts != null
+      ? `Directorio (${directoryTotalContacts.toLocaleString('es-CO')})`
+      : 'Directorio';
+
+  return [
+    { icon: <InboxIcon fontSize="small" />, label: 'Inbox' },
+    { icon: <BarChartIcon fontSize="small" />, label: 'Métricas' },
+    { icon: <ContactPhoneIcon fontSize="small" />, label: directoryLabel },
+    { icon: <ConfirmationNumberIcon fontSize="small" />, label: 'Descuentos' },
+    { icon: <SettingsIcon fontSize="small" />, label: 'Configuración' },
+    { icon: <MonitorHeartIcon fontSize="small" />, label: 'Monitoreo' },
+    { icon: <AutoAwesomeIcon fontSize="small" />, label: 'Automatizaciones' },
+  ] as const;
+}
 
 const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
   activeTab,
   onTabChange,
-  inboxTotalContacts,
   directoryTotalContacts,
-  onOpenDirectory,
   onOpenBulk,
 }) => {
   const { mode } = useTheme();
   const { profile, signOut } = useAuth();
   const muiTheme = useMuiTheme();
   const compactTabs = useMediaQuery(muiTheme.breakpoints.down('sm'));
+  const tabItems = useMemo(
+    () => buildTabItems(directoryTotalContacts),
+    [directoryTotalContacts],
+  );
 
   return (
     <Box
@@ -112,9 +119,9 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
           },
         }}
       >
-        {TAB_ITEMS.map(({ icon, label }) => (
+        {tabItems.map(({ icon, label }) => (
           <Tab
-            key={label}
+            key={label.startsWith('Directorio') ? 'Directorio' : label}
             icon={icon}
             iconPosition="start"
             label={compactTabs ? undefined : label}
@@ -144,23 +151,6 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
         }}
       >
         <WhatsAppInternalContactsButton />
-
-        <Tooltip title="Abrir directorio de contactos CRM">
-          <Chip
-            size="small"
-            color="primary"
-            icon={<ContactPhoneIcon />}
-            label={`${(directoryTotalContacts ?? inboxTotalContacts ?? 0).toLocaleString('es-CO')} contactos`}
-            onClick={onOpenDirectory}
-            sx={{
-              fontWeight: 600,
-              display: { xs: 'none', sm: 'inline-flex' },
-              cursor: 'pointer',
-              '&:hover': { bgcolor: 'primary.light', color: 'primary.contrastText' },
-            }}
-            variant="outlined"
-          />
-        </Tooltip>
 
         <Tooltip title="Envío masivo WhatsApp">
           <Button

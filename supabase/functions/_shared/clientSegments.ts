@@ -273,7 +273,7 @@ export async function loadClientProfileIndex(params: {
 }
 
 export function resolveLastAppointment(
-  entry: Pick<DirectorySegmentRow, 'phone' | 'phone_key' | 'app_user_id'>,
+  entry: Pick<DirectorySegmentRow, 'id' | 'phone' | 'phone_key' | 'app_user_id'>,
   index: LastAppointmentIndex,
 ): string | null {
   const candidates: string[] = [];
@@ -288,6 +288,12 @@ export function resolveLastAppointment(
   }
   if (entry.app_user_id) {
     const iso = index.byAppUser.get(entry.app_user_id);
+    if (iso) candidates.push(iso);
+  }
+  // Citas creadas desde CRM/UserConsole suelen guardar clientId = crm_directory.id
+  // aunque app_user_id del directorio esté vacío (p. ej. MFL eje cafetero).
+  if (entry.id && entry.id !== entry.app_user_id) {
+    const iso = index.byAppUser.get(entry.id);
     if (iso) candidates.push(iso);
   }
   if (candidates.length === 0) return null;

@@ -51,6 +51,7 @@ import DirectoryEditDialog from '@/components/directory/DirectoryEditDialog';
 import DirectoryMonitorPanel from '@/components/directory/DirectoryMonitorPanel';
 import type { DirectoryEntry, DirectorySource } from '@/types/lead';
 import DirectoryClassificationTagPicker from '@/components/directory/DirectoryClassificationTagPicker';
+import { ContactAvatar } from '@/components/common/ContactAvatar';
 
 const STATUS_CHIP_COLORS: Record<string, 'default' | 'success' | 'error' | 'warning'> = {
   active: 'success',
@@ -575,13 +576,19 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
                       Mensajes
                     </TableSortLabel>
                   </TableCell>
+                  <TableCell>Tags</TableCell>
                   <TableCell>Último contacto</TableCell>
+                  {onOpenInInbox && (
+                    <TableCell align="center" sx={{ minWidth: 64 }}>
+                      Acciones
+                    </TableCell>
+                  )}
                 </TableRow>
               </TableHead>
               <TableBody>
                 {entries.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={11} align="center">
+                    <TableCell colSpan={onOpenInInbox ? 13 : 12} align="center">
                       <Stack alignItems="center" spacing={1} py={4}>
                         <PeopleIcon sx={{ fontSize: 48, color: 'text.disabled' }} />
                         <Typography color="text.secondary">
@@ -611,28 +618,12 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
                       </TableCell>
                       <TableCell>
                         <Stack direction="row" spacing={1} alignItems="center">
-                          <Box
-                            sx={{
-                              width: 32,
-                              height: 32,
-                              borderRadius: '50%',
-                              bgcolor: 'primary.light',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              color: 'white',
-                              fontSize: '0.75rem',
-                              fontWeight: 700,
-                              flexShrink: 0,
-                              overflow: 'hidden',
-                            }}
-                          >
-                            {entry.photoUrl ? (
-                              <Box component="img" src={entry.photoUrl} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                            ) : (
-                              (entry.fullName?.charAt(0) || '?').toUpperCase()
-                            )}
-                          </Box>
+                          <ContactAvatar
+                            displayName={entry.fullName}
+                            phone={entry.phone}
+                            photoUrl={entry.photoUrl}
+                            size={32}
+                          />
                           <Typography variant="body2" fontWeight={500}>
                             {entry.fullName || '—'}
                           </Typography>
@@ -700,6 +691,24 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
                       </TableCell>
                       <TableCell>{entry.messagesCount}</TableCell>
                       <TableCell>
+                        {entry.tags && entry.tags.length > 0 ? (
+                          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                            {entry.tags.slice(0, 3).map((tag) => (
+                              <Chip key={tag} label={tag} size="small" variant="outlined" sx={{ height: 22 }} />
+                            ))}
+                            {entry.tags.length > 3 && (
+                              <Typography variant="caption" color="text.secondary" sx={{ lineHeight: '22px' }}>
+                                +{entry.tags.length - 3}
+                              </Typography>
+                            )}
+                          </Stack>
+                        ) : (
+                          <Typography variant="caption" color="text.disabled">
+                            —
+                          </Typography>
+                        )}
+                      </TableCell>
+                      <TableCell>
                         {entry.lastContactAt
                           ? new Date(entry.lastContactAt).toLocaleDateString('es-CO', {
                               day: '2-digit',
@@ -707,6 +716,37 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
                             })
                           : '—'}
                       </TableCell>
+                      {onOpenInInbox && (
+                        <TableCell align="center" onClick={(e) => e.stopPropagation()}>
+                          <Tooltip
+                            title={
+                              !entry.phone
+                                ? 'Sin teléfono'
+                                : entry.status === 'opt_out'
+                                  ? 'Contacto con opt-out'
+                                  : 'Abrir en Inbox'
+                            }
+                          >
+                            <span>
+                              <IconButton
+                                size="small"
+                                color="success"
+                                disabled={!entry.phone || entry.status === 'opt_out'}
+                                aria-label={`Abrir en inbox: ${entry.fullName || entry.phone || 'contacto'}`}
+                                onClick={() => {
+                                  if (!entry.phone || entry.status === 'opt_out') return;
+                                  onOpenInInbox(
+                                    entry.phone,
+                                    entry.fullName || entry.displayName || undefined,
+                                  );
+                                }}
+                              >
+                                <WhatsAppIcon fontSize="small" />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))
                 )}
