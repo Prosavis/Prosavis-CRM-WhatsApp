@@ -1,4 +1,4 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import {
   Box,
   Button,
@@ -12,6 +12,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   Typography,
 } from '@mui/material';
@@ -29,6 +30,7 @@ import type {
   DirectoryClientMetricRow,
 } from '@/types/whatsapp';
 import DirectoryClassificationTagPicker from '@/components/directory/DirectoryClassificationTagPicker';
+import BlacklistClientDetailDialog from './BlacklistClientDetailDialog';
 import {
   addStyledSheet,
   downloadWorkbook,
@@ -176,6 +178,8 @@ function clientEstado(c: DirectoryClientMetricRow): string {
   return 'sin citas';
 }
 
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
+
 const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
   segments,
   clients = [],
@@ -185,6 +189,9 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
   const [, setSearchParams] = useSearchParams();
   const [selected, setSelected] = React.useState<ClientSegmentKey | null>(null);
   const [detailOpen, setDetailOpen] = React.useState(false);
+  const [detailRow, setDetailRow] = React.useState<DirectoryClientMetricRow | null>(null);
+  const [page, setPage] = React.useState(0);
+  const [rowsPerPage, setRowsPerPage] = React.useState(50);
   const drillRef = useRef<HTMLDivElement>(null);
 
   const goToReactivations = () => {
@@ -210,6 +217,22 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
     return rows;
   }, [clients, selected]);
 
+  useEffect(() => {
+    setPage(0);
+  }, [selected, rowsPerPage, clients]);
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / rowsPerPage) || 1);
+  const safePage = Math.min(page, pageCount - 1);
+  const pageStart = filtered.length === 0 ? 0 : safePage * rowsPerPage;
+  const pageEnd = Math.min(pageStart + rowsPerPage, filtered.length);
+  const pageRows = filtered.slice(pageStart, pageEnd);
+
+  /** KPI del segmento vs filas recibidas del API (deben coincidir si el payload está completo). */
+  const segmentKpiTotal =
+    selected && segments ? (CARDS.find((c) => c.key === selected)?.pick(segments) ?? 0) : 0;
+  const loadedForSegment = filtered.length;
+  const payloadComplete = segmentKpiTotal === 0 || loadedForSegment >= segmentKpiTotal;
+
   const showAppointmentColumn =
     selected === 'clients' ||
     selected === 'active' ||
@@ -226,6 +249,7 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
       setDetailOpen(next !== null);
       return next;
     });
+    setPage(0);
     requestAnimationFrame(() => {
       drillRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
@@ -311,14 +335,32 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
             <Stack
               direction={{ xs: 'column', sm: 'row' }}
               spacing={1}
-              alignItems={{ sm: 'center' }}
+              alignItems={{ sm: 'flex-start' }}
               justifyContent="space-between"
               sx={{ mb: 1.5 }}
             >
-              <Typography variant="body2" color="text.secondary">
-                {filtered.length} contacto(s) · segmento «
-                {CARDS.find((c) => c.key === selected)?.label}»
-              </Typography>
+              <Box>
+                <Typography variant="body2" fontWeight={600}>
+                  Segmento «{CARDS.find((c) => c.key === selected)?.label}»
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Total en segmento (KPI): {segmentKpiTotal.toLocaleString('es-CO')} · Cargados del
+                  servidor: {loadedForSegment.toLocaleString('es-CO')}
+                  {payloadComplete ? ' (completo)' : ' (incompleto)'} · Mostrando{' '}
+                  {filtered.length === 0
+                    ? '0'
+                    : `${(pageStart + 1).toLocaleString('es-CO')}–${pageEnd.toLocaleString('es-CO')}`}{' '}
+                  de {loadedForSegment.toLocaleString('es-CO')} · Página{' '}
+                  {filtered.length === 0 ? 0 : safePage + 1} de {filtered.length === 0 ? 0 : pageCount}
+                </Typography>
+                {selected === 'potential' && (
+                  <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                    Público de interés = audiencia del directorio (sin TEST / opt-out / inactivos de
+                    status). No se montan las 2000+ filas a la vez: se paginan en el cliente; el Excel
+                    exporta el segmento completo.
+                  </Typography>
+                )}
+              </Box>
               {selected === 'inactive' && (
                 <Button
                   size="small"
@@ -344,10 +386,16 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {filtered.slice(0, 200).map((client) => {
+                  {pageRows.map((client) => {
                     const days = daysSince(client.lastAppointmentDate);
+                    const rowClickable = selected === 'blacklist';
                     return (
-                      <TableRow key={client.id} hover>
+                      <TableRow
+                        key={client.id}
+                        hover
+                        onClick={rowClickable ? () => setDetailRow(client) : undefined}
+                        sx={rowClickable ? { cursor: 'pointer' } : undefined}
+                      >
                         <TableCell>{client.name || '—'}</TableCell>
                         <TableCell sx={{ fontFamily: 'monospace', fontSize: 13 }}>
                           {client.phone || '—'}
@@ -374,7 +422,10 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
                             </Typography>
                           </TableCell>
                         )}
-                        <TableCell sx={{ minWidth: 180 }}>
+                        <TableCell
+                          sx={{ minWidth: 180 }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           <DirectoryClassificationTagPicker
                             entry={{
                               id: client.id,
@@ -399,6 +450,30 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
                 </TableBody>
               </Table>
             </TableContainer>
+            <TablePagination
+              component="div"
+              count={filtered.length}
+              page={filtered.length === 0 ? 0 : safePage}
+              onPageChange={(_, nextPage) => setPage(nextPage)}
+              rowsPerPage={rowsPerPage}
+              onRowsPerPageChange={(e) => {
+                setRowsPerPage(Number.parseInt(e.target.value, 10));
+                setPage(0);
+              }}
+              rowsPerPageOptions={[...PAGE_SIZE_OPTIONS]}
+              labelRowsPerPage="Filas por página"
+              labelDisplayedRows={({ from, to, count }) =>
+                `${from.toLocaleString('es-CO')}–${to.toLocaleString('es-CO')} de ${
+                  count === -1 ? '…' : count.toLocaleString('es-CO')
+                }`
+              }
+              sx={{ borderTop: 1, borderColor: 'divider', mt: 0.5 }}
+            />
+            {selected === 'blacklist' && (
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                Clic en una fila para ver la tarjeta y editar el motivo de lista negra.
+              </Typography>
+            )}
           </Box>
         ) : (
           <Typography variant="body2" color="text.secondary">
@@ -481,6 +556,12 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
           );
         })}
       </Grid>
+      <BlacklistClientDetailDialog
+        open={!!detailRow}
+        row={detailRow}
+        onClose={() => setDetailRow(null)}
+        onSaved={() => onReload?.()}
+      />
     </MetricsSection>
   );
 };

@@ -143,7 +143,11 @@ export interface DirectoryClientMetricRow {
   isActive: boolean;
   /** En lista negra (tag Decline/🚫/Bloqueado o whatsapp_blocklist). */
   isBlacklisted: boolean;
-  /** Motivo de lista negra (reason blocklist o internal_notes). */
+  /**
+   * Motivo humano de lista negra (clientes).
+   * Prioridad: crm_directory.internal_notes → whatsapp_blocklist.reason
+   * (excluye tokens técnicos directory_tag / tag_blacklist / inbox).
+   */
   blacklistReason: string | null;
   /** Fecha ISO de la última cita agendada, o null si nunca agendó. */
   lastAppointmentDate: string | null;

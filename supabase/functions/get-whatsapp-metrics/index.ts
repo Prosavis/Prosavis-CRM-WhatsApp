@@ -688,9 +688,30 @@ Deno.serve(async (req) => {
       return null;
     }
 
+    /** Marcadores técnicos en whatsapp_blocklist.reason (no son motivo humano). */
+    const TECHNICAL_BLOCKLIST_REASONS = new Set([
+      'directory_tag',
+      'tag_blacklist',
+      'inbox',
+    ]);
+
+    function humanBlacklistReason(entry: DirectoryRow): string | null {
+      const notes =
+        typeof entry.internal_notes === 'string' ? entry.internal_notes.trim() : '';
+      if (notes) return notes;
+
+      const fromBlocklist = resolveBlocklistReason(entry)?.trim() || null;
+      if (fromBlocklist && !TECHNICAL_BLOCKLIST_REASONS.has(fromBlocklist.toLowerCase())) {
+        return fromBlocklist;
+      }
+      return null;
+    }
+
     // Cliente real = agendó ≥1 vez (cita Firebase).
     // Blacklist = tag Decline/🚫/Bloqueado O en whatsapp_blocklist (incluye no-clientes).
     // Activo/inactivo = clientes NO blacklisted, según ventana 30 días.
+    // Motivo humano: crm_directory.internal_notes (prioridad); whatsapp_blocklist.reason
+    // solo si no es token técnico (directory_tag / tag_blacklist / inbox).
     let clients = 0;
     let company = 0;
     let recurring = 0;
@@ -714,14 +735,7 @@ Deno.serve(async (req) => {
         isClient && !isBlacklisted && lastAppointmentDate! >= activeThreshold;
       const isInactive = isClient && !isBlacklisted && !isActive;
 
-      const blacklistReason = isBlacklisted
-        ? resolveBlocklistReason(e) ||
-          (typeof e.internal_notes === 'string' && e.internal_notes.trim()
-            ? e.internal_notes.trim()
-            : taggedBlacklist
-              ? 'tag_blacklist'
-              : null)
-        : null;
+      const blacklistReason = isBlacklisted ? humanBlacklistReason(e) : null;
 
       if (isClient) clients += 1;
       if (isClient && isCompany) company += 1;
