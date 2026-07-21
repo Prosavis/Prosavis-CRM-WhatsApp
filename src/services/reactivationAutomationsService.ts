@@ -108,12 +108,14 @@ export async function runReactivationDryRun(limit = 20): Promise<{
   stats?: Record<string, number>;
   dueCount?: number;
   events?: unknown[];
+  runId?: string | null;
 }> {
   const { data, error } = await supabase.functions.invoke<{
     success?: boolean;
     stats?: Record<string, number>;
     dueCount?: number;
     events?: unknown[];
+    runId?: string | null;
     error?: string;
   }>('reactivation-automations-monitor', {
     body: { action: 'runDry', limit },
@@ -127,5 +129,39 @@ export async function runReactivationDryRun(limit = 20): Promise<{
     stats: data.stats,
     dueCount: data.dueCount,
     events: data.events,
+    runId: data.runId,
+  };
+}
+
+export async function runReactivationReal(limit?: number): Promise<{
+  success: boolean;
+  stats?: Record<string, number>;
+  dueCount?: number;
+  events?: unknown[];
+  runId?: string | null;
+}> {
+  const { data, error } = await supabase.functions.invoke<{
+    success?: boolean;
+    stats?: Record<string, number>;
+    dueCount?: number;
+    events?: unknown[];
+    runId?: string | null;
+    error?: string;
+  }>('reactivation-automations-monitor', {
+    body: {
+      action: 'runReal',
+      ...(limit != null ? { limit } : {}),
+    },
+  });
+
+  if (error) throw new Error(await parseInvokeError(error));
+  if (!data) throw new Error('Respuesta vacía del envío real');
+  if (data.error) throw new Error(data.error);
+  return {
+    success: Boolean(data.success),
+    stats: data.stats,
+    dueCount: data.dueCount,
+    events: data.events,
+    runId: data.runId,
   };
 }

@@ -2,7 +2,7 @@
  * reactivation-automations-monitor
  *
  * Panel de automatizaciones de reactivación WhatsApp.
- * Acciones: dashboard | history | setRecipientPreference | runDry | retryStep
+ * Acciones: dashboard | history | setRecipientPreference | runDry | runReal | retryStep
  */
 
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
@@ -105,6 +105,28 @@ Deno.serve(async (req) => {
         limit: body.limit != null ? Number(body.limit) : 50,
         schedulerName: 'reactivation-automations-monitor',
         runKind: 'dry_run',
+      });
+      return jsonResponse({
+        success: true,
+        runId: result.runId,
+        stats: result.stats,
+        dueCount: result.due.length,
+        events: result.events.slice(0, 100),
+      });
+    }
+
+    if (action === 'runReal') {
+      try {
+        assertMetaSendEnabled();
+      } catch (error) {
+        return jsonResponse({ error: String(error) }, 503);
+      }
+      const result = await runReactivations({
+        supabase,
+        dryRun: false,
+        limit: body.limit != null ? Number(body.limit) : undefined,
+        schedulerName: 'reactivation-monitor-manual',
+        runKind: 'manual',
       });
       return jsonResponse({
         success: true,

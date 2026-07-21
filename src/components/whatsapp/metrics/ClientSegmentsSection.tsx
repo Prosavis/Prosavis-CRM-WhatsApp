@@ -1,6 +1,7 @@
 import React, { useMemo, useRef } from 'react';
 import {
   Box,
+  Button,
   Card,
   CardContent,
   Chip,
@@ -22,6 +23,8 @@ import EventAvailableOutlinedIcon from '@mui/icons-material/EventAvailableOutlin
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import NotificationsActiveOutlinedIcon from '@mui/icons-material/NotificationsActiveOutlined';
 import BlockOutlinedIcon from '@mui/icons-material/BlockOutlined';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import { useSearchParams } from 'react-router-dom';
 import type {
   ClientSegmentsMetrics,
   DirectoryClientMetricRow,
@@ -177,9 +180,22 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
   clients = [],
   loading,
 }) => {
+  const [, setSearchParams] = useSearchParams();
   const [selected, setSelected] = React.useState<ClientSegmentKey | null>(null);
   const [detailOpen, setDetailOpen] = React.useState(false);
   const drillRef = useRef<HTMLDivElement>(null);
+
+  const goToReactivations = () => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('tab', 'automations');
+        next.set('auto', 'reactivations');
+        return next;
+      },
+      { replace: true },
+    );
+  };
 
   const filtered = useMemo(() => {
     if (!selected) return [];
@@ -292,10 +308,30 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
       detail={
         selected ? (
           <Box ref={drillRef}>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-              {filtered.length} contacto(s) · segmento «
-              {CARDS.find((c) => c.key === selected)?.label}»
-            </Typography>
+            <Stack
+              direction={{ xs: 'column', sm: 'row' }}
+              spacing={1}
+              alignItems={{ sm: 'center' }}
+              justifyContent="space-between"
+              sx={{ mb: 1.5 }}
+            >
+              <Typography variant="body2" color="text.secondary">
+                {filtered.length} contacto(s) · segmento «
+                {CARDS.find((c) => c.key === selected)?.label}»
+              </Typography>
+              {selected === 'inactive' && (
+                <Button
+                  size="small"
+                  variant="contained"
+                  color="error"
+                  startIcon={<AutoAwesomeIcon />}
+                  onClick={goToReactivations}
+                  sx={{ textTransform: 'none', flexShrink: 0 }}
+                >
+                  Ir a reactivaciones
+                </Button>
+              )}
+            </Stack>
             <TableContainer>
               <Table size="small">
                 <TableHead>

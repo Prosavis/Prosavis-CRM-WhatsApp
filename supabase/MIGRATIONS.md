@@ -76,3 +76,4 @@ Revisar el SQL generado antes de commitear.
 - `npx supabase db push` → `Remote database is up to date.`
 - Última migración recordatorios: `20260702120000_reminder_batch_events.sql` (`execution_stats`, `reminder_batch_events`, `run_kind manual`).
 - Reactivaciones: `20260721120000_whatsapp_reactivation_automations.sql` (`whatsapp_reactivation_runs`, `_events`, `_preferences` + índice `crm_directory` secuencia).
+- RLS directorio: `20260721133000_enable_rls_directory_issues_suggestions_backup.sql` (issues, AI suggestions, backup clients).

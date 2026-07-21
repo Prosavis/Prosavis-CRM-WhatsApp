@@ -26,7 +26,10 @@ export const REACTIVATION_STEPS: ReactivationStepDef[] = [
     step: 1,
     gapDaysFromPrevious: 0,
     dayFromEnrollment: 0,
-    templateName: 'react_reagendar_suave',
+    // Interino: react_reagendar_suave sigue PENDING en Meta.
+    // Usar plantilla APPROVED de reactivación suave para clientes existentes.
+    // Cuando Meta apruebe react_reagendar_suave, volver a ese nombre.
+    templateName: 'react_cliente_misma_profesional',
     label: 'Suave — reagendar',
   },
   {
@@ -130,6 +133,8 @@ export function buildDisplayBody(clientName: string, step: ReactivationStepDef):
   switch (step.templateName) {
     case 'react_reagendar_suave':
       return `Hola ${clientName} 👋 Estamos aquí por si quieres reagendar tu cita de limpieza o agendar otra pronto. Cuando quieras, responde y te ayudamos con disponibilidad.`;
+    case 'react_cliente_misma_profesional':
+      return `Hola ${clientName}, si quieres volver a agendar con Prosavis, podemos revisar disponibilidad y, si es posible, coordinar con la misma profesional que ya conoces.`;
     case 'rebooking_frecuencia':
       return `Hola ${clientName}, muchos de nuestros clientes agendan cada 2 semanas para mantener su hogar siempre limpio sin esfuerzo. ¿Te gustaría que te agendemos un servicio recurrente? Te garantizamos la misma profesional cada vez 🏠`;
     case 'react_followup_valor_sin_presion':

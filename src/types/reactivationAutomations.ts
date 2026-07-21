@@ -130,3 +130,66 @@ export function formatReactivationDate(iso: string | null | undefined): string {
     timeZone: 'America/Bogota',
   });
 }
+
+export const REACTIVATION_OUTCOME_LABEL: Record<string, string> = {
+  sent: 'Enviado',
+  failed: 'Fallido',
+  dry_run: 'Simulación (no envió)',
+  skipped_opt_out: 'Omitido (opt-out)',
+  skipped_disabled: 'Omitido (desactivado)',
+  skipped_missing_phone: 'Omitido (sin teléfono)',
+  skipped_paused_reply: 'Omitido (respondió)',
+  skipped_not_due: 'Omitido (aún no toca)',
+  skipped_blacklisted: 'Omitido (lista negra)',
+  skipped_company: 'Omitido (empresa)',
+  skipped_active: 'Omitido (activo)',
+  skipped_stale: 'Omitido (caducado)',
+  skipped_completed: 'Omitido (completado)',
+  enrolled: 'Inscrito',
+  exited_reactivated: 'Salió (reactivado)',
+  exited_completed: 'Salió (completado)',
+  exited_opt_out: 'Salió (opt-out)',
+};
+
+export const REACTIVATION_OUTCOME_COLOR: Record<
+  string,
+  'default' | 'success' | 'error' | 'warning' | 'info'
+> = {
+  sent: 'success',
+  failed: 'error',
+  dry_run: 'info',
+  skipped_opt_out: 'default',
+  skipped_disabled: 'default',
+  skipped_missing_phone: 'warning',
+  skipped_paused_reply: 'info',
+  skipped_not_due: 'default',
+  skipped_blacklisted: 'default',
+  skipped_company: 'default',
+  skipped_active: 'default',
+  skipped_stale: 'default',
+  skipped_completed: 'default',
+  enrolled: 'success',
+  exited_reactivated: 'success',
+  exited_completed: 'success',
+  exited_opt_out: 'default',
+};
+
+export const REACTIVATION_STATUS_HINT: Record<ReactivationRowStatus, string> = {
+  due: 'Tiene un paso pendiente de envío hoy.',
+  waiting: 'Inscrito; el siguiente paso aún no toca por la cadencia.',
+  paused_reply: 'Respondió después del último contacto; se pausa para atención humana.',
+  disabled: 'Reactivaciones desactivadas para este contacto.',
+  opt_out: 'Marcó opt-out; no se le envía.',
+  completed: 'Completó los 6 pasos de la cadencia.',
+  stale: 'Lleva demasiado tiempo inactivo; se sale del programa.',
+  active_again: 'Volvió a agendar; sale de la secuencia de reactivación.',
+  eligible: 'Cumple criterios para entrar (paso 1). Aún no inscrito.',
+};
+
+export function formatReactivationRunKind(kind: string): string {
+  if (kind === 'primary') return 'Envío principal (12:00 p. m.)';
+  if (kind === 'manual') return 'Envío manual';
+  if (kind === 'retry') return 'Reintento automático';
+  if (kind === 'dry_run') return 'Simulación (dry-run)';
+  return kind;
+}

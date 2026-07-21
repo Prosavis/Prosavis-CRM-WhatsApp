@@ -18,16 +18,16 @@ import {
 import { buildReactivationUniverse } from './reactivationRunner.ts';
 
 function nextSchedulerRunAt(now = new Date()): string {
-  // Cron diario 10:00 America/Bogota (UTC-5) → 15:00 UTC
+  // Cron diario 12:00 America/Bogota (UTC-5) → 17:00 UTC
   const bogotaOffsetMs = -5 * 60 * 60 * 1000;
   const bogotaNow = new Date(now.getTime() + bogotaOffsetMs);
   const y = bogotaNow.getUTCFullYear();
   const m = bogotaNow.getUTCMonth();
   const d = bogotaNow.getUTCDate();
   const hour = bogotaNow.getUTCHours();
-  let targetBogota = new Date(Date.UTC(y, m, d, 10, 0, 0));
-  if (hour >= 10) {
-    targetBogota = new Date(Date.UTC(y, m, d + 1, 10, 0, 0));
+  let targetBogota = new Date(Date.UTC(y, m, d, 12, 0, 0));
+  if (hour >= 12) {
+    targetBogota = new Date(Date.UTC(y, m, d + 1, 12, 0, 0));
   }
   // Convert Bogota wall time back to UTC ISO
   return new Date(targetBogota.getTime() - bogotaOffsetMs).toISOString();
