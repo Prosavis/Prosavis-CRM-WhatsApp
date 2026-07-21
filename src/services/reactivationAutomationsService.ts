@@ -75,6 +75,25 @@ export async function setRecipientReactivationPreference(params: {
   }
 }
 
+export async function suspendReactivationRecipient(params: {
+  directoryId: string;
+}): Promise<void> {
+  const { data, error } = await supabase.functions.invoke<{ success?: boolean; error?: string }>(
+    'reactivation-automations-monitor',
+    {
+      body: {
+        action: 'suspendRecipient',
+        directoryId: params.directoryId,
+      },
+    },
+  );
+
+  if (error) throw new Error(await parseInvokeError(error));
+  if (data && 'error' in data && typeof data.error === 'string') {
+    throw new Error(data.error);
+  }
+}
+
 export async function retryReactivationStep(params: {
   directoryId: string;
   stepNumber: number;

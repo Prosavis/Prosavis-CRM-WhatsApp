@@ -115,6 +115,34 @@ export interface AISuggestionFilters {
   limit?: number;
 }
 
+export interface DirectoryFirebaseBackfillChange {
+  field: string;
+  from: unknown;
+  to: unknown;
+}
+
+export interface DirectoryFirebaseBackfillSample {
+  id: string;
+  phone: string | null;
+  changes: DirectoryFirebaseBackfillChange[];
+}
+
+export interface DirectoryFirebaseBackfillResult {
+  dryRun: boolean;
+  total: number;
+  wouldUpdate: number;
+  updated?: number;
+  skipped: number;
+  errors?: { id: string; error: string }[];
+  indexSize?: {
+    byPhoneKey: number;
+    byAppUser: number;
+    appointments: number;
+  };
+  lookbackMonths?: number;
+  samples: DirectoryFirebaseBackfillSample[];
+}
+
 async function fetchEntriesByIds(ids: string[]): Promise<Map<string, DirectoryEntry>> {
   const map = new Map<string, DirectoryEntry>();
   if (ids.length === 0) return map;
@@ -361,6 +389,57 @@ export const directoryMonitorService = {
       throw error;
     }
     return data ?? { detected: 0 };
+  },
+
+  /**
+   * Backfill determinista (sin IA): cruza crm_directory con citas Firebase por teléfono/uid.
+   * `dryRun: true` (default) solo reporta; `false` aplica fill-only.
+   */
+  async backfillDirectoryFromFirebase(params?: {
+    dryRun?: boolean;
+    limit?: number;
+    lookbackMonths?: number;
+  }): Promise<DirectoryFirebaseBackfillResult> {
+    const dryRun = params?.dryRun !== false;
+    const { data, error } = await supabase.functions.invoke<DirectoryFirebaseBackfillResult>(
+      'directory-monitor',
+      {
+        body: {
+          action: 'backfillFromFirebase',
+          dryRun,
+          limit: params?.limit,
+          lookbackMonths: params?.lookbackMonths,
+        },
+      },
+    );
+    if (error) {
+      const ctx = (error as { context?: Response }).context;
+      if (ctx) {
+        const raw = await ctx.text().catch(() => '');
+        if (raw) {
+          let parsedError: string | null = null;
+          try {
+            const payload = JSON.parse(raw) as { error?: unknown };
+            if (payload && typeof payload === 'object' && 'error' in payload) {
+              parsedError = String(payload.error);
+            }
+          } catch {
+            parsedError = raw.slice(0, 500);
+          }
+          if (parsedError) throw new Error(`HTTP ${ctx.status}: ${parsedError}`);
+        }
+      }
+      throw error;
+    }
+    return (
+      data ?? {
+        dryRun,
+        total: 0,
+        wouldUpdate: 0,
+        skipped: 0,
+        samples: [],
+      }
+    );
   },
 
   /**

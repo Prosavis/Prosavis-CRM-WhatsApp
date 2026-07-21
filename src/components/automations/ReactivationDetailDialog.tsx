@@ -15,14 +15,19 @@ import {
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import ReplayIcon from '@mui/icons-material/Replay';
+import BlockIcon from '@mui/icons-material/Block';
 import {
   REACTIVATION_STATUS_COLOR,
   REACTIVATION_STATUS_HINT,
   REACTIVATION_STATUS_LABEL,
+  formatNextSendAt,
   formatReactivationDate,
   type ReactivationDashboardRow,
 } from '@/types/reactivationAutomations';
-import { retryReactivationStep } from '@/services/reactivationAutomationsService';
+import {
+  retryReactivationStep,
+  suspendReactivationRecipient,
+} from '@/services/reactivationAutomationsService';
 
 function formatDay(iso: string | null): string {
   if (!iso) return '—';
@@ -38,6 +43,7 @@ export interface ReactivationDetailDialogProps {
   open: boolean;
   onClose: () => void;
   onRetrySuccess?: () => void;
+  onSuspendSuccess?: () => void;
 }
 
 const ReactivationDetailDialog: React.FC<ReactivationDetailDialogProps> = ({
@@ -45,9 +51,12 @@ const ReactivationDetailDialog: React.FC<ReactivationDetailDialogProps> = ({
   open,
   onClose,
   onRetrySuccess,
+  onSuspendSuccess,
 }) => {
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
+  const [suspending, setSuspending] = useState(false);
+  const [confirmSuspend, setConfirmSuspend] = useState(false);
 
   if (!row) return null;
 
@@ -58,6 +67,8 @@ const ReactivationDetailDialog: React.FC<ReactivationDetailDialogProps> = ({
     row.status !== 'opt_out' &&
     step >= 1 &&
     step <= 6;
+
+  const canSuspend = row.status !== 'opt_out';
 
   const handleRetry = async () => {
     if (!canRetry) return;
@@ -71,6 +82,21 @@ const ReactivationDetailDialog: React.FC<ReactivationDetailDialogProps> = ({
       setRetryError(err instanceof Error ? err.message : 'Error al enviar');
     } finally {
       setRetrying(false);
+    }
+  };
+
+  const handleSuspend = async () => {
+    setRetryError(null);
+    setSuspending(true);
+    try {
+      await suspendReactivationRecipient({ directoryId: row.directoryId });
+      onSuspendSuccess?.();
+      onClose();
+    } catch (err) {
+      setRetryError(err instanceof Error ? err.message : 'Error al suspender');
+    } finally {
+      setSuspending(false);
+      setConfirmSuspend(false);
     }
   };
 
@@ -125,6 +151,7 @@ const ReactivationDetailDialog: React.FC<ReactivationDetailDialogProps> = ({
             />
             <DetailRow label="Plantilla" value={row.templateName ?? '—'} mono />
             <DetailRow label="Último contacto" value={formatReactivationDate(row.lastContactAt)} />
+            <DetailRow label="Próximo envío" value={formatNextSendAt(row.nextSendAt)} />
             <DetailRow label="Última respuesta" value={formatReactivationDate(row.lastResponseAt)} />
           </Box>
 
@@ -156,17 +183,42 @@ const ReactivationDetailDialog: React.FC<ReactivationDetailDialogProps> = ({
         </Stack>
       </DialogContent>
       <DialogActions>
+        {canSuspend && !confirmSuspend && (
+          <Button
+            color="error"
+            startIcon={<BlockIcon />}
+            onClick={() => setConfirmSuspend(true)}
+            disabled={retrying || suspending}
+            sx={{ textTransform: 'none', mr: 'auto' }}
+          >
+            Suspender (opt-out)
+          </Button>
+        )}
+        {confirmSuspend && (
+          <Button
+            color="error"
+            variant="contained"
+            startIcon={suspending ? <CircularProgress size={16} color="inherit" /> : <BlockIcon />}
+            onClick={() => void handleSuspend()}
+            disabled={suspending}
+            sx={{ textTransform: 'none', mr: 'auto' }}
+          >
+            Confirmar suspensión
+          </Button>
+        )}
         {canRetry && (
           <Button
             startIcon={retrying ? <CircularProgress size={16} /> : <ReplayIcon />}
             onClick={() => void handleRetry()}
-            disabled={retrying}
+            disabled={retrying || suspending}
             sx={{ textTransform: 'none' }}
           >
             Enviar paso ahora
           </Button>
         )}
-        <Button onClick={onClose}>Cerrar</Button>
+        <Button onClick={onClose} disabled={suspending}>
+          Cerrar
+        </Button>
       </DialogActions>
     </Dialog>
   );

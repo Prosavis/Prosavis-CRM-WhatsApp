@@ -30,6 +30,8 @@ export interface ReactivationDashboardRow {
   templateName: string | null;
   lastContactAt: string | null;
   lastResponseAt: string | null;
+  /** Primer cron 12:00 CO en que toca el siguiente paso; null si no aplica. */
+  nextSendAt: string | null;
   status: ReactivationRowStatus;
   reactivationsEnabled: boolean;
   isCompany: boolean;
@@ -131,6 +133,26 @@ export function formatReactivationDate(iso: string | null | undefined): string {
   });
 }
 
+/** Countdown compacto para filas (sin segundos). */
+export function formatRelativeUntil(iso: string | null | undefined, nowMs = Date.now()): string | null {
+  if (!iso) return null;
+  const diff = new Date(iso).getTime() - nowMs;
+  if (diff <= 0) return 'ahora';
+  const days = Math.floor(diff / 86_400_000);
+  const hours = Math.floor((diff % 86_400_000) / 3_600_000);
+  const minutes = Math.floor((diff % 3_600_000) / 60_000);
+  if (days > 0) return `en ${days}d ${hours}h`;
+  if (hours > 0) return `en ${hours}h ${minutes}m`;
+  return `en ${minutes}m`;
+}
+
+export function formatNextSendAt(iso: string | null | undefined, nowMs = Date.now()): string {
+  if (!iso) return '—';
+  const relative = formatRelativeUntil(iso, nowMs);
+  const date = formatReactivationDate(iso);
+  return relative ? `${date} · ${relative}` : date;
+}
+
 export const REACTIVATION_OUTCOME_LABEL: Record<string, string> = {
   sent: 'Enviado',
   failed: 'Fallido',
@@ -138,6 +160,7 @@ export const REACTIVATION_OUTCOME_LABEL: Record<string, string> = {
   skipped_opt_out: 'Omitido (opt-out)',
   skipped_disabled: 'Omitido (desactivado)',
   skipped_missing_phone: 'Omitido (sin teléfono)',
+  skipped_invalid_phone: 'Omitido (número inválido)',
   skipped_paused_reply: 'Omitido (respondió)',
   skipped_not_due: 'Omitido (aún no toca)',
   skipped_blacklisted: 'Omitido (lista negra)',
@@ -161,6 +184,7 @@ export const REACTIVATION_OUTCOME_COLOR: Record<
   skipped_opt_out: 'default',
   skipped_disabled: 'default',
   skipped_missing_phone: 'warning',
+  skipped_invalid_phone: 'error',
   skipped_paused_reply: 'info',
   skipped_not_due: 'default',
   skipped_blacklisted: 'default',

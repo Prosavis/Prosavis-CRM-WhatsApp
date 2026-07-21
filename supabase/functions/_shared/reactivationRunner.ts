@@ -38,6 +38,7 @@ import {
   normalizePhone,
   resolveRecipient,
 } from './whatsappIdentity.ts';
+import { isReactivationPhoneValid } from './directoryPhone.ts';
 
 export type ReactivationOutcome =
   | 'sent'
@@ -45,6 +46,7 @@ export type ReactivationOutcome =
   | 'skipped_opt_out'
   | 'skipped_disabled'
   | 'skipped_missing_phone'
+  | 'skipped_invalid_phone'
   | 'skipped_paused_reply'
   | 'skipped_not_due'
   | 'skipped_blacklisted'
@@ -178,7 +180,7 @@ async function fetchDisabledDirectoryIds(supabase: SupabaseClient): Promise<Set<
 async function exitSequence(
   supabase: SupabaseClient,
   directoryId: string,
-  reason: 'reactivated' | 'completed' | 'opt_out' | 'stale',
+  reason: 'reactivated' | 'completed' | 'opt_out' | 'stale' | 'invalid_phone',
 ): Promise<void> {
   await supabase
     .from('crm_directory')
@@ -524,6 +526,24 @@ export async function runReactivations(
         stepNumber: candidate.dueStep,
         templateName: stepDef.templateName,
         outcome: 'skipped_missing_phone',
+      });
+      continue;
+    }
+
+    // Número presente pero no entregable por WhatsApp (ej. +57 sin móvil 3xxxxxxxxx).
+    // Lo sacamos de la secuencia para que no reintente/falle indefinidamente.
+    if (!isReactivationPhoneValid(candidate.phone)) {
+      stats.skipped += 1;
+      if (!dryRun && !params.previewOnly) {
+        await exitSequence(params.supabase, candidate.id, 'invalid_phone');
+      }
+      events.push({
+        directoryId: candidate.id,
+        recipientPhone: candidate.phone,
+        recipientName: candidate.name,
+        stepNumber: candidate.dueStep,
+        templateName: stepDef.templateName,
+        outcome: 'skipped_invalid_phone',
       });
       continue;
     }

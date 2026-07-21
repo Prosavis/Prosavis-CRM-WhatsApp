@@ -157,3 +157,76 @@ export function isPausedForHumanReply(params: {
   if (!params.lastResponseAt || !params.lastContactAt) return false;
   return new Date(params.lastResponseAt).getTime() > new Date(params.lastContactAt).getTime();
 }
+
+/** Estados que no tienen envío automático pendiente. */
+export type ReactivationRowStatusForSend =
+  | 'due'
+  | 'waiting'
+  | 'paused_reply'
+  | 'disabled'
+  | 'opt_out'
+  | 'completed'
+  | 'stale'
+  | 'active_again'
+  | 'eligible';
+
+const NO_SEND_STATUSES: ReadonlySet<ReactivationRowStatusForSend> = new Set([
+  'opt_out',
+  'disabled',
+  'paused_reply',
+  'completed',
+  'stale',
+  'active_again',
+]);
+
+/**
+ * Próximo cron diario 12:00 America/Bogota (UTC-5) → 17:00 UTC.
+ */
+export function nextSchedulerRunAt(now = new Date()): string {
+  const bogotaOffsetMs = -5 * 60 * 60 * 1000;
+  const bogotaNow = new Date(now.getTime() + bogotaOffsetMs);
+  const y = bogotaNow.getUTCFullYear();
+  const m = bogotaNow.getUTCMonth();
+  const d = bogotaNow.getUTCDate();
+  const hour = bogotaNow.getUTCHours();
+  let targetBogota = new Date(Date.UTC(y, m, d, 12, 0, 0));
+  if (hour >= 12) {
+    targetBogota = new Date(Date.UTC(y, m, d + 1, 12, 0, 0));
+  }
+  return new Date(targetBogota.getTime() - bogotaOffsetMs).toISOString();
+}
+
+/**
+ * Primer cron 12:00 CO en el que el contacto recibiría el siguiente paso
+ * (misma regla que resolveDueStep). No persiste en DB.
+ */
+export function computeNextSendAt(params: {
+  sequenceStep: number;
+  lastContactAt: string | null;
+  status: ReactivationRowStatusForSend;
+  asOf?: Date;
+}): string | null {
+  const asOf = params.asOf ?? new Date();
+  if (NO_SEND_STATUSES.has(params.status)) return null;
+
+  if (params.status === 'due' || params.status === 'eligible') {
+    return nextSchedulerRunAt(asOf);
+  }
+
+  if (params.status !== 'waiting') return null;
+
+  const next = nextStepNumber(params.sequenceStep);
+  if (!next) return null;
+
+  let candidate = new Date(nextSchedulerRunAt(asOf));
+  for (let i = 0; i < 90; i++) {
+    const due = resolveDueStep({
+      sequenceStep: params.sequenceStep,
+      lastContactAt: params.lastContactAt,
+      asOf: candidate,
+    });
+    if (due) return candidate.toISOString();
+    candidate = new Date(candidate.getTime() + 24 * 60 * 60 * 1000);
+  }
+  return null;
+}

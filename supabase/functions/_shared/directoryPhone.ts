@@ -22,6 +22,26 @@ export function normalizeDirectoryPhoneE164(
   return null;
 }
 
+/**
+ * Valida que un teléfono sea realmente contactable por WhatsApp.
+ * `normalizeDirectoryPhoneE164` es permisiva y acepta números +57 de 12 dígitos
+ * cuya parte nacional NO empieza por 3 (ej. +575732052712), que Meta rechaza como
+ * "no entregable". Este chequeo exige, para Colombia, un móvil de 10 dígitos que
+ * empiece por 3; para el resto, 10-15 dígitos.
+ */
+export function isReactivationPhoneValid(
+  phone: string | null | undefined
+): boolean {
+  const e164 = normalizeDirectoryPhoneE164(phone);
+  if (!e164) return false;
+  const digits = e164.replace(/\D/g, '');
+  if (digits.startsWith('57')) {
+    const national = digits.slice(2);
+    return national.length === 10 && national.startsWith('3');
+  }
+  return digits.length >= 10 && digits.length <= 15;
+}
+
 export function directoryPhoneKey(
   phone: string | null | undefined
 ): string | null {

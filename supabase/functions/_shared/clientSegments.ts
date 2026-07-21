@@ -3,7 +3,7 @@
  * entre get-whatsapp-metrics y el motor de reactivaciones.
  */
 
-import { directoryPhoneKey } from './directoryPhone.ts';
+import { directoryPhoneKey, isReactivationPhoneValid } from './directoryPhone.ts';
 import {
   hasBlacklistTag,
   isCompanyClient,
@@ -45,6 +45,21 @@ export interface DirectorySegmentRow {
 export interface LastAppointmentIndex {
   byPhoneKey: Map<string, string>;
   byAppUser: Map<string, string>;
+  appointmentCount: number;
+}
+
+/** Perfil agregado desde citas Firebase (nombre más reciente + uid + conteo). */
+export interface ClientProfile {
+  name: string | null;
+  appUserId: string | null;
+  phone: string | null;
+  lastIso: string | null;
+  count: number;
+}
+
+export interface ClientProfileIndex {
+  byPhoneKey: Map<string, ClientProfile>;
+  byAppUser: Map<string, ClientProfile>;
   appointmentCount: number;
 }
 
@@ -180,6 +195,83 @@ export async function loadLastAppointmentIndex(params: {
   return { byPhoneKey, byAppUser, appointmentCount };
 }
 
+/**
+ * Índice de perfiles de cliente desde citas Firebase.
+ * Por phone_key y appUserId (clientId) guarda el nombre de la cita más reciente,
+ * el uid de app y el conteo de citas en la ventana.
+ */
+export async function loadClientProfileIndex(params: {
+  asOf?: Date;
+  lookbackMonths?: number;
+  serviceId?: string;
+}): Promise<ClientProfileIndex> {
+  const asOf = params.asOf ?? new Date();
+  const lookback = params.lookbackMonths ?? CLIENT_APPOINTMENT_LOOKBACK_MONTHS;
+  const clientFrom = new Date(asOf);
+  clientFrom.setMonth(clientFrom.getMonth() - lookback);
+
+  const byPhoneKey = new Map<string, ClientProfile>();
+  const byAppUser = new Map<string, ClientProfile>();
+
+  const clientDocs = await runFirestoreQuery(
+    'appointments',
+    buildClientAppointmentsQuery(clientFrom.toISOString(), params.serviceId),
+  );
+
+  const track = (
+    map: Map<string, ClientProfile>,
+    key: string | null,
+    iso: string,
+    name: string | null,
+    appUserId: string | null,
+    phone: string | null,
+  ) => {
+    if (!key) return;
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, { name, appUserId, phone, lastIso: iso, count: 1 });
+      return;
+    }
+    const next: ClientProfile = {
+      name: prev.name,
+      appUserId: prev.appUserId ?? appUserId,
+      phone: prev.phone ?? phone,
+      lastIso: prev.lastIso,
+      count: prev.count + 1,
+    };
+    if (!prev.lastIso || iso > prev.lastIso) {
+      next.lastIso = iso;
+      if (name) next.name = name;
+      if (appUserId) next.appUserId = appUserId;
+      if (phone) next.phone = phone;
+    } else {
+      if (!next.name && name) next.name = name;
+      if (!next.phone && phone) next.phone = phone;
+    }
+    map.set(key, next);
+  };
+
+  for (const doc of clientDocs) {
+    const iso = scheduledDateToIso(doc.data.scheduledDate);
+    if (!iso) continue;
+    const rawPhone =
+      typeof doc.data.clientPhone === 'string' ? doc.data.clientPhone.trim() : '';
+    const phone = rawPhone.length > 0 ? rawPhone : null;
+    const phoneKey = phoneLookupKey(phone);
+    const appUser =
+      typeof doc.data.clientId === 'string' && doc.data.clientId.trim()
+        ? doc.data.clientId.trim()
+        : null;
+    const rawName =
+      typeof doc.data.clientName === 'string' ? doc.data.clientName.trim() : '';
+    const name = rawName.length > 0 ? rawName : null;
+    track(byPhoneKey, phoneKey, iso, name, appUser, phone);
+    track(byAppUser, appUser, iso, name, appUser, phone);
+  }
+
+  return { byPhoneKey, byAppUser, appointmentCount: clientDocs.length };
+}
+
 export function resolveLastAppointment(
   entry: Pick<DirectorySegmentRow, 'phone' | 'phone_key' | 'app_user_id'>,
   index: LastAppointmentIndex,
@@ -282,6 +374,7 @@ export function isEligibleForReactivation(
 
   if (!client.isClient || !client.isInactive) return false;
   if (client.isBlacklisted || client.optOut) return false;
+  if (!isReactivationPhoneValid(client.phone)) return false;
   if (excludeCompanies && client.isCompany) return false;
   if (isTestContact({ classification: client.classification, tags: client.tags })) {
     return false;

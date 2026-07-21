@@ -9,6 +9,18 @@ import { formatError } from '../_shared/errors.ts';
 import { requireDirectoryAdmin } from '../_shared/directoryMonitorAuth.ts';
 import { runDirectoryAnalysis } from '../_shared/directoryAnalyze.ts';
 import { directoryPhoneKey, normalizeDirectoryPhoneE164 } from '../_shared/directoryPhone.ts';
+import {
+  ACTIVE_CLIENT_WINDOW_DAYS,
+  CLIENT_APPOINTMENT_LOOKBACK_MONTHS,
+  loadClientProfileIndex,
+  phoneLookupKey,
+  type ClientProfile,
+  type ClientProfileIndex,
+} from '../_shared/clientSegments.ts';
+import {
+  getFirestoreDocument,
+  getFirestoreUserPhone,
+} from '../_shared/firebaseAdminRest.ts';
 
 // deno-lint-ignore no-explicit-any
 type SupabaseClient = any;
@@ -141,9 +153,133 @@ function matchesSearch(issue: Row, term: string): boolean {
 // ── Helpers de escritura (service_role) ─────────────────────────────────────
 
 const EMOJI_RE = /\p{Extended_Pictographic}/u;
+const PLACEHOLDER_NAMES = new Set([
+  'sin nombre',
+  'sin nombre.',
+  'unknown',
+  'desconocido',
+  'n/a',
+  'na',
+]);
 
 function isUsefulName(value: string | null | undefined, minLen = 2): boolean {
   return (value ?? '').trim().length >= minLen;
+}
+
+/** Alineado con directory_name_has_emoji / is_missing / is_invalid (Postgres). */
+function nameHasEmoji(value: string | null | undefined): boolean {
+  return EMOJI_RE.test(value ?? '');
+}
+
+function nameIsMissing(
+  name: string | null | undefined,
+  phone: string | null | undefined,
+  phoneKey: string | null | undefined,
+): boolean {
+  if (name == null || name.trim() === '') return true;
+  const trimmed = name.trim();
+  if (PLACEHOLDER_NAMES.has(trimmed.toLowerCase())) return true;
+  const digits = trimmed.replace(/\D/g, '');
+  if (phoneKey && digits === phoneKey) return true;
+  if (phone && trimmed === phone.trim()) return true;
+  return false;
+}
+
+function nameIsInvalid(name: string | null | undefined): boolean {
+  if (name == null) return false;
+  const trimmed = name.trim();
+  if (trimmed === '') return false;
+  if (trimmed.length <= 1) return true;
+  return !/\p{L}/u.test(trimmed);
+}
+
+/** Nombre malo: vacío/placeholder/teléfono, emoji-only o sin letras. */
+function needsNameFill(
+  name: string | null | undefined,
+  phone: string | null | undefined,
+  phoneKey: string | null | undefined,
+): boolean {
+  if (nameIsMissing(name, phone, phoneKey)) return true;
+  if (nameHasEmoji(name) && !/\p{L}/u.test((name ?? '').trim())) return true;
+  if (nameIsInvalid(name)) return true;
+  // Nombre con letras + emoji sigue siendo "malo" para el issue emoji_name;
+  // el backfill solo lo reemplaza si Firebase trae un nombre usable sin emoji.
+  if (nameHasEmoji(name)) return true;
+  return false;
+}
+
+function isUsableFirebaseName(value: string | null | undefined): boolean {
+  const trimmed = (value ?? '').trim();
+  if (trimmed.length < 2) return false;
+  if (!/\p{L}/u.test(trimmed)) return false;
+  if (nameHasEmoji(trimmed)) return false;
+  if (PLACEHOLDER_NAMES.has(trimmed.toLowerCase())) return false;
+  return true;
+}
+
+/** Quita pictogramas, banderas, tonos de piel, ZWJ y selectores; colapsa espacios. */
+function stripEmojiAndJunk(value: string | null | undefined): string {
+  return (value ?? '')
+    .replace(/\p{Extended_Pictographic}/gu, '')
+    // Fitzpatrick skin tones + regional indicators (flags) — Postgres los marca como emoji.
+    .replace(/[\u{1F3FB}-\u{1F3FF}]/gu, '')
+    .replace(/[\u{1F1E6}-\u{1F1FF}]/gu, '')
+    // Alinear con directory_name_has_emoji (rangos misc. symbols / dingbats).
+    .replace(/[\u2122\u2139\u2190-\u21FF\u2300-\u27BF\u2B00-\u2BFF]/gu, '')
+    .replace(/[\uFE0E\uFE0F\u200D]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isUsableDirectoryName(
+  value: string | null | undefined,
+  phone?: string | null,
+  phoneKey?: string | null,
+): boolean {
+  const trimmed = (value ?? '').trim();
+  if (!isUsableFirebaseName(trimmed)) return false;
+  if (nameIsMissing(trimmed, phone, phoneKey)) return false;
+  if (nameIsInvalid(trimmed)) return false;
+  return true;
+}
+
+function pickCleanName(params: {
+  fullName: string | null;
+  displayName: string | null;
+  contactName: string | null;
+  profileName: string | null;
+  phone: string | null;
+  phoneKey: string | null;
+}): string | null {
+  const { fullName, displayName, contactName, profileName, phone, phoneKey } = params;
+  // Si WA ya tiene un nombre limpio (sin emoji) y el CRM tiene emoji, preferir WA.
+  if (
+    isUsableDirectoryName(contactName, phone, phoneKey) &&
+    !nameHasEmoji(contactName) &&
+    nameHasEmoji(fullName ?? displayName)
+  ) {
+    return (contactName as string).trim();
+  }
+  const candidates = [
+    stripEmojiAndJunk(fullName),
+    stripEmojiAndJunk(displayName),
+    stripEmojiAndJunk(contactName),
+    stripEmojiAndJunk(profileName),
+  ];
+  for (const c of candidates) {
+    if (isUsableDirectoryName(c, phone, phoneKey)) return c;
+  }
+  return null;
+}
+
+function firestoreUserDisplayName(data: Record<string, unknown> | null): string | null {
+  if (!data) return null;
+  const candidates = [data.name, data.displayName, data.fullName, data.full_name];
+  for (const c of candidates) {
+    const s = typeof c === 'string' ? c.trim() : '';
+    if (isUsableFirebaseName(s)) return s;
+  }
+  return null;
 }
 
 function shouldSyncContactName(
@@ -523,6 +659,550 @@ async function runDetection(supabase: SupabaseClient) {
   return { detected: typeof data === 'number' ? data : 0 };
 }
 
+/** Sincroniza contact_name + whatsapp_profile_name al nombre CRM limpio. */
+async function syncWaNamesClean(
+  supabase: SupabaseClient,
+  entry: Row,
+  desiredName: string,
+): Promise<void> {
+  if (!isUsefulName(desiredName)) return;
+  const phoneKey = directoryPhoneKey(entry.phone ?? null) ?? entry.phone_key ?? null;
+  const keys: string[] = [];
+  if (phoneKey) {
+    const { data } = await supabase
+      .from('whatsapp_conversations')
+      .select('stable_key')
+      .eq('phone_key', phoneKey)
+      .limit(5);
+    for (const row of (data ?? []) as Row[]) {
+      if (row.stable_key) keys.push(row.stable_key);
+    }
+  }
+  if (entry.whatsapp_conversation_id) keys.push(entry.whatsapp_conversation_id);
+  const unique = [...new Set(keys)];
+  if (unique.length === 0) return;
+  const { error } = await supabase
+    .from('whatsapp_conversations')
+    .update({
+      contact_name: desiredName,
+      whatsapp_profile_name: desiredName,
+    })
+    .in('stable_key', unique);
+  if (error) throw new Error(formatError(error));
+}
+
+async function loadWaNames(
+  supabase: SupabaseClient,
+  entry: Row,
+): Promise<{ contactName: string | null; profileName: string | null }> {
+  let conversation: Row | null = null;
+  const phoneKey = directoryPhoneKey(entry.phone ?? null) ?? entry.phone_key ?? null;
+  if (phoneKey) {
+    const { data } = await supabase
+      .from('whatsapp_conversations')
+      .select('contact_name, whatsapp_profile_name')
+      .eq('phone_key', phoneKey)
+      .order('last_message_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    conversation = data ?? null;
+  }
+  if (!conversation && entry.whatsapp_conversation_id) {
+    const { data } = await supabase
+      .from('whatsapp_conversations')
+      .select('contact_name, whatsapp_profile_name')
+      .eq('stable_key', entry.whatsapp_conversation_id)
+      .maybeSingle();
+    conversation = data ?? null;
+  }
+  return {
+    contactName: typeof conversation?.contact_name === 'string' ? conversation.contact_name : null,
+    profileName:
+      typeof conversation?.whatsapp_profile_name === 'string'
+        ? conversation.whatsapp_profile_name
+        : null,
+  };
+}
+
+/**
+ * Limpieza determinista de issues abiertos:
+ * - emoji_name / invalid_name / missing_name: nombre desde strip/WA/Firebase
+ * - missing_phone: teléfono desde users/{uid} en Firebase
+ */
+async function cleanupOpenIssues(
+  supabase: SupabaseClient,
+  params: { dryRun?: boolean; limit?: number },
+) {
+  const dryRun = params.dryRun === true; // default: aplicar
+  const maxIssues =
+    typeof params.limit === 'number' && params.limit > 0
+      ? Math.min(Math.floor(params.limit), 5000)
+      : 5000;
+
+  const { data: issueRows, error } = await supabase
+    .from('crm_directory_issues')
+    .select('id, entry_id, issue_type')
+    .eq('status', 'open')
+    .in('issue_type', ['emoji_name', 'invalid_name', 'missing_name', 'missing_phone'])
+    .order('issue_type', { ascending: true })
+    .limit(maxIssues);
+  if (error) throw new Error(formatError(error));
+
+  const issues = (issueRows ?? []) as Row[];
+  const entryIds = [...new Set(issues.map((i) => i.entry_id).filter(Boolean))];
+  const entryMap = new Map<string, Row>();
+  for (let i = 0; i < entryIds.length; i += 200) {
+    const chunk = entryIds.slice(i, i + 200);
+    const { data, error: eErr } = await supabase
+      .from('crm_directory')
+      .select(
+        'id, full_name, display_name, phone, phone_key, app_user_id, opt_out, status, whatsapp_conversation_id',
+      )
+      .in('id', chunk);
+    if (eErr) throw new Error(formatError(eErr));
+    for (const row of (data ?? []) as Row[]) entryMap.set(row.id, row);
+  }
+
+  // Índice de citas para missing_name sin WA usable.
+  const profileIndex = await loadClientProfileIndex({
+    lookbackMonths: 48,
+    serviceId: Deno.env.get('PROSAVIS_SERVICE_ID')?.trim() || undefined,
+  });
+
+  const summary = {
+    dryRun,
+    scanned: issues.length,
+    updated: 0,
+    skipped: 0,
+    errors: [] as { issueId: string; error: string }[],
+    byType: {} as Record<string, { fixed: number; skipped: number }>,
+    samples: [] as { issueType: string; phone: string | null; from: string | null; to: string | null; field: string }[],
+  };
+  const bump = (type: string, key: 'fixed' | 'skipped') => {
+    if (!summary.byType[type]) summary.byType[type] = { fixed: 0, skipped: 0 };
+    summary.byType[type][key] += 1;
+  };
+
+  for (const issue of issues) {
+    const entry = issue.entry_id ? entryMap.get(issue.entry_id) : null;
+    if (!entry || entry.opt_out === true || entry.status === 'opt_out') {
+      summary.skipped += 1;
+      bump(issue.issue_type, 'skipped');
+      continue;
+    }
+
+    try {
+      const wa = await loadWaNames(supabase, entry);
+      const patch: Record<string, unknown> = {};
+      let desiredName: string | null = null;
+      let field = '';
+
+      if (
+        issue.issue_type === 'emoji_name' ||
+        issue.issue_type === 'invalid_name' ||
+        issue.issue_type === 'missing_name'
+      ) {
+        desiredName = pickCleanName({
+          fullName: entry.full_name ?? null,
+          displayName: entry.display_name ?? null,
+          contactName: wa.contactName,
+          profileName: wa.profileName,
+          phone: entry.phone ?? null,
+          phoneKey: entry.phone_key ?? null,
+        });
+
+        if (!desiredName && entry.app_user_id) {
+          const userDoc = await getFirestoreDocument('users', entry.app_user_id);
+          desiredName = firestoreUserDisplayName(userDoc);
+        }
+
+        if (!desiredName) {
+          const profile = resolveProfile(entry, profileIndex);
+          if (profile?.name && isUsableDirectoryName(profile.name, entry.phone, entry.phone_key)) {
+            desiredName = profile.name.trim();
+          }
+        }
+
+        if (
+          desiredName &&
+          isUsableDirectoryName(desiredName, entry.phone, entry.phone_key) &&
+          desiredName !== (entry.full_name ?? '').trim()
+        ) {
+          patch.full_name = desiredName;
+          const display = (entry.display_name ?? '').trim();
+          if (!display || needsNameFill(display, entry.phone, entry.phone_key)) {
+            patch.display_name = desiredName;
+          }
+          field = 'full_name';
+        }
+      } else if (issue.issue_type === 'missing_phone') {
+        if (entry.phone && String(entry.phone).trim()) {
+          summary.skipped += 1;
+          bump(issue.issue_type, 'skipped');
+          continue;
+        }
+        let rawPhone: string | null = null;
+        if (entry.app_user_id) {
+          rawPhone = await getFirestoreUserPhone(entry.app_user_id);
+          if (!rawPhone) {
+            const profile = profileIndex.byAppUser.get(entry.app_user_id);
+            rawPhone = profile?.phone ?? null;
+          }
+        }
+        const normalized = normalizeDirectoryPhoneE164(rawPhone) ??
+          (rawPhone ? String(rawPhone).trim() : null);
+        if (!normalized || !directoryPhoneKey(normalized)) {
+          summary.skipped += 1;
+          bump(issue.issue_type, 'skipped');
+          continue;
+        }
+        // Si el teléfono ya existe en otro contacto, fusionar (este → el que tiene phone).
+        const phoneKey = directoryPhoneKey(normalized)!;
+        const { data: existing } = await supabase
+          .from('crm_directory')
+          .select('id')
+          .eq('phone_key', phoneKey)
+          .neq('id', entry.id)
+          .limit(1)
+          .maybeSingle();
+        if (existing?.id) {
+          if (!dryRun) {
+            const { error: mergeErr } = await supabase.rpc('merge_directory_entries', {
+              p_primary: existing.id,
+              p_duplicate: entry.id,
+            });
+            if (mergeErr) throw new Error(formatError(mergeErr));
+          }
+          if (summary.samples.length < 40) {
+            summary.samples.push({
+              issueType: issue.issue_type,
+              phone: normalized,
+              from: null,
+              to: `merge→${existing.id}`,
+              field: 'merge',
+            });
+          }
+          summary.updated += 1;
+          bump(issue.issue_type, 'fixed');
+          continue;
+        }
+        patch.phone = normalized;
+        field = 'phone';
+        desiredName = String(normalized);
+      }
+
+      if (Object.keys(patch).length === 0) {
+        summary.skipped += 1;
+        bump(issue.issue_type, 'skipped');
+        continue;
+      }
+
+      if (summary.samples.length < 40) {
+        summary.samples.push({
+          issueType: issue.issue_type,
+          phone: entry.phone ?? null,
+          from:
+            field === 'phone'
+              ? entry.phone ?? null
+              : entry.full_name ?? null,
+          to: field === 'phone' ? String(patch.phone ?? '') : desiredName,
+          field,
+        });
+      }
+
+      if (dryRun) {
+        summary.updated += 1;
+        bump(issue.issue_type, 'fixed');
+        continue;
+      }
+
+      // Primero WA (el trigger puede reescribir crm_directory), luego CRM
+      // para dejar el nombre limpio como fuente de verdad.
+      if (typeof patch.full_name === 'string') {
+        await syncWaNamesClean(supabase, entry, patch.full_name);
+      }
+      patch.updated_at = new Date().toISOString();
+      const { error: updErr } = await supabase
+        .from('crm_directory')
+        .update(patch)
+        .eq('id', entry.id);
+      if (updErr) throw new Error(formatError(updErr));
+
+      summary.updated += 1;
+      bump(issue.issue_type, 'fixed');
+    } catch (e) {
+      summary.errors.push({
+        issueId: issue.id,
+        error: e instanceof Error ? e.message : String(e),
+      });
+      bump(issue.issue_type, 'skipped');
+      summary.skipped += 1;
+    }
+  }
+
+  return summary;
+}
+
+type FieldChange = {
+  field: string;
+  from: unknown;
+  to: unknown;
+};
+
+type BackfillSample = {
+  id: string;
+  phone: string | null;
+  changes: FieldChange[];
+};
+
+function resolveProfile(
+  entry: Row,
+  index: ClientProfileIndex,
+): ClientProfile | null {
+  const candidates: ClientProfile[] = [];
+  const pk = (entry.phone_key as string | null) ?? phoneLookupKey(entry.phone);
+  if (pk) {
+    const byPhone = index.byPhoneKey.get(pk);
+    if (byPhone) candidates.push(byPhone);
+  }
+  if (entry.app_user_id) {
+    const byUser = index.byAppUser.get(entry.app_user_id);
+    if (byUser) candidates.push(byUser);
+  }
+  if (candidates.length === 0) return null;
+  // Preferir el perfil con última cita más reciente.
+  return candidates.reduce((best, cur) => {
+    if (!best.lastIso) return cur;
+    if (!cur.lastIso) return best;
+    return cur.lastIso > best.lastIso ? cur : best;
+  });
+}
+
+function deriveStatusFromLastIso(lastIso: string | null, asOf: Date): 'active' | 'inactive' | null {
+  if (!lastIso) return null;
+  const threshold = new Date(
+    asOf.getTime() - ACTIVE_CLIENT_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+  ).toISOString();
+  return lastIso >= threshold ? 'active' : 'inactive';
+}
+
+/**
+ * Cruza crm_directory con citas Firebase por phone_key / app_user_id.
+ * Política fill-only: no pisa nombres buenos ni app_user_id existente; nunca toca opt_out.
+ */
+async function backfillFromFirebase(
+  supabase: SupabaseClient,
+  params: { dryRun?: boolean; limit?: number; lookbackMonths?: number },
+) {
+  const dryRun = params.dryRun !== false; // default seguro: dry-run
+  const pageSize = 200;
+  const maxRows =
+    typeof params.limit === 'number' && params.limit > 0
+      ? Math.min(Math.floor(params.limit), 50_000)
+      : 50_000;
+  const lookbackMonths =
+    typeof params.lookbackMonths === 'number' && params.lookbackMonths > 0
+      ? Math.floor(params.lookbackMonths)
+      : CLIENT_APPOINTMENT_LOOKBACK_MONTHS;
+  const asOf = new Date();
+  const serviceId = Deno.env.get('PROSAVIS_SERVICE_ID')?.trim() || undefined;
+
+  const index = await loadClientProfileIndex({ asOf, lookbackMonths, serviceId });
+
+  let scanned = 0;
+  let wouldUpdate = 0;
+  let updated = 0;
+  let skipped = 0;
+  const errors: { id: string; error: string }[] = [];
+  const samples: BackfillSample[] = [];
+  const SAMPLE_CAP = 75;
+
+  let offset = 0;
+  while (scanned < maxRows) {
+    const take = Math.min(pageSize, maxRows - scanned);
+    const { data, error } = await supabase
+      .from('crm_directory')
+      .select(
+        'id, full_name, display_name, phone, phone_key, app_user_id, is_app_user, status, opt_out, pending_appointments_count, whatsapp_conversation_id',
+      )
+      .not('phone_key', 'is', null)
+      .eq('opt_out', false)
+      .neq('status', 'opt_out')
+      .order('id', { ascending: true })
+      .range(offset, offset + take - 1);
+    if (error) throw new Error(formatError(error));
+
+    const rows = (data ?? []) as Row[];
+    if (rows.length === 0) break;
+    offset += rows.length;
+
+    for (const entry of rows) {
+      scanned += 1;
+      if (entry.opt_out === true || entry.status === 'opt_out') {
+        skipped += 1;
+        continue;
+      }
+
+      const currentName =
+        (typeof entry.display_name === 'string' && entry.display_name.trim()
+          ? entry.display_name
+          : entry.full_name) as string | null;
+      const needsName = needsNameFill(currentName, entry.phone, entry.phone_key);
+      const needsAppUser = !entry.app_user_id;
+      // Candidatos: nombre malo/vacío o sin app_user_id (citas/estado se rellenan al match).
+      if (!needsName && !needsAppUser) {
+        skipped += 1;
+        continue;
+      }
+
+      const profile = resolveProfile(entry, index);
+      if (!profile) {
+        skipped += 1;
+        continue;
+      }
+
+      const patch: Record<string, unknown> = {};
+      const changes: FieldChange[] = [];
+
+      if (needsName && isUsableFirebaseName(profile.name)) {
+        const newName = (profile.name as string).trim();
+        if ((entry.full_name ?? '').trim() !== newName) {
+          patch.full_name = newName;
+          changes.push({ field: 'full_name', from: entry.full_name ?? null, to: newName });
+        }
+        const currentDisplay = (entry.display_name ?? '').trim();
+        if (!currentDisplay || needsNameFill(currentDisplay, entry.phone, entry.phone_key)) {
+          if (currentDisplay !== newName) {
+            patch.display_name = newName;
+            changes.push({
+              field: 'display_name',
+              from: entry.display_name ?? null,
+              to: newName,
+            });
+          }
+        }
+      }
+
+      if (needsAppUser && profile.appUserId) {
+        patch.app_user_id = profile.appUserId;
+        patch.is_app_user = true;
+        changes.push({
+          field: 'app_user_id',
+          from: entry.app_user_id ?? null,
+          to: profile.appUserId,
+        });
+        changes.push({
+          field: 'is_app_user',
+          from: entry.is_app_user ?? false,
+          to: true,
+        });
+      }
+
+      if (
+        entry.pending_appointments_count == null ||
+        (Number(entry.pending_appointments_count) === 0 && profile.count > 0)
+      ) {
+        if (Number(entry.pending_appointments_count ?? 0) !== profile.count) {
+          patch.pending_appointments_count = profile.count;
+          changes.push({
+            field: 'pending_appointments_count',
+            from: entry.pending_appointments_count ?? null,
+            to: profile.count,
+          });
+        }
+      }
+
+      const derivedStatus = deriveStatusFromLastIso(profile.lastIso, asOf);
+      if (
+        derivedStatus &&
+        entry.status !== derivedStatus &&
+        entry.status !== 'opt_out'
+      ) {
+        patch.status = derivedStatus;
+        changes.push({
+          field: 'status',
+          from: entry.status ?? null,
+          to: derivedStatus,
+        });
+      }
+
+      if (changes.length === 0) {
+        skipped += 1;
+        continue;
+      }
+
+      wouldUpdate += 1;
+      if (samples.length < SAMPLE_CAP) {
+        samples.push({
+          id: entry.id,
+          phone: entry.phone ?? null,
+          changes,
+        });
+      }
+
+      if (dryRun) continue;
+
+      try {
+        patch.updated_at = asOf.toISOString();
+        const { error: updErr } = await supabase
+          .from('crm_directory')
+          .update(patch)
+          .eq('id', entry.id);
+        if (updErr) throw new Error(formatError(updErr));
+
+        if (typeof patch.full_name === 'string' || typeof patch.display_name === 'string') {
+          const desired =
+            (typeof patch.display_name === 'string' ? patch.display_name : null) ??
+            (typeof patch.full_name === 'string' ? patch.full_name : null);
+          if (desired) {
+            await syncWaContactName(supabase, entry, desired);
+          }
+        }
+        updated += 1;
+      } catch (e) {
+        errors.push({
+          id: entry.id,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+
+    if (rows.length < take) break;
+  }
+
+  if (dryRun) {
+    return {
+      dryRun: true,
+      total: scanned,
+      wouldUpdate,
+      skipped,
+      indexSize: {
+        byPhoneKey: index.byPhoneKey.size,
+        byAppUser: index.byAppUser.size,
+        appointments: index.appointmentCount,
+      },
+      lookbackMonths,
+      samples,
+    };
+  }
+
+  return {
+    dryRun: false,
+    total: scanned,
+    updated,
+    wouldUpdate,
+    skipped,
+    errors,
+    indexSize: {
+      byPhoneKey: index.byPhoneKey.size,
+      byAppUser: index.byAppUser.size,
+      appointments: index.appointmentCount,
+    },
+    lookbackMonths,
+    samples,
+  };
+}
+
 async function applySuggestions(supabase: SupabaseClient, suggestionIds: string[]) {
   const ids = [...new Set(suggestionIds.filter((id) => typeof id === 'string' && id.trim() !== ''))];
   if (ids.length === 0) return { applied: 0, failed: 0, errors: [] as Row[] };
@@ -620,6 +1300,21 @@ Deno.serve(async (req) => {
         return jsonResponse(await runDirectoryAnalysis(supabase, body));
       case 'runDetection':
         return jsonResponse(await runDetection(supabase));
+      case 'backfillFromFirebase':
+        return jsonResponse(
+          await backfillFromFirebase(supabase, {
+            dryRun: body.dryRun !== false,
+            limit: body.limit,
+            lookbackMonths: body.lookbackMonths,
+          }),
+        );
+      case 'cleanupOpenIssues':
+        return jsonResponse(
+          await cleanupOpenIssues(supabase, {
+            dryRun: body.dryRun === true,
+            limit: body.limit,
+          }),
+        );
       default:
         return jsonResponse({ error: `Acción no soportada: ${action || '(vacía)'}` }, 400);
     }

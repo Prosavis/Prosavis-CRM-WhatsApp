@@ -2,7 +2,7 @@
  * reactivation-automations-monitor
  *
  * Panel de automatizaciones de reactivación WhatsApp.
- * Acciones: dashboard | history | setRecipientPreference | runDry | runReal | retryStep
+ * Acciones: dashboard | history | setRecipientPreference | suspendRecipient | runDry | runReal | retryStep
  */
 
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
@@ -95,6 +95,27 @@ Deno.serve(async (req) => {
         reactivationsEnabled,
         updatedBy,
       });
+      return jsonResponse({ success: true });
+    }
+
+    if (action === 'suspendRecipient') {
+      const directoryId = String(body.directoryId ?? '').trim();
+      if (!directoryId) {
+        return jsonResponse({ error: 'directoryId es requerido.' }, 400);
+      }
+      // Suspensión manual = opt-out global (no contactar) + salida de la secuencia,
+      // igual que el opt-out automático por "PARAR" del webhook.
+      const { error } = await supabase
+        .from('crm_directory')
+        .update({
+          opt_out: true,
+          status: 'opt_out',
+          active_sequence: 'NINGUNA',
+          sequence_step: 0,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', directoryId);
+      if (error) throw error;
       return jsonResponse({ success: true });
     }
 

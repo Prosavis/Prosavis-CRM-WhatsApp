@@ -10,28 +10,14 @@ import {
 import {
   REACTIVATION_SEQUENCE,
   REACTIVATION_STEPS,
+  computeNextSendAt,
   getStepDef,
   isPausedForHumanReply,
+  nextSchedulerRunAt,
   nextStepNumber,
   resolveDueStep,
 } from './reactivationCadence.ts';
 import { buildReactivationUniverse } from './reactivationRunner.ts';
-
-function nextSchedulerRunAt(now = new Date()): string {
-  // Cron diario 12:00 America/Bogota (UTC-5) → 17:00 UTC
-  const bogotaOffsetMs = -5 * 60 * 60 * 1000;
-  const bogotaNow = new Date(now.getTime() + bogotaOffsetMs);
-  const y = bogotaNow.getUTCFullYear();
-  const m = bogotaNow.getUTCMonth();
-  const d = bogotaNow.getUTCDate();
-  const hour = bogotaNow.getUTCHours();
-  let targetBogota = new Date(Date.UTC(y, m, d, 12, 0, 0));
-  if (hour >= 12) {
-    targetBogota = new Date(Date.UTC(y, m, d + 1, 12, 0, 0));
-  }
-  // Convert Bogota wall time back to UTC ISO
-  return new Date(targetBogota.getTime() - bogotaOffsetMs).toISOString();
-}
 
 export interface ReactivationDashboardRow {
   directoryId: string;
@@ -45,6 +31,8 @@ export interface ReactivationDashboardRow {
   templateName: string | null;
   lastContactAt: string | null;
   lastResponseAt: string | null;
+  /** Primer cron 12:00 CO en que toca el siguiente paso; null si no aplica. */
+  nextSendAt: string | null;
   status:
     | 'due'
     | 'waiting'
@@ -118,6 +106,11 @@ function mapClientRow(
 
   const next = dueStep ?? nextStepNumber(client.sequenceStep);
   const stepDef = next ? getStepDef(next) : null;
+  const nextSendAt = computeNextSendAt({
+    sequenceStep: client.sequenceStep,
+    lastContactAt: client.lastContactAt,
+    status,
+  });
 
   return {
     directoryId: client.id,
@@ -131,6 +124,7 @@ function mapClientRow(
     templateName: stepDef?.templateName ?? null,
     lastContactAt: client.lastContactAt,
     lastResponseAt: client.lastResponseAt,
+    nextSendAt,
     status,
     reactivationsEnabled: enabled,
     isCompany: client.isCompany,

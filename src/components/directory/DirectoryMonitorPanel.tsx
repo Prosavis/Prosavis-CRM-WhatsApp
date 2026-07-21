@@ -4,6 +4,7 @@ import CheckIcon from '@mui/icons-material/Check';
 import DoneAllIcon from '@mui/icons-material/DoneAll';
 import EditIcon from '@mui/icons-material/Edit';
 import PeopleAltIcon from '@mui/icons-material/PeopleAlt';
+import PhoneForwardedIcon from '@mui/icons-material/PhoneForwarded';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SearchIcon from '@mui/icons-material/Search';
 import VisibilityIcon from '@mui/icons-material/Visibility';
@@ -46,7 +47,10 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import DirectoryEditDialog from '@/components/directory/DirectoryEditDialog';
 import DirectoryEntryDrawer from '@/components/directory/DirectoryEntryDrawer';
-import { directoryMonitorService } from '@/services/directoryMonitorService';
+import {
+  directoryMonitorService,
+  type DirectoryFirebaseBackfillResult,
+} from '@/services/directoryMonitorService';
 import type {
   AISuggestionType,
   DirectoryAISuggestion,
@@ -178,6 +182,11 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
   const [selectedIssueIds, setSelectedIssueIds] = useState<Set<string>>(new Set());
   const [bulkApplying, setBulkApplying] = useState(false);
 
+  // Backfill determinista desde citas Firebase (dry-run → confirm → apply).
+  const [backfillPreview, setBackfillPreview] = useState<DirectoryFirebaseBackfillResult | null>(null);
+  const [backfillLoading, setBackfillLoading] = useState(false);
+  const [backfillApplying, setBackfillApplying] = useState(false);
+
   const notify = (message: string, severity: 'success' | 'error') =>
     setSnackbar({ open: true, message, severity });
 
@@ -253,6 +262,45 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
       notify(message, 'error');
     } finally {
       setScanning(false);
+    }
+  };
+
+  const handleBackfillDryRun = async () => {
+    setBackfillLoading(true);
+    setError(null);
+    try {
+      const result = await directoryMonitorService.backfillDirectoryFromFirebase({ dryRun: true });
+      setBackfillPreview(result);
+      if (result.wouldUpdate === 0) {
+        notify('Dry-run: no hay filas para enriquecer desde Firebase', 'success');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'No se pudo ejecutar el dry-run de backfill';
+      setError(message);
+      notify(message, 'error');
+    } finally {
+      setBackfillLoading(false);
+    }
+  };
+
+  const handleBackfillApply = async () => {
+    setBackfillApplying(true);
+    try {
+      const result = await directoryMonitorService.backfillDirectoryFromFirebase({ dryRun: false });
+      const failed = result.errors?.length ?? 0;
+      notify(
+        failed > 0
+          ? `Backfill: ${result.updated ?? 0} actualizada(s), ${failed} error(es)`
+          : `Backfill aplicado: ${result.updated ?? 0} fila(s) actualizada(s)`,
+        failed > 0 ? 'error' : 'success',
+      );
+      setBackfillPreview(null);
+      refreshAll();
+      onDirectoryChanged?.();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'No se pudo aplicar el backfill', 'error');
+    } finally {
+      setBackfillApplying(false);
     }
   };
 
@@ -469,9 +517,36 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-          <Button startIcon={<RefreshIcon />} size="small" onClick={refreshAll} disabled={analyzing || scanning}>
+          <Button
+            startIcon={<RefreshIcon />}
+            size="small"
+            onClick={refreshAll}
+            disabled={analyzing || scanning || backfillLoading || backfillApplying}
+          >
             Actualizar
           </Button>
+          <Stack alignItems={{ xs: 'flex-start', sm: 'flex-end' }} spacing={0.25}>
+            <Tooltip title="Cruza por teléfono con citas de Firebase (sin IA). Primero muestra un dry-run.">
+              <span>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="primary"
+                  startIcon={
+                    backfillLoading ? (
+                      <CircularProgress size={14} color="inherit" />
+                    ) : (
+                      <PhoneForwardedIcon />
+                    )
+                  }
+                  onClick={handleBackfillDryRun}
+                  disabled={scanning || analyzing || backfillLoading || backfillApplying}
+                >
+                  {backfillLoading ? 'Calculando…' : 'Backfill por teléfono'}
+                </Button>
+              </span>
+            </Tooltip>
+          </Stack>
           <Stack alignItems={{ xs: 'flex-start', sm: 'flex-end' }} spacing={0.25}>
             <Tooltip title="Detecta inconsistencias de calidad (teléfono, emojis, nombres, etc.). No modifica contactos.">
               <span>
@@ -480,7 +555,7 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
                   variant="outlined"
                   startIcon={scanning ? <CircularProgress size={14} color="inherit" /> : <SearchIcon />}
                   onClick={handleScanDirectory}
-                  disabled={scanning || analyzing}
+                  disabled={scanning || analyzing || backfillLoading || backfillApplying}
                 >
                   {scanning ? 'Escaneando…' : 'Escanear directorio'}
                 </Button>
@@ -499,7 +574,7 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
               color="secondary"
               startIcon={analyzing ? <CircularProgress size={14} color="inherit" /> : <AutoAwesomeIcon />}
               onClick={handleAnalyzeAll}
-              disabled={analyzing || scanning}
+              disabled={analyzing || scanning || backfillLoading || backfillApplying}
             >
               {analyzing ? 'Analizando…' : 'Analizar toda la tabla con IA'}
             </Button>
@@ -900,6 +975,109 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
           </Box>
         </Paper>
       )}
+
+      <Dialog
+        open={!!backfillPreview}
+        onClose={backfillApplying ? undefined : () => setBackfillPreview(null)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <PhoneForwardedIcon color="primary" fontSize="small" />
+            <span>Backfill por teléfono (dry-run)</span>
+          </Stack>
+        </DialogTitle>
+        <DialogContent dividers>
+          {backfillPreview && (
+            <Stack spacing={2}>
+              <Alert severity="info">
+                Cruce determinista con citas Firebase. Política fill-only: no pisa nombres buenos ni
+                contactos en opt-out. Nada se escribe hasta que confirmes.
+              </Alert>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                <Chip label={`Escaneadas: ${backfillPreview.total}`} size="small" />
+                <Chip
+                  label={`Actualizarían: ${backfillPreview.wouldUpdate}`}
+                  size="small"
+                  color={backfillPreview.wouldUpdate > 0 ? 'warning' : 'default'}
+                />
+                <Chip label={`Omitidas: ${backfillPreview.skipped}`} size="small" variant="outlined" />
+                {backfillPreview.indexSize && (
+                  <Chip
+                    label={`Citas índice: ${backfillPreview.indexSize.appointments}`}
+                    size="small"
+                    variant="outlined"
+                  />
+                )}
+                {backfillPreview.lookbackMonths != null && (
+                  <Chip
+                    label={`Ventana: ${backfillPreview.lookbackMonths} meses`}
+                    size="small"
+                    variant="outlined"
+                  />
+                )}
+              </Stack>
+              {backfillPreview.samples.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  No hay cambios propuestos.
+                </Typography>
+              ) : (
+                <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 360 }}>
+                  <Table size="small" stickyHeader>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Teléfono</TableCell>
+                        <TableCell>Cambios</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {backfillPreview.samples.map((sample) => (
+                        <TableRow key={sample.id}>
+                          <TableCell sx={{ fontFamily: 'monospace', fontSize: 13, whiteSpace: 'nowrap' }}>
+                            {sample.phone || '—'}
+                          </TableCell>
+                          <TableCell>
+                            <Stack spacing={0.5}>
+                              {sample.changes.map((change) => (
+                                <Typography key={`${sample.id}-${change.field}`} variant="caption">
+                                  <strong>{change.field}</strong>:{' '}
+                                  {String(change.from ?? '∅')} → {String(change.to ?? '∅')}
+                                </Typography>
+                              ))}
+                            </Stack>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              )}
+              {backfillPreview.wouldUpdate > backfillPreview.samples.length && (
+                <Typography variant="caption" color="text.secondary">
+                  Mostrando {backfillPreview.samples.length} de {backfillPreview.wouldUpdate} filas.
+                </Typography>
+              )}
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBackfillPreview(null)} disabled={backfillApplying}>
+            Cancelar
+          </Button>
+          <Button
+            variant="contained"
+            color="success"
+            startIcon={
+              backfillApplying ? <CircularProgress size={16} color="inherit" /> : <CheckIcon />
+            }
+            onClick={handleBackfillApply}
+            disabled={backfillApplying || !backfillPreview || backfillPreview.wouldUpdate === 0}
+          >
+            Aplicar {backfillPreview?.wouldUpdate ?? 0} cambio(s)
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={!!previewSuggestion} onClose={applyLoading ? undefined : closePreview} maxWidth="sm" fullWidth>
         <DialogTitle>

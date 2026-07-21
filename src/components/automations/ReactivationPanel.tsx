@@ -30,6 +30,7 @@ import {
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined';
 import SendIcon from '@mui/icons-material/Send';
+import BlockIcon from '@mui/icons-material/Block';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
@@ -44,6 +45,7 @@ import {
   runReactivationDryRun,
   runReactivationReal,
   setRecipientReactivationPreference,
+  suspendReactivationRecipient,
   retryReactivationStep,
 } from '@/services/reactivationAutomationsService';
 import {
@@ -52,6 +54,7 @@ import {
   REACTIVATION_STATUS_COLOR,
   REACTIVATION_STATUS_HINT,
   REACTIVATION_STATUS_LABEL,
+  formatNextSendAt,
   formatReactivationDate,
   type ReactivationDashboardRow,
 } from '@/types/reactivationAutomations';
@@ -165,6 +168,8 @@ const ReactivationPanel: React.FC<ReactivationPanelProps> = ({ onOpenHistory }) 
   const { data, isLoading, isFetching, error, refetch } = useReactivationAutomationsDashboard();
   const [toggleLoadingId, setToggleLoadingId] = useState<string | null>(null);
   const [retryLoadingId, setRetryLoadingId] = useState<string | null>(null);
+  const [suspendLoadingId, setSuspendLoadingId] = useState<string | null>(null);
+  const [suspendRow, setSuspendRow] = useState<ReactivationDashboardRow | null>(null);
   const [dryRunBusy, setDryRunBusy] = useState(false);
   const [realBusy, setRealBusy] = useState(false);
   const [actionMsg, setActionMsg] = useState<{ text: string; severity: 'success' | 'warning' | 'error' } | null>(
@@ -174,6 +179,11 @@ const ReactivationPanel: React.FC<ReactivationPanelProps> = ({ onOpenHistory }) 
   const [detailRow, setDetailRow] = useState<ReactivationDashboardRow | null>(null);
 
   const countdown = useCountdown(data?.meta.nextSchedulerRunAt);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   const rows = useMemo(() => {
     if (!data) return [] as ReactivationDashboardRow[];
@@ -226,6 +236,26 @@ const ReactivationPanel: React.FC<ReactivationPanelProps> = ({ onOpenHistory }) 
       });
     } finally {
       setRetryLoadingId(null);
+    }
+  };
+
+  const handleSuspend = async (row: ReactivationDashboardRow) => {
+    setSuspendLoadingId(row.directoryId);
+    try {
+      await suspendReactivationRecipient({ directoryId: row.directoryId });
+      setActionMsg({
+        text: `${row.recipientName} suspendido: opt-out activado y fuera de la secuencia. No se le enviarán más reactivaciones.`,
+        severity: 'success',
+      });
+      await queryClient.invalidateQueries({ queryKey: REACTIVATION_AUTOMATIONS_QUERY_KEY });
+    } catch (err) {
+      setActionMsg({
+        text: err instanceof Error ? err.message : 'Error al suspender',
+        severity: 'error',
+      });
+    } finally {
+      setSuspendLoadingId(null);
+      setSuspendRow(null);
     }
   };
 
@@ -631,8 +661,10 @@ const ReactivationPanel: React.FC<ReactivationPanelProps> = ({ onOpenHistory }) 
                 Cola e inscritos ({rows.length})
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Contactos debidos hoy e inscritos en la secuencia. Usa el switch para pausar a una
-                persona; «Enviar paso» fuerza su siguiente mensaje.
+                Contactos debidos hoy e inscritos en la secuencia. El switch <strong>pausa</strong>{' '}
+                temporalmente; «Enviar paso» fuerza su siguiente mensaje;{' '}
+                <strong>«Suspender»</strong> marca opt-out permanente (no contactar) y lo saca de la
+                secuencia.
               </Typography>
             </Box>
           </Stack>
@@ -663,6 +695,7 @@ const ReactivationPanel: React.FC<ReactivationPanelProps> = ({ onOpenHistory }) 
                   <TableCell>Paso</TableCell>
                   <TableCell>Estado</TableCell>
                   <TableCell>Último contacto</TableCell>
+                  <TableCell>Próximo envío</TableCell>
                   <TableCell align="center">Activo</TableCell>
                   <TableCell align="right">Acciones</TableCell>
                 </TableRow>
@@ -719,6 +752,11 @@ const ReactivationPanel: React.FC<ReactivationPanelProps> = ({ onOpenHistory }) 
                       </Tooltip>
                     </TableCell>
                     <TableCell>{formatReactivationDate(row.lastContactAt)}</TableCell>
+                    <TableCell>
+                      <Typography variant="body2" sx={{ whiteSpace: 'nowrap' }}>
+                        {formatNextSendAt(row.nextSendAt, nowMs)}
+                      </Typography>
+                    </TableCell>
                     <TableCell align="center">
                       <Switch
                         size="small"
@@ -744,6 +782,28 @@ const ReactivationPanel: React.FC<ReactivationPanelProps> = ({ onOpenHistory }) 
                         >
                           {retryLoadingId === row.directoryId ? '…' : 'Enviar paso'}
                         </Button>
+                        <Tooltip title="Suspender: marca opt-out (no contactar) y saca de la secuencia">
+                          <span>
+                            <Button
+                              size="small"
+                              color="error"
+                              startIcon={
+                                suspendLoadingId === row.directoryId ? (
+                                  <CircularProgress size={12} color="inherit" />
+                                ) : (
+                                  <BlockIcon fontSize="small" />
+                                )
+                              }
+                              disabled={
+                                suspendLoadingId === row.directoryId || row.status === 'opt_out'
+                              }
+                              onClick={() => setSuspendRow(row)}
+                              sx={{ textTransform: 'none' }}
+                            >
+                              Suspender
+                            </Button>
+                          </span>
+                        </Tooltip>
                       </Stack>
                     </TableCell>
                   </TableRow>
@@ -792,11 +852,59 @@ const ReactivationPanel: React.FC<ReactivationPanelProps> = ({ onOpenHistory }) 
         </DialogActions>
       </Dialog>
 
+      <Dialog
+        open={Boolean(suspendRow)}
+        onClose={() => suspendLoadingId === null && setSuspendRow(null)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Suspender contacto</DialogTitle>
+        <DialogContent>
+          <DialogContentText component="div">
+            Vas a suspender a <strong>{suspendRow?.recipientName}</strong>
+            {suspendRow?.phone ? ` (${suspendRow.phone})` : ''}.
+            <Box component="ul" sx={{ mt: 1.5, pl: 2.5, mb: 0 }}>
+              <li>Se marca <strong>opt-out (no contactar)</strong> en el directorio.</li>
+              <li>Sale de la secuencia de reactivación y no recibirá más mensajes automáticos.</li>
+              <li>Reversible: puedes quitar el opt-out desde la ficha del contacto.</li>
+            </Box>
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setSuspendRow(null)}
+            disabled={suspendLoadingId !== null}
+            sx={{ textTransform: 'none' }}
+          >
+            Cancelar
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            disabled={suspendLoadingId !== null}
+            startIcon={
+              suspendLoadingId !== null ? (
+                <CircularProgress size={16} color="inherit" />
+              ) : (
+                <BlockIcon />
+              )
+            }
+            onClick={() => suspendRow && void handleSuspend(suspendRow)}
+            sx={{ textTransform: 'none' }}
+          >
+            Suspender
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <ReactivationDetailDialog
         row={detailRow}
         open={Boolean(detailRow)}
         onClose={() => setDetailRow(null)}
         onRetrySuccess={() => {
+          void queryClient.invalidateQueries({ queryKey: REACTIVATION_AUTOMATIONS_QUERY_KEY });
+        }}
+        onSuspendSuccess={() => {
           void queryClient.invalidateQueries({ queryKey: REACTIVATION_AUTOMATIONS_QUERY_KEY });
         }}
       />
