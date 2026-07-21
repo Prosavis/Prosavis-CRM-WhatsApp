@@ -297,7 +297,7 @@ const OutboundPerformanceSection: React.FC<OutboundPerformanceSectionProps> = ({
     <Box>
       <MetricsSection
         title="Rendimiento outbound"
-        subtitle="Envíos WhatsApp, tasa de respuesta y desglose por campaña / plantilla."
+        subtitle={`Envíos WhatsApp, tasa de respuesta y desglose por campaña / plantilla. Últimos ${days} días (mismo Periodo que Clientes recibidos).`}
         onDownload={handleDownloadTables}
         downloadLabel="Descargar rendimiento Excel"
         defaultExpanded

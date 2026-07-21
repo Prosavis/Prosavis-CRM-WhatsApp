@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
-  Box,
   Button,
   CircularProgress,
   Dialog,
@@ -11,19 +10,22 @@ import {
   DialogTitle,
   FormControl,
   FormControlLabel,
+  IconButton,
   InputLabel,
+  ListItemIcon,
+  ListItemText,
+  Menu,
   MenuItem,
   Radio,
   RadioGroup,
   Select,
   Stack,
   TextField,
-  Tooltip,
   Typography,
 } from '@mui/material';
 import {
-  WhatsApp as WhatsAppIcon,
   DeleteSweep as DeleteSweepIcon,
+  MoreVert as MoreVertIcon,
 } from '@mui/icons-material';
 import { WHATSAPP_CLOUD_PRODUCTION } from '@/constants/whatsappCloudAccounts';
 import {
@@ -64,6 +66,7 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
   const [purgeTypedPhrase, setPurgeTypedPhrase] = useState('');
   const [purgeLoading, setPurgeLoading] = useState(false);
   const [purgeError, setPurgeError] = useState<string | null>(null);
+  const [advancedMenuAnchor, setAdvancedMenuAnchor] = useState<null | HTMLElement>(null);
 
   const loadMetrics = useCallback(async () => {
     setMetricsLoading(true);
@@ -116,63 +119,71 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
     void loadLogs();
   }, [loadMetrics, loadLogs]);
 
+  const periodSelect = (
+    <FormControl size="small" sx={{ minWidth: 130 }}>
+      <InputLabel>Periodo</InputLabel>
+      <Select
+        value={days}
+        label="Periodo"
+        onChange={(e) => setDays(Number(e.target.value))}
+      >
+        <MenuItem value={7}>7 días</MenuItem>
+        <MenuItem value={14}>14 días</MenuItem>
+        <MenuItem value={30}>30 días</MenuItem>
+        <MenuItem value={60}>60 días</MenuItem>
+        <MenuItem value={90}>90 días</MenuItem>
+      </Select>
+    </FormControl>
+  );
+
   return (
     <div data-tour="whatsapp-tab-metrics">
-      <Box
-        data-tour="whatsapp-metrics-toolbar"
-        sx={{
-          mb: 3,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: 1.5,
-        }}
+      <Stack
+        direction="row"
+        alignItems="center"
+        justifyContent="space-between"
+        spacing={1}
+        sx={{ mb: 1.5, minHeight: 28 }}
       >
-        <Alert severity="info" icon={<WhatsAppIcon />} sx={{ flex: '1 1 220px', mr: { md: 2 } }}>
-          Solo administradores · ProSavis Limpieza
-        </Alert>
-        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-          <Tooltip title="Borra filas en whatsapp_message_log. No modifica el directorio ni conversaciones.">
-            <Button
-              variant="outlined"
-              color="warning"
-              size="small"
-              startIcon={<DeleteSweepIcon />}
-              onClick={() => {
-                setPurgeError(null);
-                setPurgeTypedPhrase('');
-                setPurgeScope('line');
-                setPurgeDialogOpen(true);
-              }}
-            >
-              Limpiar registro
-            </Button>
-          </Tooltip>
-          <FormControl size="small" sx={{ minWidth: 130 }}>
-            <InputLabel>Periodo</InputLabel>
-            <Select
-              value={days}
-              label="Periodo"
-              onChange={(e) => setDays(Number(e.target.value))}
-            >
-              <MenuItem value={7}>7 días</MenuItem>
-              <MenuItem value={14}>14 días</MenuItem>
-              <MenuItem value={30}>30 días</MenuItem>
-              <MenuItem value={60}>60 días</MenuItem>
-              <MenuItem value={90}>90 días</MenuItem>
-            </Select>
-          </FormControl>
-        </Stack>
-      </Box>
-
-      {metrics?.dataQuality && !metricsLoading && (
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
-          Filas leídas · log: {metrics.dataQuality.messageLogRows.toLocaleString('es-CO')} ·
-          directorio: {metrics.dataQuality.directoryRows.toLocaleString('es-CO')} · citas
-          COMPLETED: {metrics.dataQuality.appointmentRows.toLocaleString('es-CO')}
+        <Typography variant="caption" color="text.secondary">
+          {metrics?.dataQuality && !metricsLoading
+            ? `Filas leídas · log: ${metrics.dataQuality.messageLogRows.toLocaleString('es-CO')} · directorio: ${metrics.dataQuality.directoryRows.toLocaleString('es-CO')} · citas COMPLETED: ${metrics.dataQuality.appointmentRows.toLocaleString('es-CO')}`
+            : '\u00a0'}
         </Typography>
-      )}
+        <IconButton
+          size="small"
+          aria-label="Opciones avanzadas de métricas"
+          onClick={(e) => setAdvancedMenuAnchor(e.currentTarget)}
+          sx={{ color: 'text.secondary' }}
+        >
+          <MoreVertIcon fontSize="small" />
+        </IconButton>
+        <Menu
+          anchorEl={advancedMenuAnchor}
+          open={Boolean(advancedMenuAnchor)}
+          onClose={() => setAdvancedMenuAnchor(null)}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+          transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+        >
+          <MenuItem
+            onClick={() => {
+              setAdvancedMenuAnchor(null);
+              setPurgeError(null);
+              setPurgeTypedPhrase('');
+              setPurgeScope('line');
+              setPurgeDialogOpen(true);
+            }}
+          >
+            <ListItemIcon>
+              <DeleteSweepIcon fontSize="small" color="warning" />
+            </ListItemIcon>
+            <ListItemText
+              primary="Limpiar registro de mensajes"
+              secondary="Borra filas de whatsapp_message_log (avanzado)"
+            />
+          </MenuItem>
+        </Menu>
+      </Stack>
 
       <Dialog
         open={purgeDialogOpen}
@@ -278,6 +289,8 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
       <InboundActivitySection
         series={metrics?.inboundTimeseries}
         loading={metricsLoading}
+        days={days}
+        periodControl={periodSelect}
       />
 
       <CompletedServicesSection

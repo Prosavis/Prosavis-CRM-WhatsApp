@@ -48,6 +48,10 @@ import MetricsSection from './MetricsSection';
 interface InboundActivitySectionProps {
   series?: MetricsGranularSeries<InboundTimeseriesPoint>;
   loading: boolean;
+  /** Ventana de días del filtro Periodo (solo para subtítulo / Excel). */
+  days?: number;
+  /** Control Periodo (compartido con outbound). */
+  periodControl?: React.ReactNode;
 }
 
 type InboundViewMode = 'clients' | 'messages';
@@ -90,6 +94,8 @@ const InboundTooltip: React.FC<InboundTooltipProps> = ({ active, label, payload,
 const InboundActivitySection: React.FC<InboundActivitySectionProps> = ({
   series,
   loading,
+  days,
+  periodControl,
 }) => {
   const theme = useTheme();
   const [granularity, setGranularity] = useState<MetricsGranularity>('day');
@@ -255,10 +261,20 @@ const InboundActivitySection: React.FC<InboundActivitySectionProps> = ({
     </ToggleButtonGroup>
   );
 
+  const periodHint =
+    typeof days === 'number' ? ` Últimos ${days} días.` : '';
+
   const subtitle =
     viewMode === 'messages'
-      ? 'Total de mensajes inbound en el periodo (no personas únicas). Fuente: whatsapp_message_log (inbound).'
-      : 'Personas únicas que escribieron en el periodo. Nuevo = su primer ingreso al CRM (first_contact_at) cae dentro del periodo. Existente = ya tenía registro en el CRM antes de escribir. Fuente: whatsapp_message_log (inbound) + crm_directory.';
+      ? `Total de mensajes inbound en el periodo (no personas únicas).${periodHint} Fuente: whatsapp_message_log (inbound).`
+      : `Personas únicas que escribieron en el periodo.${periodHint} Nuevo = su primer ingreso al CRM (first_contact_at) cae dentro del periodo. Existente = ya tenía registro en el CRM antes de escribir. Fuente: whatsapp_message_log (inbound) + crm_directory.`;
+
+  const toolbar = (
+    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+      {periodControl}
+      {viewToggle}
+    </Stack>
+  );
 
   return (
     <MetricsSection
@@ -266,7 +282,7 @@ const InboundActivitySection: React.FC<InboundActivitySectionProps> = ({
       subtitle={subtitle}
       granularity={granularity}
       onGranularityChange={setGranularity}
-      toolbarExtra={viewToggle}
+      toolbarExtra={toolbar}
       onDownload={handleDownload}
       downloadLabel={
         viewMode === 'messages' ? 'Descargar mensajes Excel' : 'Descargar clientes Excel'

@@ -107,7 +107,8 @@ const CARDS: Array<{
     color: '#b71c1c',
     bg: '#ffcdd2',
     icon: <BlockOutlinedIcon />,
-    base: 'clients',
+    // Incluye no-clientes (equipo, leads, etc.): % sobre audiencia, no sobre clientes.
+    base: 'total',
     pick: (s) => s.blacklist ?? 0,
   },
   {
