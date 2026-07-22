@@ -124,6 +124,8 @@ export interface ClientSegmentsMetrics {
   active: number;
   /** Clientes no blacklisted con última cita hace más de 30 días (reactivar). */
   inactive: number;
+  /** Contactos con tag Favoritos (marcado manual). */
+  favorites: number;
   /** Clientes reales en lista negra (Decline/🚫/Bloqueado o whatsapp_blocklist). */
   blacklist: number;
 }
@@ -137,6 +139,8 @@ export interface DirectoryClientMetricRow {
   isCompany: boolean;
   isRecurring: boolean;
   isAgendado: boolean;
+  /** Tag Favoritos (marcado manual). */
+  isFavorite: boolean;
   /** Es cliente real (tiene al menos una cita en Firebase). */
   isClient: boolean;
   /** Última cita dentro de los últimos 30 días (y no blacklisted). */

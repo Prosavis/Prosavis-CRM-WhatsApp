@@ -3,6 +3,7 @@ import { requireCrmAdmin } from '../_shared/supabase.ts';
 import {
   hasAgendadoTag,
   hasBlacklistTag,
+  hasFavoritosTag,
   isCompanyClient,
   isRecurringClient,
   isTestContact,
@@ -717,6 +718,7 @@ Deno.serve(async (req) => {
     let recurring = 0;
     let active = 0;
     let inactive = 0;
+    let favorites = 0;
     let blacklist = 0;
     const directoryClients = activeEntries.map((e) => {
       const tags = asTagArray(e.tags);
@@ -724,6 +726,7 @@ Deno.serve(async (req) => {
       const isCompany = isCompanyClient(classifiable);
       const isRecurring = isRecurringClient(classifiable);
       const isAgendado = hasAgendadoTag(classifiable);
+      const isFavorite = hasFavoritosTag(classifiable);
       const taggedBlacklist = hasBlacklistTag(classifiable);
       const blockedInInbox = isOnWhatsappBlocklist(e);
       const isBlacklisted = taggedBlacklist || blockedInInbox;
@@ -742,6 +745,7 @@ Deno.serve(async (req) => {
       if (isClient && isRecurring) recurring += 1;
       if (isActive) active += 1;
       if (isInactive) inactive += 1;
+      if (isFavorite) favorites += 1;
       if (isBlacklisted) blacklist += 1;
 
       return {
@@ -753,6 +757,7 @@ Deno.serve(async (req) => {
         isCompany,
         isRecurring,
         isAgendado,
+        isFavorite,
         isClient,
         isActive,
         isBlacklisted,
@@ -768,6 +773,7 @@ Deno.serve(async (req) => {
       recurring,
       active,
       inactive,
+      favorites,
       blacklist,
     };
 

@@ -4,12 +4,15 @@
  */
 
 export const EMPRESAS_TAG_NAME = 'Empresas';
+export const FAVORITOS_TAG_NAME = 'Favoritos';
 
 const EMPRESAS_TOKENS = new Set(['empresas', 'empresa', 'company']);
 /** Tags que marcan lista negra: Decline, 🚫, Bloqueado. */
 const BLACKLIST_TOKENS = new Set(['decline', '🚫', 'bloqueado']);
 /** Tag TEST = admins/ingenieros; excluir de métricas. */
 const TEST_TOKENS = new Set(['test']);
+/** Tag Favoritos = acceso rápido preferido en métricas. */
+const FAVORITOS_TOKENS = new Set(['favoritos', 'favorito']);
 
 export const DIRECTORY_LEGACY_LABELS: Record<string, string> = {
   company: 'Empresa',
@@ -162,6 +165,11 @@ export function hasBlacklistTag(client: ClassifiableClient): boolean {
 /** Contacto de prueba (admins/devs); excluir de métricas. */
 export function isTestContact(client: ClassifiableClient): boolean {
   return hasExactToken(client, TEST_TOKENS);
+}
+
+/** Tag Favoritos / Favorito en tags o classification. */
+export function hasFavoritosTag(client: ClassifiableClient): boolean {
+  return hasExactToken(client, FAVORITOS_TOKENS);
 }
 
 export function getClassificationLabel(classification?: string | null): string {

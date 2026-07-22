@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   Box,
   Button,
@@ -6,6 +6,7 @@ import {
   CardContent,
   CircularProgress,
   Grid,
+  IconButton,
   Stack,
   Table,
   TableBody,
@@ -14,6 +15,7 @@ import {
   TableHead,
   TablePagination,
   TableRow,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import PeopleAltOutlinedIcon from '@mui/icons-material/PeopleAltOutlined';
@@ -23,8 +25,11 @@ import EventAvailableOutlinedIcon from '@mui/icons-material/EventAvailableOutlin
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import NotificationsActiveOutlinedIcon from '@mui/icons-material/NotificationsActiveOutlined';
 import BlockOutlinedIcon from '@mui/icons-material/BlockOutlined';
+import StarOutlinedIcon from '@mui/icons-material/StarOutlined';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
-import { useSearchParams } from 'react-router-dom';
+import InboxOutlinedIcon from '@mui/icons-material/InboxOutlined';
+import WhatsAppIcon from '@mui/icons-material/WhatsApp';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import type {
   ClientSegmentsMetrics,
   DirectoryClientMetricRow,
@@ -37,6 +42,8 @@ import {
   excelGeneratedAtLine,
 } from './utils/exportMetricsExcel';
 import MetricsSection from './MetricsSection';
+import { openWhatsAppInbox } from '@/utils/openWhatsAppInbox';
+import { whatsappDesktopUrl } from '@/utils/whatsappDesktopUrl';
 
 export type ClientSegmentKey =
   | 'potential'
@@ -45,6 +52,7 @@ export type ClientSegmentKey =
   | 'recurring'
   | 'active'
   | 'inactive'
+  | 'favorites'
   | 'blacklist';
 
 interface ClientSegmentsSectionProps {
@@ -102,6 +110,16 @@ const CARDS: Array<{
     pick: (s) => s.inactive,
   },
   {
+    key: 'favorites',
+    label: 'Clientes favoritos',
+    color: '#f9a825',
+    bg: '#fff8e1',
+    icon: <StarOutlinedIcon />,
+    // Tag manual; % sobre audiencia (no exige cita Firebase).
+    base: 'total',
+    pick: (s) => s.favorites ?? 0,
+  },
+  {
     key: 'blacklist',
     label: 'Lista negra',
     color: '#b71c1c',
@@ -145,6 +163,8 @@ function matchesSegment(client: DirectoryClientMetricRow, key: ClientSegmentKey)
       return client.isActive && !client.isBlacklisted;
     case 'inactive':
       return client.isClient && !client.isActive && !client.isBlacklisted;
+    case 'favorites':
+      return client.isFavorite === true;
     case 'blacklist':
       return client.isBlacklisted;
     default: {
@@ -187,8 +207,10 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
   loading,
   onReload,
 }) => {
+  const navigate = useNavigate();
   const [, setSearchParams] = useSearchParams();
   const [selected, setSelected] = React.useState<ClientSegmentKey | null>(null);
+  const [inboxBusyId, setInboxBusyId] = React.useState<string | null>(null);
   const [detailOpen, setDetailOpen] = React.useState(false);
   const [detailRow, setDetailRow] = React.useState<DirectoryClientMetricRow | null>(null);
   const [page, setPage] = React.useState(0);
@@ -238,11 +260,29 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
     selected === 'clients' ||
     selected === 'active' ||
     selected === 'inactive' ||
+    selected === 'favorites' ||
     selected === 'company' ||
     selected === 'recurring' ||
     selected === 'blacklist';
 
   const showReasonColumn = selected === 'blacklist';
+  const showActionsColumn = selected === 'favorites';
+
+  const openFavoriteInbox = useCallback(
+    async (client: DirectoryClientMetricRow) => {
+      setInboxBusyId(client.id);
+      try {
+        await openWhatsAppInbox({
+          navigate,
+          phone: client.phone,
+          name: client.name,
+        });
+      } finally {
+        setInboxBusyId(null);
+      }
+    },
+    [navigate],
+  );
 
   const handleSelect = (key: ClientSegmentKey) => {
     setSelected((prev) => {
@@ -283,6 +323,7 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
       c.lastAppointmentDate ?? null,
       c.isCompany ? 'Sí' : 'No',
       c.isRecurring ? 'Sí' : 'No',
+      c.isFavorite ? 'Sí' : 'No',
     ]);
 
     void downloadWorkbook(`clientes-${selected ?? 'todos'}.xlsx`, (wb) => {
@@ -313,6 +354,7 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
           { header: 'Última cita', type: 'date' },
           { header: 'Empresa', type: 'text' },
           { header: 'Recurrente', type: 'text' },
+          { header: 'Favorito', type: 'text' },
         ],
         rows: clientRows,
       });
@@ -320,12 +362,15 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
   };
 
   const colSpan =
-    3 + (showAppointmentColumn ? 1 : 0) + (showReasonColumn ? 1 : 0);
+    3 +
+    (showAppointmentColumn ? 1 : 0) +
+    (showReasonColumn ? 1 : 0) +
+    (showActionsColumn ? 1 : 0);
 
   return (
     <MetricsSection
       title="Clientes"
-      subtitle="Público de interés = directorio activo sin TEST/opt-out. Cliente = agendó ≥1 vez (Firebase, 24 meses). Activo = última cita ≤ 30 días; inactivo = > 30 días. Lista negra = Decline/🚫/Bloqueado o bloqueado en inbox — incluye no-clientes; no cuenta en activos/inactivos. Clic en un KPI para el detalle; edita tags en la columna Tags."
+      subtitle="Público de interés = directorio activo sin TEST/opt-out. Cliente = agendó ≥1 vez (Firebase, 24 meses). Activo = última cita ≤ 30 días; inactivo = > 30 días. Favoritos = tag Favoritos (manual). Lista negra = Decline/🚫/Bloqueado o bloqueado en inbox — incluye no-clientes; no cuenta en activos/inactivos. Clic en un KPI para el detalle; edita tags en la columna Tags."
       expanded={detailOpen}
       onExpandedChange={setDetailOpen}
       onDownload={handleDownload}
@@ -384,12 +429,15 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
                     {showAppointmentColumn && <TableCell>Última cita</TableCell>}
                     {showReasonColumn && <TableCell>Motivo</TableCell>}
                     <TableCell>Tags</TableCell>
+                    {showActionsColumn && <TableCell align="right">Acciones</TableCell>}
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {pageRows.map((client) => {
                     const days = daysSince(client.lastAppointmentDate);
                     const rowClickable = selected === 'blacklist';
+                    const desktopUrl = whatsappDesktopUrl(client.phone);
+                    const inboxBusy = inboxBusyId === client.id;
                     return (
                       <TableRow
                         key={client.id}
@@ -438,6 +486,44 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
                             onSaved={() => onReload?.()}
                           />
                         </TableCell>
+                        {showActionsColumn && (
+                          <TableCell align="right" onClick={(e) => e.stopPropagation()}>
+                            <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                              <Tooltip title="Abrir en Inbox CRM">
+                                <span>
+                                  <IconButton
+                                    size="small"
+                                    color="primary"
+                                    disabled={!client.phone || inboxBusy}
+                                    onClick={() => void openFavoriteInbox(client)}
+                                    aria-label={`Abrir ${client.name || 'contacto'} en Inbox`}
+                                  >
+                                    {inboxBusy ? (
+                                      <CircularProgress size={16} color="inherit" />
+                                    ) : (
+                                      <InboxOutlinedIcon fontSize="small" />
+                                    )}
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+                              <Tooltip title="Abrir en WhatsApp Desktop">
+                                <span>
+                                  <IconButton
+                                    size="small"
+                                    disabled={!desktopUrl}
+                                    aria-label={`Abrir ${client.name || 'contacto'} en WhatsApp`}
+                                    sx={{ color: desktopUrl ? '#25D366' : undefined }}
+                                    onClick={() => {
+                                      if (desktopUrl) window.location.href = desktopUrl;
+                                    }}
+                                  >
+                                    <WhatsAppIcon fontSize="small" />
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+                            </Stack>
+                          </TableCell>
+                        )}
                       </TableRow>
                     );
                   })}

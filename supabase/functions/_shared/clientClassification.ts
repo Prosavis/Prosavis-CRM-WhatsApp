@@ -10,6 +10,8 @@ const AGENDADO_KEYWORDS = ['agendado', 'agendada'];
 const BLACKLIST_TOKENS = new Set(['decline', '🚫', 'bloqueado']);
 /** Tag TEST = admins/ingenieros; excluir de métricas. */
 const TEST_TOKENS = new Set(['test']);
+/** Tag Favoritos = acceso rápido preferido en métricas. */
+const FAVORITOS_TOKENS = new Set(['favoritos', 'favorito']);
 
 function splitTokens(value: string): string[] {
   return value
@@ -59,6 +61,11 @@ export function hasBlacklistTag(client: ClassifiableClient): boolean {
 /** Contacto de prueba (admins/devs); excluir de métricas. */
 export function isTestContact(client: ClassifiableClient): boolean {
   return hasExactToken(client, TEST_TOKENS);
+}
+
+/** Tag Favoritos / Favorito en tags o classification. */
+export function hasFavoritosTag(client: ClassifiableClient): boolean {
+  return hasExactToken(client, FAVORITOS_TOKENS);
 }
 
 export function isCompanyClient(client: ClassifiableClient): boolean {
