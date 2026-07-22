@@ -46,26 +46,11 @@ export const WHATSAPP_TEMPLATE_SECTIONS: WhatsAppTemplateSectionMeta[] = [
 ];
 
 const TEMPLATE_SECTION_BY_NAME: Record<string, WhatsAppTemplatePanelSection> = {
-  booking_reminder_dia_madre: 'seasonal',
-  booking_reminder_dia_padre: 'seasonal',
-  booking_reminder_navidad: 'seasonal',
-  booking_reminder_fin_ano: 'seasonal',
-  booking_reminder_amor_amistad: 'seasonal',
-  festivo_horario_atencion: 'seasonal',
-  util_aviso_semana_santa: 'seasonal',
-  felicitacion_navidad: 'seasonal',
-  felicitacion_anio_nuevo: 'seasonal',
-  felicitacion_dia_velitas: 'seasonal',
-  dia_madre_saludo: 'seasonal',
-  dia_padre_saludo: 'seasonal',
-  dia_amor_amistad_saludo: 'seasonal',
-  felicitacion_independencia_co: 'seasonal',
-  saludo_fin_anio_agradecimiento: 'seasonal',
+  cobro_servicios: 'utility',
 
   seguimiento_suave: 'reactivation',
   seguimiento_incentivo: 'reactivation',
   seguimiento_final: 'reactivation',
-  rebooking_suave_v2: 'reactivation',
   rebooking_frecuencia: 'reactivation',
   react_followup_sin_respuesta_v2: 'reactivation',
   react_followup_semanas_sin_contacto: 'reactivation',
@@ -73,7 +58,6 @@ const TEMPLATE_SECTION_BY_NAME: Record<string, WhatsAppTemplatePanelSection> = {
   react_cliente_antigua_fecha: 'reactivation',
   react_cliente_hace_tiempo: 'reactivation',
   react_cliente_misma_profesional: 'reactivation',
-  react_reagendar_suave: 'reactivation',
 
   outreach_intro_prosavis: 'cold_outreach',
   outreach_invitacion_agendar: 'cold_outreach',

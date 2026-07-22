@@ -29,7 +29,6 @@ const RETURNING_CLIENT_PRIORITY = [
   'react_cliente_antigua_fecha',
   'react_cliente_hace_tiempo',
   'react_cliente_misma_profesional',
-  'rebooking_suave_v2',
   'rebooking_frecuencia',
 ];
 

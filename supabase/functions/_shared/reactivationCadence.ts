@@ -26,18 +26,15 @@ export const REACTIVATION_STEPS: ReactivationStepDef[] = [
     step: 1,
     gapDaysFromPrevious: 0,
     dayFromEnrollment: 0,
-    // Interino: react_reagendar_suave sigue PENDING en Meta.
-    // Usar plantilla APPROVED de reactivación suave para clientes existentes.
-    // Cuando Meta apruebe react_reagendar_suave, volver a ese nombre.
     templateName: 'react_cliente_misma_profesional',
-    label: 'Suave — reagendar',
+    label: 'Promoción pago anticipado',
   },
   {
     step: 2,
     gapDaysFromPrevious: 7,
     dayFromEnrollment: 7,
     templateName: 'rebooking_frecuencia',
-    label: 'Frecuencia / valor',
+    label: 'Recordatorio de promoción',
   },
   {
     step: 3,
@@ -131,12 +128,10 @@ export function buildTemplateComponents(
 
 export function buildDisplayBody(clientName: string, step: ReactivationStepDef): string {
   switch (step.templateName) {
-    case 'react_reagendar_suave':
-      return `Hola ${clientName} 👋 Estamos aquí por si quieres reagendar tu cita de limpieza o agendar otra pronto. Cuando quieras, responde y te ayudamos con disponibilidad.`;
     case 'react_cliente_misma_profesional':
-      return `Hola ${clientName}, si quieres volver a agendar con Prosavis, podemos revisar disponibilidad y, si es posible, coordinar con la misma profesional que ya conoces.`;
+      return `Hola ${clientName} 👋 Tenemos un beneficio especial para ti. Al agendar y pagar por anticipado un paquete de 4 servicios, uno por semana, recibes un descuento sobre el total del paquete:\n\n• 4 horas por servicio: $10.000\n• 6 horas por servicio: $15.000\n• 8 horas por servicio: $20.000\n\nEste beneficio aplica cada vez que pagues anticipadamente el paquete completo. ¿Quieres que revisemos disponibilidad?`;
     case 'rebooking_frecuencia':
-      return `Hola ${clientName}, muchos de nuestros clientes agendan cada 2 semanas para mantener su hogar siempre limpio sin esfuerzo. ¿Te gustaría que te agendemos un servicio recurrente? Te garantizamos la misma profesional cada vez 🏠`;
+      return `Hola ${clientName} 👋 Te recordamos el beneficio disponible al agendar y pagar por anticipado un paquete de 4 servicios, uno por semana. El descuento sobre el total del paquete es:\n\n• 4 horas por servicio: $10.000\n• 6 horas por servicio: $15.000\n• 8 horas por servicio: $20.000\n\nPuedes aprovecharlo cada vez que pagues anticipadamente el paquete completo. Responde y revisamos disponibilidad contigo.`;
     case 'react_followup_valor_sin_presion':
       return `Hola ${clientName}, solo queríamos recordarte que en Prosavis trabajamos con personal verificado, pago seguro y seguimiento del servicio. Cuando quieras retomar tu limpieza, aquí estamos.`;
     case 'react_cliente_hace_tiempo': {

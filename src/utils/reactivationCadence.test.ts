@@ -4,6 +4,11 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import {
+  REACTIVATION_STEPS,
+  buildDisplayBody,
+  getStepDef,
+} from '../../supabase/functions/_shared/reactivationCadence';
 
 const STEPS = [
   { step: 1, gapDaysFromPrevious: 0 },
@@ -62,5 +67,24 @@ describe('reactivation cadence gaps', () => {
   it('totals ~84 days of enrollment cadence', () => {
     const total = STEPS.reduce((sum, s) => sum + s.gapDaysFromPrevious, 0);
     expect(total).toBe(84);
+  });
+
+  it('keeps the approved day 0 and day 7 template identifiers', () => {
+    expect(REACTIVATION_STEPS[0]?.templateName).toBe('react_cliente_misma_profesional');
+    expect(REACTIVATION_STEPS[1]?.templateName).toBe('rebooking_frecuencia');
+  });
+
+  it.each([1, 2])('shows the prepaid package promotion in step %i', (stepNumber) => {
+    const step = getStepDef(stepNumber);
+    expect(step).not.toBeNull();
+
+    const body = buildDisplayBody('María', step!);
+
+    expect(body).toContain('4 servicios');
+    expect(body).toContain('$10.000');
+    expect(body).toContain('$15.000');
+    expect(body).toContain('$20.000');
+    expect(body).toContain('pagar por anticipado');
+    expect(body.toLowerCase()).not.toContain('misma profesional');
   });
 });
