@@ -198,5 +198,11 @@ verify_jwt = false
 [functions.reactivation-automations-monitor]
 verify_jwt = false
 
+[functions.send-post-service-followup]
+verify_jwt = false
+
+[functions.post-service-automations-monitor]
+verify_jwt = false
+
 [functions.discount-codes-admin]
 verify_jwt = false

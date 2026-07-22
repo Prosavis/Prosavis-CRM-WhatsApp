@@ -7,8 +7,17 @@ import ReminderRecipientPanel from './ReminderRecipientPanel';
 import ReminderHistoryPanel from './ReminderHistoryPanel';
 import ReactivationPanel from './ReactivationPanel';
 import ReactivationHistoryPanel from './ReactivationHistoryPanel';
+import PostServicePanel from './PostServicePanel';
+import PostServiceHistoryPanel from './PostServiceHistoryPanel';
 
-type AutoSubTab = 'clients' | 'cleaners' | 'history' | 'reactivations' | 'react-history';
+type AutoSubTab =
+  | 'clients'
+  | 'cleaners'
+  | 'history'
+  | 'reactivations'
+  | 'react-history'
+  | 'post-service'
+  | 'post-service-history';
 
 const SUBTAB_INDEX: AutoSubTab[] = [
   'clients',
@@ -16,6 +25,8 @@ const SUBTAB_INDEX: AutoSubTab[] = [
   'history',
   'reactivations',
   'react-history',
+  'post-service',
+  'post-service-history',
 ];
 
 function parseAutoParam(value: string | null): AutoSubTab {
@@ -23,6 +34,8 @@ function parseAutoParam(value: string | null): AutoSubTab {
   if (value === 'history') return 'history';
   if (value === 'reactivations') return 'reactivations';
   if (value === 'react-history') return 'react-history';
+  if (value === 'post-service') return 'post-service';
+  if (value === 'post-service-history') return 'post-service-history';
   return 'clients';
 }
 
@@ -58,6 +71,45 @@ const AutomationsTab: React.FC = () => {
   }, [autoParam, setSubTab]);
 
   const showReminderHeader = subTabKey === 'clients' || subTabKey === 'cleaners' || subTabKey === 'history';
+
+  const renderSubTab = () => {
+    switch (subTabKey) {
+      case 'clients':
+        return data ? (
+          <ReminderRecipientPanel
+            recipientType="client"
+            upcoming={data.clients.upcoming}
+            lastRun={data.clients.lastRun}
+            onRefresh={() => void refetch()}
+          />
+        ) : null;
+      case 'cleaners':
+        return data ? (
+          <ReminderRecipientPanel
+            recipientType="professional"
+            upcoming={data.professionals.upcoming}
+            lastRun={data.professionals.lastRun}
+            onRefresh={() => void refetch()}
+          />
+        ) : null;
+      case 'history':
+        return <ReminderHistoryPanel />;
+      case 'reactivations':
+        return <ReactivationPanel onOpenHistory={() => setSubTab('react-history')} />;
+      case 'react-history':
+        return <ReactivationHistoryPanel />;
+      case 'post-service':
+        return (
+          <PostServicePanel onOpenHistory={() => setSubTab('post-service-history')} />
+        );
+      case 'post-service-history':
+        return <PostServiceHistoryPanel />;
+      default: {
+        const exhaustiveCheck: never = subTabKey;
+        return exhaustiveCheck;
+      }
+    }
+  };
 
   return (
     <Box sx={{ px: { xs: 0.5, sm: 0 } }}>
@@ -96,29 +148,11 @@ const AutomationsTab: React.FC = () => {
         <Tab label="Historial" sx={{ textTransform: 'none', fontWeight: 600 }} />
         <Tab label="Reactivaciones" sx={{ textTransform: 'none', fontWeight: 600 }} />
         <Tab label="Historial reactivaciones" sx={{ textTransform: 'none', fontWeight: 600 }} />
+        <Tab label="Post-servicio" sx={{ textTransform: 'none', fontWeight: 600 }} />
+        <Tab label="Historial post-servicio" sx={{ textTransform: 'none', fontWeight: 600 }} />
       </Tabs>
 
-      {subTabKey === 'clients' && data && (
-        <ReminderRecipientPanel
-          recipientType="client"
-          upcoming={data.clients.upcoming}
-          lastRun={data.clients.lastRun}
-          onRefresh={() => void refetch()}
-        />
-      )}
-      {subTabKey === 'cleaners' && data && (
-        <ReminderRecipientPanel
-          recipientType="professional"
-          upcoming={data.professionals.upcoming}
-          lastRun={data.professionals.lastRun}
-          onRefresh={() => void refetch()}
-        />
-      )}
-      {subTabKey === 'history' && <ReminderHistoryPanel />}
-      {subTabKey === 'reactivations' && (
-        <ReactivationPanel onOpenHistory={() => setSubTab('react-history')} />
-      )}
-      {subTabKey === 'react-history' && <ReactivationHistoryPanel />}
+      {renderSubTab()}
     </Box>
   );
 };
