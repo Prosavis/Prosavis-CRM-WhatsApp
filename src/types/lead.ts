@@ -56,6 +56,12 @@ export interface DirectoryEntry {
   address?: string;
   notes?: string;
 
+  // Identity (verified)
+  documentType?: string;
+  documentNumber?: string;
+  identityVerifiedAt?: string;
+  identitySource?: string;
+
   // Vinculaciones
   appUserId?: string;
   isAppUser: boolean;

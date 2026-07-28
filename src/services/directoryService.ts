@@ -15,6 +15,27 @@ import {
 
 type DirectoryRow = Database['public']['Tables']['crm_directory']['Row'];
 
+/** Tags / tokens de lista negra (alineado con directory_has_blacklist_tag). */
+const BLACKLIST_TAG_VALUES = ['Bloqueado', 'Decline', '🚫'] as const;
+
+/**
+ * Filtro PostgREST: tags overlap o classification con token de lista negra.
+ * Usado por getEntries / getStats para el KPI Bloqueados del Directorio.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function applyDirectoryBlacklistFilter(query: any): any {
+  // tags.ov cubre Bloqueado/Decline/🚫; ilike cubre classification legacy.
+  return query.or(
+    [
+      `tags.ov.{${BLACKLIST_TAG_VALUES.join(',')}}`,
+      'classification.ilike.%Bloqueado%',
+      'classification.ilike.%Decline%',
+      'classification.ilike.%bloqueado%',
+      'classification.ilike.%decline%',
+    ].join(','),
+  );
+}
+
 // ──────────────────────────────────────────────
 // Mapping helpers
 // ──────────────────────────────────────────────
@@ -29,6 +50,15 @@ export function mapRowToEntry(row: DirectoryRow): DirectoryEntry {
     photoUrl: row.photo_url ?? undefined,
     address: row.address ?? undefined,
     notes: row.notes ?? undefined,
+    documentType: (row as DirectoryRow & { document_type?: string | null })
+      .document_type ?? undefined,
+    documentNumber: (row as DirectoryRow & { document_number?: string | null })
+      .document_number ?? undefined,
+    identityVerifiedAt: (
+      row as DirectoryRow & { identity_verified_at?: string | null }
+    ).identity_verified_at ?? undefined,
+    identitySource: (row as DirectoryRow & { identity_source?: string | null })
+      .identity_source ?? undefined,
     appUserId: row.app_user_id ?? undefined,
     isAppUser: row.is_app_user,
     providerId: row.provider_id ?? undefined,
@@ -341,6 +371,8 @@ export const directoryService = {
     classification?: string;
     qualityTag?: string;
     optOut?: boolean;
+    /** Solo contactos en lista negra (tag Bloqueado/Decline/🚫). */
+    blacklisted?: boolean;
     assignedTo?: string;
     limit?: number;
     page?: number;
@@ -372,7 +404,15 @@ export const directoryService = {
       query = query.eq('status', filters.status);
     }
     if (filters?.source) query = query.eq('source', filters.source);
-    if (filters?.classification) {
+    const classificationLower = filters?.classification?.trim().toLowerCase() ?? '';
+    const filterBlacklisted =
+      filters?.blacklisted === true ||
+      classificationLower === 'bloqueado' ||
+      classificationLower === 'decline' ||
+      classificationLower === '🚫';
+    if (filterBlacklisted) {
+      query = applyDirectoryBlacklistFilter(query);
+    } else if (filters?.classification) {
       const c = filters.classification.trim();
       const lower = c.toLowerCase();
       // Empresa = tag WhatsApp canónico `Empresas` (no enum legacy `company`).
@@ -518,7 +558,7 @@ export const directoryService = {
       return count ?? 0;
     };
 
-    const [total, active, inactive, optOut] = await Promise.all([
+    const [total, active, inactive, optOut, blacklisted] = await Promise.all([
       countRows(),
       countRows((query) =>
         query.or('status.eq.active,whatsapp_conversation_id.not.is.null').eq('opt_out', false),
@@ -527,6 +567,7 @@ export const directoryService = {
         query.eq('status', 'inactive').is('whatsapp_conversation_id', null).eq('opt_out', false),
       ),
       countRows((query) => query.or('opt_out.eq.true,status.eq.opt_out')),
+      countRows((query) => applyDirectoryBlacklistFilter(query)),
     ]);
 
     return {
@@ -534,6 +575,7 @@ export const directoryService = {
       active,
       inactive,
       optOut,
+      blacklisted,
       byClassification: {} as Record<string, number>,
       bySource: {} as Record<string, number>,
     };

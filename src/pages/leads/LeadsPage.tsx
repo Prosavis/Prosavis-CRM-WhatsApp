@@ -85,6 +85,7 @@ interface DirectoryStats {
   active: number;
   inactive: number;
   optOut: number;
+  blacklisted: number;
   byClassification: Record<string, number>;
   bySource: Record<string, number>;
 }
@@ -114,6 +115,7 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [classificationFilter, setClassificationFilter] = useState<string>('');
   const [sourceFilter, setSourceFilter] = useState<string>('');
+  const [blacklistedFilter, setBlacklistedFilter] = useState(false);
   const [phoneNull, setPhoneNull] = useState<boolean>(false);
   const [emailNull, setEmailNull] = useState<boolean>(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -131,6 +133,7 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
     active: 0,
     inactive: 0,
     optOut: 0,
+    blacklisted: 0,
     byClassification: {},
     bySource: {},
   });
@@ -178,8 +181,9 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
       if (statusFilter) filters.status = statusFilter;
       if (classificationFilter) filters.classification = classificationFilter;
       if (sourceFilter) filters.source = sourceFilter;
-      if (phoneNull) filters.phone_null = true;
-      if (emailNull) filters.email_null = true;
+      if (blacklistedFilter) filters.blacklisted = true;
+      if (phoneNull) filters.phoneNull = true;
+      if (emailNull) filters.emailNull = true;
       if (searchTerm) filters.searchTerm = searchTerm;
       if (sortField) {
         filters.sortField = sortField;
@@ -194,7 +198,7 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, classificationFilter, sourceFilter, phoneNull, emailNull, page, rowsPerPage, searchTerm, sortField, sortDirection]);
+  }, [statusFilter, classificationFilter, sourceFilter, blacklistedFilter, phoneNull, emailNull, page, rowsPerPage, searchTerm, sortField, sortDirection]);
 
   useEffect(() => {
     fetchStats();
@@ -292,11 +296,78 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
     setPage(value - 1);
   };
 
-  const kpis = [
-    { label: 'Total', value: stats.total, color: 'primary.main' },
-    { label: 'Activos', value: stats.active, color: 'success.main' },
-    { label: 'Inactivos', value: stats.inactive, color: 'text.secondary' },
-    { label: 'Opt-out', value: stats.optOut, color: 'error.main' },
+  const kpis: Array<{
+    label: string;
+    value: number;
+    color: string;
+    active?: boolean;
+    onClick?: () => void;
+  }> = [
+    {
+      label: 'Total',
+      value: stats.total,
+      color: 'primary.main',
+      active: !blacklistedFilter && !statusFilter,
+      onClick: () => {
+        setBlacklistedFilter(false);
+        setStatusFilter('');
+        setClassificationFilter('');
+        setPage(0);
+        setShowMonitor(false);
+      },
+    },
+    {
+      label: 'Activos',
+      value: stats.active,
+      color: 'success.main',
+      active: statusFilter === 'active' && !blacklistedFilter,
+      onClick: () => {
+        setBlacklistedFilter(false);
+        setStatusFilter('active');
+        setPage(0);
+        setShowMonitor(false);
+      },
+    },
+    {
+      label: 'Inactivos',
+      value: stats.inactive,
+      color: 'text.secondary',
+      active: statusFilter === 'inactive' && !blacklistedFilter,
+      onClick: () => {
+        setBlacklistedFilter(false);
+        setStatusFilter('inactive');
+        setPage(0);
+        setShowMonitor(false);
+      },
+    },
+    {
+      label: 'Opt-out',
+      value: stats.optOut,
+      color: 'error.main',
+      active: statusFilter === 'opt_out' && !blacklistedFilter,
+      onClick: () => {
+        setBlacklistedFilter(false);
+        setStatusFilter('opt_out');
+        setPage(0);
+        setShowMonitor(false);
+      },
+    },
+    {
+      label: 'Bloqueados',
+      value: stats.blacklisted,
+      color: 'error.dark',
+      active: blacklistedFilter,
+      onClick: () => {
+        const next = !blacklistedFilter;
+        setBlacklistedFilter(next);
+        if (next) {
+          setStatusFilter('');
+          setClassificationFilter('');
+        }
+        setPage(0);
+        setShowMonitor(false);
+      },
+    },
   ];
 
   const from = totalCount === 0 ? 0 : page * rowsPerPage + 1;
@@ -357,20 +428,29 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
 
       <Grid container spacing={2} mb={3}>
         {kpis.map((kpi) => (
-          <Grid item xs={6} sm={4} md={2.4} key={kpi.label}>
-            <Card>
-              <CardContent sx={{ textAlign: 'center', py: 1.5 }}>
-                <Typography variant="h5" fontWeight={700} color={kpi.color}>
-                  {kpi.value}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {kpi.label}
-                </Typography>
-              </CardContent>
+          <Grid item xs={6} sm={4} md={2} key={kpi.label}>
+            <Card
+              sx={{
+                height: '100%',
+                border: 1,
+                borderColor: kpi.active ? 'primary.main' : 'divider',
+                bgcolor: kpi.active ? 'action.selected' : undefined,
+              }}
+            >
+              <CardActionArea onClick={kpi.onClick} sx={{ height: '100%' }}>
+                <CardContent sx={{ textAlign: 'center', py: 1.5 }}>
+                  <Typography variant="h5" fontWeight={700} color={kpi.color}>
+                    {kpi.value}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {kpi.label}
+                  </Typography>
+                </CardContent>
+              </CardActionArea>
             </Card>
           </Grid>
         ))}
-        <Grid item xs={12} sm={4} md={2.4}>
+        <Grid item xs={12} sm={4} md={2}>
           <Card
             sx={{
               height: '100%',
@@ -443,10 +523,12 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
           <FormControl size="small" sx={{ minWidth: 150 }}>
             <InputLabel>Clasificación</InputLabel>
             <Select
-              value={classificationFilter}
+              value={blacklistedFilter ? 'Bloqueado' : classificationFilter}
               label="Clasificación"
               onChange={(e) => {
-                setClassificationFilter(e.target.value);
+                const value = e.target.value;
+                setClassificationFilter(value === 'Bloqueado' ? '' : value);
+                setBlacklistedFilter(value === 'Bloqueado');
                 setPage(0);
               }}
             >
@@ -454,6 +536,7 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
               <MenuItem value="user">Usuario</MenuItem>
               <MenuItem value="Empresas">Empresas</MenuItem>
               <MenuItem value="lead">Lead</MenuItem>
+              <MenuItem value="Bloqueado">Bloqueado</MenuItem>
               <MenuItem value="unknown">Desconocido</MenuItem>
             </Select>
           </FormControl>

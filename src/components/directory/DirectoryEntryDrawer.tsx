@@ -262,6 +262,14 @@ const DirectoryEntryDrawer: React.FC<DirectoryEntryDrawerProps> = ({
               variant="outlined"
             />
           )}
+          {(entry.identityVerifiedAt || entry.documentNumber) && (
+            <Chip
+              label="Identidad verificada"
+              size="small"
+              color="success"
+              variant="filled"
+            />
+          )}
         </Stack>
       </Box>
 
@@ -273,6 +281,16 @@ const DirectoryEntryDrawer: React.FC<DirectoryEntryDrawerProps> = ({
         <Section title="Identidad">
           <Field label="Nombre completo" value={fmtNullable(entry.fullName)} />
           <Field label="Nombre mostrado" value={fmtNullable(entry.displayName)} />
+          <Field
+            label="Documento"
+            value={
+              entry.documentNumber
+                ? [entry.documentType, entry.documentNumber]
+                    .filter(Boolean)
+                    .join(' · ')
+                : '—'
+            }
+          />
           <Field
             label="Correo electrónico"
             value={
