@@ -48,6 +48,7 @@ Deno.serve(async (req) => {
           discountPercent: body.discountPercent,
           maxRedemptions: body.maxRedemptions,
           singleUse: body.singleUse,
+          oncePerUser: body.oncePerUser,
           description: body.description,
         });
         return jsonResponse(result);
@@ -61,6 +62,7 @@ Deno.serve(async (req) => {
           discountAmountCOP: body.discountAmountCOP,
           discountPercent: body.discountPercent,
           maxRedemptions: body.maxRedemptions,
+          oncePerUser: body.oncePerUser,
           description: body.description,
           status: body.status,
         });

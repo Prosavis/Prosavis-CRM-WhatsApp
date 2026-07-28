@@ -53,17 +53,17 @@ describe('isValidFixedAmount / isValidPercent', () => {
 });
 
 describe('isValidRedemptions', () => {
-  it('único uso siempre válido', () => {
-    expect(isValidRedemptions(true, '')).toBe(true);
-    expect(isValidRedemptions(true, 1)).toBe(true);
+  it('oncePerUser o único uso siempre válidos', () => {
+    expect(isValidRedemptions(true, false, '')).toBe(true);
+    expect(isValidRedemptions(false, true, '')).toBe(true);
   });
 
   it('multi-uso exige entero ≥ 2', () => {
-    expect(isValidRedemptions(false, 2)).toBe(true);
-    expect(isValidRedemptions(false, 5)).toBe(true);
-    expect(isValidRedemptions(false, 1)).toBe(false);
-    expect(isValidRedemptions(false, '')).toBe(false);
-    expect(isValidRedemptions(false, 2.5)).toBe(false);
+    expect(isValidRedemptions(false, false, 2)).toBe(true);
+    expect(isValidRedemptions(false, false, 5)).toBe(true);
+    expect(isValidRedemptions(false, false, 1)).toBe(false);
+    expect(isValidRedemptions(false, false, '')).toBe(false);
+    expect(isValidRedemptions(false, false, 2.5)).toBe(false);
   });
 });
 
@@ -75,7 +75,22 @@ describe('isCreateDiscountFormValid', () => {
         discountType: 'fixed_cop',
         amount: 10000,
         percent: '',
+        oncePerUser: false,
         singleUse: true,
+        maxRedemptions: '',
+      }),
+    ).toBe(true);
+  });
+
+  it('formulario oncePerUser sin máx canjes', () => {
+    expect(
+      isCreateDiscountFormValid({
+        code: 'SALE15',
+        discountType: 'percentage',
+        amount: '',
+        percent: 15,
+        oncePerUser: true,
+        singleUse: false,
         maxRedemptions: '',
       }),
     ).toBe(true);
@@ -88,6 +103,7 @@ describe('isCreateDiscountFormValid', () => {
         discountType: 'percentage',
         amount: '',
         percent: 15,
+        oncePerUser: false,
         singleUse: false,
         maxRedemptions: 5,
       }),
@@ -101,6 +117,7 @@ describe('isCreateDiscountFormValid', () => {
         discountType: 'fixed_cop',
         amount: 5000,
         percent: '',
+        oncePerUser: false,
         singleUse: true,
         maxRedemptions: '',
       }),
@@ -112,6 +129,7 @@ describe('isCreateDiscountFormValid', () => {
         discountType: 'percentage',
         amount: '',
         percent: '',
+        oncePerUser: false,
         singleUse: true,
         maxRedemptions: '',
       }),

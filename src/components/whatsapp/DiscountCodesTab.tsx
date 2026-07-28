@@ -116,6 +116,7 @@ const DiscountCodesTab: React.FC = () => {
   const [amount, setAmount] = useState<number | ''>('');
   const [percent, setPercent] = useState<number | ''>('');
   const [singleUse, setSingleUse] = useState(true);
+  const [oncePerUser, setOncePerUser] = useState(false);
   const [maxRedemptions, setMaxRedemptions] = useState<number | ''>(5);
   const [description, setDescription] = useState('');
   const [creating, setCreating] = useState(false);
@@ -133,6 +134,7 @@ const DiscountCodesTab: React.FC = () => {
   const [editDiscountType, setEditDiscountType] = useState<DiscountCodeType>('fixed_cop');
   const [editAmount, setEditAmount] = useState<number | ''>('');
   const [editPercent, setEditPercent] = useState<number | ''>('');
+  const [editOncePerUser, setEditOncePerUser] = useState(false);
   const [editMaxRedemptions, setEditMaxRedemptions] = useState<number | ''>(5);
   const [editDescription, setEditDescription] = useState('');
   const [editUpdating, setEditUpdating] = useState(false);
@@ -163,6 +165,7 @@ const DiscountCodesTab: React.FC = () => {
   const percentValid =
     discountType === 'percentage' && typeof percent === 'number' && percent >= 1 && percent <= 100;
   const redemptionsValid =
+    oncePerUser ||
     singleUse ||
     (typeof maxRedemptions === 'number' && Number.isInteger(maxRedemptions) && maxRedemptions >= 2);
 
@@ -171,6 +174,7 @@ const DiscountCodesTab: React.FC = () => {
     discountType,
     amount,
     percent,
+    oncePerUser,
     singleUse,
     maxRedemptions,
   });
@@ -196,7 +200,9 @@ const DiscountCodesTab: React.FC = () => {
       } else {
         params.discountPercent = percent as number;
       }
-      if (singleUse) {
+      if (oncePerUser) {
+        params.oncePerUser = true;
+      } else if (singleUse) {
         params.singleUse = true;
       } else {
         params.maxRedemptions = maxRedemptions as number;
@@ -213,6 +219,7 @@ const DiscountCodesTab: React.FC = () => {
       setPercent('');
       setDescription('');
       setSingleUse(true);
+      setOncePerUser(false);
       setMaxRedemptions(5);
       setDiscountType('fixed_cop');
       loadCodes();
@@ -257,7 +264,10 @@ const DiscountCodesTab: React.FC = () => {
     setEditDiscountType(item.discountType ?? 'fixed_cop');
     setEditAmount(item.discountType === 'fixed_cop' ? item.discountAmountCOP : '');
     setEditPercent(item.discountType === 'percentage' ? item.discountPercent ?? '' : '');
-    setEditMaxRedemptions(item.maxRedemptions ?? 5);
+    setEditOncePerUser(item.oncePerUser === true);
+    setEditMaxRedemptions(
+      item.oncePerUser ? 5 : item.maxRedemptions != null ? item.maxRedemptions : 5,
+    );
     setEditDescription(item.description ?? '');
     setEditError(null);
   };
@@ -273,13 +283,14 @@ const DiscountCodesTab: React.FC = () => {
         code: editCode,
         discountType: editDiscountType,
         description: editDescription.trim() || null,
+        oncePerUser: editOncePerUser,
       };
       if (editDiscountType === 'fixed_cop') {
         params.discountAmountCOP = editAmount;
       } else {
         params.discountPercent = editPercent;
       }
-      if (typeof editMaxRedemptions === 'number' && editMaxRedemptions >= 1) {
+      if (!editOncePerUser && typeof editMaxRedemptions === 'number' && editMaxRedemptions >= 1) {
         params.maxRedemptions = editMaxRedemptions;
       }
       await updateDiscountCodeFn(params as any);
@@ -304,8 +315,11 @@ const DiscountCodesTab: React.FC = () => {
   };
 
   const formatUsesCell = (item: DiscountCodeData) => {
-    const max = item.maxRedemptions ?? 1;
     const used = item.redemptionCount ?? 0;
+    if (item.oncePerUser) {
+      return `${used} · 1/usuario`;
+    }
+    const max = item.maxRedemptions ?? 1;
     return `${used}/${max}`;
   };
 
@@ -526,8 +540,11 @@ const DiscountCodesTab: React.FC = () => {
                 <FormControlLabel
                   control={
                     <Checkbox
-                      checked={singleUse}
-                      onChange={(_, c) => setSingleUse(c)}
+                      checked={oncePerUser}
+                      onChange={(_, c) => {
+                        setOncePerUser(c);
+                        if (c) setSingleUse(false);
+                      }}
                       size="small"
                       sx={{
                         color: brandBlue,
@@ -537,26 +554,54 @@ const DiscountCodesTab: React.FC = () => {
                   }
                   label={
                     <Typography variant="body2" fontWeight={600}>
-                      Único uso
+                      Una vez por usuario
                     </Typography>
                   }
                   sx={{ m: 0, whiteSpace: 'nowrap' }}
                 />
-                {!singleUse && (
-                  <TextField
-                    label="Máx. canjes"
-                    type="number"
-                    size="small"
-                    fullWidth
-                    value={maxRedemptions}
-                    onChange={(e) =>
-                      setMaxRedemptions(e.target.value ? Number(e.target.value) : '')
-                    }
-                    inputProps={{ min: 2 }}
-                    helperText="Mínimo 2"
-                    error={!singleUse && !redemptionsValid}
-                    sx={{ mt: 1 }}
-                  />
+                {!oncePerUser && (
+                  <>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          checked={singleUse}
+                          onChange={(_, c) => setSingleUse(c)}
+                          size="small"
+                          sx={{
+                            color: brandBlue,
+                            '&.Mui-checked': { color: brandOrange },
+                          }}
+                        />
+                      }
+                      label={
+                        <Typography variant="body2" fontWeight={600}>
+                          Único uso
+                        </Typography>
+                      }
+                      sx={{ m: 0, mt: 0.5, whiteSpace: 'nowrap' }}
+                    />
+                    {!singleUse && (
+                      <TextField
+                        label="Máx. canjes"
+                        type="number"
+                        size="small"
+                        fullWidth
+                        value={maxRedemptions}
+                        onChange={(e) =>
+                          setMaxRedemptions(e.target.value ? Number(e.target.value) : '')
+                        }
+                        inputProps={{ min: 2 }}
+                        helperText="Mínimo 2"
+                        error={!singleUse && !redemptionsValid}
+                        sx={{ mt: 1 }}
+                      />
+                    )}
+                  </>
+                )}
+                {oncePerUser && (
+                  <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.75 }}>
+                    Cupo global ilimitado; cada usuario solo una vez.
+                  </Typography>
                 )}
               </Box>
 
@@ -1096,15 +1141,32 @@ const DiscountCodesTab: React.FC = () => {
                 }
               />
             )}
-            <TextField
-              label="Máx. canjes"
-              type="number"
-              size="small"
-              fullWidth
-              value={editMaxRedemptions}
-              onChange={(e) => setEditMaxRedemptions(e.target.value ? Number(e.target.value) : '')}
-              inputProps={{ min: 1 }}
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={editOncePerUser}
+                  onChange={(_, c) => setEditOncePerUser(c)}
+                  size="small"
+                />
+              }
+              label="Una vez por usuario"
             />
+            {!editOncePerUser && (
+              <TextField
+                label="Máx. canjes"
+                type="number"
+                size="small"
+                fullWidth
+                value={editMaxRedemptions}
+                onChange={(e) => setEditMaxRedemptions(e.target.value ? Number(e.target.value) : '')}
+                inputProps={{ min: 1 }}
+              />
+            )}
+            {editOncePerUser && (
+              <Typography variant="caption" color="text.secondary">
+                Cupo global ilimitado; cada usuario solo una vez.
+              </Typography>
+            )}
             <TextField
               label="Descripción (opcional)"
               value={editDescription}

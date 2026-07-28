@@ -26,9 +26,11 @@ export function isValidPercent(percent: number | ''): percent is number {
 }
 
 export function isValidRedemptions(
+  oncePerUser: boolean,
   singleUse: boolean,
   maxRedemptions: number | '',
 ): boolean {
+  if (oncePerUser) return true;
   if (singleUse) return true;
   return (
     typeof maxRedemptions === 'number' &&
@@ -42,6 +44,7 @@ export function isCreateDiscountFormValid(params: {
   discountType: DiscountCodeType;
   amount: number | '';
   percent: number | '';
+  oncePerUser: boolean;
   singleUse: boolean;
   maxRedemptions: number | '';
 }): boolean {
@@ -50,6 +53,10 @@ export function isCreateDiscountFormValid(params: {
     params.discountType === 'fixed_cop'
       ? isValidFixedAmount(params.amount)
       : isValidPercent(params.percent);
-  const redemptionsOk = isValidRedemptions(params.singleUse, params.maxRedemptions);
+  const redemptionsOk = isValidRedemptions(
+    params.oncePerUser,
+    params.singleUse,
+    params.maxRedemptions,
+  );
   return codeOk && valueOk && redemptionsOk;
 }

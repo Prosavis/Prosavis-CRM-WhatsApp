@@ -61,7 +61,8 @@ export interface DiscountCodeResponse {
   discountType?: DiscountTypeInput;
   discountPercent?: number;
   discountAmountCOP: number;
-  maxRedemptions?: number;
+  maxRedemptions?: number | null;
+  oncePerUser?: boolean;
   redemptionCount?: number;
   description?: string;
   status: 'active' | 'redeemed' | 'deleted';
@@ -82,7 +83,12 @@ function mapDocToResponse(id: string, data: Record<string, unknown>): DiscountCo
       typeof data.discountPercent === 'number' ? data.discountPercent : undefined,
     discountAmountCOP: Number(data.discountAmountCOP ?? 0),
     maxRedemptions:
-      typeof data.maxRedemptions === 'number' ? data.maxRedemptions : undefined,
+      typeof data.maxRedemptions === 'number'
+        ? data.maxRedemptions
+        : data.maxRedemptions === null
+          ? null
+          : undefined,
+    oncePerUser: data.oncePerUser === true,
     redemptionCount:
       typeof data.redemptionCount === 'number' ? data.redemptionCount : undefined,
     description: data.description != null ? String(data.description) : undefined,
@@ -175,6 +181,7 @@ export async function createDiscountCode(
     discountPercent?: number;
     maxRedemptions?: number;
     singleUse?: boolean;
+    oncePerUser?: boolean;
     description?: string;
   },
 ): Promise<DiscountCodeResponse> {
@@ -185,6 +192,7 @@ export async function createDiscountCode(
     discountPercent,
     maxRedemptions: rawMaxRedemptions,
     singleUse,
+    oncePerUser: rawOncePerUser,
     description,
   } = params;
 
@@ -204,30 +212,36 @@ export async function createDiscountCode(
   const discountType: DiscountTypeInput =
     rawDiscountType === 'percentage' ? 'percentage' : 'fixed_cop';
 
-  let maxRedemptions = 1;
-  if (typeof rawMaxRedemptions === 'number' && Number.isFinite(rawMaxRedemptions)) {
-    maxRedemptions = Math.floor(rawMaxRedemptions);
-  }
-  if (singleUse === true) {
-    maxRedemptions = 1;
-  } else if (singleUse === false) {
-    if (
-      typeof rawMaxRedemptions !== 'number' ||
-      !Number.isFinite(rawMaxRedemptions) ||
-      Math.floor(rawMaxRedemptions) < 2
-    ) {
+  const oncePerUser = rawOncePerUser === true;
+
+  let maxRedemptions: number | null = 1;
+  if (oncePerUser) {
+    maxRedemptions = null;
+  } else {
+    if (typeof rawMaxRedemptions === 'number' && Number.isFinite(rawMaxRedemptions)) {
+      maxRedemptions = Math.floor(rawMaxRedemptions);
+    }
+    if (singleUse === true) {
+      maxRedemptions = 1;
+    } else if (singleUse === false) {
+      if (
+        typeof rawMaxRedemptions !== 'number' ||
+        !Number.isFinite(rawMaxRedemptions) ||
+        Math.floor(rawMaxRedemptions) < 2
+      ) {
+        throw new DiscountCodesError(
+          'invalid-argument',
+          'Si no es único uso, indica un máximo de canjes de al menos 2',
+        );
+      }
+      maxRedemptions = Math.floor(rawMaxRedemptions);
+    }
+    if (maxRedemptions === null || maxRedemptions < 1) {
       throw new DiscountCodesError(
         'invalid-argument',
-        'Si no es único uso, indica un máximo de canjes de al menos 2',
+        'El número máximo de canjes debe ser al menos 1',
       );
     }
-    maxRedemptions = Math.floor(rawMaxRedemptions);
-  }
-  if (maxRedemptions < 1) {
-    throw new DiscountCodesError(
-      'invalid-argument',
-      'El número máximo de canjes debe ser al menos 1',
-    );
   }
 
   const payload: Record<string, unknown> = {
@@ -238,6 +252,7 @@ export async function createDiscountCode(
     createdBy: actorId,
     createdAt: nowTimestamp(),
     redemptionCount: 0,
+    oncePerUser,
     maxRedemptions,
   };
 
@@ -284,7 +299,8 @@ export async function updateDiscountCode(
     discountType?: DiscountTypeInput;
     discountAmountCOP?: number;
     discountPercent?: number;
-    maxRedemptions?: number;
+    maxRedemptions?: number | null;
+    oncePerUser?: boolean;
     description?: string;
     status?: StatusInput;
   },
@@ -296,6 +312,7 @@ export async function updateDiscountCode(
     discountAmountCOP,
     discountPercent,
     maxRedemptions: rawMaxRedemptions,
+    oncePerUser: rawOncePerUser,
     description,
     status: rawStatus,
   } = params;
@@ -413,7 +430,26 @@ export async function updateDiscountCode(
     hasChanges = true;
   }
 
-  if (rawMaxRedemptions !== undefined) {
+  if (rawOncePerUser === true) {
+    updates.oncePerUser = true;
+    updates.maxRedemptions = null;
+    hasChanges = true;
+  } else if (rawOncePerUser === false) {
+    updates.oncePerUser = false;
+    hasChanges = true;
+    if (rawMaxRedemptions === undefined || rawMaxRedemptions === null) {
+      const fallback = Number(currentData.maxRedemptions ?? 1);
+      updates.maxRedemptions = Number.isFinite(fallback) && fallback >= 1 ? fallback : 1;
+    }
+  }
+
+  if (rawOncePerUser !== true && rawMaxRedemptions !== undefined) {
+    if (rawMaxRedemptions === null) {
+      throw new DiscountCodesError(
+        'invalid-argument',
+        'maxRedemptions null solo aplica con oncePerUser',
+      );
+    }
     if (typeof rawMaxRedemptions !== 'number' || !Number.isFinite(rawMaxRedemptions)) {
       throw new DiscountCodesError(
         'invalid-argument',
@@ -435,6 +471,9 @@ export async function updateDiscountCode(
       );
     }
     updates.maxRedemptions = parsed;
+    if (rawOncePerUser === undefined) {
+      updates.oncePerUser = false;
+    }
     hasChanges = true;
   }
 

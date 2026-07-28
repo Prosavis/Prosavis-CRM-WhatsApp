@@ -8,7 +8,8 @@ export interface DiscountCodeData {
   discountType?: DiscountCodeType;
   discountPercent?: number;
   discountAmountCOP: number;
-  maxRedemptions?: number;
+  maxRedemptions?: number | null;
+  oncePerUser?: boolean;
   redemptionCount?: number;
   description?: string;
   status: 'active' | 'redeemed' | 'deleted';
@@ -27,6 +28,7 @@ interface CreateDiscountCodeParams {
   discountPercent?: number;
   maxRedemptions?: number;
   singleUse?: boolean;
+  oncePerUser?: boolean;
   description?: string;
 }
 
@@ -36,7 +38,8 @@ interface UpdateDiscountCodeParams {
   discountType?: DiscountCodeType;
   discountAmountCOP?: number;
   discountPercent?: number;
-  maxRedemptions?: number;
+  maxRedemptions?: number | null;
+  oncePerUser?: boolean;
   description?: string;
   status?: 'active' | 'redeemed' | 'deleted';
 }
