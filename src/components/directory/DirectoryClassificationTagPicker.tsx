@@ -73,6 +73,7 @@ export const DirectoryClassificationTagPicker: React.FC<
 
   useEffect(() => {
     let cancelled = false;
+    setAnchorEl(null);
     setLoading(true);
     listWhatsAppTags()
       .then((tags) => {
