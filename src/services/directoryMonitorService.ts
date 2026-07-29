@@ -747,7 +747,7 @@ export const directoryMonitorService = {
           if (key) {
             const { data } = await supabase
               .from('whatsapp_conversations')
-              .select('id, contact_name')
+              .select('id, contact_name, contact_name_locked')
               .eq('phone_key', key)
               .order('last_message_at', { ascending: false })
               .limit(1)
@@ -756,7 +756,9 @@ export const directoryMonitorService = {
             if (
               conversationId
               && data
-              && shouldSyncContactNameFromDirectory(contactName || value, data.contact_name)
+              && shouldSyncContactNameFromDirectory(contactName || value, data.contact_name, {
+                contactNameLocked: data.contact_name_locked === true,
+              })
             ) {
               await patchWhatsAppConversationAdmin({
                 conversationId,

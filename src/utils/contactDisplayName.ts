@@ -9,11 +9,8 @@ export interface ContactNameSources {
   whatsappProfileName?: string | null;
   phone?: string | null;
   conversationId?: string | null;
-}
-
-function isUsefulName(value: string | null | undefined, minLen = 2): boolean {
-  const trimmed = (value ?? '').trim();
-  return trimmed.length >= minLen;
+  /** Si true, contact_name bloqueado gana sobre el directorio (p. ej. DETEKTOR). */
+  contactNameLocked?: boolean | null;
 }
 
 /**
@@ -29,11 +26,15 @@ export function isUsableName(value: string | null | undefined): boolean {
 }
 
 /** Nombre canónico del directorio (display_name > full_name). */
-export function pickDirectoryDisplayName(entry: Pick<DirectoryEntry, 'displayName' | 'fullName'> | null | undefined): string {
+export function pickDirectoryDisplayName(
+  entry: Pick<DirectoryEntry, 'displayName' | 'fullName'> | null | undefined,
+): string {
   if (!entry) return '';
   const display = (entry.displayName ?? '').trim();
-  if (isUsefulName(display)) return display;
-  return (entry.fullName ?? '').trim();
+  if (isUsableName(display)) return display;
+  const full = (entry.fullName ?? '').trim();
+  if (isUsableName(full)) return full;
+  return '';
 }
 
 export function directoryNameHasEmoji(name: string | null | undefined): boolean {
@@ -41,17 +42,30 @@ export function directoryNameHasEmoji(name: string | null | undefined): boolean 
 }
 
 /**
- * Prioridad: CRM directory > contact_name > whatsapp_profile_name > teléfono/id.
+ * Prioridad:
+ * 1. contact_name usable + locked (nombre CRM manual / marca, p. ej. DETEKTOR)
+ * 2. directorio usable
+ * 3. contact_name usable
+ * 4. whatsapp_profile_name usable
+ * 5. teléfono / id
+ *
+ * Emoji-only y strings sin letras se rechazan (isUsableName).
  */
 export function resolveContactDisplayName(sources: ContactNameSources): string {
-  const dirName = (sources.directoryDisplayName ?? '').trim() || (sources.directoryFullName ?? '').trim();
-  if (isUsefulName(dirName)) return dirName;
-
   const contactName = (sources.contactName ?? '').trim();
-  if (isUsefulName(contactName)) return contactName;
+  const locked = sources.contactNameLocked === true;
+
+  if (locked && isUsableName(contactName)) return contactName;
+
+  const dirName =
+    (sources.directoryDisplayName ?? '').trim() ||
+    (sources.directoryFullName ?? '').trim();
+  if (isUsableName(dirName)) return dirName;
+
+  if (isUsableName(contactName)) return contactName;
 
   const waProfile = (sources.whatsappProfileName ?? '').trim();
-  if (isUsefulName(waProfile)) return waProfile;
+  if (isUsableName(waProfile)) return waProfile;
 
   const phone = (sources.phone ?? '').trim();
   if (phone) return phone;
@@ -61,15 +75,20 @@ export function resolveContactDisplayName(sources: ContactNameSources): string {
 
 /**
  * True cuando el directorio tiene nombre válido y contact_name debería alinearse.
+ * No aplica si el nombre actual está bloqueado (se preserva, p. ej. DETEKTOR).
  */
 export function shouldSyncContactNameFromDirectory(
   dirName: string | null | undefined,
   currentContactName: string | null | undefined,
+  options?: { contactNameLocked?: boolean | null },
 ): boolean {
+  if (options?.contactNameLocked === true) return false;
+
   const canonical = (dirName ?? '').trim();
-  if (!isUsefulName(canonical)) return false;
+  if (!isUsableName(canonical)) return false;
   const current = (currentContactName ?? '').trim();
   if (!current) return true;
+  if (!isUsableName(current)) return true;
   if (current.toLowerCase() === canonical.toLowerCase()) return false;
   if (directoryNameHasEmoji(current) && !directoryNameHasEmoji(canonical)) return true;
   return current !== canonical;

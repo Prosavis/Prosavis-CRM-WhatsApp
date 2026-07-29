@@ -72,6 +72,7 @@ function conversationShortLabel(c: WhatsAppConversation): string {
     whatsappProfileName: c.whatsappProfileName,
     phone: c.contactPhone ?? c.phone,
     conversationId: c.id,
+    contactNameLocked: c.contactNameLocked,
   });
 }
 

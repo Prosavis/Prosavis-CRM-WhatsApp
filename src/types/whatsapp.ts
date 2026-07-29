@@ -13,6 +13,7 @@ export interface WhatsAppConversation {
   contactPhone?: string;
   contactPhotoUrl?: string;
   whatsappProfileName?: string;
+  contactNameLocked?: boolean;
   adminNotes?: string;
   assignedTo?: string;
   phoneNumberId?: string;

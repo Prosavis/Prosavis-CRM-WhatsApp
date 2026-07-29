@@ -62,7 +62,8 @@ import {
   useDirectoryContactMeta,
 } from '@/hooks/useDirectoryContactMeta';
 import { pickContactPhotoUrl } from '@/utils/contactAvatar';
-import { resolveContactDisplayName } from '@/utils/contactDisplayName';
+import { resolveContactDisplayName, shouldSyncContactNameFromDirectory } from '@/utils/contactDisplayName';
+import { patchWhatsAppConversationAdmin } from '@/services/whatsappService';
 import {
   conversationMatchesInboxCategory,
   conversationMatchesSelectedTags,
@@ -396,7 +397,52 @@ const ConversationList: React.FC<ConversationListProps> = ({
     }
   }, [sidebarCollapsed]);
 
-  const directoryMetaByPhoneKey = useDirectoryContactMeta(conversations);
+  const directoryMeta = useDirectoryContactMeta(conversations);
+  const { metaByPhoneKey: directoryMetaByPhoneKey, ready: directoryMetaReady } = directoryMeta;
+  const syncedContactNamesRef = React.useRef(new Set<string>());
+
+  // Hidrata contact_name desde directorio (solo no locked) para evitar flash en próximos loads.
+  useEffect(() => {
+    if (!directoryMetaReady) return;
+    const pending: Array<{ id: string; name: string; key: string }> = [];
+    for (const conv of conversations) {
+      if (conv.contactNameLocked) continue;
+      const dirMeta = getDirectoryMetaForConversation(conv, directoryMetaByPhoneKey);
+      const dirName = dirMeta?.displayName?.trim();
+      if (
+        !dirName ||
+        !shouldSyncContactNameFromDirectory(dirName, conv.contactName, {
+          contactNameLocked: conv.contactNameLocked,
+        })
+      ) {
+        continue;
+      }
+      const key = `${conv.id}:${dirName}`;
+      if (syncedContactNamesRef.current.has(key)) continue;
+      pending.push({ id: conv.id, name: dirName, key });
+    }
+    if (pending.length === 0) return;
+
+    let cancelled = false;
+    void (async () => {
+      for (const item of pending.slice(0, 25)) {
+        if (cancelled) return;
+        syncedContactNamesRef.current.add(item.key);
+        try {
+          await patchWhatsAppConversationAdmin({
+            conversationId: item.id,
+            patch: { contactName: item.name },
+          });
+        } catch {
+          syncedContactNamesRef.current.delete(item.key);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [directoryMetaReady, directoryMetaByPhoneKey, conversations]);
 
   const tagMap = useMemo(() => {
     const map = new Map<string, WhatsAppTag>();
@@ -646,9 +692,13 @@ const ConversationList: React.FC<ConversationListProps> = ({
             {categoryDef.label}
           </Typography>
           <Typography variant="caption" color="text.secondary" sx={{ fontVariantNumeric: 'tabular-nums' }}>
-            {filtered.length === categoryCount
-              ? `${categoryCount}`
-              : `${filtered.length} de ${categoryCount}`}
+            {loading
+              ? filtered.length > 0
+                ? `${filtered.length}`
+                : '…'
+              : filtered.length === categoryCount
+                ? `${categoryCount}`
+                : `${filtered.length} de ${categoryCount}`}
           </Typography>
           {selectedTagIds.length > 0 && (
             <Typography variant="caption" color="text.secondary">
@@ -1021,13 +1071,22 @@ const ConversationList: React.FC<ConversationListProps> = ({
           const dirMeta = getDirectoryMetaForConversation(conv, directoryMetaByPhoneKey);
           const rowPhone = conv.contactPhone || conv.phone;
           const rowName = resolveContactDisplayName({
-            directoryDisplayName: dirMeta?.displayName,
-            contactName: conv.contactName,
+            directoryDisplayName: directoryMetaReady ? dirMeta?.displayName : undefined,
+            // Mientras hidrata el directorio, no usar contact_name suelto (emoji / nombre de cliente).
+            // Si está locked (DETEKTOR, etc.) sí se usa de inmediato.
+            contactName:
+              !directoryMetaReady && !conv.contactNameLocked
+                ? undefined
+                : conv.contactName,
             whatsappProfileName: conv.whatsappProfileName,
             phone: rowPhone,
             conversationId: conv.id,
+            contactNameLocked: conv.contactNameLocked,
           });
-          const rowPhoto = pickContactPhotoUrl(dirMeta?.photoUrl, conv.contactPhotoUrl);
+          const rowPhoto = pickContactPhotoUrl(
+            directoryMetaReady ? dirMeta?.photoUrl : undefined,
+            conv.contactPhotoUrl,
+          );
           const convTags = (conv.tagIds || []).map((id) => tagMap.get(id)).filter(Boolean) as WhatsAppTag[];
           const isUnread = Boolean(conv.unreadCount > 0 || conv.crmForceUnread);
           const peers = presenceByConversationId?.[conv.id] || [];

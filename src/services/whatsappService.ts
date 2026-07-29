@@ -101,6 +101,7 @@ function mapConversationRow(row: ConversationRow): WhatsAppConversation {
     contactPhone: row.contact_phone ?? undefined,
     contactPhotoUrl: row.contact_photo_url ?? undefined,
     whatsappProfileName: row.whatsapp_profile_name ?? undefined,
+    contactNameLocked: row.contact_name_locked === true,
     adminNotes: row.admin_notes ?? undefined,
     assignedTo: row.assigned_to ?? undefined,
     lastIntent: row.last_intent ?? undefined,
@@ -186,6 +187,8 @@ export interface WhatsAppConversation {
   contactPhone?: string;
   contactPhotoUrl?: string;
   whatsappProfileName?: string;
+  /** Si true, no sobrescribir contact_name desde WA/directorio automático. */
+  contactNameLocked?: boolean;
   adminNotes?: string;
   assignedTo?: string;
   lastIntent?: string;

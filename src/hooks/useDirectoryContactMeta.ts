@@ -12,6 +12,12 @@ export interface DirectoryContactMeta {
   displayName?: string;
 }
 
+export interface DirectoryContactMetaResult {
+  metaByPhoneKey: Map<string, DirectoryContactMeta>;
+  /** False hasta que el fetch del directorio termina (éxito o error). */
+  ready: boolean;
+}
+
 const CHUNK_SIZE = 80;
 
 function chunkArray<T>(items: T[], size: number): T[][] {
@@ -42,7 +48,7 @@ function buildLookupVariants(conversations: WhatsAppConversation[]): string[] {
 
 export function useDirectoryContactMeta(
   conversations: WhatsAppConversation[],
-): Map<string, DirectoryContactMeta> {
+): DirectoryContactMetaResult {
   const lookupSignature = useMemo(() => {
     return buildLookupVariants(conversations).join('|');
   }, [conversations]);
@@ -50,15 +56,18 @@ export function useDirectoryContactMeta(
   const [metaByPhoneKey, setMetaByPhoneKey] = useState<
     Map<string, DirectoryContactMeta>
   >(() => new Map());
+  const [ready, setReady] = useState(() => !lookupSignature);
 
   useEffect(() => {
     if (!lookupSignature) {
       setMetaByPhoneKey(new Map());
+      setReady(true);
       return;
     }
 
     const variants = lookupSignature.split('|');
     let cancelled = false;
+    setReady(false);
 
     const load = async () => {
       const rows: Array<{
@@ -106,11 +115,17 @@ export function useDirectoryContactMeta(
         });
       }
 
-      if (!cancelled) setMetaByPhoneKey(next);
+      if (!cancelled) {
+        setMetaByPhoneKey(next);
+        setReady(true);
+      }
     };
 
     void load().catch(() => {
-      if (!cancelled) setMetaByPhoneKey(new Map());
+      if (!cancelled) {
+        setMetaByPhoneKey(new Map());
+        setReady(true);
+      }
     });
 
     return () => {
@@ -118,7 +133,7 @@ export function useDirectoryContactMeta(
     };
   }, [lookupSignature]);
 
-  return metaByPhoneKey;
+  return { metaByPhoneKey, ready };
 }
 
 export function getDirectoryMetaForConversation(

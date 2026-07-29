@@ -173,11 +173,18 @@ export function useWhatsAppContactContext(
     whatsappProfileName: conversation?.whatsappProfileName,
     phone: conversation?.contactPhone ?? conversation?.phone,
     conversationId: conversation?.id,
+    contactNameLocked: conversation?.contactNameLocked,
   });
 
   useEffect(() => {
     if (!conversation?.id || !dirDisplayName) return;
-    if (!shouldSyncContactNameFromDirectory(dirDisplayName, conversation.contactName)) return;
+    if (
+      !shouldSyncContactNameFromDirectory(dirDisplayName, conversation.contactName, {
+        contactNameLocked: conversation.contactNameLocked,
+      })
+    ) {
+      return;
+    }
     if (lastSyncedContactNameRef.current === `${conversation.id}:${dirDisplayName}`) return;
 
     lastSyncedContactNameRef.current = `${conversation.id}:${dirDisplayName}`;
@@ -187,7 +194,12 @@ export function useWhatsAppContactContext(
     }).catch(() => {
       lastSyncedContactNameRef.current = null;
     });
-  }, [conversation?.id, conversation?.contactName, dirDisplayName]);
+  }, [
+    conversation?.id,
+    conversation?.contactName,
+    conversation?.contactNameLocked,
+    dirDisplayName,
+  ]);
   const photoUrl = pickContactPhotoUrl(
     user?.photoUrl ?? user?.photoURL,
     conversation?.contactPhotoUrl,
