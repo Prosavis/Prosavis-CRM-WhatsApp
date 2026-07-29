@@ -261,10 +261,21 @@ export interface WhatsAppMessage {
   createdAt: Date;
 }
 
+export interface WhatsAppTagFolder {
+  id: string;
+  name: string;
+  sortOrder: number;
+  createdAt?: Date;
+  createdBy?: string;
+  updatedAt?: Date;
+}
+
 export interface WhatsAppTag {
   id: string;
   name: string;
   color?: string;
+  folderId?: string | null;
+  sortOrder?: number;
   createdAt?: Date;
   createdBy?: string;
   archived?: boolean;
@@ -1212,32 +1223,123 @@ export async function blockWhatsAppUser(
   });
 }
 
-// --- Tags ---
+// --- Tags & tag folders ---
+
+type TagFolderRow = Database['public']['Tables']['whatsapp_tag_folders']['Row'];
+
+function mapTagRow(row: TagRow): WhatsAppTag {
+  return {
+    id: row.id,
+    name: row.name,
+    color: row.color ?? undefined,
+    folderId: row.folder_id ?? null,
+    sortOrder: row.sort_order ?? 0,
+    createdAt: toDate(row.created_at),
+    createdBy: row.created_by ?? undefined,
+    archived: row.archived,
+  };
+}
+
+function mapTagFolderRow(row: TagFolderRow): WhatsAppTagFolder {
+  return {
+    id: row.id,
+    name: row.name,
+    sortOrder: row.sort_order,
+    createdAt: toDate(row.created_at),
+    createdBy: row.created_by ?? undefined,
+    updatedAt: row.updated_at ? toDate(row.updated_at) : undefined,
+  };
+}
+
+export async function listWhatsAppTagFolders(): Promise<WhatsAppTagFolder[]> {
+  const { data, error } = await supabase
+    .from('whatsapp_tag_folders')
+    .select('*')
+    .order('sort_order', { ascending: true })
+    .order('name', { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((row: TagFolderRow) => mapTagFolderRow(row));
+}
+
+export async function createWhatsAppTagFolder(
+  name: string,
+): Promise<{ success: boolean; id: string }> {
+  const existing = await listWhatsAppTagFolders();
+  const nextOrder =
+    existing.length === 0
+      ? 0
+      : Math.max(...existing.map((f) => f.sortOrder)) + 1;
+  const { data, error } = await supabase
+    .from('whatsapp_tag_folders')
+    .insert({ name: name.trim(), sort_order: nextOrder })
+    .select('id')
+    .single();
+  if (error) throw error;
+  return { success: true, id: data.id };
+}
+
+export async function updateWhatsAppTagFolder(
+  folderId: string,
+  patch: { name?: string; sortOrder?: number },
+): Promise<{ success: boolean }> {
+  const update: Database['public']['Tables']['whatsapp_tag_folders']['Update'] = {};
+  if (patch.name !== undefined) update.name = patch.name.trim();
+  if (patch.sortOrder !== undefined) update.sort_order = patch.sortOrder;
+  const { error } = await supabase
+    .from('whatsapp_tag_folders')
+    .update(update)
+    .eq('id', folderId);
+  if (error) throw error;
+  return { success: true };
+}
+
+export async function deleteWhatsAppTagFolder(
+  folderId: string,
+): Promise<{ success: boolean }> {
+  // ON DELETE SET NULL libera tags; quedan en la raíz sin grupo "Sin carpeta".
+  const { error } = await supabase
+    .from('whatsapp_tag_folders')
+    .delete()
+    .eq('id', folderId);
+  if (error) throw error;
+  return { success: true };
+}
+
+export async function reorderWhatsAppTagFolders(
+  orderedIds: string[],
+): Promise<{ success: boolean }> {
+  await Promise.all(
+    orderedIds.map((id, index) =>
+      supabase.from('whatsapp_tag_folders').update({ sort_order: index }).eq('id', id),
+    ),
+  );
+  return { success: true };
+}
 
 export async function listWhatsAppTags(): Promise<WhatsAppTag[]> {
   const { data, error } = await supabase
     .from('whatsapp_chat_tags')
     .select('*')
     .eq('archived', false)
+    .order('sort_order', { ascending: true })
     .order('name', { ascending: true });
   if (error) throw error;
-  return (data ?? []).map((row: TagRow) => ({
-    id: row.id,
-    name: row.name,
-    color: row.color ?? undefined,
-    createdAt: toDate(row.created_at),
-    createdBy: row.created_by ?? undefined,
-    archived: row.archived,
-  }));
+  return (data ?? []).map((row: TagRow) => mapTagRow(row));
 }
 
 export async function createWhatsAppTag(
   name: string,
   color?: string,
+  folderId?: string | null,
 ): Promise<{ success: boolean; id: string }> {
   const { data, error } = await supabase
     .from('whatsapp_chat_tags')
-    .insert({ name, color: color ?? '#1976d2' })
+    .insert({
+      name,
+      color: color ?? '#1976d2',
+      folder_id: folderId ?? null,
+      sort_order: 0,
+    })
     .select('id')
     .single();
   if (error) throw error;
@@ -1246,9 +1348,19 @@ export async function createWhatsAppTag(
 
 export async function updateWhatsAppTag(
   tagId: string,
-  patch: { name?: string; color?: string },
+  patch: {
+    name?: string;
+    color?: string;
+    folderId?: string | null;
+    sortOrder?: number;
+  },
 ): Promise<{ success: boolean }> {
-  const { error } = await supabase.from('whatsapp_chat_tags').update(patch).eq('id', tagId);
+  const update: Database['public']['Tables']['whatsapp_chat_tags']['Update'] = {};
+  if (patch.name !== undefined) update.name = patch.name;
+  if (patch.color !== undefined) update.color = patch.color;
+  if (patch.folderId !== undefined) update.folder_id = patch.folderId;
+  if (patch.sortOrder !== undefined) update.sort_order = patch.sortOrder;
+  const { error } = await supabase.from('whatsapp_chat_tags').update(update).eq('id', tagId);
   if (error) throw error;
   return { success: true };
 }

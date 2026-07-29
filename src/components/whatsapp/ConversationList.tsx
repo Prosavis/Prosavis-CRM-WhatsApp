@@ -51,9 +51,11 @@ import type {
   WhatsAppTag,
   WhatsAppAdminPresence,
 } from '@/services/whatsappService';
+import type { WhatsAppTagFolder } from '@/types/whatsapp';
 import { summarizePeerPresences } from '@/utils/whatsappAdminPresence';
 import OutboundPreviewTicks from './OutboundPreviewTicks';
 import InboxCategorySidebar from './InboxCategorySidebar';
+import TagListGrouped from './TagListGrouped';
 import { ContactAvatar } from '@/components/common/ContactAvatar';
 import {
   getDirectoryMetaForConversation,
@@ -124,6 +126,7 @@ interface ConversationListProps {
   onSelect: (conversation: WhatsAppConversation) => void;
   loading?: boolean;
   tags?: WhatsAppTag[];
+  tagFolders?: WhatsAppTagFolder[];
   onManageTags?: () => void;
   onNewContact?: () => void;
   /** Presencia de otros admins (excluye al usuario actual) por id de conversación. */
@@ -341,6 +344,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
   onSelect,
   loading,
   tags = [],
+  tagFolders = [],
   onManageTags,
   onNewContact,
   presenceByConversationId,
@@ -579,6 +583,11 @@ const ConversationList: React.FC<ConversationListProps> = ({
         collapsed={sidebarCollapsed}
         onCollapsedChange={setSidebarCollapsed}
         onConfigureOutOfCoverage={onConfigureOutOfCoverage}
+        tags={tags}
+        tagFolders={tagFolders}
+        selectedTagIds={selectedTagIds}
+        onToggleTagFilter={toggleTagId}
+        tagCountsById={filter === 'archived' ? archivedTagCountsById : tagCountsById}
       />
 
       <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0 }}>
@@ -785,47 +794,31 @@ const ConversationList: React.FC<ConversationListProps> = ({
               secondary="Mostrar todos los chats de esta categoría"
             />
           </ListItemButton>
-          {secondaryTags.length === 0 ? (
+        </List>
+        {secondaryTags.length === 0 ? (
+          <List dense sx={{ py: 0 }}>
             <ListItemButton disabled>
               <ListItemText
                 primary="No hay tags adicionales"
                 secondary="Los tags de categoría (Agendado, etc.) se eligen en la barra izquierda"
               />
             </ListItemButton>
-          ) : (
-            secondaryTags.map((tag) => {
-              const checked = selectedTagIds.includes(tag.id);
-              const cnt = filter === 'archived'
-                ? (archivedTagCountsById[tag.id] ?? 0)
-                : (tagCountsById[tag.id] ?? 0);
-              return (
-                <ListItemButton key={tag.id} onClick={() => toggleTagId(tag.id)}>
-                  <Checkbox
-                    checked={checked}
-                    tabIndex={-1}
-                    disableRipple
-                    sx={{ mr: 0.5, p: 0.25, pointerEvents: 'none' }}
-                    size="small"
-                  />
-                  <Box
-                    sx={{
-                      width: 12,
-                      height: 12,
-                      borderRadius: '50%',
-                      bgcolor: tag.color || '#1976d2',
-                      mr: 1,
-                      flexShrink: 0,
-                    }}
-                  />
-                  <ListItemText primary={tag.name} sx={{ flex: '1 1 auto', minWidth: 0 }} />
-                  <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0, ml: 1 }}>
-                    {cnt}
-                  </Typography>
-                </ListItemButton>
-              );
-            })
-          )}
-          {onManageTags && (
+          </List>
+        ) : (
+          <TagListGrouped
+            tags={secondaryTags}
+            folders={tagFolders}
+            isChecked={(id) => selectedTagIds.includes(id)}
+            onTagClick={(tag) => toggleTagId(tag.id)}
+            getCount={(id) =>
+              filter === 'archived'
+                ? (archivedTagCountsById[id] ?? 0)
+                : (tagCountsById[id] ?? 0)
+            }
+          />
+        )}
+        {onManageTags && (
+          <List dense sx={{ py: 0 }}>
             <ListItemButton
               sx={{ borderTop: 1, borderColor: 'divider' }}
               onClick={() => {
@@ -837,8 +830,8 @@ const ConversationList: React.FC<ConversationListProps> = ({
                 Gestionar tags...
               </Typography>
             </ListItemButton>
-          )}
-        </List>
+          </List>
+        )}
       </Popover>
 
       <Menu
@@ -922,8 +915,8 @@ const ConversationList: React.FC<ConversationListProps> = ({
         transformOrigin={{ vertical: 'center', horizontal: 'left' }}
         PaperProps={{ sx: { minWidth: 240, maxHeight: 360 } }}
       >
-        <List dense sx={{ py: 0 }}>
-          {tags.length === 0 ? (
+        {tags.length === 0 ? (
+          <List dense sx={{ py: 0 }}>
             <ListItemButton
               onClick={() => {
                 setAssignTagsAnchor(null);
@@ -933,49 +926,28 @@ const ConversationList: React.FC<ConversationListProps> = ({
             >
               <ListItemText primary="Crear tags" secondary="No hay tags disponibles" />
             </ListItemButton>
-          ) : (
-            tags.map((tag) => {
-              const checked = Boolean(contextConversation?.tagIds?.includes(tag.id));
-              return (
-                <ListItemButton
-                  key={tag.id}
-                  onClick={() => {
-                    if (!contextConversation || !onAssignTags) return;
-                    const current = contextConversation.tagIds || [];
-                    const next = checked
-                      ? current.filter((id) => id !== tag.id)
-                      : [...current, tag.id];
-                    onAssignTags(contextConversation, next);
-                    setContextMenu((prev) =>
-                      prev && prev.conversation.id === contextConversation.id
-                        ? { ...prev, conversation: { ...prev.conversation, tagIds: next } }
-                        : prev,
-                    );
-                  }}
-                >
-                  <Checkbox
-                    checked={checked}
-                    tabIndex={-1}
-                    disableRipple
-                    sx={{ mr: 0.5, p: 0.25, pointerEvents: 'none' }}
-                    size="small"
-                  />
-                  <Box
-                    sx={{
-                      width: 12,
-                      height: 12,
-                      borderRadius: '50%',
-                      bgcolor: tag.color || '#1976d2',
-                      mr: 1,
-                      flexShrink: 0,
-                    }}
-                  />
-                  <ListItemText primary={tag.name} />
-                </ListItemButton>
+          </List>
+        ) : (
+          <TagListGrouped
+            tags={tags}
+            folders={tagFolders}
+            isChecked={(id) => Boolean(contextConversation?.tagIds?.includes(id))}
+            onTagClick={(tag) => {
+              if (!contextConversation || !onAssignTags) return;
+              const current = contextConversation.tagIds || [];
+              const checked = current.includes(tag.id);
+              const next = checked
+                ? current.filter((id) => id !== tag.id)
+                : [...current, tag.id];
+              onAssignTags(contextConversation, next);
+              setContextMenu((prev) =>
+                prev && prev.conversation.id === contextConversation.id
+                  ? { ...prev, conversation: { ...prev.conversation, tagIds: next } }
+                  : prev,
               );
-            })
-          )}
-        </List>
+            }}
+          />
+        )}
       </Popover>
 
       <Dialog
@@ -1015,38 +987,18 @@ const ConversationList: React.FC<ConversationListProps> = ({
                 <ListItemText primary="Crear tags" secondary="No hay tags disponibles" />
               </ListItemButton>
             ) : (
-              tags.map((tag) => {
-                const checked = bulkTagSelection.includes(tag.id);
-                return (
-                  <ListItemButton
-                    key={tag.id}
-                    onClick={() => {
-                      setBulkTagSelection((prev) =>
-                        checked ? prev.filter((id) => id !== tag.id) : [...prev, tag.id],
-                      );
-                    }}
-                  >
-                    <Checkbox
-                      checked={checked}
-                      tabIndex={-1}
-                      disableRipple
-                      sx={{ mr: 0.5, p: 0.25, pointerEvents: 'none' }}
-                      size="small"
-                    />
-                    <Box
-                      sx={{
-                        width: 12,
-                        height: 12,
-                        borderRadius: '50%',
-                        bgcolor: tag.color || '#1976d2',
-                        mr: 1,
-                        flexShrink: 0,
-                      }}
-                    />
-                    <ListItemText primary={tag.name} />
-                  </ListItemButton>
-                );
-              })
+              <TagListGrouped
+                tags={tags}
+                folders={tagFolders}
+                isChecked={(id) => bulkTagSelection.includes(id)}
+                onTagClick={(tag) => {
+                  setBulkTagSelection((prev) =>
+                    prev.includes(tag.id)
+                      ? prev.filter((id) => id !== tag.id)
+                      : [...prev, tag.id],
+                  );
+                }}
+              />
             )}
           </List>
         </DialogContent>

@@ -90,6 +90,8 @@ import { getLastInboundAt } from '@/utils/whatsappTemplateSuggestions';
 import { coloredChipSx } from '@/utils/coloredChipStyles';
 import { prepareWhatsAppSticker } from '@/utils/prepareWhatsAppSticker';
 import { summarizePeerPresences } from '@/utils/whatsappAdminPresence';
+import type { WhatsAppTagFolder } from '@/types/whatsapp';
+import TagListGrouped from './TagListGrouped';
 
 interface ChatAreaProps {
   conversation: WhatsAppConversation;
@@ -104,6 +106,7 @@ interface ChatAreaProps {
   externalDraft?: string;
   onExternalDraftConsumed?: () => void;
   tags?: WhatsAppTag[];
+  tagFolders?: WhatsAppTagFolder[];
   onTagsChanged?: () => void;
   /** Abre el diálogo de gestión de tags (crear, editar, eliminar). */
   onManageTags?: () => void;
@@ -197,6 +200,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   externalDraft,
   onExternalDraftConsumed,
   tags = [],
+  tagFolders = [],
   onTagsChanged,
   onManageTags,
   onConversationPermanentlyDeleted,
@@ -1356,40 +1360,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             </Box>
           ) : (
             <>
-              <List dense sx={{ py: 0 }}>
-                {tags.map((tag) => {
-                  const isAssigned = (conversation.tagIds || []).includes(tag.id);
-                  return (
-                    <ListItemButton
-                      key={tag.id}
-                      onClick={() => handleTagToggle(tag.id)}
-                      disabled={tagSaving}
-                      dense
-                    >
-                      <ListItemIcon sx={{ minWidth: 36 }}>
-                        <Checkbox
-                          edge="start"
-                          checked={isAssigned}
-                          tabIndex={-1}
-                          disableRipple
-                          size="small"
-                        />
-                      </ListItemIcon>
-                      <Box
-                        sx={{
-                          width: 12,
-                          height: 12,
-                          borderRadius: '50%',
-                          bgcolor: tag.color || '#1976d2',
-                          mr: 1,
-                          flexShrink: 0,
-                        }}
-                      />
-                      <ListItemText primary={tag.name} primaryTypographyProps={{ variant: 'body2' }} />
-                    </ListItemButton>
-                  );
-                })}
-              </List>
+              <TagListGrouped
+                tags={tags}
+                folders={tagFolders}
+                isChecked={(id) => (conversation.tagIds || []).includes(id)}
+                onTagClick={(tag) => handleTagToggle(tag.id)}
+                disabled={tagSaving}
+              />
               {onManageTags && (
                 <>
                   <Divider />

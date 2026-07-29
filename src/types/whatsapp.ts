@@ -50,10 +50,21 @@ export interface WhatsAppMessage {
   createdAt: Date;
 }
 
+export interface WhatsAppTagFolder {
+  id: string;
+  name: string;
+  sortOrder: number;
+  createdAt?: Date;
+  createdBy?: string;
+  updatedAt?: Date;
+}
+
 export interface WhatsAppTag {
   id: string;
   name: string;
   color?: string;
+  folderId?: string | null;
+  sortOrder?: number;
   createdAt?: Date;
   createdBy?: string;
   archived?: boolean;

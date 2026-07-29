@@ -317,10 +317,21 @@ const DiscountCodesTab: React.FC = () => {
   const formatUsesCell = (item: DiscountCodeData) => {
     const used = item.redemptionCount ?? 0;
     if (item.oncePerUser) {
-      return `${used} · 1/usuario`;
+      return {
+        primary: `${used} canje${used === 1 ? '' : 's'}`,
+        modeLabel: '1 por usuario',
+        modeHint: 'Cupo global ilimitado; cada cliente solo una vez',
+      };
     }
     const max = item.maxRedemptions ?? 1;
-    return `${used}/${max}`;
+    return {
+      primary: `${used}/${max}`,
+      modeLabel: max === 1 ? '1 global' : `Máx. ${max}`,
+      modeHint:
+        max === 1
+          ? 'Un solo canje en total (cualquiera lo gasta)'
+          : `Hasta ${max} canjes en total`,
+    };
   };
 
   const typeToggleSx = {
@@ -553,11 +564,16 @@ const DiscountCodesTab: React.FC = () => {
                     />
                   }
                   label={
-                    <Typography variant="body2" fontWeight={600}>
-                      Una vez por usuario
-                    </Typography>
+                    <Box>
+                      <Typography variant="body2" fontWeight={600}>
+                        Una vez por usuario
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        Ilimitado en total; cada cliente 1 vez
+                      </Typography>
+                    </Box>
                   }
-                  sx={{ m: 0, whiteSpace: 'nowrap' }}
+                  sx={{ m: 0, alignItems: 'flex-start' }}
                 />
                 {!oncePerUser && (
                   <>
@@ -574,11 +590,16 @@ const DiscountCodesTab: React.FC = () => {
                         />
                       }
                       label={
-                        <Typography variant="body2" fontWeight={600}>
-                          Único uso
-                        </Typography>
+                        <Box>
+                          <Typography variant="body2" fontWeight={600}>
+                            Único uso
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" display="block">
+                            1 canje en total (global)
+                          </Typography>
+                        </Box>
                       }
-                      sx={{ m: 0, mt: 0.5, whiteSpace: 'nowrap' }}
+                      sx={{ m: 0, mt: 0.75, alignItems: 'flex-start' }}
                     />
                     {!singleUse && (
                       <TextField
@@ -591,7 +612,7 @@ const DiscountCodesTab: React.FC = () => {
                           setMaxRedemptions(e.target.value ? Number(e.target.value) : '')
                         }
                         inputProps={{ min: 2 }}
-                        helperText="Mínimo 2"
+                        helperText="Tope global (mín. 2). Cualquier usuario puede gastarlos."
                         error={!singleUse && !redemptionsValid}
                         sx={{ mt: 1 }}
                       />
@@ -600,7 +621,7 @@ const DiscountCodesTab: React.FC = () => {
                 )}
                 {oncePerUser && (
                   <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.75 }}>
-                    Cupo global ilimitado; cada usuario solo una vez.
+                    No hay tope global: el código sigue activo; cada usuario de la app (o web) solo puede usarlo una vez.
                   </Typography>
                 )}
               </Box>
@@ -851,14 +872,41 @@ const DiscountCodesTab: React.FC = () => {
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        <Typography
-                          variant="body2"
-                          fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
-                          color="text.secondary"
-                          sx={{ fontVariantNumeric: 'tabular-nums' }}
-                        >
-                          {formatUsesCell(item)}
-                        </Typography>
+                        {(() => {
+                          const uses = formatUsesCell(item);
+                          return (
+                            <Stack spacing={0.5} alignItems="flex-start">
+                              <Typography
+                                variant="body2"
+                                fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+                                fontWeight={700}
+                                sx={{ fontVariantNumeric: 'tabular-nums' }}
+                              >
+                                {uses.primary}
+                              </Typography>
+                              <Chip
+                                label={uses.modeLabel}
+                                size="small"
+                                title={uses.modeHint}
+                                sx={{
+                                  height: 22,
+                                  fontWeight: 600,
+                                  fontSize: '0.65rem',
+                                  bgcolor: item.oncePerUser
+                                    ? alpha(brandOrange, 0.12)
+                                    : alpha(brandBlue, 0.08),
+                                  color: item.oncePerUser
+                                    ? DesignTokens.brand.secondary.darkOrange
+                                    : brandBlue,
+                                  border: '1px solid',
+                                  borderColor: item.oncePerUser
+                                    ? alpha(brandOrange, 0.35)
+                                    : alpha(brandBlue, 0.2),
+                                }}
+                              />
+                            </Stack>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell>
                         <Chip
@@ -1149,23 +1197,34 @@ const DiscountCodesTab: React.FC = () => {
                   size="small"
                 />
               }
-              label="Una vez por usuario"
+              label={
+                <Box>
+                  <Typography variant="body2" fontWeight={600}>
+                    Una vez por usuario
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" display="block">
+                    Ilimitado en total; cada cliente 1 vez
+                  </Typography>
+                </Box>
+              }
+              sx={{ alignItems: 'flex-start' }}
             />
             {!editOncePerUser && (
               <TextField
-                label="Máx. canjes"
+                label="Máx. canjes (global)"
                 type="number"
                 size="small"
                 fullWidth
                 value={editMaxRedemptions}
                 onChange={(e) => setEditMaxRedemptions(e.target.value ? Number(e.target.value) : '')}
                 inputProps={{ min: 1 }}
+                helperText="1 = único uso global. Cualquier cliente puede gastar el cupo."
               />
             )}
             {editOncePerUser && (
-              <Typography variant="caption" color="text.secondary">
-                Cupo global ilimitado; cada usuario solo una vez.
-              </Typography>
+              <Alert severity="info" sx={{ py: 0.5 }}>
+                Configurado bien: sin tope global. Cada usuario autenticado solo puede canjearlo una vez.
+              </Alert>
             )}
             <TextField
               label="Descripción (opcional)"

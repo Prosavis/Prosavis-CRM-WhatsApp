@@ -37,7 +37,7 @@ import SortIcon from '@mui/icons-material/Sort';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { ContactAvatar } from '@/components/common/ContactAvatar';
 import { directoryService } from '@/services/directoryService';
-import { listWhatsAppTags, type WhatsAppTag } from '@/services/whatsappService';
+import { listWhatsAppTags, listWhatsAppTagFolders, type WhatsAppTag, type WhatsAppTagFolder } from '@/services/whatsappService';
 import type { DirectoryEntry } from '@/types/lead';
 import { downloadDirectoryCsv } from '@/utils/exportDirectoryCsv';
 import {
@@ -128,6 +128,7 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
     DEFAULT_BULK_AUDIENCE_ADVANCED_FILTERS,
   );
   const [waTags, setWaTags] = useState<WhatsAppTag[]>([]);
+  const [waTagFolders, setWaTagFolders] = useState<WhatsAppTagFolder[]>([]);
   const [showDirectoryTagFilters, setShowDirectoryTagFilters] = useState(false);
   const [includeOptOut, setIncludeOptOut] = useState(false);
   const [showFilters, setShowFilters] = useState(true);
@@ -188,12 +189,18 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
 
   useEffect(() => {
     let cancelled = false;
-    void listWhatsAppTags()
-      .then((tags) => {
-        if (!cancelled) setWaTags(tags);
+    void Promise.all([listWhatsAppTags(), listWhatsAppTagFolders()])
+      .then(([tags, folders]) => {
+        if (!cancelled) {
+          setWaTags(tags);
+          setWaTagFolders(folders);
+        }
       })
       .catch(() => {
-        if (!cancelled) setWaTags([]);
+        if (!cancelled) {
+          setWaTags([]);
+          setWaTagFolders([]);
+        }
       });
     return () => {
       cancelled = true;
@@ -450,6 +457,7 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
                 setPage(0);
               }}
               waTags={waTags}
+              waTagFolders={waTagFolders}
               directoryTagSuggestions={directoryTagSuggestions}
               showDirectoryTags={showDirectoryTagFilters}
               onToggleDirectoryTags={() => setShowDirectoryTagFilters((v) => !v)}

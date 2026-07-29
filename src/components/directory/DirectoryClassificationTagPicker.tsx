@@ -4,9 +4,6 @@ import {
   Chip,
   CircularProgress,
   FormHelperText,
-  List,
-  ListItemButton,
-  ListItemText,
   Popover,
   Stack,
   Typography,
@@ -15,10 +12,11 @@ import {
 import LocalOfferOutlinedIcon from '@mui/icons-material/LocalOfferOutlined';
 import type { DirectoryEntry } from '@/types/lead';
 import { directoryService } from '@/services/directoryService';
-import { listWhatsAppTags } from '@/services/whatsappService';
-import type { WhatsAppTag } from '@/types/whatsapp';
+import { listWhatsAppTags, listWhatsAppTagFolders } from '@/services/whatsappService';
+import type { WhatsAppTag, WhatsAppTagFolder } from '@/types/whatsapp';
 import { getClassificationLabel, tagNamesToIds } from '@/utils/classificationLabels';
 import { coloredChipSx } from '@/utils/coloredChipStyles';
+import TagListGrouped from '@/components/whatsapp/TagListGrouped';
 
 /** Forma mínima para editar tags (DirectoryEntry o fila de métricas). */
 export type ClassificationTagPickerEntry = {
@@ -56,6 +54,7 @@ export const DirectoryClassificationTagPicker: React.FC<
 }) => {
   const theme = useTheme();
   const [catalog, setCatalog] = useState<WhatsAppTag[]>([]);
+  const [folders, setFolders] = useState<WhatsAppTagFolder[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [internalIds, setInternalIds] = useState<string[]>([]);
@@ -75,10 +74,11 @@ export const DirectoryClassificationTagPicker: React.FC<
     let cancelled = false;
     setAnchorEl(null);
     setLoading(true);
-    listWhatsAppTags()
-      .then((tags) => {
+    Promise.all([listWhatsAppTags(), listWhatsAppTagFolders()])
+      .then(([tags, tagFolders]) => {
         if (cancelled) return;
         setCatalog(tags);
+        setFolders(tagFolders);
         const initial = tagNamesToIds(entry.tags ?? [], tags);
         if (value === undefined) setInternalIds(initial);
       })
@@ -217,28 +217,12 @@ export const DirectoryClassificationTagPicker: React.FC<
               No hay tags configurados. Créalos desde el inbox de WhatsApp.
             </Typography>
           ) : (
-            <List dense disablePadding>
-              {catalog.map((tag) => {
-                const checked = selectedIds.includes(tag.id);
-                return (
-                  <ListItemButton key={tag.id} onClick={() => void handleToggle(tag.id)}>
-                    <Chip
-                      label={tag.name}
-                      size="small"
-                      sx={{
-                        mr: 1,
-                        ...coloredChipSx(theme, tag.color, checked ? 'filled' : 'outlined'),
-                      }}
-                      variant={checked ? 'filled' : 'outlined'}
-                    />
-                    <ListItemText
-                      primary={checked ? 'Asignado' : 'Sin asignar'}
-                      primaryTypographyProps={{ variant: 'caption', color: 'text.secondary' }}
-                    />
-                  </ListItemButton>
-                );
-              })}
-            </List>
+            <TagListGrouped
+              tags={catalog}
+              folders={folders}
+              isChecked={(id) => selectedIds.includes(id)}
+              onTagClick={(tag) => void handleToggle(tag.id)}
+            />
           )}
         </Box>
       </Popover>

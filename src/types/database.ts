@@ -260,6 +260,25 @@ export interface Database {
         };
         Update: Partial<Database['public']['Tables']['crm_discount_codes']['Row']>;
       };
+      whatsapp_tag_folders: {
+        Row: {
+          id: string;
+          name: string;
+          sort_order: number;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          sort_order?: number;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string | null;
+        };
+        Update: Partial<Database['public']['Tables']['whatsapp_tag_folders']['Insert']>;
+      };
       whatsapp_chat_tags: {
         Row: {
           id: string;
@@ -268,6 +287,8 @@ export interface Database {
           created_by: string | null;
           archived: boolean;
           created_at: string;
+          folder_id: string | null;
+          sort_order: number;
         };
         Insert: {
           id?: string;
@@ -276,6 +297,8 @@ export interface Database {
           created_by?: string | null;
           archived?: boolean;
           created_at?: string;
+          folder_id?: string | null;
+          sort_order?: number;
         };
         Update: Partial<Database['public']['Tables']['whatsapp_chat_tags']['Insert']>;
       };

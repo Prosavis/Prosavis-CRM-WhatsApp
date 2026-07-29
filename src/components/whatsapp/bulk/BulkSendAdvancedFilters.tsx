@@ -16,6 +16,7 @@ import {
   useTheme,
 } from '@mui/material';
 import type { WhatsAppTag } from '@/services/whatsappService';
+import type { WhatsAppTagFolder } from '@/types/whatsapp';
 import { coloredChipSx } from '@/utils/coloredChipStyles';
 import {
   BULK_AUDIENCE_TAG_FILTER_LABELS,
@@ -31,6 +32,7 @@ export interface BulkSendAdvancedFiltersProps {
   filters: BulkAudienceAdvancedFilters;
   onChange: (filters: BulkAudienceAdvancedFilters) => void;
   waTags: WhatsAppTag[];
+  waTagFolders?: WhatsAppTagFolder[];
   directoryTagSuggestions: string[];
   showDirectoryTags?: boolean;
   onToggleDirectoryTags?: () => void;
@@ -42,6 +44,7 @@ const BulkSendAdvancedFilters: React.FC<BulkSendAdvancedFiltersProps> = ({
   filters,
   onChange,
   waTags,
+  waTagFolders = [],
   directoryTagSuggestions,
   showDirectoryTags = false,
   onToggleDirectoryTags,
@@ -52,6 +55,11 @@ const BulkSendAdvancedFilters: React.FC<BulkSendAdvancedFiltersProps> = ({
   };
 
   const selectedWaTags = waTags.filter((t) => filters.waTagIds.includes(t.id));
+  const folderNameById = React.useMemo(() => {
+    const map = new Map<string, string>();
+    for (const f of waTagFolders) map.set(f.id, f.name);
+    return map;
+  }, [waTagFolders]);
 
   return (
     <Stack spacing={2}>
@@ -81,6 +89,9 @@ const BulkSendAdvancedFilters: React.FC<BulkSendAdvancedFiltersProps> = ({
             options={waTags}
             value={selectedWaTags}
             getOptionLabel={(option) => option.name}
+            groupBy={(option) =>
+              option.folderId ? (folderNameById.get(option.folderId) ?? '') : ''
+            }
             isOptionEqualToValue={(a, b) => a.id === b.id}
             onChange={(_, value) => patch({ waTagIds: value.map((t) => t.id) })}
             renderTags={(value, getTagProps) =>

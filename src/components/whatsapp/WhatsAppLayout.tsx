@@ -15,6 +15,7 @@ import {
   subscribeToWhatsAppAdminPresence,
   clearMyWhatsAppPresence,
   listWhatsAppTags,
+  listWhatsAppTagFolders,
   listWhatsAppSnippets,
   assignWhatsAppTags,
   blockWhatsAppUser,
@@ -26,6 +27,7 @@ import {
   backfillWhatsAppConversationLine,
   type WhatsAppConversation,
   type WhatsAppTag,
+  type WhatsAppTagFolder,
   type WhatsAppSnippet,
   type WhatsAppAdminPresence,
 } from '@/services/whatsappService';
@@ -169,6 +171,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   const [rightPanel, setRightPanel] = useState<RightPanelMode>('none');
   const [composerDraft, setComposerDraft] = useState('');
   const [tags, setTags] = useState<WhatsAppTag[]>([]);
+  const [tagFolders, setTagFolders] = useState<WhatsAppTagFolder[]>([]);
   const [snippets, setSnippets] = useState<WhatsAppSnippet[]>([]);
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const [newContactOpen, setNewContactOpen] = useState(false);
@@ -332,8 +335,12 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
 
   const loadTags = useCallback(async () => {
     try {
-      const result = await listWhatsAppTags();
-      setTags(result);
+      const [tagResult, folderResult] = await Promise.all([
+        listWhatsAppTags(),
+        listWhatsAppTagFolders(),
+      ]);
+      setTags(tagResult);
+      setTagFolders(folderResult);
     } catch (err) {
       console.error('Error loading tags:', err);
     }
@@ -876,6 +883,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
             onSelect={handleConversationSelect}
             loading={loading}
             tags={tags}
+            tagFolders={tagFolders}
             onManageTags={() => setTagManagerOpen(true)}
             onNewContact={() => setNewContactOpen(true)}
             presenceByConversationId={presenceByConversationId}
@@ -910,6 +918,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
               externalDraft={composerDraft}
               onExternalDraftConsumed={() => setComposerDraft('')}
               tags={tags}
+              tagFolders={tagFolders}
               onTagsChanged={loadTags}
               onManageTags={() => setTagManagerOpen(true)}
               onConversationPermanentlyDeleted={handleConversationPermanentlyDeleted}
@@ -996,6 +1005,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
         open={tagManagerOpen}
         onClose={() => setTagManagerOpen(false)}
         tags={tags}
+        folders={tagFolders}
         tagCounts={inboxMetrics.tagCountsById}
         onTagsChanged={loadTags}
       />
@@ -1004,6 +1014,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
         open={outOfCoverageDialogOpen}
         onClose={() => setOutOfCoverageDialogOpen(false)}
         tags={tags}
+        folders={tagFolders}
         currentTagIds={inboxMetrics.categoryTagIds.fuera_cobertura}
         onSaved={(tagIds) => {
           setCategoryTagOverrides({ fuera_cobertura: tagIds });
