@@ -38,6 +38,7 @@ export interface Database {
           bsuid: string | null;
           state: 'active' | 'escalated' | 'resolved';
           contact_name: string | null;
+          contact_name_locked: boolean;
           contact_phone: string | null;
           contact_photo_url: string | null;
           whatsapp_profile_name: string | null;
