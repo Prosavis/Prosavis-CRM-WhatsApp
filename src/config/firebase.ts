@@ -1,5 +1,6 @@
 // Configuración de Firebase para CRM-WhatsApp
 import { initializeApp } from 'firebase/app';
+import { getFirestore } from 'firebase/firestore';
 import { getFunctions } from 'firebase/functions';
 import { getStorage } from 'firebase/storage';
 
@@ -22,4 +23,6 @@ if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
 const app = initializeApp(firebaseConfig);
 export const functions = getFunctions(app, 'us-central1');
 export const storage = getStorage(app);
+/** Cliente Firestore (lectura/escritura privilegiada de reglas va por Edge Function). */
+export const db = getFirestore(app);
 export default app;

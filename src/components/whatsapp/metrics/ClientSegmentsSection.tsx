@@ -222,6 +222,7 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
       (prev) => {
         const next = new URLSearchParams(prev);
         next.set('tab', 'automations');
+        next.delete('layer');
         next.set('auto', 'reactivations');
         return next;
       },

@@ -385,6 +385,16 @@ function toFirestorePatchValue(value: unknown): FirestoreValue {
     if (Number.isInteger(value)) return { integerValue: String(value) };
     return { doubleValue: value };
   }
+  if (Array.isArray(value)) {
+    return { arrayValue: { values: value.map((item) => toFirestorePatchValue(item)) } };
+  }
+  if (typeof value === 'object') {
+    const fields: Record<string, FirestoreValue> = {};
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      fields[key] = toFirestorePatchValue(nested);
+    }
+    return { mapValue: { fields } };
+  }
   return { stringValue: String(value) };
 }
 
@@ -523,6 +533,212 @@ export async function patchFirestoreDocument(
     const detail = await res.text();
     throw new Error(
       `Error al actualizar ${collectionId}/${documentId}: ${res.status} ${detail}`,
+    );
+  }
+}
+
+/**
+ * Parent path relativo bajo documents/, p.ej. `services/nwEMgpEqVwY3o95u3PNE`.
+ * Usado para CRUD de subcolecciones (automations, etc.).
+ */
+function documentsParentUrl(parentPath: string): string {
+  const account = loadServiceAccount();
+  const segments = parentPath
+    .split('/')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => encodeURIComponent(s))
+    .join('/');
+  return (
+    `https://firestore.googleapis.com/v1/projects/${account.projectId}` +
+    `/databases/(default)/documents/${segments}`
+  );
+}
+
+/** runQuery sobre una subcolección bajo `parentPath`. */
+export async function runFirestoreSubcollectionQuery(
+  parentPath: string,
+  collectionId: string,
+  structuredQuery: Record<string, unknown>,
+): Promise<FirestoreQueryDocument[]> {
+  const account = loadServiceAccount();
+  const accessToken = await getAccessToken(account);
+  const url =
+    `https://firestore.googleapis.com/v1/projects/${account.projectId}` +
+    `/databases/(default)/documents:runQuery`;
+  const parentResource =
+    `projects/${account.projectId}/databases/(default)/documents/` +
+    parentPath
+      .split('/')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .join('/');
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      parent: parentResource,
+      structuredQuery: {
+        from: [{ collectionId }],
+        ...structuredQuery,
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(
+      `Error en runQuery(${parentPath}/${collectionId}): ${res.status} ${detail}`,
+    );
+  }
+
+  const rows = (await res.json()) as Array<{
+    document?: { name?: string; fields?: Record<string, FirestoreValue> };
+  }>;
+
+  const docs: FirestoreQueryDocument[] = [];
+  for (const row of rows) {
+    if (!row.document?.name) continue;
+    docs.push({
+      id: documentNameToId(row.document.name),
+      data: parseFirestoreDocument(row.document.fields),
+    });
+  }
+  return docs;
+}
+
+/** Crea documento en subcolección (ID auto). */
+export async function createFirestoreSubcollectionDocument(
+  parentPath: string,
+  collectionId: string,
+  fields: Record<string, unknown>,
+): Promise<{ id: string; data: Record<string, unknown> }> {
+  const accessToken = await getAccessToken(loadServiceAccount());
+  const url =
+    `${documentsParentUrl(parentPath)}/${encodeURIComponent(collectionId)}`;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ fields: toFirestoreCreateFields(fields) }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(
+      `Error al crear en ${parentPath}/${collectionId}: ${res.status} ${detail}`,
+    );
+  }
+
+  const payload = (await res.json()) as {
+    name?: string;
+    fields?: Record<string, FirestoreValue>;
+  };
+  return {
+    id: documentNameToId(payload.name),
+    data: parseFirestoreDocument(payload.fields),
+  };
+}
+
+/** Lee documento de subcolección. */
+export async function getFirestoreSubcollectionDocument(
+  parentPath: string,
+  collectionId: string,
+  documentId: string,
+): Promise<Record<string, unknown> | null> {
+  const accessToken = await getAccessToken(loadServiceAccount());
+  const url =
+    `${documentsParentUrl(parentPath)}/${encodeURIComponent(collectionId)}` +
+    `/${encodeURIComponent(documentId)}`;
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(
+      `Error al leer ${parentPath}/${collectionId}/${documentId}: ${res.status} ${detail}`,
+    );
+  }
+  const payload = (await res.json()) as {
+    fields?: Record<string, FirestoreValue>;
+  };
+  return parseFirestoreDocument(payload.fields);
+}
+
+/** Patch documento de subcolección. */
+export async function patchFirestoreSubcollectionDocument(
+  parentPath: string,
+  collectionId: string,
+  documentId: string,
+  fields: Record<string, unknown>,
+): Promise<void> {
+  const fieldNames = Object.keys(fields);
+  if (fieldNames.length === 0) return;
+
+  const accessToken = await getAccessToken(loadServiceAccount());
+  const mask = fieldNames
+    .map((f) => `updateMask.fieldPaths=${encodeURIComponent(f)}`)
+    .join('&');
+  const url =
+    `${documentsParentUrl(parentPath)}/${encodeURIComponent(collectionId)}` +
+    `/${encodeURIComponent(documentId)}?${mask}`;
+
+  const firestoreFields: Record<string, FirestoreValue> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    setNestedFirestoreValue(firestoreFields, key.split('.'), toFirestorePatchValue(value));
+  }
+
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ fields: firestoreFields }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(
+      `Error al actualizar ${parentPath}/${collectionId}/${documentId}: ${res.status} ${detail}`,
+    );
+  }
+}
+
+/** Elimina documento de subcolección. */
+export async function deleteFirestoreSubcollectionDocument(
+  parentPath: string,
+  collectionId: string,
+  documentId: string,
+): Promise<void> {
+  const accessToken = await getAccessToken(loadServiceAccount());
+  const url =
+    `${documentsParentUrl(parentPath)}/${encodeURIComponent(collectionId)}` +
+    `/${encodeURIComponent(documentId)}`;
+
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (res.status === 404) {
+    throw new Error(
+      `Documento no encontrado: ${parentPath}/${collectionId}/${documentId}`,
+    );
+  }
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(
+      `Error al eliminar ${parentPath}/${collectionId}/${documentId}: ${res.status} ${detail}`,
     );
   }
 }

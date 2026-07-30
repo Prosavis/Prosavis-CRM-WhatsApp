@@ -206,3 +206,6 @@ verify_jwt = false
 
 [functions.discount-codes-admin]
 verify_jwt = false
+
+[functions.app-automations-admin]
+verify_jwt = false
