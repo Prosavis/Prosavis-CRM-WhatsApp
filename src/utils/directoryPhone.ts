@@ -81,3 +81,14 @@ export function directoryPhoneLookupVariants(
   }
   return [...variants];
 }
+
+/** True when two phone values share the same directory phone_key. */
+export function directoryPhonesMatch(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
+  const keyA = directoryPhoneKey(a);
+  const keyB = directoryPhoneKey(b);
+  if (!keyA || !keyB) return false;
+  return keyA === keyB;
+}

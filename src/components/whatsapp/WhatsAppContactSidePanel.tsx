@@ -34,7 +34,11 @@ import DirectoryClassificationTagPicker from '@/components/directory/DirectoryCl
 import { AppointmentService } from '@/services/appointmentService';
 import type { Appointment } from '@/types/appointment';
 import type { DirectoryChannel, DirectoryEntry } from '@/types/lead';
-import { normalizeDirectoryPhoneE164 } from '@/utils/directoryPhone';
+import {
+  directoryPhoneKey,
+  directoryPhonesMatch,
+  normalizeDirectoryPhoneE164,
+} from '@/utils/directoryPhone';
 import { isUsableName } from '@/utils/contactDisplayName';
 
 const ENTRY_STATUSES = ['active', 'inactive', 'opt_out'];
@@ -265,6 +269,18 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
     ) {
       return;
     }
+
+    const convPhone = conversation.contactPhone || conversation.phone || conversation.id;
+    // Never hydrate names from a directory row that belongs to another phone.
+    if (
+      entry &&
+      !directoryPhonesMatch(entry.phone, convPhone)
+    ) {
+      hydratedIdsRef.current = { conversationId: convId, entryId: null };
+      hydrateForm(null, conversation);
+      return;
+    }
+
     hydratedIdsRef.current = { conversationId: convId, entryId };
     hydrateForm(entry, conversation);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- guarded by hydratedIdsRef; solo conv/entry id
@@ -356,6 +372,12 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
           return;
         }
 
+        if (entry && !directoryPhonesMatch(entry.phone, convPhone)) {
+          // Stale directory row for another phone — do not write.
+          autoSyncDoneRef.current = true;
+          return;
+        }
+
         const updates: Record<string, unknown> = {};
         const hasPhoneInEntry = entry.phone && entry.phone.trim().length > 0;
         if (!hasPhoneInEntry && convPhone) {
@@ -438,6 +460,14 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
     setSaveSuccess(false);
 
     try {
+      const convPhone = conversation.contactPhone || conversation.phone || conversation.id;
+      if (!directoryPhonesMatch(entry.phone, convPhone)) {
+        setError(
+          'La ficha del directorio no corresponde a este chat (teléfono distinto). Recarga e intenta de nuevo.',
+        );
+        return;
+      }
+
       let normalizedPhone: string | undefined;
       if (form.phone.trim()) {
         const normalized = normalizeDirectoryPhoneE164(form.phone.trim());
@@ -446,6 +476,16 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
           return;
         }
         normalizedPhone = normalized;
+      }
+
+      // Form phone must still resolve to the same conversation identity.
+      const formPhoneKey = directoryPhoneKey(normalizedPhone ?? form.phone);
+      const convPhoneKey = directoryPhoneKey(convPhone);
+      if (formPhoneKey && convPhoneKey && formPhoneKey !== convPhoneKey) {
+        setError(
+          'El teléfono de la ficha no coincide con el de este chat. Corrige el teléfono antes de guardar.',
+        );
+        return;
       }
 
       const metadata = { ...(entry.metadata ?? {}) };
@@ -505,9 +545,10 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
         },
       });
 
-      // Write-back al usuario de la App (Firestore users/{uid}) cuando aplique.
-      const appUid = form.appUserId.trim() || entry.appUserId;
-      if (appUid) {
+      // Write-back solo si el app_user_id pertenece a esta entrada (phone ya validado).
+      const appUid = (form.appUserId.trim() || entry.appUserId || '').trim();
+      const entryAppUid = (entry.appUserId || '').trim();
+      if (appUid && (!entryAppUid || appUid === entryAppUid)) {
         try {
           await updateAppUserProfile({
             uid: appUid,
@@ -537,7 +578,7 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
     } finally {
       setSaving(false);
     }
-  }, [conversation.id, entry, form, refetch]);
+  }, [conversation.id, conversation.contactPhone, conversation.phone, entry, form, refetch]);
 
   const hasLinkedAppUser = Boolean(user?.id || entry?.appUserId || form.appUserId.trim());
 

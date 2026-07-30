@@ -1,15 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/config/supabase';
 import type { WhatsAppConversation } from '@/services/whatsappService';
-import { patchWhatsAppConversationAdmin } from '@/services/whatsappService';
 import type { DirectoryEntry } from '@/types/lead';
 import { pickContactPhotoUrl } from '@/utils/contactAvatar';
+import { resolveContactDisplayName } from '@/utils/contactDisplayName';
 import {
-  pickDirectoryDisplayName,
-  resolveContactDisplayName,
-  shouldSyncContactNameFromDirectory,
-} from '@/utils/contactDisplayName';
-import { directoryPhoneLookupVariants } from '@/utils/directoryPhone';
+  directoryPhoneLookupVariants,
+  directoryPhonesMatch,
+} from '@/utils/directoryPhone';
 import { normalizeWhatsAppPanelPhone } from '@/utils/whatsappPhone';
 
 export interface ContactPanelUser {
@@ -90,13 +88,29 @@ function mapDirectoryRow(row: Record<string, unknown>): DirectoryEntry {
   };
 }
 
+/** @deprecated Prefer directoryPhonesMatch from @/utils/directoryPhone */
+export function directoryEntryMatchesConversationPhone(
+  entryPhone: string | null | undefined,
+  conversationPhone: string | null | undefined,
+): boolean {
+  return directoryPhonesMatch(entryPhone, conversationPhone);
+}
+
 export function useWhatsAppContactContext(
   conversation: WhatsAppConversation | null | undefined,
 ): WhatsAppContactContextValue {
   const [directoryEntry, setDirectoryEntry] = useState<DirectoryEntry | null>(null);
   const [user, setUser] = useState<WhatsAppContactContextValue['user']>(null);
   const [loading, setLoading] = useState(false);
-  const lastSyncedContactNameRef = useRef<string | null>(null);
+  const fetchGenRef = useRef(0);
+  const conversationId = conversation?.id ?? null;
+
+  // Clear stale directory identity immediately on chat switch (prevents cross-name writes).
+  useEffect(() => {
+    fetchGenRef.current += 1;
+    setDirectoryEntry(null);
+    setUser(null);
+  }, [conversationId]);
 
   const refresh = useCallback(async () => {
     if (!conversation) {
@@ -105,6 +119,7 @@ export function useWhatsAppContactContext(
       return;
     }
 
+    const gen = ++fetchGenRef.current;
     setLoading(true);
     try {
       const phone = normalizeWhatsAppPanelPhone(
@@ -122,7 +137,14 @@ export function useWhatsAppContactContext(
           .in('phone', lookupPhones)
           .order('updated_at', { ascending: false })
           .limit(5);
-        const dirRow = dirRows?.[0] ?? null;
+
+        if (gen !== fetchGenRef.current) return;
+
+        const dirRow =
+          (dirRows ?? []).find((row) =>
+            directoryPhonesMatch(row.phone as string | null, phone),
+          ) ?? null;
+
         setDirectoryEntry(dirRow ? mapDirectoryRow(dirRow) : null);
 
         if (dirRow) {
@@ -153,11 +175,14 @@ export function useWhatsAppContactContext(
           setUser(null);
         }
       } else {
+        if (gen !== fetchGenRef.current) return;
         setDirectoryEntry(null);
         setUser(null);
       }
     } finally {
-      setLoading(false);
+      if (gen === fetchGenRef.current) {
+        setLoading(false);
+      }
     }
   }, [conversation]);
 
@@ -165,10 +190,19 @@ export function useWhatsAppContactContext(
     void refresh();
   }, [refresh]);
 
-  const dirDisplayName = pickDirectoryDisplayName(directoryEntry);
+  // Prefer directory only when it matches this conversation's phone (avoids stale overlay).
+  const matchedDirectory =
+    directoryEntry &&
+    directoryPhonesMatch(
+      directoryEntry.phone,
+      conversation?.phone ?? conversation?.contactPhone ?? conversation?.id,
+    )
+      ? directoryEntry
+      : null;
+
   const displayName = resolveContactDisplayName({
-    directoryDisplayName: directoryEntry?.displayName,
-    directoryFullName: directoryEntry?.fullName,
+    directoryDisplayName: matchedDirectory?.displayName,
+    directoryFullName: matchedDirectory?.fullName,
     contactName: conversation?.contactName,
     whatsappProfileName: conversation?.whatsappProfileName,
     phone: conversation?.contactPhone ?? conversation?.phone,
@@ -176,39 +210,15 @@ export function useWhatsAppContactContext(
     contactNameLocked: conversation?.contactNameLocked,
   });
 
-  useEffect(() => {
-    if (!conversation?.id || !dirDisplayName) return;
-    if (
-      !shouldSyncContactNameFromDirectory(dirDisplayName, conversation.contactName, {
-        contactNameLocked: conversation.contactNameLocked,
-      })
-    ) {
-      return;
-    }
-    if (lastSyncedContactNameRef.current === `${conversation.id}:${dirDisplayName}`) return;
-
-    lastSyncedContactNameRef.current = `${conversation.id}:${dirDisplayName}`;
-    void patchWhatsAppConversationAdmin({
-      conversationId: conversation.id,
-      patch: { contactName: dirDisplayName },
-    }).catch(() => {
-      lastSyncedContactNameRef.current = null;
-    });
-  }, [
-    conversation?.id,
-    conversation?.contactName,
-    conversation?.contactNameLocked,
-    dirDisplayName,
-  ]);
   const photoUrl = pickContactPhotoUrl(
-    user?.photoUrl ?? user?.photoURL,
+    matchedDirectory ? user?.photoUrl ?? user?.photoURL : undefined,
     conversation?.contactPhotoUrl,
   );
 
   return {
-    directoryEntry,
-    lead: directoryEntry, // backward compat
-    user,
+    directoryEntry: matchedDirectory,
+    lead: matchedDirectory, // backward compat
+    user: matchedDirectory ? user : null,
     loading,
     refresh,
     refetch: refresh,

@@ -270,36 +270,38 @@ export const directoryService = {
   },
 
   /**
-   * Update an existing entry via upsert_directory_entry (merge por phone_key/email).
-   * Evita duplicados al añadir teléfono o al sincronizar desde WhatsApp.
+   * Update an existing entry by primary key only.
+   * Never upsert/merge by phone_key/email/name — that crossed identities when renaming.
    */
   async updateEntry(
     entryId: string,
     data: Partial<DirectoryEntry>,
-    options?: { overwriteClassification?: boolean; replaceTags?: boolean }
+    _options?: { overwriteClassification?: boolean; replaceTags?: boolean },
   ) {
     const existing = await this.getEntryById(entryId);
     if (!existing) {
       throw new Error(`Directorio: entrada no encontrada (${entryId})`);
     }
 
-    const merged: Partial<DirectoryEntry> = { ...existing, ...data };
-    const row = toDbEntry(merged);
+    const row = toDbEntry(data);
     if (row.phone && typeof row.phone === 'string') {
-      row.phone =
-        normalizeDirectoryPhoneE164(row.phone) ?? row.phone;
+      row.phone = normalizeDirectoryPhoneE164(row.phone) ?? row.phone;
     }
     if (row.email && typeof row.email === 'string') {
       row.email = row.email.trim().toLowerCase();
     }
+    if (Object.keys(row).length === 0) {
+      return { id: entryId, success: true };
+    }
 
-    const { data: id, error } = await supabase.rpc('upsert_directory_entry', {
-      p_entry: row,
-      p_overwrite_classification: options?.overwriteClassification ?? false,
-      p_replace_tags: options?.replaceTags ?? false,
-    });
+    row.updated_at = new Date().toISOString();
+
+    const { error } = await supabase
+      .from('crm_directory')
+      .update(row)
+      .eq('id', entryId);
     if (error) throw error;
-    return { id: id as string, success: true };
+    return { id: entryId, success: true };
   },
 
   /** Busca entradas por teléfono (variantes E.164 / dígitos). */

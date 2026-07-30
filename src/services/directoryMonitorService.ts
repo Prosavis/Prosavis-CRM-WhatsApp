@@ -328,14 +328,29 @@ export const directoryMonitorService = {
       if (key) {
         const { data, error } = await supabase
           .from('whatsapp_conversations')
-          .select('id')
+          .select('stable_key')
           .eq('phone_key', key)
           .order('last_message_at', { ascending: false })
           .limit(1)
           .maybeSingle();
         if (error) throw error;
-        conversationId = data?.id ?? undefined;
+        conversationId = data?.stable_key ?? undefined;
       }
+    }
+
+    if (!conversationId) throw new Error('Sin conversación WhatsApp vinculada');
+
+    // Resolve UUID → stable_key if an old directory link stored conversations.id
+    const uuidRe =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (uuidRe.test(conversationId)) {
+      const { data, error } = await supabase
+        .from('whatsapp_conversations')
+        .select('stable_key')
+        .eq('id', conversationId)
+        .maybeSingle();
+      if (error) throw error;
+      conversationId = data?.stable_key ?? undefined;
     }
 
     if (!conversationId) throw new Error('Sin conversación WhatsApp vinculada');

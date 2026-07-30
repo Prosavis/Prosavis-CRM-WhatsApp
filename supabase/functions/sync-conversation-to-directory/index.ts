@@ -131,7 +131,7 @@ Deno.serve(async (req) => {
       last_whatsapp_message_at: safeString(record.last_message_at),
       last_whatsapp_message_text: safeString(record.last_message_text),
       last_whatsapp_intent: safeString(record.last_intent),
-      whatsapp_conversation_id: safeString(record.id) || safeString(record.stable_key),
+      whatsapp_conversation_id: safeString(record.stable_key) || safeString(record.id),
       channels: ['WHATSAPP'],
     };
 

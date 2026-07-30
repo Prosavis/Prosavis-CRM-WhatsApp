@@ -26,25 +26,71 @@ function toDbPatch(patch: Record<string, unknown>) {
   return dbPatch;
 }
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+async function resolveStableKey(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  rawKey: string,
+): Promise<string | null> {
+  const key = rawKey.trim();
+  if (!key) return null;
+
+  const { data: byStable } = await supabase
+    .from('whatsapp_conversations')
+    .select('stable_key')
+    .eq('stable_key', key)
+    .maybeSingle();
+  if (byStable?.stable_key) return String(byStable.stable_key);
+
+  if (UUID_RE.test(key)) {
+    const { data: byId } = await supabase
+      .from('whatsapp_conversations')
+      .select('stable_key')
+      .eq('id', key)
+      .maybeSingle();
+    if (byId?.stable_key) return String(byId.stable_key);
+  }
+
+  return null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
     const { supabase } = await requireCrmAdmin(req);
     const body = await req.json();
-    const stableKey = String(body.stableKey ?? body.conversationId ?? '').trim();
+    const rawKey = String(body.stableKey ?? body.conversationId ?? '').trim();
     const patch = toDbPatch(body.patch ?? {});
 
-    if (!stableKey) return jsonResponse({ error: 'stableKey es requerido.' }, 400);
+    if (!rawKey) return jsonResponse({ error: 'stableKey es requerido.' }, 400);
     if (!Object.keys(patch).length) return jsonResponse({ success: true });
 
-    const { error } = await supabase
+    const stableKey = await resolveStableKey(supabase, rawKey);
+    if (!stableKey) {
+      return jsonResponse(
+        { error: `Conversación no encontrada para key: ${rawKey}` },
+        404,
+      );
+    }
+
+    const { data, error } = await supabase
       .from('whatsapp_conversations')
       .update(patch)
-      .eq('stable_key', stableKey);
+      .eq('stable_key', stableKey)
+      .select('stable_key')
+      .maybeSingle();
 
     if (error) throw error;
-    return jsonResponse({ success: true });
+    if (!data) {
+      return jsonResponse(
+        { error: `No se actualizó ninguna fila para stable_key: ${stableKey}` },
+        404,
+      );
+    }
+    return jsonResponse({ success: true, stableKey });
   } catch (error) {
     if (error instanceof Response) return error;
     return jsonResponse({ error: String(error) }, 500);
