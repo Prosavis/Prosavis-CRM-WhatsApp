@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  contactNameForReminderRecipient,
   isUsableName,
   resolveContactDisplayName,
+  resolveOutboundContactName,
   shouldSyncContactNameFromDirectory,
 } from './contactDisplayName';
 
@@ -78,5 +80,56 @@ describe('shouldSyncContactNameFromDirectory', () => {
 
   it('does not sync when already aligned', () => {
     expect(shouldSyncContactNameFromDirectory('Johanna Guerra', 'Johanna Guerra')).toBe(false);
+  });
+});
+
+describe('resolveOutboundContactName', () => {
+  it('never overwrites a locked contact name', () => {
+    expect(
+      resolveOutboundContactName({
+        incomingName: 'Linda Guzman',
+        existingContactName: 'Alexandra Idarraga',
+        contactNameLocked: true,
+      }),
+    ).toBeNull();
+  });
+
+  it('preserves an already-usable contact name (cleaner reminder case)', () => {
+    expect(
+      resolveOutboundContactName({
+        incomingName: 'Linda Guzman',
+        existingContactName: 'Doris Alexandra Idarraga',
+        contactNameLocked: false,
+      }),
+    ).toBeNull();
+  });
+
+  it('sets name when conversation has no usable name yet', () => {
+    expect(
+      resolveOutboundContactName({
+        incomingName: 'Linda Guzman',
+        existingContactName: null,
+        contactNameLocked: false,
+      }),
+    ).toBe('Linda Guzman');
+  });
+
+  it('rejects unusable incoming names', () => {
+    expect(
+      resolveOutboundContactName({
+        incomingName: '😍😍',
+        existingContactName: null,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe('contactNameForReminderRecipient', () => {
+  it('passes clientName only for client recipients', () => {
+    expect(contactNameForReminderRecipient('client', 'Linda Guzman')).toBe('Linda Guzman');
+  });
+
+  it('omits name for professional recipients (prevents client→cleaner overwrite)', () => {
+    expect(contactNameForReminderRecipient('professional', 'Linda Guzman')).toBeUndefined();
   });
 });

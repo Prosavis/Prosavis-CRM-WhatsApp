@@ -1,4 +1,5 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { resolveOutboundContactName } from './contactDisplayName.ts';
 import {
   buildRecipientPayload,
   getBlocklistKey,
@@ -324,6 +325,13 @@ export async function ensureConversation(
   phoneNumberId: string,
   contactName?: string | null,
 ) {
+  const { data: existing, error: readError } = await supabase
+    .from('whatsapp_conversations')
+    .select('contact_name, contact_name_locked')
+    .eq('stable_key', stableKey)
+    .maybeSingle();
+  if (readError) throw readError;
+
   const row: Record<string, unknown> = {
     stable_key: stableKey,
     phone: stableKey,
@@ -332,9 +340,14 @@ export async function ensureConversation(
     state: 'active',
     ...UNARCHIVE_CONVERSATION_PATCH,
   };
-  const trimmedName = contactName?.trim();
-  if (trimmedName) {
-    row.contact_name = trimmedName;
+
+  const nameToSet = resolveOutboundContactName({
+    incomingName: contactName,
+    existingContactName: existing?.contact_name as string | null | undefined,
+    contactNameLocked: existing?.contact_name_locked as boolean | null | undefined,
+  });
+  if (nameToSet) {
+    row.contact_name = nameToSet;
   }
 
   const { error } = await supabase.from('whatsapp_conversations').upsert(row, {

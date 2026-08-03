@@ -12,6 +12,7 @@
 
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { getServiceClient } from '../_shared/supabase.ts';
+import { contactNameForReminderRecipient } from '../_shared/contactDisplayName.ts';
 import {
   assertMetaSendEnabled,
   ensureConversation,
@@ -317,12 +318,14 @@ Deno.serve(async (req) => {
     const stableKey = getStableKeyFromRecipient(phone);
     const recipient = resolveRecipient(phone);
 
-    // Asegurar que la conversación exista antes de insertar el log
+    // Asegurar que la conversación exista antes de insertar el log.
+    // Solo el destinatario cliente aporta identidad; en professional el body
+    // usa clientName como dato del servicio, NO como nombre del contacto WA.
     await ensureConversationExists(
       supabase,
       stableKey,
       phone,
-      appointmentData.clientName,
+      contactNameForReminderRecipient(recipientType, appointmentData.clientName),
       graph.phoneNumberId,
     );
 
