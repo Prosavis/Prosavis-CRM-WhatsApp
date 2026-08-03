@@ -24,7 +24,12 @@ export const STORAGE_LIMITS = {
   tusChunkBytes: STORAGE_TUS_CHUNK_BYTES,
   warningPercent: STORAGE_ALERT_WARNING_PERCENT,
   criticalPercent: STORAGE_ALERT_CRITICAL_PERCENT,
-  buckets: ['whatsapp-media', 'whatsapp-stickers', 'crm-contact-photos'] as const,
+  buckets: [
+    'whatsapp-media',
+    'whatsapp-stickers',
+    'crm-contact-photos',
+    'electronic-invoices',
+  ] as const,
 } as const;
 
 export const STORAGE_ERROR_CODES = [

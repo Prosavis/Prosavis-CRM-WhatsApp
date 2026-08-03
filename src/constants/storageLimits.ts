@@ -28,6 +28,7 @@ export const STORAGE_LIMITS = {
     { id: 'whatsapp-media', label: 'Media WhatsApp' },
     { id: 'whatsapp-stickers', label: 'Stickers' },
     { id: 'crm-contact-photos', label: 'Fotos contacto' },
+    { id: 'electronic-invoices', label: 'Facturas electrónicas' },
   ],
 } as const;
 
