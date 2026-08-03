@@ -1,4 +1,5 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
+import { isUsableName } from '../_shared/contactDisplayName.ts';
 import { getServiceClient } from '../_shared/supabase.ts';
 import {
   buildStoragePath,
@@ -321,11 +322,11 @@ async function processInboundMessage(params: {
   const unreadCount = Number(existingConversation?.unread_count ?? 0) + 1;
   const lastMessageText = content.messageBody ?? `[${getString(params.message.type) || 'mensaje'}]`;
 
-  // Si el nombre fue editado manualmente desde la ficha (contact_name_locked),
-  // o si el webhook no trae push name, no tocamos los nombres del contacto
-  // para no sobrescribir lo editado ni borrarlo con null.
+  // Nombre CRM (`contact_name`):
+  // - Si está locked (p. ej. Auxiliares), NUNCA lo pisa el push name de Meta.
+  // - Si Meta manda un nombre no usable (solo emoji/símbolos), tampoco pisa contact_name.
+  // `whatsapp_profile_name` sí refleja el push name de Meta (incluso emoji) para diagnóstico.
   const isNameLocked = existingConversation?.contact_name_locked === true;
-  const shouldUpdateName = !isNameLocked && contactName !== null;
 
   const conversationPatch: Record<string, unknown> = {
     stable_key: senderPhone,
@@ -341,9 +342,11 @@ async function processInboundMessage(params: {
     ...UNARCHIVE_CONVERSATION_PATCH,
   };
 
-  if (shouldUpdateName) {
-    conversationPatch.contact_name = contactName;
+  if (contactName !== null) {
     conversationPatch.whatsapp_profile_name = contactName;
+    if (!isNameLocked && isUsableName(contactName)) {
+      conversationPatch.contact_name = contactName;
+    }
   }
 
   const { error: conversationError } = await params.supabase
