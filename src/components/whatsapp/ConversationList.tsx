@@ -23,8 +23,6 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  ToggleButton,
-  ToggleButtonGroup,
   useTheme,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
@@ -82,7 +80,22 @@ import {
 import { useLongPress } from '@/hooks/useLongPress';
 import { coloredChipSx } from '@/utils/coloredChipStyles';
 
-export type BulkTagMode = 'add' | 'replace';
+/** Diff applied to each selected conversation: add new tags, remove deselected common tags. */
+export type BulkTagChanges = {
+  addTagIds: string[];
+  removeTagIds: string[];
+};
+
+function intersectionTagIds(conversations: WhatsAppConversation[]): string[] {
+  if (conversations.length === 0) return [];
+  let common = new Set(conversations[0].tagIds ?? []);
+  for (let i = 1; i < conversations.length; i++) {
+    const ids = new Set(conversations[i].tagIds ?? []);
+    common = new Set([...common].filter((id) => ids.has(id)));
+    if (common.size === 0) break;
+  }
+  return [...common];
+}
 
 function countConversationsMatchingTags(
   conversations: WhatsAppConversation[],
@@ -138,7 +151,7 @@ interface ConversationListProps {
   onAssignTags?: (conversation: WhatsAppConversation, tagIds: string[]) => void;
   onDeleteConversation?: (conversation: WhatsAppConversation) => void;
   onBlockConversation?: (conversation: WhatsAppConversation) => void;
-  onBulkAssignTags?: (conversationIds: string[], tagIds: string[], mode: BulkTagMode) => Promise<void>;
+  onBulkAssignTags?: (conversationIds: string[], changes: BulkTagChanges) => Promise<void>;
   onBulkArchive?: (conversationIds: string[], archive: boolean) => Promise<void>;
   onBulkMarkRead?: (conversationIds: string[], read: boolean) => Promise<void>;
   onBulkPin?: (conversationIds: string[], pin: boolean) => Promise<void>;
@@ -371,8 +384,8 @@ const ConversationList: React.FC<ConversationListProps> = ({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
   const [bulkTagDialogOpen, setBulkTagDialogOpen] = useState(false);
-  const [bulkTagMode, setBulkTagMode] = useState<BulkTagMode>('add');
   const [bulkTagSelection, setBulkTagSelection] = useState<string[]>([]);
+  const [bulkTagInitialCommon, setBulkTagInitialCommon] = useState<string[]>([]);
   const [tagMenuAnchor, setTagMenuAnchor] = useState<null | HTMLElement>(null);
   const [contextMenu, setContextMenu] = useState<{
     mouseX: number;
@@ -565,6 +578,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
     setSelectedIds(new Set());
     setBulkTagDialogOpen(false);
     setBulkTagSelection([]);
+    setBulkTagInitialCommon([]);
   }, []);
 
   const enterSelectionMode = useCallback((conversationId: string) => {
@@ -610,15 +624,30 @@ const ConversationList: React.FC<ConversationListProps> = ({
   }, [bulkLoading, selectedIdList.length, exitSelectionMode]);
 
   const handleApplyBulkTags = useCallback(async () => {
-    if (!onBulkAssignTags || bulkTagSelection.length === 0) return;
-    await runBulkAction(() => onBulkAssignTags(selectedIdList, bulkTagSelection, bulkTagMode));
-  }, [onBulkAssignTags, bulkTagSelection, bulkTagMode, runBulkAction, selectedIdList]);
+    if (!onBulkAssignTags || selectedIdList.length === 0) return;
+    const initial = new Set(bulkTagInitialCommon);
+    const selected = new Set(bulkTagSelection);
+    const addTagIds = bulkTagSelection.filter((id) => !initial.has(id));
+    const removeTagIds = bulkTagInitialCommon.filter((id) => !selected.has(id));
+    if (addTagIds.length === 0 && removeTagIds.length === 0) {
+      setBulkTagDialogOpen(false);
+      return;
+    }
+    await runBulkAction(() => onBulkAssignTags(selectedIdList, { addTagIds, removeTagIds }));
+  }, [
+    onBulkAssignTags,
+    selectedIdList,
+    bulkTagSelection,
+    bulkTagInitialCommon,
+    runBulkAction,
+  ]);
 
   const openBulkTagDialog = useCallback(() => {
-    setBulkTagMode('add');
-    setBulkTagSelection([]);
+    const common = intersectionTagIds(selectedConversations);
+    setBulkTagInitialCommon(common);
+    setBulkTagSelection(common);
     setBulkTagDialogOpen(true);
-  }, []);
+  }, [selectedConversations]);
 
   return (
     <Box sx={{ display: 'flex', height: '100%', bgcolor: 'background.paper', minHeight: 0 }}>
@@ -1008,23 +1037,9 @@ const ConversationList: React.FC<ConversationListProps> = ({
       >
         <DialogTitle>Tags para {selectedIds.size} chat{selectedIds.size === 1 ? '' : 's'}</DialogTitle>
         <DialogContent dividers>
-          <ToggleButtonGroup
-            value={bulkTagMode}
-            exclusive
-            fullWidth
-            size="small"
-            onChange={(_, val: BulkTagMode | null) => {
-              if (val) setBulkTagMode(val);
-            }}
-            sx={{ mb: 2 }}
-          >
-            <ToggleButton value="add">Agregar tags</ToggleButton>
-            <ToggleButton value="replace">Reemplazar tags</ToggleButton>
-          </ToggleButtonGroup>
           <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-            {bulkTagMode === 'add'
-              ? 'Los tags elegidos se añadirán a los existentes en cada chat.'
-              : 'Todos los chats quedarán solo con los tags elegidos.'}
+            Marcados: tags comunes a todos los seleccionados. Desmarcar quita el tag; marcar lo agrega.
+            Tags que solo tienen algunos chats no se tocan si los dejas desmarcados.
           </Typography>
           <List dense sx={{ py: 0 }}>
             {tags.length === 0 ? (
@@ -1058,7 +1073,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
           </Button>
           <Button
             variant="contained"
-            disabled={bulkLoading || bulkTagSelection.length === 0}
+            disabled={bulkLoading || selectedIds.size === 0}
             onClick={() => void handleApplyBulkTags()}
           >
             Aplicar

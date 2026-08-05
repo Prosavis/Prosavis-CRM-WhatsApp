@@ -737,16 +737,22 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
 
   const handleBulkAssignTags = useCallback(async (
     conversationIds: string[],
-    tagIds: string[],
-    mode: 'add' | 'replace',
+    changes: { addTagIds: string[]; removeTagIds: string[] },
   ) => {
-    if (conversationIds.length === 0 || tagIds.length === 0) return;
+    const { addTagIds, removeTagIds } = changes;
+    if (conversationIds.length === 0) return;
+    if (addTagIds.length === 0 && removeTagIds.length === 0) return;
+    const removeSet = new Set(removeTagIds);
     const convById = new Map(conversations.map((c) => [c.id, c]));
     const result = await runBulk(conversationIds, async (id) => {
       const conv = convById.get(id);
-      const nextTagIds = mode === 'replace'
-        ? tagIds
-        : [...new Set([...(conv?.tagIds ?? []), ...tagIds])];
+      const current = conv?.tagIds ?? [];
+      const nextTagIds = [
+        ...new Set([
+          ...current.filter((tagId) => !removeSet.has(tagId)),
+          ...addTagIds,
+        ]),
+      ];
       await assignWhatsAppTags(id, nextTagIds);
     });
     notifyBulkResult(notifyAction, 'con tags actualizados', result);

@@ -6,10 +6,11 @@ Aplicativo independiente para operar Inbox, Métricas, Leads y Descuentos de Wha
 
 **Documentación centralizada** (prosavis-firebase):
 
-- [MIGRACION_SUPABASE_CRM.md](https://github.com/Prosavis/prosavis-firebase/blob/main/docs/whatsapp/MIGRACION_SUPABASE_CRM.md) — cutover, runbook, rollback
-- [WHATSAPP_CRM_SUPABASE_ARQUITECTURA.md](https://github.com/Prosavis/prosavis-firebase/blob/main/docs/whatsapp/WHATSAPP_CRM_SUPABASE_ARQUITECTURA.md) — schema, Edge Functions, Storage
-- [crm-supabase-etl-runbook.md](https://github.com/Prosavis/prosavis-firebase/blob/main/docs/operacion-y-despliegue/crm-supabase-etl-runbook.md) — scripts ETL, validación, capacidad
-- [guia-operativa-meta-whatsapp.md](https://github.com/Prosavis/prosavis-firebase/blob/main/docs/operacion-y-despliegue/guia-operativa-meta-whatsapp.md) — webhook Meta, plantillas WABA, **coexistencia Coex (§J)**
+- [CRM_INBOX_AI_CONTEXTO.md](../prosavis-firebase/docs/whatsapp/CRM_INBOX_AI_CONTEXTO.md) — **sugerencias IA ✨** (Gemini 3.6 Flash + contexto CRM: tags, citas, propiedades)
+- [MIGRACION_SUPABASE_CRM.md](../prosavis-firebase/docs/whatsapp/MIGRACION_SUPABASE_CRM.md) — cutover, runbook, rollback
+- [WHATSAPP_CRM_SUPABASE_ARQUITECTURA.md](../prosavis-firebase/docs/whatsapp/WHATSAPP_CRM_SUPABASE_ARQUITECTURA.md) — schema, Edge Functions, Storage
+- [crm-supabase-etl-runbook.md](../prosavis-firebase/docs/operacion-y-despliegue/crm-supabase-etl-runbook.md) — scripts ETL, validación, capacidad
+- [guia-operativa-meta-whatsapp.md](../prosavis-firebase/docs/operacion-y-despliegue/guia-operativa-meta-whatsapp.md) — webhook Meta, plantillas WABA, **coexistencia Coex (§J)**
 
 Ruta local en monorepo: `prosavis-firebase/docs/whatsapp/` y `docs/operacion-y-despliegue/`.
 
@@ -80,19 +81,21 @@ Referencia local en `.env.example` (solo para `supabase functions serve`).
 | `ENABLE_META_SEND` | `true` = envío real; `false` = mantenimiento (sin envíos) |
 | `WHATSAPP_WEBHOOK_MODE` | `shadow` = solo audita; `active` = crea conversaciones/mensajes |
 | `META_GRAPH_API_VERSION` | Versión Graph API (ej. `v21.0`) |
-| `NVIDIA_API_KEY` | IA en inbox: sugerencias, plantillas, booking JSON, transcripción audio |
-| `NVIDIA_MODEL_REPLY` | Modelo reply (default `meta/llama-4-maverick-17b-128e-instruct`) |
-| `NVIDIA_MODEL_JSON` | Modelo JSON booking (default `nvidia/nemotron-mini-4b-instruct`) |
-| `NVIDIA_MODEL_TEMPLATE` | Modelo plantillas IA (default igual que reply) |
-| `NVIDIA_MODEL_TRANSCRIBE` | Modelo STT (default `google/gemma-3n-e4b-it`) |
+| `GEMINI_API_KEY` | IA en inbox: sugerencias, booking JSON, transcripción audio |
+| `GEMINI_MODEL_REPLY` | Modelo reply (default `gemini-3.6-flash`) |
+| `GEMINI_MODEL_JSON` | Modelo JSON booking (default `gemini-3.6-flash`) |
+| `GEMINI_MODEL_TRANSCRIBE` | Modelo STT (default `gemini-3.6-flash`) |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | Lectura Firestore (citas para IA, métricas, reminders) |
+
+Detalle del packer de contexto: [CRM_INBOX_AI_CONTEXTO.md](../prosavis-firebase/docs/whatsapp/CRM_INBOX_AI_CONTEXTO.md).
 
 Configuración rápida con archivo local (ver `.env.secrets.local.example`):
 
 ```powershell
 Copy-Item .env.secrets.local.example .env.secrets.local
-# Editar .env.secrets.local con NVIDIA_API_KEY y tokens Meta
-.\scripts\set-supabase-secrets.ps1
-.\scripts\deploy-wave-a-llm.ps1
+# Editar .env.secrets.local con GEMINI_API_KEY y tokens Meta
+npx supabase secrets set --env-file .env.secrets.local --project-ref djzwjaegxbhlefanmmee
+.\scripts\deploy-edge-functions.ps1 -Only suggest-whatsapp-agent-reply,get-whatsapp-booking-context
 ```
 
 ## Checklist operativo (después de configurar tokens)
