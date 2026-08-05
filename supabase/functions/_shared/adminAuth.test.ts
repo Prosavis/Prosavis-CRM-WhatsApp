@@ -3,7 +3,10 @@ import {
   createAdminGuard,
   requireAdmin,
 } from "./adminAuth.ts";
-import { requireDirectoryAdmin } from "./directoryMonitorAuth.ts";
+import {
+  createDirectoryAdminGuard,
+  requireDirectoryAdmin,
+} from "./directoryMonitorAuth.ts";
 
 interface FakeClient {
   name: string;
@@ -201,6 +204,62 @@ Deno.test("V5 guard denies Firestore admin document without active flags", async
     response.headers.get("Access-Control-Allow-Origin"),
     "https://userconsole.prosavis.com",
   );
+});
+
+Deno.test("legacy facade allows Firestore admin document without active flags", async () => {
+  const requireDirectoryAdmin = createDirectoryAdminGuard(
+    dependencies({
+      verifyFirebaseToken: () => Promise.resolve({ uid: "legacy-admin" }),
+      getFirebaseAdminDoc: () => Promise.resolve({ role: "admin" }),
+    }),
+  );
+  const token = unsignedToken({
+    iss: "https://securetoken.google.com/prosavis",
+    sub: "legacy-admin",
+  });
+
+  const context = await requireDirectoryAdmin(authRequest(token));
+
+  assertEquals(context.actor.kind, "firebase");
+  assertEquals(context.actor.uid, "legacy-admin");
+});
+
+Deno.test("legacy facade denies explicitly inactive admin documents with strict CORS", async () => {
+  const cases = [
+    {
+      document: { role: "admin", isActive: false },
+      origin: "https://userconsole.prosavis.com",
+      expectedOrigin: "https://userconsole.prosavis.com",
+    },
+    {
+      document: { isAdmin: true, active: false },
+      origin: "https://attacker.example",
+      expectedOrigin: null,
+    },
+  ];
+
+  for (const testCase of cases) {
+    const requireDirectoryAdmin = createDirectoryAdminGuard(
+      dependencies({
+        verifyFirebaseToken: () => Promise.resolve({ uid: "inactive-admin" }),
+        getFirebaseAdminDoc: () => Promise.resolve(testCase.document),
+      }),
+    );
+    const token = unsignedToken({
+      iss: "https://securetoken.google.com/prosavis",
+      sub: "inactive-admin",
+    });
+
+    const response = await thrownResponse(() =>
+      requireDirectoryAdmin(authRequest(token, testCase.origin))
+    );
+
+    assertEquals(response.status, 403);
+    assertEquals(
+      response.headers.get("Access-Control-Allow-Origin"),
+      testCase.expectedOrigin,
+    );
+  }
 });
 
 Deno.test("invalid Supabase token returns 401", async () => {

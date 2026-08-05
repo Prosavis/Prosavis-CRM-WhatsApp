@@ -52,6 +52,27 @@ export interface AdminAuthDependencies<Client> {
   authorizedAdminEmails: readonly string[];
 }
 
+export type FirebaseAdminDocumentActivePolicy = (
+  document: Record<string, unknown>,
+) => boolean;
+
+export interface AdminGuardOptions {
+  isFirebaseAdminDocumentActive?: FirebaseAdminDocumentActivePolicy;
+}
+
+export const requireExplicitFirebaseAdminActive:
+  FirebaseAdminDocumentActivePolicy = (
+    document,
+  ) => document.isActive === true || document.active === true;
+
+export const preserveLegacyFirebaseAdminActive:
+  FirebaseAdminDocumentActivePolicy = (
+    document,
+  ) =>
+    document.isActive === true ||
+    document.active === true ||
+    (document.isActive === undefined && document.active === undefined);
+
 function bearerToken(request: Request): string | null {
   const authorization = request.headers.get("Authorization") ?? "";
   const match = authorization.match(/^Bearer\s+(.+)$/i);
@@ -81,7 +102,11 @@ function isFirebaseIssuer(payload: Record<string, unknown> | null): boolean {
 
 export function createAdminGuard<Client>(
   dependencies: AdminAuthDependencies<Client>,
+  options: AdminGuardOptions = {},
 ): (request: Request) => Promise<AdminContext<Client>> {
+  const isFirebaseAdminDocumentActive = options.isFirebaseAdminDocumentActive ??
+    requireExplicitFirebaseAdminActive;
+
   return async (request: Request): Promise<AdminContext<Client>> => {
     const token = bearerToken(request);
     if (!token) {
@@ -131,8 +156,8 @@ export function createAdminGuard<Client>(
       const role = String(adminDocument?.role ?? "");
       const hasAdminRole = adminDocument?.isAdmin === true ||
         ["admin", "super_admin", "superadmin"].includes(role);
-      const isActive = adminDocument?.isActive === true ||
-        adminDocument?.active === true;
+      const isActive = adminDocument !== null &&
+        isFirebaseAdminDocumentActive(adminDocument);
       if (hasAdminRole && isActive) {
         return {
           supabase: dependencies.createServiceClient(),
@@ -233,7 +258,13 @@ const defaultDependencies: AdminAuthDependencies<ServiceClient> = {
   authorizedAdminEmails: authorizedAdminEmails(),
 };
 
-const defaultRequireAdmin = createAdminGuard(defaultDependencies);
+export function createDefaultAdminGuard(
+  options: AdminGuardOptions = {},
+): (request: Request) => Promise<AdminContext<ServiceClient>> {
+  return createAdminGuard(defaultDependencies, options);
+}
+
+const defaultRequireAdmin = createDefaultAdminGuard();
 
 export function requireAdmin(
   request: Request,
