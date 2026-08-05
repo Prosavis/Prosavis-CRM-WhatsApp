@@ -7,6 +7,7 @@ Aplicativo independiente para operar Inbox, Métricas, Leads y Descuentos de Wha
 **Documentación centralizada** (prosavis-firebase):
 
 - [CRM_INBOX_AI_CONTEXTO.md](../prosavis-firebase/docs/whatsapp/CRM_INBOX_AI_CONTEXTO.md) — **sugerencias IA ✨** (Gemini 3.6 Flash + contexto CRM: tags, citas, propiedades)
+- [CRM_INBOX_BULK_TAGS.md](../prosavis-firebase/docs/whatsapp/CRM_INBOX_BULK_TAGS.md) — **tags masivos** (checklist por intersección; quitar/agregar en lote)
 - [MIGRACION_SUPABASE_CRM.md](../prosavis-firebase/docs/whatsapp/MIGRACION_SUPABASE_CRM.md) — cutover, runbook, rollback
 - [WHATSAPP_CRM_SUPABASE_ARQUITECTURA.md](../prosavis-firebase/docs/whatsapp/WHATSAPP_CRM_SUPABASE_ARQUITECTURA.md) — schema, Edge Functions, Storage
 - [crm-supabase-etl-runbook.md](../prosavis-firebase/docs/operacion-y-despliegue/crm-supabase-etl-runbook.md) — scripts ETL, validación, capacidad
