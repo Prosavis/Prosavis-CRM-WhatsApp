@@ -112,3 +112,61 @@ Implementada y verificada localmente. No se ejecutó deploy ni se modificó el e
 - El lint global continúa rojo por deuda previa; no se amplió el alcance para corregir archivos no relacionados.
 - El índice Graphify quedó sin refrescar por instalación local rota.
 - Durante la ejecución, `HEAD` avanzó externamente a `8f09c6c` (`Ground booking payments and Meta session window`). Este agente no creó commits; se conservaron los cambios concurrentes y el WIP visible.
+
+## Correcciones posteriores a Spec FAIL / Quality CHANGES_REQUIRED
+
+### Implementación
+
+- Los snapshots de `sessionWindow` ya no se consumen como estado congelado:
+  - `resolveMetaSessionWindow()` recalcula el estado con el reloj actual.
+  - Prefiere el inbound local más reciente frente al snapshot del Edge.
+  - `useMetaSessionWindow()` programa un único `setTimeout` para `expiresAt`, sin polling.
+  - El efecto cancela el timeout al cambiar dependencias o desmontar el consumidor.
+  - `BookingAssistantDrawer`, `TemplatesSidePanel` y la selección de plantillas usan el contrato reevaluado.
+- `groundBookingPayment()` ahora:
+  - usa `collectedData.date`, `time` y `address` como objetivo de la reserva;
+  - compara fecha/hora en `America/Bogota` y dirección normalizada;
+  - no toma una cita distinta cuando existe un objetivo explícito sin coincidencia autoritativa;
+  - conserva el fallback a la cita próxima solamente cuando no existe objetivo explícito;
+  - acepta `totalAmount` como autoritativo únicamente si es finito y mayor que cero.
+
+### RED / GREEN de la corrección
+
+1. Snapshot temporal e inbound posterior:
+   - RED: 2 fallos; `resolveMetaSessionWindow` no existía.
+   - GREEN: 6/6 en el primer ciclo.
+2. Asociación con reserva conversada:
+   - RED: el caso objetivo devolvía `APPROVED` de la cita más cercana en vez de `PENDING` de la cita conversada.
+   - GREEN: 13/13 en el primer ciclo.
+3. Timer único y cleanup:
+   - RED: 2 fallos; `scheduleMetaSessionExpiry` no existía.
+   - GREEN: 8/8.
+4. Casos adicionales:
+   - objetivo explícito sin cita coincidente limpia pago inventado;
+   - una cita distinta no presta su pago;
+   - montos `0` y negativos nunca se exponen como `paymentAmount`;
+   - GREEN: 15/15 en `inboxAiContextFormat.test.ts`.
+
+### Verificación posterior
+
+- Focused:
+  - `npm test -- --run src/utils/metaSessionWindow.test.ts src/utils/inboxAiContextFormat.test.ts src/services/whatsappService.types.test.ts src/utils/conversationHistory.test.ts`
+  - 4 archivos, 35 tests, todos aprobados.
+- Suite completa:
+  - `npm test`
+  - 15 archivos, 120 tests, todos aprobados.
+- Tipos:
+  - `npm run type-check`
+  - Exit 0.
+- Diagnósticos IDE:
+  - Sin errores en los archivos de la corrección.
+- Lint enfocado:
+  - Los archivos nuevos y consumidores no presentan hallazgos.
+  - Permanecen 2 errores `no-useless-assignment` preexistentes en `inboxAiContextFormat.ts`.
+- Graphify:
+  - El reintento de `graphify update .` volvió a fallar con `ModuleNotFoundError: No module named 'graphify'`.
+- Concurrencia:
+  - Durante esta corrección `HEAD` avanzó externamente a `4384112` (`Use MetaSessionWindow for session logic`) y se actualizó `origin/master`.
+  - Después avanzó externamente a `02e0fc4`; `origin/master` quedó en `2dd1383`, ambos relacionados con el WIP de autenticación concurrente.
+  - Este agente no ejecutó commits, push, deploy, stash, reset ni checkout.
+  - El WIP concurrente de `directoryMonitorAuth`, `adminAuth` y `strictCors` se preservó sin editar.

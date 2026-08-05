@@ -28,6 +28,11 @@ export function useMetaSessionWindow(
       ? lastInboundAt.toISOString()
       : null;
   const [nowMillis, setNowMillis] = useState(() => Date.now());
+  const newestInboundMillis = Math.max(
+    new Date(snapshotInboundAt ?? '').getTime() || 0,
+    new Date(currentInboundAt ?? '').getTime() || 0,
+  );
+  const evaluationNowMillis = Math.max(nowMillis, newestInboundMillis);
 
   useEffect(() => {
     setNowMillis(Date.now());
@@ -38,9 +43,9 @@ export function useMetaSessionWindow(
       resolveMetaSessionWindow({
         snapshot,
         lastInboundAt: currentInboundAt,
-        now: new Date(nowMillis),
+        now: new Date(evaluationNowMillis),
       }),
-    [currentInboundAt, nowMillis, snapshot],
+    [currentInboundAt, evaluationNowMillis, snapshot],
   );
 
   useEffect(() => {
