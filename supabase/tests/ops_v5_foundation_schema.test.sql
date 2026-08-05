@@ -28,6 +28,24 @@ select has_column('public', 'crm_team_members', 'hire_date', 'team members have 
 select has_column('public', 'crm_team_members', 'labor_regime', 'team members have labor_regime');
 select has_column('public', 'crm_team_members', 'operations_status', 'team members have operations_status');
 
+-- Allowed-value fixtures are copied from the binding brief, independently of
+-- the migration constraint definitions.
+select lives_ok(
+  $$insert into public.buildings
+    (service_id, name, building_type)
+    select 'svc-allowed', name, building_type
+    from (
+      values
+        ('Allowed conjunto', 'conjunto'),
+        ('Allowed edificio', 'edificio'),
+        ('Allowed casa', 'casa'),
+        ('Allowed comercial', 'comercial'),
+        ('Allowed hotel', 'hotel'),
+        ('Allowed airbnb', 'airbnb')
+    ) as allowed_buildings(name, building_type)$$,
+  'all contractual building types are accepted'
+);
+
 select is(
   pg_temp.sqlstate_of($$insert into public.buildings
     (service_id, name, building_type, unit_count)
@@ -70,12 +88,52 @@ select is(
   '23514',
   'booking status is exhaustive'
 );
+select lives_ok(
+  $$insert into public.bookings
+    (service_id, appointment_id, status, fulfillment, crew_size)
+    select
+      'svc-a',
+      'allowed-status-' || lower(status),
+      status,
+      'single',
+      1
+    from (
+      values
+        ('PENDING'),
+        ('PENDING_RESCHEDULE'),
+        ('CONFIRMED'),
+        ('EN_ROUTE'),
+        ('IN_PROGRESS'),
+        ('COMPLETED'),
+        ('CANCELED'),
+        ('REJECTED')
+    ) as allowed_statuses(status)$$,
+  'all contractual booking statuses are accepted'
+);
 select is(
   pg_temp.sqlstate_of($$insert into public.bookings
     (service_id, appointment_id, status, payment_status, fulfillment, crew_size)
     values ('svc-a', 'invalid-payment-status', 'PENDING', 'PAID', 'single', 1)$$),
   '23514',
   'payment status is exhaustive'
+);
+select lives_ok(
+  $$insert into public.bookings
+    (service_id, appointment_id, status, payment_status, fulfillment, crew_size)
+    select
+      'svc-a',
+      'allowed-payment-status-' || lower(payment_status),
+      'PENDING',
+      payment_status,
+      'single',
+      1
+    from (
+      values
+        ('PAGO_PENDIENTE'),
+        ('PAGO_EN_PROCESO'),
+        ('PAGO_ACEPTADO')
+    ) as allowed_payment_statuses(payment_status)$$,
+  'all contractual payment statuses are accepted'
 );
 select is(
   pg_temp.sqlstate_of($$insert into public.bookings
@@ -84,12 +142,52 @@ select is(
   '23514',
   'payment method is exhaustive'
 );
+select lives_ok(
+  $$insert into public.bookings
+    (service_id, appointment_id, status, payment_method, fulfillment, crew_size)
+    select
+      'svc-a',
+      'allowed-payment-method-' || lower(payment_method),
+      'PENDING',
+      payment_method,
+      'single',
+      1
+    from (
+      values ('WOMPI'), ('QR'), ('CASH')
+    ) as allowed_payment_methods(payment_method)$$,
+  'all contractual payment methods are accepted'
+);
 select is(
   pg_temp.sqlstate_of($$insert into public.bookings
     (service_id, appointment_id, status, fulfillment, crew_size)
     values ('svc-a', 'invalid-fulfillment', 'PENDING', 'team', 1)$$),
   '23514',
   'fulfillment is exhaustive'
+);
+select lives_ok(
+  $$insert into public.bookings
+    (service_id, appointment_id, status, fulfillment, crew_size)
+    values
+      ('svc-a', 'allowed-fulfillment-single', 'PENDING', 'single', 1),
+      ('svc-a', 'allowed-fulfillment-composite', 'PENDING', 'composite', 2)$$,
+  'all contractual fulfillment values are accepted'
+);
+select lives_ok(
+  $$insert into public.bookings
+    (service_id, appointment_id, status, fulfillment, crew_size, assignment_source)
+    values
+      ('svc-a', 'allowed-assignment-manual', 'PENDING', 'single', 1, 'manual'),
+      ('svc-a', 'allowed-assignment-suggested-accepted', 'PENDING', 'single', 1, 'suggested_accepted'),
+      ('svc-a', 'allowed-assignment-suggested-overridden', 'PENDING', 'single', 1, 'suggested_overridden'),
+      ('svc-a', 'allowed-assignment-auto', 'PENDING', 'single', 1, 'auto')$$,
+  'all contractual assignment sources are accepted'
+);
+select is(
+  pg_temp.sqlstate_of($$insert into public.bookings
+    (service_id, appointment_id, status, fulfillment, crew_size, assignment_source)
+    values ('svc-a', 'invalid-assignment-source', 'PENDING', 'single', 1, 'imported')$$),
+  '23514',
+  'assignment source is exhaustive'
 );
 select is(
   pg_temp.sqlstate_of($$insert into public.bookings
@@ -208,6 +306,15 @@ select is(
   '23514',
   'addon sale point is exhaustive'
 );
+select lives_ok(
+  $$insert into public.booking_addons
+    (service_id, booking_id, addon_id, minutes, price_cop, sold_at)
+    values
+      ('svc-a', '20000000-0000-0000-0000-000000000001', 'allowed-checkout', 15, 1000, 'checkout'),
+      ('svc-a', '20000000-0000-0000-0000-000000000001', 'allowed-onsite', 15, 1000, 'onsite'),
+      ('svc-a', '20000000-0000-0000-0000-000000000001', 'allowed-rebook', 15, 1000, 'rebook')$$,
+  'all contractual addon sale points are accepted'
+);
 
 select is(
   pg_temp.sqlstate_of($$insert into public.booking_events
@@ -215,6 +322,21 @@ select is(
     values ('svc-a', '20000000-0000-0000-0000-000000000001', 'deleted')$$),
   '23514',
   'booking event is exhaustive'
+);
+select lives_ok(
+  $$insert into public.booking_events
+    (service_id, booking_id, event)
+    values
+      ('svc-a', '20000000-0000-0000-0000-000000000001', 'creado'),
+      ('svc-a', '20000000-0000-0000-0000-000000000001', 'confirmado'),
+      ('svc-a', '20000000-0000-0000-0000-000000000001', 'reagendado'),
+      ('svc-a', '20000000-0000-0000-0000-000000000001', 'reasignado'),
+      ('svc-a', '20000000-0000-0000-0000-000000000001', 'en_proceso'),
+      ('svc-a', '20000000-0000-0000-0000-000000000001', 'finalizado'),
+      ('svc-a', '20000000-0000-0000-0000-000000000001', 'cancelado_cliente'),
+      ('svc-a', '20000000-0000-0000-0000-000000000001', 'cancelado_operaria'),
+      ('svc-a', '20000000-0000-0000-0000-000000000001', 'no_pudo_ingresar')$$,
+  'all contractual booking events are accepted'
 );
 
 select is(
@@ -247,12 +369,33 @@ select is(
   '23514',
   'availability reason is exhaustive'
 );
+select lives_ok(
+  $$insert into public.cleaner_availability
+    (service_id, cleaner_id, operational_date, unavailable_reason, source)
+    values
+      ('svc-a', 'cleaner-a-2', '2026-09-01', 'none', 'manual'),
+      ('svc-a', 'cleaner-a-2', '2026-09-02', 'incapacidad', 'manual'),
+      ('svc-a', 'cleaner-a-2', '2026-09-03', 'vacaciones', 'manual'),
+      ('svc-a', 'cleaner-a-2', '2026-09-04', 'personal', 'manual'),
+      ('svc-a', 'cleaner-a-2', '2026-09-05', 'no_demand', 'manual'),
+      ('svc-a', 'cleaner-a-2', '2026-09-06', 'no_response', 'manual')$$,
+  'all contractual availability reasons are accepted'
+);
 select is(
   pg_temp.sqlstate_of($$insert into public.cleaner_availability
     (service_id, cleaner_id, operational_date, source)
     values ('svc-a', 'cleaner-a-2', '2026-08-05', 'web')$$),
   '23514',
   'availability source is exhaustive'
+);
+select lives_ok(
+  $$insert into public.cleaner_availability
+    (service_id, cleaner_id, operational_date, source)
+    values
+      ('svc-a', 'cleaner-a-2', '2026-10-01', 'manual'),
+      ('svc-a', 'cleaner-a-2', '2026-10-02', 'whatsapp'),
+      ('svc-a', 'cleaner-a-2', '2026-10-03', 'app')$$,
+  'all contractual availability sources are accepted'
 );
 select is(
   pg_temp.sqlstate_of($$insert into public.cleaner_availability

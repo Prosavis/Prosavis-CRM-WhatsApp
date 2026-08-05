@@ -143,3 +143,65 @@ de implementación enfocado.
    `npx supabase migration list --local`.
 4. El grafo del workspace no pudo actualizarse hasta reparar la instalación
    local del CLI Graphify.
+
+## Follow-up de revisión task-scoped — 05/08/2026
+
+### Fix aplicado
+
+- `ops_v5_foundation_rls.test.sql` ahora ejerce `SELECT`, `INSERT`, `UPDATE` y
+  `DELETE` sobre las seis tablas nuevas como `anon`, authenticated no admin y
+  admin activo: `6 tablas × 3 roles × 4 operaciones`.
+- La inspección de `pg_policies` exige que cada tabla esperada invoque
+  `app_private.is_crm_admin()` tanto en `USING` como en `WITH CHECK`.
+- Los grants `SELECT`, `INSERT`, `UPDATE` y `DELETE` se comprueban uno por uno,
+  sin usar una lista any-of en `has_table_privilege`.
+- `ops_v5_foundation_schema.test.sql` contiene fixtures independientes del DDL
+  que insertan los 46 valores permitidos por los checks contractuales,
+  incluyendo `assignment_source`, y conserva los casos inválidos.
+
+### Ciclo de revisión y comandos
+
+Antes del fix, la verificación estática task-scoped falló con:
+
+```text
+RED: missing six-table behavioral fixture
+RED: policy predicate does not assert is_crm_admin invocation
+RED: privileges are checked as an any-of list
+RED: missing allowed fixture: PENDING_RESCHEDULE
+...
+RED: missing allowed fixture: no_pudo_ingresar
+```
+
+Después del fix, la misma verificación estática devolvió exit code `0`:
+
+```text
+RLS behavior matrix: 6 tables x 3 roles x 4 operations
+Policy predicates: is_crm_admin() required in USING and WITH CHECK
+Privileges: SELECT/INSERT/UPDATE/DELETE checked separately
+Allowed contractual enum fixtures: 46/46
+```
+
+Se comprobó el runtime antes de decidir si ejecutar exclusivamente los dos
+archivos pgTAP:
+
+```powershell
+npx supabase status --debug
+```
+
+Salida exacta:
+
+```text
+LegacyStatusDbInspectError: failed to inspect container health:
+docker: command not found (podman also not found) — install Docker Desktop
+or Podman and ensure it is on PATH
+```
+
+Por tanto, no se ejecutó `supabase test db`: el runtime local no apareció y no
+se usó ninguna base remota como sustituto.
+
+### Commit
+
+- Mensaje: `fix(db): strengthen foundation SQL tests`
+- Hash: el commit que contiene este follow-up; se devuelve de forma exacta en
+  la entrega final para evitar una referencia circular dentro del propio
+  commit.
