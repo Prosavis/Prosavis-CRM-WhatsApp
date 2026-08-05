@@ -77,6 +77,35 @@ describe('buildTranscriptWithBudget', () => {
     expect(merged[merged.length - 1]?.text).toContain('nuevo');
     expect(meta.truncated).toBe(true);
   });
+
+  it('retains complete merged turns separately before character truncation', () => {
+    const turns: ConversationTurn[] = [
+      {
+        role: 'user',
+        text: 'mensaje inbound anterior',
+        createdAt: '2026-08-05T10:00:00.000Z',
+      },
+      {
+        role: 'bot',
+        text: 'respuesta saliente muy larga '.repeat(10),
+        createdAt: '2026-08-05T11:00:00.000Z',
+      },
+    ];
+
+    const result = buildTranscriptWithBudget(
+      turns,
+      { loaded: 2, truncated: false },
+      60,
+    );
+
+    expect(result.merged).toHaveLength(1);
+    expect(result.merged[0]?.role).toBe('bot');
+    expect(result.completeMerged).toHaveLength(2);
+    expect(result.completeMerged[0]).toMatchObject({
+      role: 'user',
+      createdAt: '2026-08-05T10:00:00.000Z',
+    });
+  });
 });
 
 describe('mergedTurnsToTranscript', () => {

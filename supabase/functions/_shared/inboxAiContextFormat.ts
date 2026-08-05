@@ -4,6 +4,7 @@
  */
 
 import type { ConversationHistoryMeta } from './conversationHistory.ts';
+import type { MetaSessionWindow } from './metaSessionWindow.ts';
 import { formatPricingCatalogBlock } from './pricingCatalog.ts';
 
 const UPCOMING_APPTS = 5;
@@ -22,6 +23,7 @@ export interface InboxAiDirectory {
   tags?: string[];
   appUserId?: string | null;
   notesSummary?: string | null;
+  paymentStatus?: string | null;
   isReturningClient: boolean;
 }
 
@@ -37,6 +39,36 @@ export interface InboxAiAppointment {
   clientName?: string | null;
   /** Auxiliar(es) / profesional asignado. */
   providerName?: string | null;
+  paymentStatus?: string | null;
+  totalAmount?: number | null;
+  paymentMethod?: string | null;
+  wompiReference?: string | null;
+}
+
+export function mapInboxAiAppointmentPayment(
+  data: Record<string, unknown>,
+): Pick<
+  InboxAiAppointment,
+  'paymentStatus' | 'totalAmount' | 'paymentMethod' | 'wompiReference'
+> {
+  const text = (value: unknown): string | null => {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    return trimmed || null;
+  };
+  const number = (value: unknown): number | null => {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value !== 'string' || !value.trim()) return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
+  return {
+    paymentStatus: text(data.paymentStatus),
+    totalAmount: number(data.totalAmount),
+    paymentMethod: text(data.paymentMethod),
+    wompiReference: text(data.wompiReference),
+  };
 }
 
 export type PropertyPattern = 'none' | 'single' | 'multiple' | 'unknown';
@@ -69,6 +101,7 @@ export interface InboxAiContextSlice {
   /** Total de citas encontradas en la ventana de lookback (no solo las listadas). */
   appointmentCount?: number;
   propertySummary?: InboxAiPropertySummary | null;
+  sessionWindow: MetaSessionWindow;
 }
 
 /** Fecha/hora legible en zona Colombia (America/Bogota). */
@@ -231,6 +264,12 @@ function formatAppointmentLine(a: InboxAiAppointment): string {
     `dirección: ${place}`,
   ];
   if (a.duration != null) parts.push(`${a.duration}h`);
+  if (a.paymentStatus) parts.push(`pago: ${a.paymentStatus}`);
+  if (a.totalAmount != null) {
+    parts.push(`valor: COP ${String(a.totalAmount).replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`);
+  }
+  if (a.paymentMethod) parts.push(`método: ${a.paymentMethod}`);
+  if (a.wompiReference) parts.push(`referencia Wompi: ${a.wompiReference}`);
   return `- ${parts.join(' | ')}`;
 }
 
@@ -273,6 +312,7 @@ export function formatInboxAiContextBlock(params: {
   /** Citas completas de lookback para resumen de propiedades (si no, usa appointments). */
   allAppointmentsForProperties?: InboxAiAppointment[];
   propertySummary?: InboxAiPropertySummary | null;
+  sessionWindow: MetaSessionWindow;
   nowIso?: string;
 }): string {
   const nowIso = params.nowIso ?? new Date().toISOString();
@@ -288,6 +328,13 @@ export function formatInboxAiContextBlock(params: {
   );
 
   lines.push('');
+  lines.push('=== Canal / ventana WhatsApp ===');
+  lines.push(`Estado: ${params.sessionWindow.status}`);
+  lines.push(`Último mensaje inbound: ${params.sessionWindow.lastInboundAt ?? 'desconocido'}`);
+  lines.push(`Expira: ${params.sessionWindow.expiresAt ?? 'desconocido'}`);
+  lines.push(`Requiere plantilla: ${params.sessionWindow.requiresTemplate ? 'sí' : 'no'}`);
+
+  lines.push('');
   lines.push('=== Perfil directorio ===');
   if (params.directory) {
     const d = params.directory;
@@ -300,6 +347,9 @@ export function formatInboxAiContextBlock(params: {
       lines.push(`Dirección preferida de servicio: ${d.preferredServiceAddress}`);
     }
     lines.push(`Cliente recurrente (CRM): ${d.isReturningClient ? 'sí' : 'no'}`);
+    if (d.paymentStatus) {
+      lines.push(`Estado de pago (directorio): ${d.paymentStatus}`);
+    }
     if (d.appUserId) lines.push(`app_user_id: ${d.appUserId}`);
     if (d.notesSummary) lines.push(`Notas: ${d.notesSummary}`);
   } else {
@@ -358,7 +408,7 @@ export function formatInboxAiContextBlock(params: {
   lines.push('');
   lines.push('=== Citas / apoyos (Firestore, fuente de verdad) ===');
   lines.push(
-    'Cada apoyo incluye fecha/hora (Colombia), estado, servicio, cliente, auxiliar y dirección del servicio.',
+    'Cada apoyo incluye fecha/hora (Colombia), estado, servicio, cliente, auxiliar, dirección y pago cuando existen.',
   );
   if (!upcoming.length && !past.length) {
     lines.push('Sin citas/apoyos encontrados para este contacto.');
@@ -437,6 +487,81 @@ export function groundBookingClientInfo<
   return { ...bookingContext, clientInfo: info };
 }
 
+type GroundedBookingPayment<T> = Omit<T, 'paymentStatus' | 'paymentAmount'> & {
+  paymentStatus: 'APPROVED' | 'PENDING' | 'none';
+  paymentAmount: number | null;
+};
+
+function normalizeAppointmentPaymentStatus(
+  value: string | null | undefined,
+): 'APPROVED' | 'PENDING' | null {
+  const status = value?.trim().toUpperCase();
+  if (!status) return null;
+  if (['APPROVED', 'PAID', 'PAGO_ACEPTADO', 'SUCCESSFUL'].includes(status)) {
+    return 'APPROVED';
+  }
+  if (['PENDING', 'PAGO_PENDIENTE', 'PAGO_EN_PROCESO'].includes(status)) {
+    return 'PENDING';
+  }
+  return null;
+}
+
+function isRelevantUpcomingAppointment(
+  appointment: InboxAiAppointment,
+  now: number,
+): boolean {
+  const scheduledAt = new Date(appointment.scheduledDate).getTime();
+  if (!Number.isFinite(scheduledAt) || scheduledAt < now) return false;
+  const status = appointment.status?.trim().toUpperCase();
+  return !status || !['CANCELLED', 'CANCELED', 'REJECTED'].includes(status);
+}
+
+/**
+ * Sustituye afirmaciones de pago inferidas por datos reales de la cita próxima
+ * más cercana. Sin datos autoritativos elimina estado y monto inventados.
+ */
+export function groundBookingPayment<
+  T extends {
+    paymentStatus?: unknown;
+    paymentAmount?: unknown;
+  },
+>(
+  bookingContext: T,
+  ctx: Pick<InboxAiContextSlice, 'appointments'>,
+  nowIso = new Date().toISOString(),
+): GroundedBookingPayment<T> {
+  const now = new Date(nowIso).getTime();
+  const closest = ctx.appointments
+    .filter((appointment) => isRelevantUpcomingAppointment(appointment, now))
+    .sort(
+      (a, b) =>
+        new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime(),
+    )
+    .find(
+      (appointment) =>
+        normalizeAppointmentPaymentStatus(appointment.paymentStatus) != null ||
+        (appointment.totalAmount != null && Number.isFinite(appointment.totalAmount)),
+    );
+
+  if (!closest) {
+    return {
+      ...bookingContext,
+      paymentStatus: 'none',
+      paymentAmount: null,
+    };
+  }
+
+  return {
+    ...bookingContext,
+    paymentStatus:
+      normalizeAppointmentPaymentStatus(closest.paymentStatus) ?? 'none',
+    paymentAmount:
+      closest.totalAmount != null && Number.isFinite(closest.totalAmount)
+        ? closest.totalAmount
+        : null,
+  };
+}
+
 export const INBOX_AI_SYSTEM_INSTRUCTION =
   'Eres un agente de ventas de Prosavis (limpieza residencial y empresas en Colombia). ' +
   'Responde en español, cordial y concreto. ' +
@@ -452,7 +577,11 @@ export const INBOX_AI_SYSTEM_INSTRUCTION =
   'y garantizar limpieza correcta y seguridad. Explica brevemente que priorizamos seguridad y confianza. ' +
   'Si no queda claro quién recibe, pregunta cómo nos abrirán o si prefieren llegada anticipada. ' +
   'Al hablar de apoyos, usa fecha/hora, dirección, cliente y auxiliar solo si aporta; no inventes auxiliares ni direcciones. ' +
-  'No inventes precios distintos a los del contexto. Si hay link de pago, menciónalo al final. ' +
+  'Usa precios únicamente desde el catálogo oficial incluido en el contexto. ' +
+  'Nunca afirmes un pago sin datos autoritativos de CRM/Firestore. ' +
+  'Nunca inventes horarios disponibles; usa solo disponibilidad confirmada por una fuente real. ' +
+  'Cuando la ventana Meta esté cerrada, propone una plantilla aprobada en vez de texto libre. ' +
+  'Si hay link de pago, menciónalo al final. ' +
   'Adapta el tono a los tags (p. ej. Empresas vs residencial). ' +
   'Si hay tags sensibles internos (Bloqueado, Decline, lista negra), no empujes venta agresiva y no reveles esos tags al cliente en el texto. ' +
   'Si hay citas próximas, tenlas en cuenta al responder (no ofrezcas re-agendar ignorándolas).';

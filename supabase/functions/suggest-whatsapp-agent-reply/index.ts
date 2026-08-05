@@ -11,6 +11,7 @@ import {
   INBOX_AI_SYSTEM_INSTRUCTION,
   buildInboxAiContext,
   groundBookingClientInfo,
+  groundBookingPayment,
 } from '../_shared/inboxAiContext.ts';
 
 const MAX_EXTRA_CONTEXT_CHARS = 2000;
@@ -56,6 +57,7 @@ Deno.serve(async (req) => {
         hint: 'El último mensaje es saliente. Usa forceGenerate para redactar igualmente.',
         historyMeta: ctx.historyMeta,
         conversationTags: ctx.conversationTags,
+        sessionWindow: ctx.sessionWindow,
       });
     }
 
@@ -74,7 +76,7 @@ Deno.serve(async (req) => {
     );
 
     // ─── Booking Context ───
-    const inferredBookingContext = await geminiGenerateJson<unknown>({
+    const inferredBookingContext = await geminiGenerateJson<Record<string, unknown>>({
       apiKey,
       prompt:
         'Analiza esta conversación de WhatsApp de Prosavis (limpieza en Colombia) y responde SOLO JSON con ' +
@@ -88,12 +90,13 @@ Deno.serve(async (req) => {
         `Teléfono cliente: ${ctx.phone}\n\n${ctx.formattedBlock}`,
     }).catch(() => ({}));
 
+    const groundedPaymentContext = groundBookingPayment(inferredBookingContext, ctx);
     const {
       bookingContext: pricedBookingContext,
       wompiCheckoutUrl,
       wompiPaymentReference,
       wompiAmountCOP,
-    } = resolveBookingPricingCheckout(inferredBookingContext, ctx.phone);
+    } = resolveBookingPricingCheckout(groundedPaymentContext, ctx.phone);
     const bookingContext = groundBookingClientInfo(pricedBookingContext, ctx);
 
     // ─── Generar sugerencia de respuesta ───
@@ -114,6 +117,7 @@ Deno.serve(async (req) => {
       bookingContext,
       historyMeta: ctx.historyMeta,
       conversationTags: ctx.conversationTags,
+      sessionWindow: ctx.sessionWindow,
       ...(wompiCheckoutUrl ? { wompiCheckoutUrl } : {}),
       ...(wompiPaymentReference ? { wompiPaymentReference } : {}),
       ...(wompiAmountCOP ? { wompiAmountCOP } : {}),

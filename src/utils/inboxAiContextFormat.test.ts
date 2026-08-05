@@ -5,6 +5,8 @@ import {
   formatBogotaDateTime,
   formatInboxAiContextBlock,
   groundBookingClientInfo,
+  groundBookingPayment,
+  mapInboxAiAppointmentPayment,
   normalizeAddressKey,
 } from '../../supabase/functions/_shared/inboxAiContextFormat';
 
@@ -80,6 +82,7 @@ describe('formatInboxAiContextBlock', () => {
         tags: ['Cliente'],
         appUserId: 'uid-1',
         notesSummary: 'Prefiere mañana',
+        paymentStatus: 'paid',
         isReturningClient: true,
         preferredServiceAddress: 'Calle 10 #20-30',
       },
@@ -94,6 +97,10 @@ describe('formatInboxAiContextBlock', () => {
           duration: 4,
           clientName: 'Ana Pérez',
           providerName: 'Laura Gómez',
+          paymentStatus: 'PAGO_ACEPTADO',
+          totalAmount: 88_000,
+          paymentMethod: 'WOMPI',
+          wompiReference: 'APPT-123',
         },
         {
           id: 'a0',
@@ -108,6 +115,12 @@ describe('formatInboxAiContextBlock', () => {
         },
       ],
       appointmentCount: 7,
+      sessionWindow: {
+        status: 'open',
+        lastInboundAt: '2026-08-05T11:00:00.000Z',
+        expiresAt: '2026-08-06T11:00:00.000Z',
+        requiresTemplate: false,
+      },
       nowIso: '2026-08-05T12:00:00.000Z',
     });
 
@@ -117,8 +130,16 @@ describe('formatInboxAiContextBlock', () => {
     expect(block).toContain('=== Propiedades / ubicaciones de apoyos ===');
     expect(block).toContain('misma propiedad');
     expect(block).toContain('Dirección preferida (directorio): Calle 10 #20-30');
+    expect(block).toContain('Estado de pago (directorio): paid');
+    expect(block).toContain('=== Canal / ventana WhatsApp ===');
+    expect(block).toContain('Estado: open');
+    expect(block).toContain('Requiere plantilla: no');
     expect(block).toContain('dirección: Calle 10 #20-30 (Apto 201)');
     expect(block).toContain('auxiliar: Laura Gómez');
+    expect(block).toContain('pago: PAGO_ACEPTADO');
+    expect(block).toContain('valor: COP 88.000');
+    expect(block).toContain('método: WOMPI');
+    expect(block).toContain('referencia Wompi: APPT-123');
     expect(block).toContain('Cliente: Hola');
     expect(block).toContain('=== Catálogo oficial de precios (fuente de verdad) ===');
     expect(block).toContain('120 minutos → COP 58.000');
@@ -134,12 +155,20 @@ describe('formatInboxAiContextBlock', () => {
       directory: null,
       appointments: [],
       appointmentCount: 0,
+      sessionWindow: {
+        status: 'unknown',
+        lastInboundAt: null,
+        expiresAt: null,
+        requiresTemplate: true,
+      },
       nowIso: '2026-08-05T12:00:00.000Z',
     });
     expect(block).toContain('Sin entrada en crm_directory');
     expect(block).toContain('Sin citas/apoyos encontrados');
     expect(block).toContain('Total apoyos/citas encontrados (ventana CRM): 0');
     expect(block).toContain('=== Propiedades / ubicaciones de apoyos ===');
+    expect(block).toContain('=== Canal / ventana WhatsApp ===');
+    expect(block).toContain('Estado: unknown');
     expect(block).toContain('Ventana truncada');
   });
 });
@@ -149,6 +178,13 @@ describe('INBOX_AI_SYSTEM_INSTRUCTION', () => {
     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/SEGURIDAD Y ACCESO/);
     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/1 hora antes/);
     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/NUNCA propongas llegar exactamente/);
+  });
+
+  it('requires grounded prices, payments, availability and Meta templates', () => {
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/precios.+catálogo oficial/i);
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/pago.+datos autoritativos/i);
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/nunca inventes.+horarios disponibles/i);
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/ventana.+cerrada.+plantilla/i);
   });
 });
 
@@ -195,5 +231,75 @@ describe('groundBookingClientInfo', () => {
 
     expect(grounded.clientInfo?.address).toBe('Calle servicio 9');
     expect(grounded.clientInfo?.name).toBe('Real Name');
+  });
+});
+
+describe('groundBookingPayment', () => {
+  it('overwrites invented payment values from the closest relevant upcoming appointment', () => {
+    const grounded = groundBookingPayment(
+      {
+        paymentStatus: 'PENDING',
+        paymentAmount: 999_999,
+      },
+      {
+        appointments: [
+          {
+            id: 'later',
+            scheduledDate: '2026-08-20T14:00:00.000Z',
+            paymentStatus: 'PAGO_PENDIENTE',
+            totalAmount: 118_000,
+          },
+          {
+            id: 'closest',
+            scheduledDate: '2026-08-10T14:00:00.000Z',
+            paymentStatus: 'PAGO_ACEPTADO',
+            totalAmount: 88_000,
+          },
+        ],
+      },
+      '2026-08-05T12:00:00.000Z',
+    );
+
+    expect(grounded.paymentStatus).toBe('APPROVED');
+    expect(grounded.paymentAmount).toBe(88_000);
+  });
+
+  it('clears invented paid claims when no upcoming appointment has authoritative payment data', () => {
+    const grounded = groundBookingPayment(
+      {
+        paymentStatus: 'APPROVED',
+        paymentAmount: 999_999,
+      },
+      {
+        appointments: [
+          {
+            id: 'without-payment',
+            scheduledDate: '2026-08-10T14:00:00.000Z',
+          },
+        ],
+      },
+      '2026-08-05T12:00:00.000Z',
+    );
+
+    expect(grounded.paymentStatus).toBe('none');
+    expect(grounded.paymentAmount).toBeNull();
+  });
+});
+
+describe('mapInboxAiAppointmentPayment', () => {
+  it('maps Firestore payment fields without trusting incompatible values', () => {
+    expect(
+      mapInboxAiAppointmentPayment({
+        paymentStatus: 'PAGO_ACEPTADO',
+        totalAmount: '88000',
+        paymentMethod: 'WOMPI',
+        wompiReference: 'APPT-123',
+      }),
+    ).toEqual({
+      paymentStatus: 'PAGO_ACEPTADO',
+      totalAmount: 88_000,
+      paymentMethod: 'WOMPI',
+      wompiReference: 'APPT-123',
+    });
   });
 });

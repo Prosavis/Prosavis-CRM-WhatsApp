@@ -24,18 +24,26 @@ import {
   buildPropertyLocationSummary,
   formatInboxAiContextBlock,
   groundBookingClientInfo,
+  groundBookingPayment,
+  mapInboxAiAppointmentPayment,
   type InboxAiAppointment,
   type InboxAiDirectory,
   type InboxAiPropertySummary,
 } from './inboxAiContextFormat.ts';
+import {
+  buildMetaSessionWindow,
+  type MetaSessionWindow,
+} from './metaSessionWindow.ts';
 
 export {
   INBOX_AI_SYSTEM_INSTRUCTION,
   buildPropertyLocationSummary,
   formatInboxAiContextBlock,
   groundBookingClientInfo,
+  groundBookingPayment,
 };
 export type { InboxAiAppointment, InboxAiDirectory, InboxAiPropertySummary };
+export type { MetaSessionWindow };
 
 type SupabaseClient = any;
 
@@ -55,6 +63,7 @@ export interface InboxAiContext {
   /** Total de citas en lookback (antes del slice de listado). */
   appointmentCount: number;
   propertySummary: InboxAiPropertySummary;
+  sessionWindow: MetaSessionWindow;
   formattedBlock: string;
   /** Rol del último turn tras merge (el presupuesto recorta desde lo antiguo). */
   lastTurnRole: 'user' | 'bot' | null;
@@ -153,7 +162,7 @@ async function loadDirectoryByPhone(
   const { data: rows, error } = await supabase
     .from('crm_directory')
     .select(
-      'id, full_name, display_name, phone, email, address, preferred_service_address_line, notes, internal_notes, tags, app_user_id, metadata',
+      'id, full_name, display_name, phone, email, address, preferred_service_address_line, notes, internal_notes, tags, app_user_id, payment_status, metadata',
     )
     .in('phone', lookupPhones)
     .order('updated_at', { ascending: false })
@@ -190,6 +199,7 @@ async function loadDirectoryByPhone(
     tags,
     appUserId,
     notesSummary: notes,
+    paymentStatus: asTrimmedString(row.payment_status),
     isReturningClient: Boolean(appUserId),
   };
 }
@@ -224,6 +234,7 @@ function mapAppointmentDoc(doc: { id: string; data: Record<string, unknown> }): 
     duration: asFiniteNumber(doc.data.duration),
     clientName: asTrimmedString(doc.data.clientName),
     providerName: resolveProviderName(doc.data),
+    ...mapInboxAiAppointmentPayment(doc.data),
   };
 }
 
@@ -368,7 +379,7 @@ export async function buildInboxAiContext(
     throw new Error('No se encontró historial de conversación.');
   }
 
-  const { transcript, meta: historyMeta, merged } = buildTranscriptWithBudget(
+  const { transcript, meta: historyMeta, merged, completeMerged } = buildTranscriptWithBudget(
     history.turns,
     history.meta,
     charBudget,
@@ -377,6 +388,8 @@ export async function buildInboxAiContext(
     throw new Error('No hay mensajes del cliente en el historial.');
   }
   const lastTurnRole = merged[merged.length - 1]?.role ?? null;
+  const nowIso = new Date().toISOString();
+  const sessionWindow = buildMetaSessionWindow(completeMerged, nowIso);
 
   let conversationTags: string[] = [];
   try {
@@ -439,7 +452,6 @@ export async function buildInboxAiContext(
       directory?.preferredServiceAddress ?? directory?.address ?? null,
   });
 
-  const nowIso = new Date().toISOString();
   const formattedBlock = formatInboxAiContextBlock({
     phone,
     transcript,
@@ -450,6 +462,7 @@ export async function buildInboxAiContext(
     appointmentCount,
     allAppointmentsForProperties: allAppointments,
     propertySummary,
+    sessionWindow,
     nowIso,
   });
 
@@ -462,6 +475,7 @@ export async function buildInboxAiContext(
     appointments,
     appointmentCount,
     propertySummary,
+    sessionWindow,
     formattedBlock,
     lastTurnRole,
   };

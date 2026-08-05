@@ -9,6 +9,7 @@ import { resolveBookingPricingCheckout } from '../_shared/pricingCatalog.ts';
 import {
   buildInboxAiContext,
   groundBookingClientInfo,
+  groundBookingPayment,
 } from '../_shared/inboxAiContext.ts';
 
 Deno.serve(async (req) => {
@@ -36,7 +37,7 @@ Deno.serve(async (req) => {
       throw err;
     }
 
-    const inferredBookingContext = await geminiGenerateJson<unknown>({
+    const inferredBookingContext = await geminiGenerateJson<Record<string, unknown>>({
       apiKey,
       prompt:
         'Analiza esta conversación de WhatsApp de Prosavis y responde SOLO JSON con stage, collectedData, ' +
@@ -47,18 +48,20 @@ Deno.serve(async (req) => {
         `Teléfono: ${ctx.phone}\n\n${ctx.formattedBlock}`,
     }).catch(() => ({}));
 
+    const groundedPaymentContext = groundBookingPayment(inferredBookingContext, ctx);
     const {
       bookingContext: pricedBookingContext,
       wompiCheckoutUrl,
       wompiPaymentReference,
       wompiAmountCOP,
-    } = resolveBookingPricingCheckout(inferredBookingContext, ctx.phone);
+    } = resolveBookingPricingCheckout(groundedPaymentContext, ctx.phone);
     const bookingContext = groundBookingClientInfo(pricedBookingContext, ctx);
 
     return jsonResponse({
       bookingContext,
       historyMeta: ctx.historyMeta,
       conversationTags: ctx.conversationTags,
+      sessionWindow: ctx.sessionWindow,
       ...(wompiCheckoutUrl ? { wompiCheckoutUrl } : {}),
       ...(wompiPaymentReference ? { wompiPaymentReference } : {}),
       ...(wompiAmountCOP ? { wompiAmountCOP } : {}),

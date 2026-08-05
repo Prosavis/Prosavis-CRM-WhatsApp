@@ -194,12 +194,18 @@ export function buildTranscriptWithBudget(
   historyTurns: ConversationTurn[],
   historyMeta: ConversationHistoryMeta,
   maxChars = DEFAULT_TRANSCRIPT_CHAR_BUDGET,
-): { transcript: string; meta: ConversationHistoryMeta; merged: ConversationTurn[] } {
-  const merged = buildMergedTurns(historyTurns);
-  const budgeted = applyTranscriptCharBudget(merged, maxChars);
+): {
+  transcript: string;
+  meta: ConversationHistoryMeta;
+  merged: ConversationTurn[];
+  completeMerged: ConversationTurn[];
+} {
+  const completeMerged = buildMergedTurns(historyTurns);
+  const budgeted = applyTranscriptCharBudget(completeMerged, maxChars);
   return {
     transcript: budgeted.transcript,
     merged: budgeted.turns,
+    completeMerged,
     meta: {
       ...historyMeta,
       loaded: budgeted.turns.length,
