@@ -993,6 +993,7 @@ interface BroadcastJobRow {
   created_at: string;
   completed_at: string | null;
   last_progress_at: string | null;
+  job_kind?: string | null;
 }
 
 interface BroadcastRecipientRow {
@@ -1043,24 +1044,32 @@ function mapBroadcastRecipient(row: BroadcastRecipientRow): BroadcastRecipientDe
   };
 }
 
-/** Lista jobs de envío masivo recientes (pestaña Métricas). */
+/** Lista jobs de envío masivo recientes (pestaña Métricas / historial frío). */
 export async function listBroadcastJobs(options: {
   days?: number;
   limit?: number;
+  /** Filtra por job_kind (p. ej. cold_app_user). */
+  jobKind?: string;
 } = {}): Promise<BroadcastJobSummary[]> {
   const days = options.days ?? 30;
   const limit = options.limit ?? 50;
   const from = new Date();
   from.setDate(from.getDate() - days);
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('whatsapp_broadcast_jobs')
     .select(
-      'id, status, total_recipients, sent, failed, skipped, template_name, rich_body_preview, created_at, completed_at, last_progress_at',
+      'id, status, total_recipients, sent, failed, skipped, template_name, rich_body_preview, created_at, completed_at, last_progress_at, job_kind',
     )
     .gte('created_at', from.toISOString())
     .order('created_at', { ascending: false })
     .limit(limit);
+
+  if (options.jobKind) {
+    query = query.eq('job_kind', options.jobKind);
+  }
+
+  const { data, error } = await query;
 
   if (error) throw error;
   return ((data ?? []) as BroadcastJobRow[]).map(mapBroadcastJob);

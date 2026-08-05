@@ -38,6 +38,8 @@ scripts/.edge-deploy/
 scripts/.edge-deploy-payloads/
 scripts/deploy-manifest.json
 scripts/mcp-runner/
+# Listas de audiencia con PII (teléfonos / nombres) — solo local
+scripts/output/
 .cursor/edge-mcp-deploy-results/
 .cursor/edge-mcp-args/
 .cursor/_mcp-deploy-args/

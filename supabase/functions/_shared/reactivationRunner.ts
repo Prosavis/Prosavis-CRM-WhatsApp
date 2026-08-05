@@ -24,6 +24,7 @@ import {
   resolveDueStep,
   type ReactivationStepNumber,
 } from './reactivationCadence.ts';
+import { shouldSkipReactivationByTags } from './reactivationTagPolicy.ts';
 import {
   assertMetaSendEnabled,
   ensureConversation,
@@ -54,6 +55,7 @@ export type ReactivationOutcome =
   | 'skipped_active'
   | 'skipped_stale'
   | 'skipped_completed'
+  | 'skipped_tags'
   | 'enrolled'
   | 'exited_reactivated'
   | 'exited_completed'
@@ -258,6 +260,14 @@ export async function buildReactivationUniverse(supabase: SupabaseClient): Promi
     }
 
     if (client.optOut || client.isBlacklisted) continue;
+    if (
+      shouldSkipReactivationByTags({
+        tags: client.tags,
+        classification: client.classification,
+      })
+    ) {
+      continue;
+    }
     if (client.daysInactive != null && client.daysInactive > REACTIVATION_STALE_DAYS) continue;
     if (client.sequenceStep >= 6) continue;
 
@@ -482,6 +492,27 @@ export async function runReactivations(
         outcome: 'skipped_disabled',
         lastAppointmentDate: candidate.lastAppointmentDate,
         daysInactive: candidate.daysInactive,
+      });
+      continue;
+    }
+
+    if (
+      shouldSkipReactivationByTags({
+        tags: candidate.tags,
+        classification: candidate.classification,
+      })
+    ) {
+      stats.skipped += 1;
+      events.push({
+        directoryId: candidate.id,
+        recipientPhone: candidate.phone,
+        recipientName: candidate.name,
+        stepNumber: candidate.dueStep,
+        templateName: stepDef.templateName,
+        outcome: 'skipped_tags',
+        lastAppointmentDate: candidate.lastAppointmentDate,
+        daysInactive: candidate.daysInactive,
+        errorMessage: 'Excluded by tag policy (equipo/blacklist/fuera cobertura)',
       });
       continue;
     }

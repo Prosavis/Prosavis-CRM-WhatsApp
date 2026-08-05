@@ -433,7 +433,7 @@ const BroadcastJobsSection: React.FC<BroadcastJobsSectionProps> = ({
               )}
 
               <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 2 }}>
-                Los envíos exitosos también aparecen en el registro de mensajes abajo (campaña BULK_PANEL).
+                Los envíos exitosos también aparecen en el registro de mensajes abajo (BULK_PANEL o COLD_APP_USER).
               </Typography>
             </DialogContent>
             <DialogActions>

@@ -100,6 +100,9 @@ verify_jwt = false
 [functions.bulk-whatsapp-send]
 verify_jwt = false
 
+[functions.run-app-user-cold-outreach]
+verify_jwt = false
+
 [functions.ensure-whatsapp-conversation-from-lead]
 verify_jwt = false
 

@@ -11,6 +11,7 @@ import {
   isTestContact,
   type ClassifiableClient,
 } from './clientClassification.ts';
+import { shouldSkipReactivationByTags } from './reactivationTagPolicy.ts';
 import { runFirestoreQuery } from './firebaseAdminRest.ts';
 
 /** Ventana (meses) para detectar clientes reales y su última cita. */
@@ -383,6 +384,15 @@ export function isEligibleForReactivation(
   if (!isReactivationPhoneValid(client.phone)) return false;
   if (excludeCompanies && client.isCompany) return false;
   if (isTestContact({ classification: client.classification, tags: client.tags })) {
+    return false;
+  }
+  // Auxiliares / Job / Marian / Decline / ciudades fuera de Pereira-Dosquebradas-Santa Rosa, etc.
+  if (
+    shouldSkipReactivationByTags({
+      tags: client.tags,
+      classification: client.classification,
+    })
+  ) {
     return false;
   }
   if (client.daysInactive == null) return false;
