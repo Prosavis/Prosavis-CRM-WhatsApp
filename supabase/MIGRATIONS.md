@@ -60,6 +60,18 @@ Tras renombrar, registrar la nueva versión:
 npx supabase migration repair --status applied 20260612170100 20260612170200
 ```
 
+### Colisión local del 03/08/2026
+
+`20260803120000_repair_reminder_crossed_cleaner_names.sql` fue creado primero y
+conserva la versión `20260803120000`. La migración local de facturación
+electrónica se renombró a
+`20260803143500_crm_electronic_invoices.sql` para eliminar la colisión.
+
+El DDL de facturación ya existe en remoto y es idempotente. El historial remoto
+de estas versiones sigue pendiente de una reconciliación separada: este
+renombrado local no ejecuta `migration repair`, `db push` ni otra mutación
+remota.
+
 ## Alternativa: pull desde remoto
 
 Si el esquema de producción es la fuente de verdad y diverge mucho del repo:
