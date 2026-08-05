@@ -4,6 +4,7 @@
  */
 
 import type { ConversationHistoryMeta } from './conversationHistory.ts';
+import { formatPricingCatalogBlock } from './pricingCatalog.ts';
 
 const UPCOMING_APPTS = 5;
 const PAST_APPTS = 5;
@@ -281,6 +282,10 @@ export function formatInboxAiContextBlock(params: {
   lines.push('=== Momento actual ===');
   lines.push(`Fecha/hora actual (Colombia): ${formatBogotaDateTime(nowIso)} (${nowIso})`);
   lines.push('Usa esta fecha como referencia temporal al interpretar "hoy", "mañana", "ayer" y el historial.');
+  lines.push(
+    'Política operativa: si el cliente indica que a cierta hora no habrá nadie / se va la persona, ' +
+      'propón llegada ~1 h antes para recepción segura del personal (nunca esa hora exacta).',
+  );
 
   lines.push('');
   lines.push('=== Perfil directorio ===');
@@ -337,6 +342,9 @@ export function formatInboxAiContextBlock(params: {
   );
   const dirTags = params.directory?.tags ?? [];
   lines.push(`Directorio: ${dirTags.length ? dirTags.join(', ') : '(ninguno)'}`);
+
+  lines.push('');
+  lines.push(formatPricingCatalogBlock());
 
   const upcoming = params.appointments
     .filter((a) => new Date(a.scheduledDate).getTime() >= now)
@@ -437,6 +445,12 @@ export const INBOX_AI_SYSTEM_INSTRUCTION =
   'Si el cliente tiene apoyos previos, trátarlo como cliente con historial (no como lead frío). ' +
   'Respeta el patrón de propiedades: si siempre ha sido la misma dirección, asúmela como habitual; ' +
   'si ha tenido varias ubicaciones, pregunta en cuál quiere el próximo apoyo. ' +
+  'SEGURIDAD Y ACCESO A LA PROPIEDAD (prioridad alta): ' +
+  'Si el cliente indica que a cierta hora se va / no habrá nadie en la casa / nadie puede recibir, ' +
+  'NUNCA propongas llegar exactamente a esa hora. Ofrece llegar con antelación (típicamente 1 hora antes, ' +
+  'p. ej. si se van a las 8:00 → propone 7:00) para que alguien reciba al personal, entregar llaves/acceso ' +
+  'y garantizar limpieza correcta y seguridad. Explica brevemente que priorizamos seguridad y confianza. ' +
+  'Si no queda claro quién recibe, pregunta cómo nos abrirán o si prefieren llegada anticipada. ' +
   'Al hablar de apoyos, usa fecha/hora, dirección, cliente y auxiliar solo si aporta; no inventes auxiliares ni direcciones. ' +
   'No inventes precios distintos a los del contexto. Si hay link de pago, menciónalo al final. ' +
   'Adapta el tono a los tags (p. ej. Empresas vs residencial). ' +

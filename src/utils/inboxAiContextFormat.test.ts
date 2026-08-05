@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  INBOX_AI_SYSTEM_INSTRUCTION,
   buildPropertyLocationSummary,
   formatBogotaDateTime,
   formatInboxAiContextBlock,
@@ -119,6 +120,9 @@ describe('formatInboxAiContextBlock', () => {
     expect(block).toContain('dirección: Calle 10 #20-30 (Apto 201)');
     expect(block).toContain('auxiliar: Laura Gómez');
     expect(block).toContain('Cliente: Hola');
+    expect(block).toContain('=== Catálogo oficial de precios (fuente de verdad) ===');
+    expect(block).toContain('120 minutos → COP 58.000');
+    expect(block).toContain('Kit profesional → COP 30.000 adicionales');
   });
 
   it('degrades gracefully without directory or appointments', () => {
@@ -137,6 +141,14 @@ describe('formatInboxAiContextBlock', () => {
     expect(block).toContain('Total apoyos/citas encontrados (ventana CRM): 0');
     expect(block).toContain('=== Propiedades / ubicaciones de apoyos ===');
     expect(block).toContain('Ventana truncada');
+  });
+});
+
+describe('INBOX_AI_SYSTEM_INSTRUCTION', () => {
+  it('requires early arrival when house will be empty', () => {
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/SEGURIDAD Y ACCESO/);
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/1 hora antes/);
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/NUNCA propongas llegar exactamente/);
   });
 });
 

@@ -6,10 +6,7 @@ import {
   geminiGenerateJson,
   geminiGenerateText,
 } from '../_shared/geminiClient.ts';
-import {
-  getStaticCleaningWompiReference,
-  getStaticCleaningWompiUrl,
-} from '../_shared/wompiLinks.ts';
+import { resolveBookingPricingCheckout } from '../_shared/pricingCatalog.ts';
 import {
   INBOX_AI_SYSTEM_INSTRUCTION,
   buildInboxAiContext,
@@ -23,33 +20,6 @@ function normalizeExtraContext(value: unknown): string {
   const text = value.trim();
   if (!text) return '';
   return text.length <= MAX_EXTRA_CONTEXT_CHARS ? text : `${text.slice(0, MAX_EXTRA_CONTEXT_CHARS)}…`;
-}
-
-function emptyBookingContext(phone: string) {
-  return {
-    stage: 'no_booking' as const,
-    collectedData: {
-      date: null,
-      time: null,
-      duration: null,
-      address: null,
-      addressSource: null,
-    },
-    missingData: ['fecha', 'hora', 'duración', 'dirección'],
-    availableSlots: [],
-    paymentStatus: 'none' as const,
-    paymentAmount: null,
-    calculatedPrice: null,
-    clientInfo: {
-      name: null,
-      phone,
-      email: null,
-      address: null,
-      city: null,
-      isReturningClient: false,
-      userId: null,
-    },
-  };
 }
 
 Deno.serve(async (req) => {
@@ -104,29 +74,27 @@ Deno.serve(async (req) => {
     );
 
     // ─── Booking Context ───
-    let bookingContext = await geminiGenerateJson<ReturnType<typeof emptyBookingContext>>({
+    const inferredBookingContext = await geminiGenerateJson<unknown>({
       apiKey,
       prompt:
         'Analiza esta conversación de WhatsApp de Prosavis (limpieza en Colombia) y responde SOLO JSON con ' +
         'stage, collectedData {date,time,duration,address,addressSource}, missingData[], availableSlots[], ' +
-        'paymentStatus, paymentAmount, calculatedPrice, clientInfo {name,phone,email,address,city,isReturningClient,userId}. ' +
+        'paymentStatus, paymentAmount, wantsKit, clientInfo {name,phone,email,address,city,isReturningClient,userId}. ' +
+        'Devuelve duration en minutos usando solo una duración oficial del catálogo y wantsKit como booleano. ' +
+        'No devuelvas precios ni links de pago; esos valores se resuelven en código. ' +
         'Usa el perfil CRM y citas como fuente de verdad cuando existan; no inventes citas. ' +
+        'SEGURIDAD: si el cliente dice que a la hora H se va / no habrá nadie, pon collectedData.time una hora ANTES ' +
+        '(p. ej. se van a las 08:00 → time "07:00"), nunca H exacta cuando la casa quedaría sola. ' +
         `Teléfono cliente: ${ctx.phone}\n\n${ctx.formattedBlock}`,
-    }).catch(() => emptyBookingContext(ctx.phone));
+    }).catch(() => ({}));
 
-    bookingContext = groundBookingClientInfo(bookingContext, ctx);
-
-    let wompiCheckoutUrl: string | undefined;
-    let wompiPaymentReference: string | undefined;
-    let wompiAmountCOP: number | undefined;
-    if (bookingContext.calculatedPrice && bookingContext.paymentStatus !== 'APPROVED') {
-      const url = getStaticCleaningWompiUrl(bookingContext.calculatedPrice);
-      if (url) {
-        wompiCheckoutUrl = url;
-        wompiPaymentReference = getStaticCleaningWompiReference(bookingContext.calculatedPrice) ?? undefined;
-        wompiAmountCOP = bookingContext.calculatedPrice;
-      }
-    }
+    const {
+      bookingContext: pricedBookingContext,
+      wompiCheckoutUrl,
+      wompiPaymentReference,
+      wompiAmountCOP,
+    } = resolveBookingPricingCheckout(inferredBookingContext, ctx.phone);
+    const bookingContext = groundBookingClientInfo(pricedBookingContext, ctx);
 
     // ─── Generar sugerencia de respuesta ───
     const suggestion = await geminiGenerateText({

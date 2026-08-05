@@ -1,0 +1,746 @@
+﻿diff --git a/src/services/whatsappService.ts b/src/services/whatsappService.ts
+index 61033a4..ccba833 100644
+--- a/src/services/whatsappService.ts
++++ b/src/services/whatsappService.ts
+@@ -771,20 +771,21 @@ export interface BookingContextData {
+     date: string | null;
+     time: string | null;
+     duration: number | null;
+     address: string | null;
+     addressSource?: 'conversation' | 'lead' | null;
+   };
+   missingData: string[];
+   availableSlots: string[];
+   paymentStatus: 'APPROVED' | 'PENDING' | 'none';
+   paymentAmount: number | null;
++  wantsKit: boolean;
+   calculatedPrice: number | null;
+   clientInfo: {
+     name: string | null;
+     phone: string;
+     email: string | null;
+     address: string | null;
+     city: string | null;
+     isReturningClient: boolean;
+     userId: string | null;
+   };
+diff --git a/src/utils/inboxAiContextFormat.test.ts b/src/utils/inboxAiContextFormat.test.ts
+index 16fe389..d920cae 100644
+--- a/src/utils/inboxAiContextFormat.test.ts
++++ b/src/utils/inboxAiContextFormat.test.ts
+@@ -1,12 +1,13 @@
+ import { describe, expect, it } from 'vitest';
+ import {
++  INBOX_AI_SYSTEM_INSTRUCTION,
+   buildPropertyLocationSummary,
+   formatBogotaDateTime,
+   formatInboxAiContextBlock,
+   groundBookingClientInfo,
+   normalizeAddressKey,
+ } from '../../supabase/functions/_shared/inboxAiContextFormat';
+ 
+ describe('normalizeAddressKey / buildPropertyLocationSummary', () => {
+   it('treats minor address variants as the same property', () => {
+     const a = normalizeAddressKey('Calle 1 #2-3 Apto 401');
+@@ -112,20 +113,23 @@ describe('formatInboxAiContextBlock', () => {
+ 
+     expect(block).toContain('=== Momento actual ===');
+     expect(block).toContain(formatBogotaDateTime('2026-08-05T12:00:00.000Z'));
+     expect(block).toContain('Total apoyos/citas encontrados (ventana CRM): 7');
+     expect(block).toContain('=== Propiedades / ubicaciones de apoyos ===');
+     expect(block).toContain('misma propiedad');
+     expect(block).toContain('Direcci├│n preferida (directorio): Calle 10 #20-30');
+     expect(block).toContain('direcci├│n: Calle 10 #20-30 (Apto 201)');
+     expect(block).toContain('auxiliar: Laura G├│mez');
+     expect(block).toContain('Cliente: Hola');
++    expect(block).toContain('=== Cat├ílogo oficial de precios (fuente de verdad) ===');
++    expect(block).toContain('120 minutos ÔåÆ COP 58.000');
++    expect(block).toContain('Kit profesional ÔåÆ COP 30.000 adicionales');
+   });
+ 
+   it('degrades gracefully without directory or appointments', () => {
+     const block = formatInboxAiContextBlock({
+       phone: '573009998877',
+       transcript: 'Cliente: info',
+       historyMeta: { loaded: 1, truncated: true },
+       conversationTags: [],
+       directory: null,
+       appointments: [],
+@@ -133,20 +137,28 @@ describe('formatInboxAiContextBlock', () => {
+       nowIso: '2026-08-05T12:00:00.000Z',
+     });
+     expect(block).toContain('Sin entrada en crm_directory');
+     expect(block).toContain('Sin citas/apoyos encontrados');
+     expect(block).toContain('Total apoyos/citas encontrados (ventana CRM): 0');
+     expect(block).toContain('=== Propiedades / ubicaciones de apoyos ===');
+     expect(block).toContain('Ventana truncada');
+   });
+ });
+ 
++describe('INBOX_AI_SYSTEM_INSTRUCTION', () => {
++  it('requires early arrival when house will be empty', () => {
++    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/SEGURIDAD Y ACCESO/);
++    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/1 hora antes/);
++    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/NUNCA propongas llegar exactamente/);
++  });
++});
++
+ describe('groundBookingClientInfo', () => {
+   it('grounds address from preferred / single property', () => {
+     const grounded = groundBookingClientInfo(
+       {
+         stage: 'collecting',
+         clientInfo: {
+           name: 'Inventado',
+           phone: '000',
+           email: null,
+           address: null,
+diff --git a/supabase/functions/_shared/inboxAiContextFormat.ts b/supabase/functions/_shared/inboxAiContextFormat.ts
+index cc55f51..d09e282 100644
+--- a/supabase/functions/_shared/inboxAiContextFormat.ts
++++ b/supabase/functions/_shared/inboxAiContextFormat.ts
+@@ -1,16 +1,17 @@
+ /**
+  * Formato puro del bloque de contexto AI del inbox (sin Deno/Firebase).
+  * Testeable con Vitest.
+  */
+ 
+ import type { ConversationHistoryMeta } from './conversationHistory.ts';
++import { formatPricingCatalogBlock } from './pricingCatalog.ts';
+ 
+ const UPCOMING_APPTS = 5;
+ const PAST_APPTS = 5;
+ const BOGOTA_TZ = 'America/Bogota';
+ const MAX_PROPERTIES_IN_SUMMARY = 8;
+ 
+ export interface InboxAiDirectory {
+   id?: string;
+   fullName?: string | null;
+   email?: string | null;
+@@ -274,20 +275,24 @@ export function formatInboxAiContextBlock(params: {
+   propertySummary?: InboxAiPropertySummary | null;
+   nowIso?: string;
+ }): string {
+   const nowIso = params.nowIso ?? new Date().toISOString();
+   const now = new Date(nowIso).getTime();
+   const lines: string[] = [];
+ 
+   lines.push('=== Momento actual ===');
+   lines.push(`Fecha/hora actual (Colombia): ${formatBogotaDateTime(nowIso)} (${nowIso})`);
+   lines.push('Usa esta fecha como referencia temporal al interpretar "hoy", "ma├▒ana", "ayer" y el historial.');
++  lines.push(
++    'Pol├¡tica operativa: si el cliente indica que a cierta hora no habr├í nadie / se va la persona, ' +
++      'prop├│n llegada ~1 h antes para recepci├│n segura del personal (nunca esa hora exacta).',
++  );
+ 
+   lines.push('');
+   lines.push('=== Perfil directorio ===');
+   if (params.directory) {
+     const d = params.directory;
+     lines.push(`Nombre: ${d.fullName ?? 'ÔÇö'}`);
+     lines.push(`Tel├®fono: ${params.phone}`);
+     if (d.email) lines.push(`Email: ${d.email}`);
+     if (d.city) lines.push(`Ciudad: ${d.city}`);
+     if (d.address) lines.push(`Direcci├│n de contacto: ${d.address}`);
+@@ -331,20 +336,23 @@ export function formatInboxAiContextBlock(params: {
+   lines.push('');
+   lines.push('=== Tags ===');
+   lines.push(
+     `Conversaci├│n: ${
+       params.conversationTags.length ? params.conversationTags.join(', ') : '(ninguno)'
+     }`,
+   );
+   const dirTags = params.directory?.tags ?? [];
+   lines.push(`Directorio: ${dirTags.length ? dirTags.join(', ') : '(ninguno)'}`);
+ 
++  lines.push('');
++  lines.push(formatPricingCatalogBlock());
++
+   const upcoming = params.appointments
+     .filter((a) => new Date(a.scheduledDate).getTime() >= now)
+     .sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate))
+     .slice(0, UPCOMING_APPTS);
+   const past = params.appointments
+     .filter((a) => new Date(a.scheduledDate).getTime() < now)
+     .sort((a, b) => b.scheduledDate.localeCompare(a.scheduledDate))
+     .slice(0, PAST_APPTS);
+ 
+   lines.push('');
+@@ -430,15 +438,21 @@ export function groundBookingClientInfo<
+ }
+ 
+ export const INBOX_AI_SYSTEM_INSTRUCTION =
+   'Eres un agente de ventas de Prosavis (limpieza residencial y empresas en Colombia). ' +
+   'Responde en espa├▒ol, cordial y concreto. ' +
+   'Usa el perfil CRM, tags, apoyos/citas Firestore y sus direcciones como fuente de verdad; no inventes citas, tags, precios, direcciones ni datos del cliente. ' +
+   'Ten en cuenta la fecha/hora actual (Colombia) y las fechas de los mensajes y apoyos para contextualizar "hoy", "ma├▒ana", retrasos y seguimiento. ' +
+   'Si el cliente tiene apoyos previos, tr├ítarlo como cliente con historial (no como lead fr├¡o). ' +
+   'Respeta el patr├│n de propiedades: si siempre ha sido la misma direcci├│n, as├║mela como habitual; ' +
+   'si ha tenido varias ubicaciones, pregunta en cu├íl quiere el pr├│ximo apoyo. ' +
++  'SEGURIDAD Y ACCESO A LA PROPIEDAD (prioridad alta): ' +
++  'Si el cliente indica que a cierta hora se va / no habr├í nadie en la casa / nadie puede recibir, ' +
++  'NUNCA propongas llegar exactamente a esa hora. Ofrece llegar con antelaci├│n (t├¡picamente 1 hora antes, ' +
++  'p. ej. si se van a las 8:00 ÔåÆ propone 7:00) para que alguien reciba al personal, entregar llaves/acceso ' +
++  'y garantizar limpieza correcta y seguridad. Explica brevemente que priorizamos seguridad y confianza. ' +
++  'Si no queda claro qui├®n recibe, pregunta c├│mo nos abrir├ín o si prefieren llegada anticipada. ' +
+   'Al hablar de apoyos, usa fecha/hora, direcci├│n, cliente y auxiliar solo si aporta; no inventes auxiliares ni direcciones. ' +
+   'No inventes precios distintos a los del contexto. Si hay link de pago, menci├│nalo al final. ' +
+   'Adapta el tono a los tags (p. ej. Empresas vs residencial). ' +
+   'Si hay tags sensibles internos (Bloqueado, Decline, lista negra), no empujes venta agresiva y no reveles esos tags al cliente en el texto. ' +
+   'Si hay citas pr├│ximas, tenlas en cuenta al responder (no ofrezcas re-agendar ignor├índolas).';
+diff --git a/supabase/functions/get-whatsapp-booking-context/index.ts b/supabase/functions/get-whatsapp-booking-context/index.ts
+index 1cf02cd..c2c63a6 100644
+--- a/supabase/functions/get-whatsapp-booking-context/index.ts
++++ b/supabase/functions/get-whatsapp-booking-context/index.ts
+@@ -1,40 +1,38 @@
+ import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
+ import { requireCrmAdmin } from '../_shared/supabase.ts';
+ import { formatError } from '../_shared/whatsappOutbound.ts';
+ import {
+   getGeminiApiKey,
+   geminiGenerateJson,
+ } from '../_shared/geminiClient.ts';
+-import {
+-  getStaticCleaningWompiReference,
+-  getStaticCleaningWompiUrl,
+-} from '../_shared/wompiLinks.ts';
++import { resolveBookingPricingCheckout } from '../_shared/pricingCatalog.ts';
+ import {
+   buildInboxAiContext,
+   groundBookingClientInfo,
+ } from '../_shared/inboxAiContext.ts';
+ 
+ function emptyBookingContext(phone: string) {
+   return {
+     stage: 'no_booking' as const,
+     collectedData: {
+       date: null,
+       time: null,
+       duration: null,
+       address: null,
+       addressSource: null,
+     },
+     missingData: ['fecha', 'hora', 'duraci├│n', 'direcci├│n'],
+     availableSlots: [],
+     paymentStatus: 'none' as const,
+     paymentAmount: null,
++    wantsKit: false,
+     calculatedPrice: null,
+     clientInfo: {
+       name: null,
+       phone,
+       email: null,
+       address: null,
+       city: null,
+       isReturningClient: false,
+       userId: null,
+     },
+@@ -59,42 +57,38 @@ Deno.serve(async (req) => {
+     try {
+       ctx = await buildInboxAiContext(supabase, stableKey, { includeVoiceTranscriptions });
+     } catch (err) {
+       const msg = String((err as Error)?.message ?? err);
+       if (msg.includes('historial') || msg.includes('mensajes del cliente')) {
+         return jsonResponse({ error: msg }, 404);
+       }
+       throw err;
+     }
+ 
+-    let bookingContext = await geminiGenerateJson<ReturnType<typeof emptyBookingContext>>({
++    const inferredBookingContext = await geminiGenerateJson<ReturnType<typeof emptyBookingContext>>({
+       apiKey,
+       prompt:
+         'Analiza esta conversaci├│n de WhatsApp de Prosavis y responde SOLO JSON con stage, collectedData, ' +
+-        'missingData, availableSlots, paymentStatus, paymentAmount, calculatedPrice, clientInfo. ' +
++        'missingData, availableSlots, paymentStatus, paymentAmount, wantsKit, clientInfo. ' +
++        'Devuelve collectedData.duration en minutos usando solo una duraci├│n oficial del cat├ílogo y wantsKit como booleano. ' +
++        'No devuelvas precios ni links de pago; esos valores se resuelven en c├│digo. ' +
+         'Usa el perfil CRM y citas Firestore como fuente de verdad cuando existan; no inventes citas. ' +
+         `Tel├®fono: ${ctx.phone}\n\n${ctx.formattedBlock}`,
+     }).catch(() => emptyBookingContext(ctx.phone));
+ 
+-    bookingContext = groundBookingClientInfo(bookingContext, ctx);
+-
+-    let wompiCheckoutUrl: string | undefined;
+-    let wompiPaymentReference: string | undefined;
+-    let wompiAmountCOP: number | undefined;
+-    if (bookingContext.calculatedPrice && bookingContext.paymentStatus !== 'APPROVED') {
+-      const url = getStaticCleaningWompiUrl(bookingContext.calculatedPrice);
+-      if (url) {
+-        wompiCheckoutUrl = url;
+-        wompiPaymentReference = getStaticCleaningWompiReference(bookingContext.calculatedPrice) ?? undefined;
+-        wompiAmountCOP = bookingContext.calculatedPrice;
+-      }
+-    }
++    const {
++      bookingContext: pricedBookingContext,
++      wompiCheckoutUrl,
++      wompiPaymentReference,
++      wompiAmountCOP,
++    } = resolveBookingPricingCheckout(inferredBookingContext);
++    const bookingContext = groundBookingClientInfo(pricedBookingContext, ctx);
+ 
+     return jsonResponse({
+       bookingContext,
+       historyMeta: ctx.historyMeta,
+       conversationTags: ctx.conversationTags,
+       ...(wompiCheckoutUrl ? { wompiCheckoutUrl } : {}),
+       ...(wompiPaymentReference ? { wompiPaymentReference } : {}),
+       ...(wompiAmountCOP ? { wompiAmountCOP } : {}),
+     });
+   } catch (error) {
+diff --git a/supabase/functions/suggest-whatsapp-agent-reply/index.ts b/supabase/functions/suggest-whatsapp-agent-reply/index.ts
+index d6ce51e..8da0e64 100644
+--- a/supabase/functions/suggest-whatsapp-agent-reply/index.ts
++++ b/supabase/functions/suggest-whatsapp-agent-reply/index.ts
+@@ -1,22 +1,19 @@
+ import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
+ import { requireCrmAdmin } from '../_shared/supabase.ts';
+ import { formatError } from '../_shared/whatsappOutbound.ts';
+ import {
+   getGeminiApiKey,
+   geminiGenerateJson,
+   geminiGenerateText,
+ } from '../_shared/geminiClient.ts';
+-import {
+-  getStaticCleaningWompiReference,
+-  getStaticCleaningWompiUrl,
+-} from '../_shared/wompiLinks.ts';
++import { resolveBookingPricingCheckout } from '../_shared/pricingCatalog.ts';
+ import {
+   INBOX_AI_SYSTEM_INSTRUCTION,
+   buildInboxAiContext,
+   groundBookingClientInfo,
+ } from '../_shared/inboxAiContext.ts';
+ 
+ const MAX_EXTRA_CONTEXT_CHARS = 2000;
+ 
+ function normalizeExtraContext(value: unknown): string {
+   if (typeof value !== 'string') return '';
+@@ -32,20 +29,21 @@ function emptyBookingContext(phone: string) {
+       date: null,
+       time: null,
+       duration: null,
+       address: null,
+       addressSource: null,
+     },
+     missingData: ['fecha', 'hora', 'duraci├│n', 'direcci├│n'],
+     availableSlots: [],
+     paymentStatus: 'none' as const,
+     paymentAmount: null,
++    wantsKit: false,
+     calculatedPrice: null,
+     clientInfo: {
+       name: null,
+       phone,
+       email: null,
+       address: null,
+       city: null,
+       isReturningClient: false,
+       userId: null,
+     },
+@@ -97,43 +95,41 @@ Deno.serve(async (req) => {
+         conversationTagCount: ctx.conversationTags.length,
+         hasDirectory: Boolean(ctx.directory),
+         appointmentCount: ctx.appointmentCount,
+         listedAppointments: ctx.appointments.length,
+         propertyPattern: ctx.propertySummary.pattern,
+         uniqueProperties: ctx.propertySummary.uniquePropertyCount,
+       }),
+     );
+ 
+     // ÔöÇÔöÇÔöÇ Booking Context ÔöÇÔöÇÔöÇ
+-    let bookingContext = await geminiGenerateJson<ReturnType<typeof emptyBookingContext>>({
++    const inferredBookingContext = await geminiGenerateJson<ReturnType<typeof emptyBookingContext>>({
+       apiKey,
+       prompt:
+         'Analiza esta conversaci├│n de WhatsApp de Prosavis (limpieza en Colombia) y responde SOLO JSON con ' +
+         'stage, collectedData {date,time,duration,address,addressSource}, missingData[], availableSlots[], ' +
+-        'paymentStatus, paymentAmount, calculatedPrice, clientInfo {name,phone,email,address,city,isReturningClient,userId}. ' +
++        'paymentStatus, paymentAmount, wantsKit, clientInfo {name,phone,email,address,city,isReturningClient,userId}. ' +
++        'Devuelve duration en minutos usando solo una duraci├│n oficial del cat├ílogo y wantsKit como booleano. ' +
++        'No devuelvas precios ni links de pago; esos valores se resuelven en c├│digo. ' +
+         'Usa el perfil CRM y citas como fuente de verdad cuando existan; no inventes citas. ' +
++        'SEGURIDAD: si el cliente dice que a la hora H se va / no habr├í nadie, pon collectedData.time una hora ANTES ' +
++        '(p. ej. se van a las 08:00 ÔåÆ time "07:00"), nunca H exacta cuando la casa quedar├¡a sola. ' +
+         `Tel├®fono cliente: ${ctx.phone}\n\n${ctx.formattedBlock}`,
+     }).catch(() => emptyBookingContext(ctx.phone));
+ 
+-    bookingContext = groundBookingClientInfo(bookingContext, ctx);
+-
+-    let wompiCheckoutUrl: string | undefined;
+-    let wompiPaymentReference: string | undefined;
+-    let wompiAmountCOP: number | undefined;
+-    if (bookingContext.calculatedPrice && bookingContext.paymentStatus !== 'APPROVED') {
+-      const url = getStaticCleaningWompiUrl(bookingContext.calculatedPrice);
+-      if (url) {
+-        wompiCheckoutUrl = url;
+-        wompiPaymentReference = getStaticCleaningWompiReference(bookingContext.calculatedPrice) ?? undefined;
+-        wompiAmountCOP = bookingContext.calculatedPrice;
+-      }
+-    }
++    const {
++      bookingContext: pricedBookingContext,
++      wompiCheckoutUrl,
++      wompiPaymentReference,
++      wompiAmountCOP,
++    } = resolveBookingPricingCheckout(inferredBookingContext);
++    const bookingContext = groundBookingClientInfo(pricedBookingContext, ctx);
+ 
+     // ÔöÇÔöÇÔöÇ Generar sugerencia de respuesta ÔöÇÔöÇÔöÇ
+     const suggestion = await geminiGenerateText({
+       apiKey,
+       systemInstruction: INBOX_AI_SYSTEM_INSTRUCTION,
+       userText:
+         `${extraContext ? `Contexto extra del agente:\n${extraContext}\n\n` : ''}` +
+         `${ctx.formattedBlock}\n\n` +
+         `Contexto booking (inferido + CRM):\n${JSON.stringify(bookingContext)}` +
+         (wompiCheckoutUrl ? `\nLink Wompi: ${wompiCheckoutUrl}` : ''),
+diff --git a/src/utils/pricingCatalog.test.ts b/src/utils/pricingCatalog.test.ts
+new file mode 100644
+index 0000000..1c77794
+--- /dev/null
++++ b/src/utils/pricingCatalog.test.ts
+@@ -0,0 +1,186 @@
++import { describe, expect, it } from 'vitest';
++import {
++  formatPricingCatalogBlock,
++  groundBookingPricing,
++  resolveBookingPricingCheckout,
++  resolvePriceForDuration,
++} from '../../supabase/functions/_shared/pricingCatalog';
++
++describe('resolvePriceForDuration', () => {
++  it.each([
++    [120, 58_000],
++    [180, 78_000],
++    [240, 88_000],
++    [360, 118_000],
++    [480, 148_000],
++  ])('maps %i minutes to the official COP %i base price', (minutes, basePriceCOP) => {
++    expect(resolvePriceForDuration(minutes, false)).toEqual({
++      basePriceCOP,
++      kitSurchargeCOP: 0,
++      totalCOP: basePriceCOP,
++    });
++  });
++
++  it('adds exactly COP 30,000 for the professional kit', () => {
++    expect(resolvePriceForDuration(240, true)).toEqual({
++      basePriceCOP: 88_000,
++      kitSurchargeCOP: 30_000,
++      totalCOP: 118_000,
++    });
++  });
++
++  it.each([0, 150, Number.NaN])('returns null for invalid or unsupported duration %s', (minutes) => {
++    expect(resolvePriceForDuration(minutes, false)).toBeNull();
++  });
++});
++
++describe('formatPricingCatalogBlock', () => {
++  it('includes every official duration, price and the kit surcharge', () => {
++    const block = formatPricingCatalogBlock();
++
++    expect(block).toContain('120 minutos ÔåÆ COP 58.000');
++    expect(block).toContain('180 minutos ÔåÆ COP 78.000');
++    expect(block).toContain('240 minutos ÔåÆ COP 88.000');
++    expect(block).toContain('360 minutos ÔåÆ COP 118.000');
++    expect(block).toContain('480 minutos ÔåÆ COP 148.000');
++    expect(block).toContain('Kit profesional ÔåÆ COP 30.000 adicionales');
++  });
++});
++
++describe('groundBookingPricing', () => {
++  it('overwrites a Gemini-invented calculatedPrice with the deterministic total', () => {
++    const grounded = groundBookingPricing({
++      stage: 'payment_pending',
++      collectedData: { duration: 240 },
++      wantsKit: true,
++      calculatedPrice: 999_999,
++    });
++
++    expect(grounded).toEqual({
++      stage: 'payment_pending',
++      collectedData: { duration: 240 },
++      wantsKit: true,
++      calculatedPrice: 118_000,
++    });
++  });
++
++  it('clears a Gemini-invented calculatedPrice when duration is unsupported', () => {
++    const grounded = groundBookingPricing({
++      collectedData: { duration: 150 },
++      wantsKit: false,
++      calculatedPrice: 999_999,
++    });
++
++    expect(grounded.calculatedPrice).toBeNull();
++  });
++});
++
++describe('resolveBookingPricingCheckout', () => {
++  it('does not throw when Gemini omits collectedData', () => {
++    expect(resolveBookingPricingCheckout({
++      stage: 'info_gathering',
++      calculatedPrice: 999_999,
++    })).toEqual({
++      bookingContext: {
++        stage: 'info_gathering',
++        wantsKit: false,
++        calculatedPrice: null,
++      },
++    });
++  });
++
++  it('does not throw when Gemini returns malformed collectedData', () => {
++    expect(resolveBookingPricingCheckout({
++      collectedData: 'not-an-object',
++      wantsKit: 'yes',
++      calculatedPrice: 999_999,
++    })).toEqual({
++      bookingContext: {
++        collectedData: 'not-an-object',
++        wantsKit: false,
++        calculatedPrice: null,
++      },
++    });
++  });
++
++  it('normalizes a non-object Gemini response without throwing', () => {
++    expect(resolveBookingPricingCheckout(null)).toEqual({
++      bookingContext: {
++        wantsKit: false,
++        calculatedPrice: null,
++      },
++    });
++  });
++
++  it('routes a normal checkout using basePriceCOP', () => {
++    expect(resolveBookingPricingCheckout({
++      collectedData: { duration: 240 },
++      wantsKit: false,
++      paymentStatus: 'PENDING',
++    })).toEqual({
++      bookingContext: {
++        collectedData: { duration: 240 },
++        wantsKit: false,
++        paymentStatus: 'PENDING',
++        calculatedPrice: 88_000,
++      },
++      wompiCheckoutUrl: 'https://checkout.wompi.co/l/6WXkiC',
++      wompiPaymentReference: '6WXkiC',
++      wompiAmountCOP: 88_000,
++    });
++  });
++
++  it('routes a kit checkout using basePriceCOP instead of the kit-inclusive total', () => {
++    expect(resolveBookingPricingCheckout({
++      collectedData: { duration: 240 },
++      wantsKit: true,
++      paymentStatus: 'PENDING',
++    })).toEqual({
++      bookingContext: {
++        collectedData: { duration: 240 },
++        wantsKit: true,
++        paymentStatus: 'PENDING',
++        calculatedPrice: 118_000,
++      },
++      wompiCheckoutUrl: 'https://checkout.wompi.co/l/x1dbS7',
++      wompiPaymentReference: 'x1dbS7',
++      wompiAmountCOP: 118_000,
++    });
++  });
++
++  it.each([
++    [120, 88_000],
++    [180, 108_000],
++  ])('keeps pricing but omits the legitimately unavailable kit link for %i minutes', (
++    duration,
++    totalCOP,
++  ) => {
++    expect(resolveBookingPricingCheckout({
++      collectedData: { duration },
++      wantsKit: true,
++      paymentStatus: 'PENDING',
++    })).toEqual({
++      bookingContext: {
++        collectedData: { duration },
++        wantsKit: true,
++        paymentStatus: 'PENDING',
++        calculatedPrice: totalCOP,
++      },
++    });
++  });
++
++  it('does not expose a checkout for an approved payment', () => {
++    expect(resolveBookingPricingCheckout({
++      collectedData: { duration: 240 },
++      wantsKit: false,
++      paymentStatus: 'APPROVED',
++    })).toEqual({
++      bookingContext: {
++        collectedData: { duration: 240 },
++        wantsKit: false,
++        paymentStatus: 'APPROVED',
++        calculatedPrice: 88_000,
++      },
++    });
++  });
++});
+diff --git a/supabase/functions/_shared/pricingCatalog.ts b/supabase/functions/_shared/pricingCatalog.ts
+new file mode 100644
+index 0000000..6fbec09
+--- /dev/null
++++ b/supabase/functions/_shared/pricingCatalog.ts
+@@ -0,0 +1,150 @@
++import {
++  getStaticCleaningKitWompiReference,
++  getStaticCleaningKitWompiUrl,
++  getStaticCleaningWompiReference,
++  getStaticCleaningWompiUrl,
++} from './wompiLinks.ts';
++
++export const PROFESSIONAL_KIT_SURCHARGE_COP = 30_000;
++
++const BASE_PRICE_BY_DURATION_MINUTES: Readonly<Record<number, number>> = {
++  120: 58_000,
++  180: 78_000,
++  240: 88_000,
++  360: 118_000,
++  480: 148_000,
++};
++
++export interface ResolvedDurationPrice {
++  basePriceCOP: number;
++  kitSurchargeCOP: number;
++  totalCOP: number;
++}
++
++export function resolvePriceForDuration(
++  minutes: number | null | undefined,
++  withKit: boolean,
++): ResolvedDurationPrice | null {
++  if (typeof minutes !== 'number' || !Number.isFinite(minutes)) return null;
++
++  const basePriceCOP = BASE_PRICE_BY_DURATION_MINUTES[minutes];
++  if (basePriceCOP == null) return null;
++
++  const kitSurchargeCOP = withKit ? PROFESSIONAL_KIT_SURCHARGE_COP : 0;
++  return {
++    basePriceCOP,
++    kitSurchargeCOP,
++    totalCOP: basePriceCOP + kitSurchargeCOP,
++  };
++}
++
++function formatCOP(value: number): string {
++  return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
++}
++
++export function formatPricingCatalogBlock(): string {
++  const lines = [
++    '=== Cat├ílogo oficial de precios (fuente de verdad) ===',
++    ...Object.entries(BASE_PRICE_BY_DURATION_MINUTES).map(
++      ([minutes, priceCOP]) => `- ${minutes} minutos ÔåÆ COP ${formatCOP(priceCOP)}`,
++    ),
++    `- Kit profesional ÔåÆ COP ${formatCOP(PROFESSIONAL_KIT_SURCHARGE_COP)} adicionales`,
++    'No inventes, estimes ni modifiques estos valores.',
++  ];
++  return lines.join('\n');
++}
++
++interface BookingContextWithPricing {
++  collectedData?: unknown;
++  wantsKit?: unknown;
++  calculatedPrice?: unknown;
++  paymentStatus?: unknown;
++}
++
++type GroundedBookingPricing<T extends BookingContextWithPricing> =
++  Omit<T, 'wantsKit' | 'calculatedPrice'> & {
++    wantsKit: boolean;
++    calculatedPrice: number | null;
++  };
++
++function isRecord(value: unknown): value is Record<string, unknown> {
++  return typeof value === 'object' && value !== null && !Array.isArray(value);
++}
++
++function readBookingDuration(bookingContext: BookingContextWithPricing): number | null {
++  if (!isRecord(bookingContext.collectedData)) return null;
++  const duration = bookingContext.collectedData.duration;
++  return typeof duration === 'number' ? duration : null;
++}
++
++function resolveGroundedBookingPricing<T extends BookingContextWithPricing>(
++  bookingContext: T,
++): {
++  bookingContext: GroundedBookingPricing<T>;
++  resolvedPrice: ResolvedDurationPrice | null;
++} {
++  const wantsKit = bookingContext.wantsKit === true;
++  const resolved = resolvePriceForDuration(
++    readBookingDuration(bookingContext),
++    wantsKit,
++  );
++
++  return {
++    bookingContext: {
++      ...bookingContext,
++      wantsKit,
++      calculatedPrice: resolved?.totalCOP ?? null,
++    },
++    resolvedPrice: resolved,
++  };
++}
++
++export function groundBookingPricing<T extends BookingContextWithPricing>(
++  bookingContext: T,
++): GroundedBookingPricing<T> {
++  return resolveGroundedBookingPricing(bookingContext).bookingContext;
++}
++
++export interface BookingPricingCheckoutResult<T extends object = Record<string, unknown>> {
++  bookingContext: GroundedBookingPricing<T & BookingContextWithPricing>;
++  wompiCheckoutUrl?: string;
++  wompiPaymentReference?: string;
++  wompiAmountCOP?: number;
++}
++
++export function resolveBookingPricingCheckout<T extends object>(
++  rawBookingContext: T,
++): BookingPricingCheckoutResult<T>;
++export function resolveBookingPricingCheckout(
++  rawBookingContext: unknown,
++): BookingPricingCheckoutResult;
++export function resolveBookingPricingCheckout(
++  rawBookingContext: unknown,
++): BookingPricingCheckoutResult {
++  const bookingContext = isRecord(rawBookingContext) ? rawBookingContext : {};
++  const grounded = resolveGroundedBookingPricing(bookingContext);
++  const result: BookingPricingCheckoutResult = {
++    bookingContext: grounded.bookingContext,
++  };
++
++  if (!grounded.resolvedPrice || bookingContext.paymentStatus === 'APPROVED') {
++    return result;
++  }
++
++  const basePriceCOP = grounded.resolvedPrice.basePriceCOP;
++  const url = grounded.bookingContext.wantsKit
++    ? getStaticCleaningKitWompiUrl(basePriceCOP)
++    : getStaticCleaningWompiUrl(basePriceCOP);
++  if (!url) return result;
++
++  const reference = grounded.bookingContext.wantsKit
++    ? getStaticCleaningKitWompiReference(basePriceCOP)
++    : getStaticCleaningWompiReference(basePriceCOP);
++
++  return {
++    ...result,
++    wompiCheckoutUrl: url,
++    ...(reference ? { wompiPaymentReference: reference } : {}),
++    wompiAmountCOP: grounded.resolvedPrice.totalCOP,
++  };
++}

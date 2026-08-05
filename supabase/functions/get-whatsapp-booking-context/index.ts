@@ -5,41 +5,11 @@ import {
   getGeminiApiKey,
   geminiGenerateJson,
 } from '../_shared/geminiClient.ts';
-import {
-  getStaticCleaningWompiReference,
-  getStaticCleaningWompiUrl,
-} from '../_shared/wompiLinks.ts';
+import { resolveBookingPricingCheckout } from '../_shared/pricingCatalog.ts';
 import {
   buildInboxAiContext,
   groundBookingClientInfo,
 } from '../_shared/inboxAiContext.ts';
-
-function emptyBookingContext(phone: string) {
-  return {
-    stage: 'no_booking' as const,
-    collectedData: {
-      date: null,
-      time: null,
-      duration: null,
-      address: null,
-      addressSource: null,
-    },
-    missingData: ['fecha', 'hora', 'duración', 'dirección'],
-    availableSlots: [],
-    paymentStatus: 'none' as const,
-    paymentAmount: null,
-    calculatedPrice: null,
-    clientInfo: {
-      name: null,
-      phone,
-      email: null,
-      address: null,
-      city: null,
-      isReturningClient: false,
-      userId: null,
-    },
-  };
-}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -66,28 +36,24 @@ Deno.serve(async (req) => {
       throw err;
     }
 
-    let bookingContext = await geminiGenerateJson<ReturnType<typeof emptyBookingContext>>({
+    const inferredBookingContext = await geminiGenerateJson<unknown>({
       apiKey,
       prompt:
         'Analiza esta conversación de WhatsApp de Prosavis y responde SOLO JSON con stage, collectedData, ' +
-        'missingData, availableSlots, paymentStatus, paymentAmount, calculatedPrice, clientInfo. ' +
+        'missingData, availableSlots, paymentStatus, paymentAmount, wantsKit, clientInfo. ' +
+        'Devuelve collectedData.duration en minutos usando solo una duración oficial del catálogo y wantsKit como booleano. ' +
+        'No devuelvas precios ni links de pago; esos valores se resuelven en código. ' +
         'Usa el perfil CRM y citas Firestore como fuente de verdad cuando existan; no inventes citas. ' +
         `Teléfono: ${ctx.phone}\n\n${ctx.formattedBlock}`,
-    }).catch(() => emptyBookingContext(ctx.phone));
+    }).catch(() => ({}));
 
-    bookingContext = groundBookingClientInfo(bookingContext, ctx);
-
-    let wompiCheckoutUrl: string | undefined;
-    let wompiPaymentReference: string | undefined;
-    let wompiAmountCOP: number | undefined;
-    if (bookingContext.calculatedPrice && bookingContext.paymentStatus !== 'APPROVED') {
-      const url = getStaticCleaningWompiUrl(bookingContext.calculatedPrice);
-      if (url) {
-        wompiCheckoutUrl = url;
-        wompiPaymentReference = getStaticCleaningWompiReference(bookingContext.calculatedPrice) ?? undefined;
-        wompiAmountCOP = bookingContext.calculatedPrice;
-      }
-    }
+    const {
+      bookingContext: pricedBookingContext,
+      wompiCheckoutUrl,
+      wompiPaymentReference,
+      wompiAmountCOP,
+    } = resolveBookingPricingCheckout(inferredBookingContext, ctx.phone);
+    const bookingContext = groundBookingClientInfo(pricedBookingContext, ctx);
 
     return jsonResponse({
       bookingContext,

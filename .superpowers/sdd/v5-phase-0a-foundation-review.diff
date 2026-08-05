@@ -1,0 +1,1121 @@
+BASE da117caf3e4799aed2a0afa08634f8260bf9a48a
+HEAD 2480a73
+
+COMMITS
+2480a73 docs(db): report V5 foundation delivery
+78e0cce feat(db): add V5 foundation schema
+
+STAT
+ .superpowers/sdd/v5-phase-0a-foundation-report.md  | 145 +++++++
+ supabase/MIGRATIONS.md                             |  12 +
+ ... => 20260803143500_crm_electronic_invoices.sql} |   0
+ .../20260805120000_ops_v5_foundation.sql           | 442 +++++++++++++++++++++
+ supabase/tests/ops_v5_foundation_rls.test.sql      | 186 +++++++++
+ supabase/tests/ops_v5_foundation_schema.test.sql   | 266 +++++++++++++
+ 6 files changed, 1051 insertions(+)
+
+DIFF
+diff --git a/.superpowers/sdd/v5-phase-0a-foundation-report.md b/.superpowers/sdd/v5-phase-0a-foundation-report.md
+new file mode 100644
+index 0000000..0dd3039
+--- /dev/null
++++ b/.superpowers/sdd/v5-phase-0a-foundation-report.md
+@@ -0,0 +1,145 @@
++# V5 Fase 0A ÔÇö Foundation schema report
++
++## Estado
++
++`DONE_WITH_CONCERNS`
++
++El esquema foundation, sus constraints, +¡ndices, RLS, grants y pruebas pgTAP
++quedaron implementados localmente en `master`. La verificaci+¦n din+ímica no pudo
++ejecutarse porque Docker Desktop/Podman no est+í instalado o disponible en
++`PATH`; no se us+¦ el proyecto remoto como sustituto.
++
++## Archivos cambiados
++
++- `supabase/MIGRATIONS.md`
++- `supabase/migrations/20260803143500_crm_electronic_invoices.sql`
++  (renombrado desde `20260803120000_crm_electronic_invoices.sql`)
++- `supabase/migrations/20260805120000_ops_v5_foundation.sql`
++- `supabase/tests/ops_v5_foundation_schema.test.sql`
++- `supabase/tests/ops_v5_foundation_rls.test.sql`
++- `.superpowers/sdd/v5-phase-0a-foundation-report.md`
++
++No se modificaron ni incluyeron en commits los cambios preexistentes ajenos al
++task.
++
++## Implementaci+¦n
++
++- Se conserv+¦ `20260803120000_repair_reminder_crossed_cleaner_names.sql` y se
++  movi+¦ la migraci+¦n de facturaci+¦n a la versi+¦n contractual
++  `20260803143500`.
++- Se ejecut+¦ primero `npx supabase migration new ops_v5_foundation`; el CLI
++  gener+¦ `20260805214253_ops_v5_foundation.sql` y luego se ajust+¦ al timestamp
++  contractual `20260805120000`.
++- Se crearon `buildings`, `bookings`, `booking_crew`, `booking_addons`,
++  `booking_events` y `cleaner_availability`.
++- Se extendi+¦ `crm_team_members` sin reemplazar su PK compuesta ni
++  `contract_type`.
++- Se a+¦adieron checks exhaustivos, importes/minutos no negativos, validaci+¦n de
++  rangos y coordenadas, FKs compuestas por servicio, +¡ndices operacionales y un
++  +¡ndice +¦nico parcial para el lead.
++- Las seis tablas nuevas tienen RLS y una policy CRUD para `authenticated`
++  condicionada por `app_private.is_crm_admin()`, con `USING` y `WITH CHECK`.
++  Los grants CRUD son expl+¡citos para `authenticated` y se revoc+¦ todo acceso
++  de `anon`/`public`.
++- No se ejecut+¦ `migration repair`, `db push`, `apply_migration` ni ninguna
++  mutaci+¦n remota.
++
++## Ciclos red ÔåÆ green
++
++### Seam 1: constraints y service scope
++
++1. **Red preparado:** se escribi+¦ primero
++   `supabase/tests/ops_v5_foundation_schema.test.sql`, cubriendo tablas,
++   extensiones de operarias, estados, importes, minutos, rangos, FKs
++   multi-servicio y lead +¦nico.
++2. **Red intentado:** `npx supabase db reset --local` no lleg+¦ a aplicar las
++   migraciones ni a ejecutar pgTAP:
++
++   ```text
++   LegacyDbBootstrapError: failed to inspect service
++   ```
++
++3. **Green implementado:** se a+¦adi+¦ el DDL m+¡nimo en
++   `20260805120000_ops_v5_foundation.sql`.
++4. **Green din+ímico pendiente:** no verificable sin el runtime local de Docker.
++
++### Seam 2: RLS
++
++1. **Red preparado:** se escribi+¦
++   `supabase/tests/ops_v5_foundation_rls.test.sql` para comprobar RLS en las
++   seis tablas, grants, ausencia de acceso `anon`, bloqueo de authenticated no
++   admin y CRUD de admin activo.
++2. **Green implementado:** se a+¦adieron RLS, policies y grants.
++3. **Green din+ímico pendiente:** bloqueado por la misma falta de Postgres local.
++
++## Verificaciones y salida
++
++### Supabase CLI
++
++- `npx supabase --version`
++
++  ```text
++  2.111.0
++  ```
++
++- `npx supabase db reset --local`
++
++  ```text
++  LegacyDbBootstrapError: failed to inspect service
++  ```
++
++- `npx supabase test db --local`
++
++  ```text
++  LegacyDbConnectError: failed to connect to postgres:
++  connect ECONNREFUSED 127.0.0.1:54322
++  Make sure Docker is running, then run: supabase start
++  ```
++
++- `npx supabase migration list --local`
++
++  ```text
++  LegacyDbConnectError: failed to connect to postgres:
++  connect ECONNREFUSED 127.0.0.1:54322
++  ```
++
++- `npx supabase status --debug`
++
++  ```text
++  LegacyStatusDbInspectError: docker: command not found
++  (podman also not found)
++  ```
++
++### Verificaciones est+íticas
++
++- Timestamps de migraci+¦n: `59` versiones +¦nicas; sin colisiones.
++- Declaraciones de tablas foundation: `6/6`.
++- Literales contractuales de estados y tipos: completos.
++- RLS/policies/`WITH CHECK`: `6/6/6`.
++- `git diff --cached --check`: exit code `0`.
++- Diagn+¦sticos IDE de los archivos editados: sin errores.
++- `graphify update .` se intent+¦ desde la ra+¡z del workspace y fall+¦ por una
++  instalaci+¦n local rota:
++
++  ```text
++  ModuleNotFoundError: No module named 'graphify'
++  ```
++
++## Commits
++
++- `78e0cce` ÔÇö `feat(db): add V5 foundation schema`
++
++El reporte se guarda en un commit documental separado para mantener el commit
++de implementaci+¦n enfocado.
++
++## Riesgos y preocupaciones
++
++1. Las pruebas pgTAP y la aplicaci+¦n completa de las migraciones no est+ín
++   confirmadas en runtime local hasta disponer de Docker Desktop o Podman.
++2. El historial remoto de la migraci+¦n de facturaci+¦n sigue pendiente de una
++   reconciliaci+¦n separada, deliberadamente fuera de alcance.
++3. Antes de desplegar, ejecutar localmente:
++   `npx supabase db reset --local`, `npx supabase test db --local` y
++   `npx supabase migration list --local`.
++4. El grafo del workspace no pudo actualizarse hasta reparar la instalaci+¦n
++   local del CLI Graphify.
+diff --git a/supabase/MIGRATIONS.md b/supabase/MIGRATIONS.md
+index ffbb8d2..71d3574 100644
+--- a/supabase/MIGRATIONS.md
++++ b/supabase/MIGRATIONS.md
+@@ -53,20 +53,32 @@ Renombrado 02/07/2026:
+ |-------|---------|
+ | `20260612170000_crm_directory_issues_ai_progress.sql` | `20260612170100_crm_directory_issues_ai_progress.sql` |
+ | `20260612170000_recreate_whatsapp_stickers.sql` | `20260612170200_recreate_whatsapp_stickers.sql` |
+ 
+ Tras renombrar, registrar la nueva versi+¦n:
+ 
+ ```powershell
+ npx supabase migration repair --status applied 20260612170100 20260612170200
+ ```
+ 
++### Colisi+¦n local del 03/08/2026
++
++`20260803120000_repair_reminder_crossed_cleaner_names.sql` fue creado primero y
++conserva la versi+¦n `20260803120000`. La migraci+¦n local de facturaci+¦n
++electr+¦nica se renombr+¦ a
++`20260803143500_crm_electronic_invoices.sql` para eliminar la colisi+¦n.
++
++El DDL de facturaci+¦n ya existe en remoto y es idempotente. El historial remoto
++de estas versiones sigue pendiente de una reconciliaci+¦n separada: este
++renombrado local no ejecuta `migration repair`, `db push` ni otra mutaci+¦n
++remota.
++
+ ## Alternativa: pull desde remoto
+ 
+ Si el esquema de producci+¦n es la fuente de verdad y diverge mucho del repo:
+ 
+ ```powershell
+ npx supabase db pull
+ ```
+ 
+ Revisar el SQL generado antes de commitear.
+ 
+diff --git a/supabase/migrations/20260803120000_crm_electronic_invoices.sql b/supabase/migrations/20260803143500_crm_electronic_invoices.sql
+similarity index 100%
+rename from supabase/migrations/20260803120000_crm_electronic_invoices.sql
+rename to supabase/migrations/20260803143500_crm_electronic_invoices.sql
+diff --git a/supabase/migrations/20260805120000_ops_v5_foundation.sql b/supabase/migrations/20260805120000_ops_v5_foundation.sql
+new file mode 100644
+index 0000000..3bef7c1
+--- /dev/null
++++ b/supabase/migrations/20260805120000_ops_v5_foundation.sql
+@@ -0,0 +1,442 @@
++-- V5 Phase 0A: operational foundation for Firestore appointment projections.
++-- Firestore remains the transactional source of truth.
++
++create table public.buildings (
++  id uuid primary key default gen_random_uuid(),
++  service_id text not null,
++  name text not null,
++  building_type text not null,
++  unit_count integer not null default 0,
++  admin_contact_name text,
++  admin_contact_phone text,
++  admin_contact_email text,
++  barrio text,
++  comuna text,
++  latitude numeric(9, 6),
++  longitude numeric(9, 6),
++  has_common_areas boolean not null default false,
++  average_actual_service_minutes integer,
++  created_at timestamptz not null default now(),
++  updated_at timestamptz not null default now(),
++  constraint buildings_service_id_id_key unique (service_id, id),
++  constraint buildings_type_check check (
++    building_type in ('conjunto', 'edificio', 'casa', 'comercial', 'hotel', 'airbnb')
++  ),
++  constraint buildings_unit_count_check check (unit_count >= 0),
++  constraint buildings_latitude_check check (
++    latitude is null or latitude between -90 and 90
++  ),
++  constraint buildings_longitude_check check (
++    longitude is null or longitude between -180 and 180
++  ),
++  constraint buildings_average_actual_service_minutes_check check (
++    average_actual_service_minutes is null or average_actual_service_minutes >= 0
++  )
++);
++
++create table public.bookings (
++  id uuid primary key default gen_random_uuid(),
++  service_id text not null,
++  appointment_id text not null,
++  source_revision bigint not null default 0,
++  source_hash text,
++  source_created_at timestamptz,
++  source_updated_at timestamptz,
++  status text not null default 'PENDING',
++  tier text,
++  required_cleaner_minutes integer not null default 0,
++  scheduled_start timestamptz,
++  scheduled_end timestamptz,
++  fulfillment text not null default 'single',
++  crew_size integer not null default 1,
++  building_id uuid,
++  location_address text,
++  barrio text,
++  comuna text,
++  latitude numeric(9, 6),
++  longitude numeric(9, 6),
++  client_id text,
++  client_name text,
++  client_phone text,
++  client_app_user_id text,
++  window_start timestamptz,
++  window_end timestamptz,
++  payment_status text not null default 'PAGO_PENDIENTE',
++  payment_method text,
++  payment_id text,
++  wompi_reference text,
++  wompi_transaction_id text,
++  subtotal_cop bigint not null default 0,
++  total_cop bigint not null default 0,
++  paid_cop bigint not null default 0,
++  pending_cop bigint not null default 0,
++  is_first_booking boolean not null default false,
++  acquisition_channel text,
++  cac_cop bigint not null default 0,
++  has_addons boolean not null default false,
++  addon_total_cop bigint not null default 0,
++  cancellation_fee_cop bigint not null default 0,
++  assignment_source text,
++  assignment_decision_id text,
++  source_deleted_at timestamptz,
++  created_at timestamptz not null default now(),
++  updated_at timestamptz not null default now(),
++  constraint bookings_service_appointment_key unique (service_id, appointment_id),
++  constraint bookings_service_id_id_key unique (service_id, id),
++  constraint bookings_building_fkey foreign key (service_id, building_id)
++    references public.buildings (service_id, id),
++  constraint bookings_source_revision_check check (source_revision >= 0),
++  constraint bookings_status_check check (
++    status in (
++      'PENDING',
++      'PENDING_RESCHEDULE',
++      'CONFIRMED',
++      'EN_ROUTE',
++      'IN_PROGRESS',
++      'COMPLETED',
++      'CANCELED',
++      'REJECTED'
++    )
++  ),
++  constraint bookings_payment_status_check check (
++    payment_status in ('PAGO_PENDIENTE', 'PAGO_EN_PROCESO', 'PAGO_ACEPTADO')
++  ),
++  constraint bookings_payment_method_check check (
++    payment_method is null or payment_method in ('WOMPI', 'QR', 'CASH')
++  ),
++  constraint bookings_fulfillment_check check (
++    fulfillment in ('single', 'composite')
++  ),
++  constraint bookings_crew_size_check check (crew_size >= 1),
++  constraint bookings_fulfillment_crew_size_check check (
++    (fulfillment = 'single' and crew_size = 1)
++    or (fulfillment = 'composite' and crew_size >= 2)
++  ),
++  constraint bookings_required_cleaner_minutes_check check (
++    required_cleaner_minutes >= 0
++  ),
++  constraint bookings_scheduled_range_check check (
++    scheduled_start is null
++    or scheduled_end is null
++    or scheduled_start < scheduled_end
++  ),
++  constraint bookings_window_range_check check (
++    window_start is null
++    or window_end is null
++    or window_start < window_end
++  ),
++  constraint bookings_latitude_check check (
++    latitude is null or latitude between -90 and 90
++  ),
++  constraint bookings_longitude_check check (
++    longitude is null or longitude between -180 and 180
++  ),
++  constraint bookings_amounts_check check (
++    subtotal_cop >= 0
++    and total_cop >= 0
++    and paid_cop >= 0
++    and pending_cop >= 0
++    and cac_cop >= 0
++    and addon_total_cop >= 0
++    and cancellation_fee_cop >= 0
++  ),
++  constraint bookings_assignment_source_check check (
++    assignment_source is null
++    or assignment_source in (
++      'manual',
++      'suggested_accepted',
++      'suggested_overridden',
++      'auto'
++    )
++  )
++);
++
++create table public.booking_crew (
++  id uuid primary key default gen_random_uuid(),
++  service_id text not null,
++  booking_id uuid not null,
++  cleaner_id text not null,
++  assigned_minutes integer not null default 0,
++  is_lead boolean not null default false,
++  scheduled_start timestamptz,
++  scheduled_end timestamptz,
++  actual_start timestamptz,
++  actual_end timestamptz,
++  ya_trabajaba_ese_dia boolean not null default false,
++  estimated_marginal_cost_cop bigint not null default 0,
++  created_at timestamptz not null default now(),
++  updated_at timestamptz not null default now(),
++  constraint booking_crew_member_key unique (service_id, booking_id, cleaner_id),
++  constraint booking_crew_booking_fkey foreign key (service_id, booking_id)
++    references public.bookings (service_id, id) on delete cascade,
++  constraint booking_crew_cleaner_fkey foreign key (service_id, cleaner_id)
++    references public.crm_team_members (service_id, id),
++  constraint booking_crew_assigned_minutes_check check (assigned_minutes >= 0),
++  constraint booking_crew_scheduled_range_check check (
++    scheduled_start is null
++    or scheduled_end is null
++    or scheduled_start < scheduled_end
++  ),
++  constraint booking_crew_actual_range_check check (
++    actual_start is null
++    or actual_end is null
++    or actual_start < actual_end
++  ),
++  constraint booking_crew_estimated_marginal_cost_check check (
++    estimated_marginal_cost_cop >= 0
++  )
++);
++
++create table public.booking_addons (
++  id uuid primary key default gen_random_uuid(),
++  service_id text not null,
++  booking_id uuid not null,
++  addon_id text not null,
++  minutes integer not null default 0,
++  price_cop bigint not null default 0,
++  sold_at text not null,
++  created_at timestamptz not null default now(),
++  updated_at timestamptz not null default now(),
++  constraint booking_addons_booking_fkey foreign key (service_id, booking_id)
++    references public.bookings (service_id, id) on delete cascade,
++  constraint booking_addons_minutes_check check (minutes >= 0),
++  constraint booking_addons_price_check check (price_cop >= 0),
++  constraint booking_addons_sold_at_check check (
++    sold_at in ('checkout', 'onsite', 'rebook')
++  )
++);
++
++create table public.booking_events (
++  id uuid primary key default gen_random_uuid(),
++  service_id text not null,
++  booking_id uuid not null,
++  event text not null,
++  payload jsonb not null default '{}'::jsonb,
++  actor text,
++  created_at timestamptz not null default now(),
++  constraint booking_events_booking_fkey foreign key (service_id, booking_id)
++    references public.bookings (service_id, id) on delete cascade,
++  constraint booking_events_event_check check (
++    event in (
++      'creado',
++      'confirmado',
++      'reagendado',
++      'reasignado',
++      'en_proceso',
++      'finalizado',
++      'cancelado_cliente',
++      'cancelado_operaria',
++      'no_pudo_ingresar'
++    )
++  )
++);
++
++create table public.cleaner_availability (
++  id uuid primary key default gen_random_uuid(),
++  service_id text not null,
++  cleaner_id text not null,
++  operational_date date not null,
++  offered_minutes integer not null default 0,
++  accepted_minutes integer not null default 0,
++  window_start timestamptz,
++  window_end timestamptz,
++  unavailable_reason text not null default 'none',
++  source text not null default 'manual',
++  created_at timestamptz not null default now(),
++  updated_at timestamptz not null default now(),
++  constraint cleaner_availability_day_key unique (
++    service_id,
++    cleaner_id,
++    operational_date
++  ),
++  constraint cleaner_availability_cleaner_fkey foreign key (service_id, cleaner_id)
++    references public.crm_team_members (service_id, id),
++  constraint cleaner_availability_minutes_check check (
++    offered_minutes >= 0
++    and accepted_minutes >= 0
++    and accepted_minutes <= offered_minutes
++  ),
++  constraint cleaner_availability_accepted_window_check check (
++    accepted_minutes = 0
++    or (window_start is not null and window_end is not null)
++  ),
++  constraint cleaner_availability_window_range_check check (
++    window_start is null
++    or window_end is null
++    or window_start < window_end
++  ),
++  constraint cleaner_availability_reason_check check (
++    unavailable_reason in (
++      'none',
++      'incapacidad',
++      'vacaciones',
++      'personal',
++      'no_demand',
++      'no_response'
++    )
++  ),
++  constraint cleaner_availability_source_check check (
++    source in ('manual', 'whatsapp', 'app')
++  )
++);
++
++alter table public.crm_team_members
++  add column hire_date date,
++  add column labor_regime text not null default 'decreto_2616',
++  add column home_comuna text,
++  add column home_latitude numeric(9, 6),
++  add column home_longitude numeric(9, 6),
++  add column addon_skills text[] not null default '{}'::text[],
++  add column service_skills text[] not null default '{}'::text[],
++  add column alturas_certified boolean not null default false,
++  add column alturas_certification_expires_on date,
++  add column arl_risk_class integer,
++  add column accepts_composite boolean not null default false,
++  add column preferred_max_travel_minutes integer,
++  add column operations_status text not null default 'active',
++  add column termination_date date,
++  add column termination_reason text,
++  add constraint crm_team_members_home_latitude_check check (
++    home_latitude is null or home_latitude between -90 and 90
++  ),
++  add constraint crm_team_members_home_longitude_check check (
++    home_longitude is null or home_longitude between -180 and 180
++  ),
++  add constraint crm_team_members_arl_risk_class_check check (
++    arl_risk_class is null or arl_risk_class between 1 and 5
++  ),
++  add constraint crm_team_members_preferred_max_travel_minutes_check check (
++    preferred_max_travel_minutes is null or preferred_max_travel_minutes >= 0
++  );
++
++create index buildings_service_comuna_idx
++  on public.buildings (service_id, comuna);
++
++create index bookings_service_date_status_idx
++  on public.bookings (service_id, scheduled_start, status);
++
++create index bookings_service_client_date_idx
++  on public.bookings (service_id, client_id, scheduled_start desc)
++  where client_id is not null;
++
++create index bookings_service_comuna_date_idx
++  on public.bookings (service_id, comuna, scheduled_start)
++  where comuna is not null;
++
++create index bookings_service_building_idx
++  on public.bookings (service_id, building_id)
++  where building_id is not null;
++
++create index booking_crew_booking_idx
++  on public.booking_crew (service_id, booking_id);
++
++create index booking_crew_cleaner_date_idx
++  on public.booking_crew (
++    service_id,
++    cleaner_id,
++    scheduled_start,
++    scheduled_end
++  );
++
++create unique index booking_crew_one_lead_idx
++  on public.booking_crew (service_id, booking_id)
++  where is_lead;
++
++create index booking_addons_booking_idx
++  on public.booking_addons (service_id, booking_id);
++
++create index booking_events_booking_created_idx
++  on public.booking_events (service_id, booking_id, created_at);
++
++create index cleaner_availability_cleaner_date_idx
++  on public.cleaner_availability (
++    service_id,
++    cleaner_id,
++    operational_date,
++    window_start,
++    window_end
++  );
++
++create index crm_team_members_home_comuna_idx
++  on public.crm_team_members (service_id, home_comuna)
++  where home_comuna is not null;
++
++drop trigger if exists set_buildings_updated_at on public.buildings;
++create trigger set_buildings_updated_at
++before update on public.buildings
++for each row execute function public.set_updated_at();
++
++drop trigger if exists set_bookings_updated_at on public.bookings;
++create trigger set_bookings_updated_at
++before update on public.bookings
++for each row execute function public.set_updated_at();
++
++drop trigger if exists set_booking_crew_updated_at on public.booking_crew;
++create trigger set_booking_crew_updated_at
++before update on public.booking_crew
++for each row execute function public.set_updated_at();
++
++drop trigger if exists set_booking_addons_updated_at on public.booking_addons;
++create trigger set_booking_addons_updated_at
++before update on public.booking_addons
++for each row execute function public.set_updated_at();
++
++drop trigger if exists set_cleaner_availability_updated_at on public.cleaner_availability;
++create trigger set_cleaner_availability_updated_at
++before update on public.cleaner_availability
++for each row execute function public.set_updated_at();
++
++alter table public.buildings enable row level security;
++alter table public.bookings enable row level security;
++alter table public.booking_crew enable row level security;
++alter table public.booking_addons enable row level security;
++alter table public.booking_events enable row level security;
++alter table public.cleaner_availability enable row level security;
++
++create policy "CRM admins manage buildings"
++on public.buildings for all to authenticated
++using ((select app_private.is_crm_admin()))
++with check ((select app_private.is_crm_admin()));
++
++create policy "CRM admins manage bookings"
++on public.bookings for all to authenticated
++using ((select app_private.is_crm_admin()))
++with check ((select app_private.is_crm_admin()));
++
++create policy "CRM admins manage booking crew"
++on public.booking_crew for all to authenticated
++using ((select app_private.is_crm_admin()))
++with check ((select app_private.is_crm_admin()));
++
++create policy "CRM admins manage booking addons"
++on public.booking_addons for all to authenticated
++using ((select app_private.is_crm_admin()))
++with check ((select app_private.is_crm_admin()));
++
++create policy "CRM admins manage booking events"
++on public.booking_events for all to authenticated
++using ((select app_private.is_crm_admin()))
++with check ((select app_private.is_crm_admin()));
++
++create policy "CRM admins manage cleaner availability"
++on public.cleaner_availability for all to authenticated
++using ((select app_private.is_crm_admin()))
++with check ((select app_private.is_crm_admin()));
++
++revoke all on table
++  public.buildings,
++  public.bookings,
++  public.booking_crew,
++  public.booking_addons,
++  public.booking_events,
++  public.cleaner_availability
++from public, anon;
++
++grant select, insert, update, delete on table
++  public.buildings,
++  public.bookings,
++  public.booking_crew,
++  public.booking_addons,
++  public.booking_events,
++  public.cleaner_availability
++to authenticated;
+diff --git a/supabase/tests/ops_v5_foundation_rls.test.sql b/supabase/tests/ops_v5_foundation_rls.test.sql
+new file mode 100644
+index 0000000..17ec335
+--- /dev/null
++++ b/supabase/tests/ops_v5_foundation_rls.test.sql
+@@ -0,0 +1,186 @@
++begin;
++
++create extension if not exists pgtap with schema extensions;
++set local search_path = public, extensions;
++select no_plan();
++
++create or replace function pg_temp.sqlstate_of(statement text)
++returns text
++language plpgsql
++as $$
++begin
++  execute statement;
++  return null;
++exception
++  when others then
++    return sqlstate;
++end;
++$$;
++
++select results_eq(
++  $$
++    select count(*)::bigint
++    from pg_class c
++    join pg_namespace n on n.oid = c.relnamespace
++    where n.nspname = 'public'
++      and c.relname in (
++        'buildings',
++        'bookings',
++        'booking_crew',
++        'booking_addons',
++        'booking_events',
++        'cleaner_availability'
++      )
++      and c.relrowsecurity
++  $$,
++  array[6::bigint],
++  'RLS is enabled on every foundation table'
++);
++
++select results_eq(
++  $$
++    select count(*)::bigint
++    from pg_policies
++    where schemaname = 'public'
++      and tablename in (
++        'buildings',
++        'bookings',
++        'booking_crew',
++        'booking_addons',
++        'booking_events',
++        'cleaner_availability'
++      )
++      and cmd = 'ALL'
++      and roles = array['authenticated']::name[]
++      and qual is not null
++      and with_check is not null
++  $$,
++  array[6::bigint],
++  'each admin CRUD policy has USING and WITH CHECK'
++);
++
++select results_eq(
++  $$
++    select count(*)::bigint
++    from unnest(array[
++      'buildings',
++      'bookings',
++      'booking_crew',
++      'booking_addons',
++      'booking_events',
++      'cleaner_availability'
++    ]) as table_names(name)
++    where has_table_privilege(
++      'authenticated',
++      format('public.%I', name),
++      'SELECT, INSERT, UPDATE, DELETE'
++    )
++  $$,
++  array[6::bigint],
++  'authenticated receives explicit CRUD grants'
++);
++
++select results_eq(
++  $$
++    select count(*)::bigint
++    from unnest(array[
++      'buildings',
++      'bookings',
++      'booking_crew',
++      'booking_addons',
++      'booking_events',
++      'cleaner_availability'
++    ]) as table_names(name)
++    where has_table_privilege(
++      'anon',
++      format('public.%I', name),
++      'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER'
++    )
++  $$,
++  array[0::bigint],
++  'anon receives no foundation table privileges'
++);
++
++insert into auth.users (id, email)
++values ('30000000-0000-0000-0000-000000000001', 'admin-foundation@example.test');
++
++insert into public.admin_profiles (id, email, role, is_active)
++values (
++  '30000000-0000-0000-0000-000000000001',
++  'admin-foundation@example.test',
++  'admin',
++  true
++);
++
++insert into public.buildings
++  (id, service_id, name, building_type)
++values (
++  '40000000-0000-0000-0000-000000000001',
++  'svc-rls',
++  'RLS Seed',
++  'edificio'
++);
++
++set local role anon;
++select is(
++  pg_temp.sqlstate_of($$select * from public.buildings$$),
++  '42501',
++  'anon cannot read buildings'
++);
++select is(
++  pg_temp.sqlstate_of($$insert into public.buildings
++    (service_id, name, building_type)
++    values ('svc-rls', 'Anon write', 'edificio')$$),
++  '42501',
++  'anon cannot write buildings'
++);
++
++set local role authenticated;
++set local "request.jwt.claim.sub" = '30000000-0000-0000-0000-000000000002';
++set local "request.jwt.claim.role" = 'authenticated';
++
++select results_eq(
++  $$select count(*) from public.buildings$$,
++  array[0::bigint],
++  'authenticated non-admin cannot read buildings'
++);
++select is(
++  pg_temp.sqlstate_of($$insert into public.buildings
++    (service_id, name, building_type)
++    values ('svc-rls', 'Non-admin write', 'edificio')$$),
++  '42501',
++  'authenticated non-admin cannot write buildings'
++);
++
++set local "request.jwt.claim.sub" = '30000000-0000-0000-0000-000000000001';
++
++select results_eq(
++  $$select count(*) from public.buildings$$,
++  array[1::bigint],
++  'active CRM admin can read buildings'
++);
++select lives_ok(
++  $$insert into public.buildings
++    (id, service_id, name, building_type)
++    values (
++      '40000000-0000-0000-0000-000000000002',
++      'svc-rls',
++      'Admin CRUD',
++      'edificio'
++    )$$,
++  'active CRM admin can insert buildings'
++);
++select lives_ok(
++  $$update public.buildings
++    set name = 'Admin updated'
++    where id = '40000000-0000-0000-0000-000000000002'$$,
++  'active CRM admin can update buildings'
++);
++select lives_ok(
++  $$delete from public.buildings
++    where id = '40000000-0000-0000-0000-000000000002'$$,
++  'active CRM admin can delete buildings'
++);
++
++select * from finish();
++rollback;
+diff --git a/supabase/tests/ops_v5_foundation_schema.test.sql b/supabase/tests/ops_v5_foundation_schema.test.sql
+new file mode 100644
+index 0000000..901f13d
+--- /dev/null
++++ b/supabase/tests/ops_v5_foundation_schema.test.sql
+@@ -0,0 +1,266 @@
++begin;
++
++create extension if not exists pgtap with schema extensions;
++set local search_path = public, extensions;
++select no_plan();
++
++create or replace function pg_temp.sqlstate_of(statement text)
++returns text
++language plpgsql
++as $$
++begin
++  execute statement;
++  return null;
++exception
++  when others then
++    return sqlstate;
++end;
++$$;
++
++select has_table('public', 'buildings', 'buildings exists');
++select has_table('public', 'bookings', 'bookings exists');
++select has_table('public', 'booking_crew', 'booking_crew exists');
++select has_table('public', 'booking_addons', 'booking_addons exists');
++select has_table('public', 'booking_events', 'booking_events exists');
++select has_table('public', 'cleaner_availability', 'cleaner_availability exists');
++
++select has_column('public', 'crm_team_members', 'hire_date', 'team members have hire_date');
++select has_column('public', 'crm_team_members', 'labor_regime', 'team members have labor_regime');
++select has_column('public', 'crm_team_members', 'operations_status', 'team members have operations_status');
++
++select is(
++  pg_temp.sqlstate_of($$insert into public.buildings
++    (service_id, name, building_type, unit_count)
++    values ('svc-a', 'Invalid type', 'office', 1)$$),
++  '23514',
++  'building type is exhaustive'
++);
++select is(
++  pg_temp.sqlstate_of($$insert into public.buildings
++    (service_id, name, building_type, unit_count)
++    values ('svc-a', 'Invalid units', 'edificio', -1)$$),
++  '23514',
++  'building unit count cannot be negative'
++);
++select is(
++  pg_temp.sqlstate_of($$insert into public.buildings
++    (service_id, name, building_type, latitude, longitude)
++    values ('svc-a', 'Invalid coordinates', 'edificio', 91, -181)$$),
++  '23514',
++  'building coordinates stay in geographic bounds'
++);
++
++insert into public.crm_team_members
++  (service_id, id, user_id, name, email)
++values
++  ('svc-a', 'cleaner-a', 'user-a', 'Cleaner A', 'cleaner-a@example.test'),
++  ('svc-a', 'cleaner-a-2', 'user-a-2', 'Cleaner A2', 'cleaner-a-2@example.test'),
++  ('svc-b', 'cleaner-b', 'user-b', 'Cleaner B', 'cleaner-b@example.test');
++
++insert into public.buildings
++  (id, service_id, name, building_type, unit_count)
++values
++  ('10000000-0000-0000-0000-000000000001', 'svc-a', 'Building A', 'edificio', 10),
++  ('10000000-0000-0000-0000-000000000002', 'svc-b', 'Building B', 'edificio', 10);
++
++select is(
++  pg_temp.sqlstate_of($$insert into public.bookings
++    (service_id, appointment_id, status, fulfillment, crew_size)
++    values ('svc-a', 'invalid-status', 'DONE', 'single', 1)$$),
++  '23514',
++  'booking status is exhaustive'
++);
++select is(
++  pg_temp.sqlstate_of($$insert into public.bookings
++    (service_id, appointment_id, status, payment_status, fulfillment, crew_size)
++    values ('svc-a', 'invalid-payment-status', 'PENDING', 'PAID', 'single', 1)$$),
++  '23514',
++  'payment status is exhaustive'
++);
++select is(
++  pg_temp.sqlstate_of($$insert into public.bookings
++    (service_id, appointment_id, status, payment_method, fulfillment, crew_size)
++    values ('svc-a', 'invalid-payment-method', 'PENDING', 'CARD', 'single', 1)$$),
++  '23514',
++  'payment method is exhaustive'
++);
++select is(
++  pg_temp.sqlstate_of($$insert into public.bookings
++    (service_id, appointment_id, status, fulfillment, crew_size)
++    values ('svc-a', 'invalid-fulfillment', 'PENDING', 'team', 1)$$),
++  '23514',
++  'fulfillment is exhaustive'
++);
++select is(
++  pg_temp.sqlstate_of($$insert into public.bookings
++    (service_id, appointment_id, status, fulfillment, crew_size)
++    values ('svc-a', 'invalid-single-size', 'PENDING', 'single', 2)$$),
++  '23514',
++  'single fulfillment requires one cleaner'
++);
++select is(
++  pg_temp.sqlstate_of($$insert into public.bookings
++    (service_id, appointment_id, status, fulfillment, crew_size)
++    values ('svc-a', 'invalid-composite-size', 'PENDING', 'composite', 1)$$),
++  '23514',
++  'composite fulfillment requires at least two cleaners'
++);
++select is(
++  pg_temp.sqlstate_of($$insert into public.bookings
++    (service_id, appointment_id, status, required_cleaner_minutes, fulfillment, crew_size)
++    values ('svc-a', 'invalid-minutes', 'PENDING', -1, 'single', 1)$$),
++  '23514',
++  'required cleaner minutes cannot be negative'
++);
++select is(
++  pg_temp.sqlstate_of($$insert into public.bookings
++    (service_id, appointment_id, status, total_cop, fulfillment, crew_size)
++    values ('svc-a', 'invalid-money', 'PENDING', -1, 'single', 1)$$),
++  '23514',
++  'booking COP amounts cannot be negative'
++);
++select is(
++  pg_temp.sqlstate_of($$insert into public.bookings
++    (service_id, appointment_id, status, scheduled_start, scheduled_end, fulfillment, crew_size)
++    values ('svc-a', 'invalid-range', 'PENDING', '2026-08-05 12:00+00', '2026-08-05 11:00+00', 'single', 1)$$),
++  '23514',
++  'booking scheduled range must increase'
++);
++select is(
++  pg_temp.sqlstate_of($$insert into public.bookings
++    (service_id, appointment_id, status, building_id, fulfillment, crew_size)
++    values ('svc-a', 'cross-service-building', 'PENDING',
++      '10000000-0000-0000-0000-000000000002', 'single', 1)$$),
++  '23503',
++  'building foreign key prevents cross-service references'
++);
++
++insert into public.bookings
++  (id, service_id, appointment_id, status, scheduled_start, scheduled_end,
++   fulfillment, crew_size)
++values
++  ('20000000-0000-0000-0000-000000000001', 'svc-a', 'appointment-a',
++   'CONFIRMED', '2026-08-05 12:00+00', '2026-08-05 14:00+00', 'single', 1),
++  ('20000000-0000-0000-0000-000000000002', 'svc-b', 'appointment-b',
++   'CONFIRMED', '2026-08-05 12:00+00', '2026-08-05 14:00+00', 'single', 1);
++
++select is(
++  pg_temp.sqlstate_of($$insert into public.booking_crew
++    (service_id, booking_id, cleaner_id, assigned_minutes)
++    values ('svc-a', '20000000-0000-0000-0000-000000000001', 'cleaner-b', 60)$$),
++  '23503',
++  'cleaner foreign key prevents cross-service references'
++);
++select is(
++  pg_temp.sqlstate_of($$insert into public.booking_crew
++    (service_id, booking_id, cleaner_id, assigned_minutes)
++    values ('svc-a', '20000000-0000-0000-0000-000000000001', 'cleaner-a', -1)$$),
++  '23514',
++  'assigned minutes cannot be negative'
++);
++select is(
++  pg_temp.sqlstate_of($$insert into public.booking_crew
++    (service_id, booking_id, cleaner_id, assigned_minutes, scheduled_start, scheduled_end)
++    values ('svc-a', '20000000-0000-0000-0000-000000000001', 'cleaner-a', 60,
++      '2026-08-05 14:00+00', '2026-08-05 12:00+00')$$),
++  '23514',
++  'crew scheduled range must increase'
++);
++select is(
++  pg_temp.sqlstate_of($$insert into public.booking_crew
++    (service_id, booking_id, cleaner_id, assigned_minutes, estimated_marginal_cost_cop)
++    values ('svc-a', '20000000-0000-0000-0000-000000000001', 'cleaner-a', 60, -1)$$),
++  '23514',
++  'crew marginal cost cannot be negative'
++);
++
++insert into public.booking_crew
++  (service_id, booking_id, cleaner_id, assigned_minutes, is_lead)
++values
++  ('svc-a', '20000000-0000-0000-0000-000000000001', 'cleaner-a', 60, true);
++
++select is(
++  pg_temp.sqlstate_of($$insert into public.booking_crew
++    (service_id, booking_id, cleaner_id, assigned_minutes, is_lead)
++    values ('svc-a', '20000000-0000-0000-0000-000000000001', 'cleaner-a-2', 60, true)$$),
++  '23505',
++  'only one lead is allowed per booking'
++);
++
++select is(
++  pg_temp.sqlstate_of($$insert into public.booking_addons
++    (service_id, booking_id, addon_id, minutes, price_cop, sold_at)
++    values ('svc-a', '20000000-0000-0000-0000-000000000001', 'addon-a', -1, 0, 'checkout')$$),
++  '23514',
++  'addon minutes cannot be negative'
++);
++select is(
++  pg_temp.sqlstate_of($$insert into public.booking_addons
++    (service_id, booking_id, addon_id, minutes, price_cop, sold_at)
++    values ('svc-a', '20000000-0000-0000-0000-000000000001', 'addon-a', 15, -1, 'checkout')$$),
++  '23514',
++  'addon price cannot be negative'
++);
++select is(
++  pg_temp.sqlstate_of($$insert into public.booking_addons
++    (service_id, booking_id, addon_id, minutes, price_cop, sold_at)
++    values ('svc-a', '20000000-0000-0000-0000-000000000001', 'addon-a', 15, 1000, 'later')$$),
++  '23514',
++  'addon sale point is exhaustive'
++);
++
++select is(
++  pg_temp.sqlstate_of($$insert into public.booking_events
++    (service_id, booking_id, event)
++    values ('svc-a', '20000000-0000-0000-0000-000000000001', 'deleted')$$),
++  '23514',
++  'booking event is exhaustive'
++);
++
++select is(
++  pg_temp.sqlstate_of($$insert into public.cleaner_availability
++    (service_id, cleaner_id, operational_date, offered_minutes, accepted_minutes, source)
++    values ('svc-a', 'cleaner-a-2', '2026-08-05', 60, 61, 'manual')$$),
++  '23514',
++  'accepted availability cannot exceed offered minutes'
++);
++select is(
++  pg_temp.sqlstate_of($$insert into public.cleaner_availability
++    (service_id, cleaner_id, operational_date, offered_minutes, accepted_minutes, source)
++    values ('svc-a', 'cleaner-a-2', '2026-08-05', 60, 30, 'manual')$$),
++  '23514',
++  'accepted availability requires a window'
++);
++select is(
++  pg_temp.sqlstate_of($$insert into public.cleaner_availability
++    (service_id, cleaner_id, operational_date, offered_minutes, accepted_minutes,
++     window_start, window_end, source)
++    values ('svc-a', 'cleaner-a-2', '2026-08-05', 60, 30,
++      '2026-08-05 14:00+00', '2026-08-05 12:00+00', 'manual')$$),
++  '23514',
++  'availability window must increase'
++);
++select is(
++  pg_temp.sqlstate_of($$insert into public.cleaner_availability
++    (service_id, cleaner_id, operational_date, unavailable_reason, source)
++    values ('svc-a', 'cleaner-a-2', '2026-08-05', 'other', 'manual')$$),
++  '23514',
++  'availability reason is exhaustive'
++);
++select is(
++  pg_temp.sqlstate_of($$insert into public.cleaner_availability
++    (service_id, cleaner_id, operational_date, source)
++    values ('svc-a', 'cleaner-a-2', '2026-08-05', 'web')$$),
++  '23514',
++  'availability source is exhaustive'
++);
++select is(
++  pg_temp.sqlstate_of($$insert into public.cleaner_availability
++    (service_id, cleaner_id, operational_date, source)
++    values ('svc-a', 'cleaner-b', '2026-08-05', 'manual')$$),
++  '23503',
++  'availability cleaner foreign key prevents cross-service references'
++);
++
++select * from finish();
++rollback;

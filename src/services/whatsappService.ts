@@ -2,6 +2,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '@/config/supabase';
 import type { Database } from '@/types/database';
 import type { WhatsAppMetrics } from '@/types/whatsapp';
+import type { NormalizedBookingContext } from '../../supabase/functions/_shared/bookingContext';
 import {
   presenceStateToEntries,
   type WhatsAppPresenceTrackPayload,
@@ -765,30 +766,7 @@ export async function sendWhatsAppTemplateMessageAdmin(params: {
   );
 }
 
-export interface BookingContextData {
-  stage: 'no_booking' | 'info_gathering' | 'availability' | 'summary_confirmation' | 'payment_pending' | 'payment_confirmed';
-  collectedData: {
-    date: string | null;
-    time: string | null;
-    duration: number | null;
-    address: string | null;
-    addressSource?: 'conversation' | 'lead' | null;
-  };
-  missingData: string[];
-  availableSlots: string[];
-  paymentStatus: 'APPROVED' | 'PENDING' | 'none';
-  paymentAmount: number | null;
-  calculatedPrice: number | null;
-  clientInfo: {
-    name: string | null;
-    phone: string;
-    email: string | null;
-    address: string | null;
-    city: string | null;
-    isReturningClient: boolean;
-    userId: string | null;
-  };
-}
+export type BookingContextData = NormalizedBookingContext;
 
 export interface SuggestReplyResult {
   suggestion: string | null;
