@@ -2,11 +2,6 @@ import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { requireCrmAdmin } from '../_shared/supabase.ts';
 import { formatError } from '../_shared/whatsappOutbound.ts';
 import {
-  buildMergedTurns,
-  getConversationHistory,
-  mergedTurnsToTranscript,
-} from '../_shared/conversationHistory.ts';
-import {
   getGeminiApiKey,
   geminiGenerateJson,
   geminiGenerateText,
@@ -15,7 +10,11 @@ import {
   getStaticCleaningWompiReference,
   getStaticCleaningWompiUrl,
 } from '../_shared/wompiLinks.ts';
-import { normalizePhone } from '../_shared/whatsappIdentity.ts';
+import {
+  INBOX_AI_SYSTEM_INSTRUCTION,
+  buildInboxAiContext,
+  groundBookingClientInfo,
+} from '../_shared/inboxAiContext.ts';
 
 const MAX_EXTRA_CONTEXT_CHARS = 2000;
 
@@ -69,35 +68,53 @@ Deno.serve(async (req) => {
     const apiKey = getGeminiApiKey();
     if (!apiKey) return jsonResponse({ error: 'GEMINI_API_KEY no configurada.' }, 412);
 
-    const history = await getConversationHistory(supabase, stableKey, 40, {
-      includeVoiceTranscriptions,
-    });
-    if (!history.length) return jsonResponse({ error: 'No se encontró historial de conversación.' }, 404);
+    let ctx;
+    try {
+      ctx = await buildInboxAiContext(supabase, stableKey, { includeVoiceTranscriptions });
+    } catch (err) {
+      const msg = String((err as Error)?.message ?? err);
+      if (msg.includes('historial') || msg.includes('mensajes del cliente')) {
+        return jsonResponse({ error: msg }, 404);
+      }
+      throw err;
+    }
 
-    const merged = buildMergedTurns(history);
-    if (!merged.length) return jsonResponse({ error: 'No hay mensajes del cliente en el historial.' }, 404);
-
-    const last = merged[merged.length - 1];
-    if (last.role === 'bot' && !forceGenerate) {
+    if (ctx.lastTurnRole === 'bot' && !forceGenerate) {
       return jsonResponse({
         suggestion: null,
         lastMessageIsOutbound: true,
         hint: 'El último mensaje es saliente. Usa forceGenerate para redactar igualmente.',
+        historyMeta: ctx.historyMeta,
+        conversationTags: ctx.conversationTags,
       });
     }
 
-    const phone = normalizePhone(stableKey);
-    const transcript = mergedTurnsToTranscript(merged);
+    console.log(
+      JSON.stringify({
+        scope: 'suggest-whatsapp-agent-reply',
+        event: 'context-built',
+        historyMeta: ctx.historyMeta,
+        conversationTagCount: ctx.conversationTags.length,
+        hasDirectory: Boolean(ctx.directory),
+        appointmentCount: ctx.appointmentCount,
+        listedAppointments: ctx.appointments.length,
+        propertyPattern: ctx.propertySummary.pattern,
+        uniqueProperties: ctx.propertySummary.uniquePropertyCount,
+      }),
+    );
 
     // ─── Booking Context ───
-    const bookingContext = await geminiGenerateJson<ReturnType<typeof emptyBookingContext>>({
+    let bookingContext = await geminiGenerateJson<ReturnType<typeof emptyBookingContext>>({
       apiKey,
       prompt:
         'Analiza esta conversación de WhatsApp de Prosavis (limpieza en Colombia) y responde SOLO JSON con ' +
         'stage, collectedData {date,time,duration,address,addressSource}, missingData[], availableSlots[], ' +
         'paymentStatus, paymentAmount, calculatedPrice, clientInfo {name,phone,email,address,city,isReturningClient,userId}. ' +
-        `Teléfono cliente: ${phone}\n\n${transcript}`,
-    }).catch(() => emptyBookingContext(phone));
+        'Usa el perfil CRM y citas como fuente de verdad cuando existan; no inventes citas. ' +
+        `Teléfono cliente: ${ctx.phone}\n\n${ctx.formattedBlock}`,
+    }).catch(() => emptyBookingContext(ctx.phone));
+
+    bookingContext = groundBookingClientInfo(bookingContext, ctx);
 
     let wompiCheckoutUrl: string | undefined;
     let wompiPaymentReference: string | undefined;
@@ -114,13 +131,11 @@ Deno.serve(async (req) => {
     // ─── Generar sugerencia de respuesta ───
     const suggestion = await geminiGenerateText({
       apiKey,
-      systemInstruction:
-        'Eres un agente de ventas de Prosavis (limpieza residencial en Colombia). Responde en español, cordial y concreto. ' +
-        'No inventes precios distintos a los del contexto. Si hay link de pago, menciónalo al final.',
+      systemInstruction: INBOX_AI_SYSTEM_INSTRUCTION,
       userText:
-        `${extraContext ? `Contexto extra:\n${extraContext}\n\n` : ''}` +
-        `Transcripción:\n${transcript}\n\n` +
-        `Contexto booking:\n${JSON.stringify(bookingContext)}` +
+        `${extraContext ? `Contexto extra del agente:\n${extraContext}\n\n` : ''}` +
+        `${ctx.formattedBlock}\n\n` +
+        `Contexto booking (inferido + CRM):\n${JSON.stringify(bookingContext)}` +
         (wompiCheckoutUrl ? `\nLink Wompi: ${wompiCheckoutUrl}` : ''),
       temperature: 0.4,
     });
@@ -129,6 +144,8 @@ Deno.serve(async (req) => {
       suggestion,
       lastMessageIsOutbound: false,
       bookingContext,
+      historyMeta: ctx.historyMeta,
+      conversationTags: ctx.conversationTags,
       ...(wompiCheckoutUrl ? { wompiCheckoutUrl } : {}),
       ...(wompiPaymentReference ? { wompiPaymentReference } : {}),
       ...(wompiAmountCOP ? { wompiAmountCOP } : {}),

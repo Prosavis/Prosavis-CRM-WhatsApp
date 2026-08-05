@@ -1,15 +1,15 @@
 /**
  * Cliente compartido para Google Gemini API.
  * Único proveedor de IA para el CRM WhatsApp.
- * Usa gemini-3.5-flash como modelo por defecto (GA, estable desde mayo 2026).
+ * Usa gemini-3.6-flash como modelo por defecto.
  *
  * Documentación:
- *   https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash
+ *   https://ai.google.dev/gemini-api/docs/models/gemini-3.6-flash
  *   https://ai.google.dev/gemini-api/docs/structured-output
  */
 
 export const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
-export const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash';
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
 export const GEMINI_TIMEOUT_MS = 75000;
 export const MAX_INLINE_AUDIO_BYTES = 180 * 1024; // 180 KB — inline; mayor usa asset
 

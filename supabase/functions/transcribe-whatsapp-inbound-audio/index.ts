@@ -80,7 +80,7 @@ Deno.serve(async (req) => {
       await supabase.from('whatsapp_message_log').update({
         voice_transcription: transcript,
         voice_transcription_at: new Date().toISOString(),
-        voice_transcription_model: 'gemini-3.5-flash',
+        voice_transcription_model: Deno.env.get('GEMINI_MODEL_TRANSCRIBE')?.trim() || 'gemini-3.6-flash',
         voice_transcription_mime_type: media.mimeType,
         voice_transcription_bytes: media.buffer.byteLength,
         voice_transcription_status: 'completed',
