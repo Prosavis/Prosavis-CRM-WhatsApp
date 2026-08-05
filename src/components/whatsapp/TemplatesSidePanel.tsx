@@ -6,6 +6,8 @@ import {
   type WhatsAppSnippet,
 } from '@/services/whatsappService';
 import type { WhatsAppTemplateSuggestionContext } from '@/utils/whatsappTemplateSuggestions';
+import type { MetaSessionWindow } from '../../../supabase/functions/_shared/metaSessionWindow';
+import { useMetaSessionWindow } from '@/hooks/useMetaSessionWindow';
 
 interface TemplatesSidePanelProps {
   wabaId: string;
@@ -33,20 +35,29 @@ const TemplatesSidePanel: React.FC<TemplatesSidePanelProps> = ({
   lastMessageDirection,
 }) => {
   const [bookingContext, setBookingContext] = useState<BookingContextData | null>(null);
+  const [sessionWindow, setSessionWindow] = useState<MetaSessionWindow | null>(null);
+  const effectiveSessionWindow = useMetaSessionWindow(sessionWindow, lastInboundAt);
 
   useEffect(() => {
     if (!conversationStableKey) {
       setBookingContext(null);
+      setSessionWindow(null);
       return;
     }
 
     let cancelled = false;
     void getWhatsAppBookingContext(conversationStableKey, false)
       .then((result) => {
-        if (!cancelled) setBookingContext(result.bookingContext ?? null);
+        if (!cancelled) {
+          setBookingContext(result.bookingContext ?? null);
+          setSessionWindow(result.sessionWindow);
+        }
       })
       .catch(() => {
-        if (!cancelled) setBookingContext(null);
+        if (!cancelled) {
+          setBookingContext(null);
+          setSessionWindow(null);
+        }
       });
 
     return () => {
@@ -61,8 +72,15 @@ const TemplatesSidePanel: React.FC<TemplatesSidePanelProps> = ({
       conversationDisplayName,
       lastInboundAt,
       lastMessageDirection,
+      sessionWindow: effectiveSessionWindow,
     };
-  }, [bookingContext, conversationDisplayName, lastInboundAt, lastMessageDirection]);
+  }, [
+    bookingContext,
+    conversationDisplayName,
+    lastInboundAt,
+    lastMessageDirection,
+    effectiveSessionWindow,
+  ]);
 
   return (
     <TemplateLibrary

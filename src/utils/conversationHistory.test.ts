@@ -30,6 +30,25 @@ describe('buildMergedTurns', () => {
     expect(merged).toHaveLength(2);
     expect(merged[0].text).toBe('Hola\n¿Precios?');
   });
+
+  it('preserves the newest valid timestamp when a merged turn has an invalid timestamp', () => {
+    const turns: ConversationTurn[] = [
+      {
+        role: 'user',
+        text: 'Primero',
+        createdAt: '2026-08-05T10:00:00.000Z',
+      },
+      {
+        role: 'user',
+        text: 'Segundo',
+        createdAt: 'invalid',
+      },
+    ];
+
+    expect(buildMergedTurns(turns)[0]?.createdAt).toBe(
+      '2026-08-05T10:00:00.000Z',
+    );
+  });
 });
 
 describe('applyTranscriptCharBudget', () => {

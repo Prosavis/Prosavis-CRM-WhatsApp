@@ -284,6 +284,134 @@ describe('groundBookingPayment', () => {
     expect(grounded.paymentStatus).toBe('none');
     expect(grounded.paymentAmount).toBeNull();
   });
+
+  it('does not borrow payment data from a later appointment', () => {
+    const grounded = groundBookingPayment(
+      {
+        paymentStatus: 'APPROVED',
+        paymentAmount: 999_999,
+      },
+      {
+        appointments: [
+          {
+            id: 'closest-without-payment',
+            scheduledDate: '2026-08-10T14:00:00.000Z',
+          },
+          {
+            id: 'later-paid',
+            scheduledDate: '2026-08-20T14:00:00.000Z',
+            paymentStatus: 'PAGO_ACEPTADO',
+            totalAmount: 118_000,
+          },
+        ],
+      },
+      '2026-08-05T12:00:00.000Z',
+    );
+
+    expect(grounded.paymentStatus).toBe('none');
+    expect(grounded.paymentAmount).toBeNull();
+  });
+
+  it('grounds payment from the appointment matching the booking target', () => {
+    const grounded = groundBookingPayment(
+      {
+        collectedData: {
+          date: '2026-08-20',
+          time: '09:00',
+          address: 'Carrera 5 #8-12',
+        },
+        paymentStatus: 'APPROVED',
+        paymentAmount: 999_999,
+      },
+      {
+        appointments: [
+          {
+            id: 'closer-different-booking',
+            scheduledDate: '2026-08-10T14:00:00.000Z',
+            address: 'Calle 10 #20-30',
+            paymentStatus: 'PAGO_ACEPTADO',
+            totalAmount: 88_000,
+          },
+          {
+            id: 'conversation-target',
+            scheduledDate: '2026-08-20T14:00:00.000Z',
+            address: 'Carrera 5 #8-12',
+            paymentStatus: 'PAGO_PENDIENTE',
+            totalAmount: 118_000,
+          },
+        ],
+      },
+      '2026-08-05T12:00:00.000Z',
+    );
+
+    expect(grounded.paymentStatus).toBe('PENDING');
+    expect(grounded.paymentAmount).toBe(118_000);
+  });
+
+  it('clears invented payment when no authoritative appointment matches an explicit target', () => {
+    const grounded = groundBookingPayment(
+      {
+        collectedData: {
+          date: '2026-08-15',
+          time: '09:00',
+          address: 'Calle objetivo #1-2',
+        },
+        paymentStatus: 'APPROVED',
+        paymentAmount: 999_999,
+      },
+      {
+        appointments: [
+          {
+            id: 'different-booking',
+            scheduledDate: '2026-08-10T14:00:00.000Z',
+            address: 'Otra dirección #3-4',
+            paymentStatus: 'PAGO_ACEPTADO',
+            totalAmount: 88_000,
+          },
+        ],
+      },
+      '2026-08-05T12:00:00.000Z',
+    );
+
+    expect(grounded.paymentStatus).toBe('none');
+    expect(grounded.paymentAmount).toBeNull();
+  });
+
+  it('never treats zero or negative appointment totals as authoritative amounts', () => {
+    const zero = groundBookingPayment(
+      { paymentStatus: 'APPROVED', paymentAmount: 999_999 },
+      {
+        appointments: [
+          {
+            id: 'zero',
+            scheduledDate: '2026-08-10T14:00:00.000Z',
+            paymentStatus: 'PAGO_ACEPTADO',
+            totalAmount: 0,
+          },
+        ],
+      },
+      '2026-08-05T12:00:00.000Z',
+    );
+    const negative = groundBookingPayment(
+      { paymentStatus: 'PENDING', paymentAmount: 999_999 },
+      {
+        appointments: [
+          {
+            id: 'negative',
+            scheduledDate: '2026-08-10T14:00:00.000Z',
+            paymentStatus: 'PAGO_PENDIENTE',
+            totalAmount: -88_000,
+          },
+        ],
+      },
+      '2026-08-05T12:00:00.000Z',
+    );
+
+    expect(zero.paymentStatus).toBe('APPROVED');
+    expect(zero.paymentAmount).toBeNull();
+    expect(negative.paymentStatus).toBe('PENDING');
+    expect(negative.paymentAmount).toBeNull();
+  });
 });
 
 describe('mapInboxAiAppointmentPayment', () => {

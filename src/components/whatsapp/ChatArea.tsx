@@ -88,6 +88,7 @@ import { prepareWhatsAppSticker } from '@/utils/prepareWhatsAppSticker';
 import { summarizePeerPresences } from '@/utils/whatsappAdminPresence';
 import type { WhatsAppTagFolder } from '@/types/whatsapp';
 import TagListGrouped from './TagListGrouped';
+import type { MetaSessionWindow } from '../../../supabase/functions/_shared/metaSessionWindow';
 
 interface ChatAreaProps {
   conversation: WhatsAppConversation;
@@ -214,6 +215,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [aiContextDialogOpen, setAiContextDialogOpen] = useState(false);
   const [aiExtraContext, setAiExtraContext] = useState('');
   const [bookingContext, setBookingContext] = useState<BookingContextData | null>(null);
+  const [sessionWindow, setSessionWindow] = useState<MetaSessionWindow | null>(null);
   const [bookingDrawerOpen, setBookingDrawerOpen] = useState(false);
   const [bookingContextLoading, setBookingContextLoading] = useState(false);
   const [wompiCheckoutUrl, setWompiCheckoutUrl] = useState<string | null>(null);
@@ -281,6 +283,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     setSuggestionDraft('');
     setSuggestionHint(null);
     setBookingContext(null);
+    setSessionWindow(null);
     setBookingDrawerOpen(false);
     setWompiCheckoutUrl(null);
     setWompiPaymentReference(null);
@@ -565,6 +568,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         includeVoiceTranscriptions,
         extraContext,
       );
+      setSessionWindow(result.sessionWindow);
       if (result.suggestion) {
         setSuggestionDraft(result.suggestion);
         setSuggestionHint(null);
@@ -655,6 +659,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     setBookingContextLoading(true);
     try {
       const result = await getWhatsAppBookingContext(stableKey, includeVoiceTranscriptions);
+      setSessionWindow(result.sessionWindow);
       if (result.bookingContext) {
         setBookingContext(result.bookingContext);
         if (result.wompiCheckoutUrl) {
@@ -1317,6 +1322,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           conversationDisplayName={displayName}
           lastInboundAt={lastInboundAt}
           lastMessageDirection={conversation.lastMessageDirection}
+          sessionWindow={sessionWindow}
         />
       )}
 

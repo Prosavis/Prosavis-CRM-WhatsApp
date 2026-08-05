@@ -7,14 +7,19 @@ import {
   countSlotsForTemplate,
   getExampleValues,
 } from './whatsappTemplateHelpers';
-
-const META_SESSION_WINDOW_MS = 24 * 60 * 60 * 1000;
+import {
+  buildMetaSessionWindow,
+  getMetaSessionWindow,
+  resolveMetaSessionWindow,
+  type MetaSessionWindow,
+} from '../../supabase/functions/_shared/metaSessionWindow';
 
 export interface WhatsAppTemplateSuggestionContext {
   bookingContext: BookingContextData;
   conversationDisplayName?: string;
   lastInboundAt: Date | null;
   lastMessageDirection?: 'inbound' | 'outbound';
+  sessionWindow?: MetaSessionWindow | null;
 }
 
 export interface WhatsAppTemplateSuggestion {
@@ -48,16 +53,14 @@ const COLD_OUTREACH_PRIORITY = [
 ];
 
 export function getLastInboundAt(messages: WhatsAppMessage[]): Date | null {
-  const inbound = [...messages]
-    .reverse()
-    .find((message) => message.direction === 'inbound' && message.createdAt);
-  return inbound?.createdAt ?? null;
+  const sessionWindow = buildMetaSessionWindow(messages);
+  return sessionWindow.lastInboundAt
+    ? new Date(sessionWindow.lastInboundAt)
+    : null;
 }
 
 export function isWithinMetaSessionWindow(lastInboundAt: Date | null, now = new Date()): boolean {
-  if (!lastInboundAt) return false;
-  const age = now.getTime() - lastInboundAt.getTime();
-  return age >= 0 && age <= META_SESSION_WINDOW_MS;
+  return getMetaSessionWindow(lastInboundAt, now).status === 'open';
 }
 
 export function filterApprovedSpanishTemplates(
@@ -75,13 +78,19 @@ export function selectWhatsAppTemplateSuggestion(
   templates: WhatsAppTemplateSummary[],
   context: WhatsAppTemplateSuggestionContext,
 ): WhatsAppTemplateSuggestion | null {
-  const sessionExpired = !isWithinMetaSessionWindow(context.lastInboundAt);
+  const sessionWindow = resolveMetaSessionWindow({
+    snapshot: context.sessionWindow,
+    lastInboundAt: context.lastInboundAt,
+  });
+  const sessionExpired = sessionWindow.requiresTemplate;
   if (!sessionExpired) return null;
 
   const availableTemplates = filterApprovedSpanishTemplates(templates);
   const byName = new Map(availableTemplates.map((template) => [template.name, template]));
   const isReturningClient = context.bookingContext.clientInfo.isReturningClient;
-  const hasUsefulThread = Boolean(context.lastInboundAt || context.lastMessageDirection);
+  const hasUsefulThread = Boolean(
+    sessionWindow.lastInboundAt || context.lastMessageDirection,
+  );
 
   const priorities = isReturningClient
     ? RETURNING_CLIENT_PRIORITY

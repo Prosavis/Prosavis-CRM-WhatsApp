@@ -83,6 +83,7 @@ Deno.serve(async (req) => {
         'stage, collectedData {date,time,duration,address,addressSource}, missingData[], availableSlots[], ' +
         'paymentStatus, paymentAmount, wantsKit, clientInfo {name,phone,email,address,city,isReturningClient,userId}. ' +
         'Devuelve duration en minutos usando solo una duración oficial del catálogo y wantsKit como booleano. ' +
+        'No inventes availableSlots: déjalo vacío salvo que el contexto incluya disponibilidad confirmada. ' +
         'No devuelvas precios ni links de pago; esos valores se resuelven en código. ' +
         'Usa el perfil CRM y citas como fuente de verdad cuando existan; no inventes citas. ' +
         'SEGURIDAD: si el cliente dice que a la hora H se va / no habrá nadie, pon collectedData.time una hora ANTES ' +

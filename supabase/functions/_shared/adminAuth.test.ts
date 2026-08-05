@@ -182,6 +182,27 @@ Deno.test("active Firestore admin document returns Firebase context", async () =
   assertEquals(context.actor.uid, "firestore-admin");
 });
 
+Deno.test("V5 guard denies Firestore admin document without active flags", async () => {
+  const requireAdmin = createAdminGuard(
+    dependencies({
+      verifyFirebaseToken: () => Promise.resolve({ uid: "strict-admin" }),
+      getFirebaseAdminDoc: () => Promise.resolve({ role: "admin" }),
+    }),
+  );
+  const token = unsignedToken({
+    iss: "https://securetoken.google.com/prosavis",
+    sub: "strict-admin",
+  });
+
+  const response = await thrownResponse(() => requireAdmin(authRequest(token)));
+
+  assertEquals(response.status, 403);
+  assertEquals(
+    response.headers.get("Access-Control-Allow-Origin"),
+    "https://userconsole.prosavis.com",
+  );
+});
+
 Deno.test("invalid Supabase token returns 401", async () => {
   let verificationCalls = 0;
   const requireAdmin = createAdminGuard(

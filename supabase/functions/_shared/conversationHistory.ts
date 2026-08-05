@@ -105,12 +105,18 @@ export function buildMergedTurns(turns: ConversationTurn[]): ConversationTurn[] 
     const last = merged[merged.length - 1];
     if (last && last.role === t.role) {
       last.text = `${last.text}\n${text}`;
-      if (t.createdAt) last.createdAt = t.createdAt;
+      if (t.createdAt && Number.isFinite(new Date(t.createdAt).getTime())) {
+        last.createdAt = t.createdAt;
+      }
     } else {
+      const createdAt =
+        t.createdAt && Number.isFinite(new Date(t.createdAt).getTime())
+          ? t.createdAt
+          : null;
       merged.push({
         role: t.role,
         text,
-        ...(t.createdAt ? { createdAt: t.createdAt } : {}),
+        ...(createdAt ? { createdAt } : {}),
       });
     }
   }

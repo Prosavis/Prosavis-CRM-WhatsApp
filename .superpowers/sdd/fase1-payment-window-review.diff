@@ -1,0 +1,2068 @@
+﻿commit 8f09c6ca5ee68341904a3215cf5002e7b4645f52
+Author:     Nicol├ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+AuthorDate: Wed Aug 5 17:07:18 2026 -0500
+Commit:     Nicol├ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+CommitDate: Wed Aug 5 17:07:18 2026 -0500
+
+    Ground booking payments and Meta session window
+    
+    Add deterministic Meta session window and payment grounding across Inbox AI. Key changes: new shared metaSessionWindow module and tests; groundBookingPayment and mapInboxAiAppointmentPayment in inboxAiContextFormat; include sessionWindow in InboxAiContext and Edge responses; strengthen INBOX_AI_SYSTEM_INSTRUCTION to require grounded prices/payments and propose templates when closed; add pricingCatalog module and tests; preserve completeMerged transcript for window calculation; edge functions now ground payments before pricing resolution. Improves safety by preventing model-invented payments/prices and makes WhatsApp 24h window explicit.
+
+diff --git a/src/utils/conversationHistory.test.ts b/src/utils/conversationHistory.test.ts
+index 4b63f42..9b17f8b 100644
+--- a/src/utils/conversationHistory.test.ts
++++ b/src/utils/conversationHistory.test.ts
+@@ -70,20 +70,49 @@ describe('buildTranscriptWithBudget', () => {
+     ];
+     const { transcript, merged, meta } = buildTranscriptWithBudget(
+       turns,
+       { loaded: 3, truncated: false },
+       80,
+     );
+     expect(transcript).toContain('nuevo');
+     expect(merged[merged.length - 1]?.text).toContain('nuevo');
+     expect(meta.truncated).toBe(true);
+   });
++
++  it('retains complete merged turns separately before character truncation', () => {
++    const turns: ConversationTurn[] = [
++      {
++        role: 'user',
++        text: 'mensaje inbound anterior',
++        createdAt: '2026-08-05T10:00:00.000Z',
++      },
++      {
++        role: 'bot',
++        text: 'respuesta saliente muy larga '.repeat(10),
++        createdAt: '2026-08-05T11:00:00.000Z',
++      },
++    ];
++
++    const result = buildTranscriptWithBudget(
++      turns,
++      { loaded: 2, truncated: false },
++      60,
++    );
++
++    expect(result.merged).toHaveLength(1);
++    expect(result.merged[0]?.role).toBe('bot');
++    expect(result.completeMerged).toHaveLength(2);
++    expect(result.completeMerged[0]).toMatchObject({
++      role: 'user',
++      createdAt: '2026-08-05T10:00:00.000Z',
++    });
++  });
+ });
+ 
+ describe('mergedTurnsToTranscript', () => {
+   it('labels Cliente/Agente', () => {
+     const text = mergedTurnsToTranscript([
+       { role: 'user', text: 'hola' },
+       { role: 'bot', text: 'buenas' },
+     ]);
+     expect(text).toBe('Cliente: hola\nAgente: buenas');
+   });
+diff --git a/src/utils/inboxAiContextFormat.test.ts b/src/utils/inboxAiContextFormat.test.ts
+index d920cae..0045c44 100644
+--- a/src/utils/inboxAiContextFormat.test.ts
++++ b/src/utils/inboxAiContextFormat.test.ts
+@@ -1,17 +1,19 @@
+ import { describe, expect, it } from 'vitest';
+ import {
+   INBOX_AI_SYSTEM_INSTRUCTION,
+   buildPropertyLocationSummary,
+   formatBogotaDateTime,
+   formatInboxAiContextBlock,
+   groundBookingClientInfo,
++  groundBookingPayment,
++  mapInboxAiAppointmentPayment,
+   normalizeAddressKey,
+ } from '../../supabase/functions/_shared/inboxAiContextFormat';
+ 
+ describe('normalizeAddressKey / buildPropertyLocationSummary', () => {
+   it('treats minor address variants as the same property', () => {
+     const a = normalizeAddressKey('Calle 1 #2-3 Apto 401');
+     const b = normalizeAddressKey('calle 1 2 3, apartamento 401');
+     expect(a).toBeTruthy();
+     expect(a).toBe(b);
+   });
+@@ -73,90 +75,124 @@ describe('formatInboxAiContextBlock', () => {
+         oldestAt: '2026-08-01T10:00:00Z',
+         newestAt: '2026-08-01T11:00:00Z',
+       },
+       conversationTags: ['Bogot├í', 'Favoritos'],
+       directory: {
+         fullName: 'Ana P├®rez',
+         city: 'Bogot├í',
+         tags: ['Cliente'],
+         appUserId: 'uid-1',
+         notesSummary: 'Prefiere ma├▒ana',
++        paymentStatus: 'paid',
+         isReturningClient: true,
+         preferredServiceAddress: 'Calle 10 #20-30',
+       },
+       appointments: [
+         {
+           id: 'a1',
+           scheduledDate: '2026-08-10T14:00:00.000Z',
+           status: 'CONFIRMED',
+           serviceName: 'Limpieza',
+           address: 'Calle 10 #20-30',
+           addressReference: 'Apto 201',
+           duration: 4,
+           clientName: 'Ana P├®rez',
+           providerName: 'Laura G├│mez',
++          paymentStatus: 'PAGO_ACEPTADO',
++          totalAmount: 88_000,
++          paymentMethod: 'WOMPI',
++          wompiReference: 'APPT-123',
+         },
+         {
+           id: 'a0',
+           scheduledDate: '2026-07-01T14:00:00.000Z',
+           status: 'COMPLETED',
+           serviceName: 'Limpieza',
+           address: 'Calle 10 #20-30',
+           addressReference: 'Apto 201',
+           duration: 3,
+           clientName: 'Ana P├®rez',
+           providerName: 'Mar├¡a L├│pez',
+         },
+       ],
+       appointmentCount: 7,
++      sessionWindow: {
++        status: 'open',
++        lastInboundAt: '2026-08-05T11:00:00.000Z',
++        expiresAt: '2026-08-06T11:00:00.000Z',
++        requiresTemplate: false,
++      },
+       nowIso: '2026-08-05T12:00:00.000Z',
+     });
+ 
+     expect(block).toContain('=== Momento actual ===');
+     expect(block).toContain(formatBogotaDateTime('2026-08-05T12:00:00.000Z'));
+     expect(block).toContain('Total apoyos/citas encontrados (ventana CRM): 7');
+     expect(block).toContain('=== Propiedades / ubicaciones de apoyos ===');
+     expect(block).toContain('misma propiedad');
+     expect(block).toContain('Direcci├│n preferida (directorio): Calle 10 #20-30');
++    expect(block).toContain('Estado de pago (directorio): paid');
++    expect(block).toContain('=== Canal / ventana WhatsApp ===');
++    expect(block).toContain('Estado: open');
++    expect(block).toContain('Requiere plantilla: no');
+     expect(block).toContain('direcci├│n: Calle 10 #20-30 (Apto 201)');
+     expect(block).toContain('auxiliar: Laura G├│mez');
++    expect(block).toContain('pago: PAGO_ACEPTADO');
++    expect(block).toContain('valor: COP 88.000');
++    expect(block).toContain('m├®todo: WOMPI');
++    expect(block).toContain('referencia Wompi: APPT-123');
+     expect(block).toContain('Cliente: Hola');
+     expect(block).toContain('=== Cat├ílogo oficial de precios (fuente de verdad) ===');
+     expect(block).toContain('120 minutos ÔåÆ COP 58.000');
+     expect(block).toContain('Kit profesional ÔåÆ COP 30.000 adicionales');
+   });
+ 
+   it('degrades gracefully without directory or appointments', () => {
+     const block = formatInboxAiContextBlock({
+       phone: '573009998877',
+       transcript: 'Cliente: info',
+       historyMeta: { loaded: 1, truncated: true },
+       conversationTags: [],
+       directory: null,
+       appointments: [],
+       appointmentCount: 0,
++      sessionWindow: {
++        status: 'unknown',
++        lastInboundAt: null,
++        expiresAt: null,
++        requiresTemplate: true,
++      },
+       nowIso: '2026-08-05T12:00:00.000Z',
+     });
+     expect(block).toContain('Sin entrada en crm_directory');
+     expect(block).toContain('Sin citas/apoyos encontrados');
+     expect(block).toContain('Total apoyos/citas encontrados (ventana CRM): 0');
+     expect(block).toContain('=== Propiedades / ubicaciones de apoyos ===');
++    expect(block).toContain('=== Canal / ventana WhatsApp ===');
++    expect(block).toContain('Estado: unknown');
+     expect(block).toContain('Ventana truncada');
+   });
+ });
+ 
+ describe('INBOX_AI_SYSTEM_INSTRUCTION', () => {
+   it('requires early arrival when house will be empty', () => {
+     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/SEGURIDAD Y ACCESO/);
+     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/1 hora antes/);
+     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/NUNCA propongas llegar exactamente/);
+   });
++
++  it('requires grounded prices, payments, availability and Meta templates', () => {
++    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/precios.+cat├ílogo oficial/i);
++    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/pago.+datos autoritativos/i);
++    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/nunca inventes.+horarios disponibles/i);
++    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/ventana.+cerrada.+plantilla/i);
++  });
+ });
+ 
+ describe('groundBookingClientInfo', () => {
+   it('grounds address from preferred / single property', () => {
+     const grounded = groundBookingClientInfo(
+       {
+         stage: 'collecting',
+         clientInfo: {
+           name: 'Inventado',
+           phone: '000',
+@@ -190,10 +226,80 @@ describe('groundBookingClientInfo', () => {
+           ],
+           appointmentsWithoutAddress: 0,
+         },
+       },
+     );
+ 
+     expect(grounded.clientInfo?.address).toBe('Calle servicio 9');
+     expect(grounded.clientInfo?.name).toBe('Real Name');
+   });
+ });
++
++describe('groundBookingPayment', () => {
++  it('overwrites invented payment values from the closest relevant upcoming appointment', () => {
++    const grounded = groundBookingPayment(
++      {
++        paymentStatus: 'PENDING',
++        paymentAmount: 999_999,
++      },
++      {
++        appointments: [
++          {
++            id: 'later',
++            scheduledDate: '2026-08-20T14:00:00.000Z',
++            paymentStatus: 'PAGO_PENDIENTE',
++            totalAmount: 118_000,
++          },
++          {
++            id: 'closest',
++            scheduledDate: '2026-08-10T14:00:00.000Z',
++            paymentStatus: 'PAGO_ACEPTADO',
++            totalAmount: 88_000,
++          },
++        ],
++      },
++      '2026-08-05T12:00:00.000Z',
++    );
++
++    expect(grounded.paymentStatus).toBe('APPROVED');
++    expect(grounded.paymentAmount).toBe(88_000);
++  });
++
++  it('clears invented paid claims when no upcoming appointment has authoritative payment data', () => {
++    const grounded = groundBookingPayment(
++      {
++        paymentStatus: 'APPROVED',
++        paymentAmount: 999_999,
++      },
++      {
++        appointments: [
++          {
++            id: 'without-payment',
++            scheduledDate: '2026-08-10T14:00:00.000Z',
++          },
++        ],
++      },
++      '2026-08-05T12:00:00.000Z',
++    );
++
++    expect(grounded.paymentStatus).toBe('none');
++    expect(grounded.paymentAmount).toBeNull();
++  });
++});
++
++describe('mapInboxAiAppointmentPayment', () => {
++  it('maps Firestore payment fields without trusting incompatible values', () => {
++    expect(
++      mapInboxAiAppointmentPayment({
++        paymentStatus: 'PAGO_ACEPTADO',
++        totalAmount: '88000',
++        paymentMethod: 'WOMPI',
++        wompiReference: 'APPT-123',
++      }),
++    ).toEqual({
++      paymentStatus: 'PAGO_ACEPTADO',
++      totalAmount: 88_000,
++      paymentMethod: 'WOMPI',
++      wompiReference: 'APPT-123',
++    });
++  });
++});
+diff --git a/src/utils/metaSessionWindow.test.ts b/src/utils/metaSessionWindow.test.ts
+new file mode 100644
+index 0000000..b1fc17f
+--- /dev/null
++++ b/src/utils/metaSessionWindow.test.ts
+@@ -0,0 +1,83 @@
++import { describe, expect, it } from 'vitest';
++import {
++  buildMetaSessionWindow,
++  getMetaSessionWindow,
++} from '../../supabase/functions/_shared/metaSessionWindow';
++import { isWithinMetaSessionWindow } from './whatsappTemplateSuggestions';
++
++describe('getMetaSessionWindow', () => {
++  it('closes deterministically at the exact 24-hour boundary', () => {
++    const lastInboundAt = '2026-08-04T12:00:00.000Z';
++
++    expect(
++      getMetaSessionWindow(lastInboundAt, '2026-08-05T11:59:59.999Z').status,
++    ).toBe('open');
++    expect(
++      getMetaSessionWindow(lastInboundAt, '2026-08-05T12:00:00.000Z'),
++    ).toEqual({
++      status: 'closed',
++      lastInboundAt,
++      expiresAt: '2026-08-05T12:00:00.000Z',
++      requiresTemplate: true,
++    });
++  });
++
++  it('keeps the frontend compatibility utility on the shared boundary contract', () => {
++    expect(
++      isWithinMetaSessionWindow(
++        new Date('2026-08-04T12:00:00.000Z'),
++        new Date('2026-08-05T12:00:00.000Z'),
++      ),
++    ).toBe(false);
++  });
++});
++
++describe('buildMetaSessionWindow', () => {
++  it('uses only the newest valid inbound message even when messages are unsorted', () => {
++    const window = buildMetaSessionWindow(
++      [
++        {
++          direction: 'outbound',
++          createdAt: '2026-08-05T11:55:00.000Z',
++        },
++        {
++          direction: 'inbound',
++          createdAt: '2026-08-05T10:00:00.000Z',
++        },
++        {
++          direction: 'inbound',
++          createdAt: '2026-08-05T11:00:00.000Z',
++        },
++        {
++          direction: 'inbound',
++          createdAt: 'invalid',
++        },
++      ],
++      '2026-08-05T12:00:00.000Z',
++    );
++
++    expect(window).toEqual({
++      status: 'open',
++      lastInboundAt: '2026-08-05T11:00:00.000Z',
++      expiresAt: '2026-08-06T11:00:00.000Z',
++      requiresTemplate: false,
++    });
++  });
++
++  it('returns unknown when no valid inbound timestamp exists', () => {
++    expect(
++      buildMetaSessionWindow(
++        [
++          { direction: 'outbound', createdAt: '2026-08-05T11:00:00.000Z' },
++          { direction: 'inbound', createdAt: 'invalid' },
++        ],
++        '2026-08-05T12:00:00.000Z',
++      ),
++    ).toEqual({
++      status: 'unknown',
++      lastInboundAt: null,
++      expiresAt: null,
++      requiresTemplate: true,
++    });
++  });
++});
+diff --git a/supabase/functions/_shared/conversationHistory.ts b/supabase/functions/_shared/conversationHistory.ts
+index 8d02627..4776c25 100644
+--- a/supabase/functions/_shared/conversationHistory.ts
++++ b/supabase/functions/_shared/conversationHistory.ts
+@@ -187,26 +187,32 @@ export function applyTranscriptCharBudget(
+   }
+ 
+   return { turns: merged.slice(start), truncated, transcript };
+ }
+ 
+ /** Pipeline completo: merge + presupuesto de caracteres + meta. */
+ export function buildTranscriptWithBudget(
+   historyTurns: ConversationTurn[],
+   historyMeta: ConversationHistoryMeta,
+   maxChars = DEFAULT_TRANSCRIPT_CHAR_BUDGET,
+-): { transcript: string; meta: ConversationHistoryMeta; merged: ConversationTurn[] } {
+-  const merged = buildMergedTurns(historyTurns);
+-  const budgeted = applyTranscriptCharBudget(merged, maxChars);
++): {
++  transcript: string;
++  meta: ConversationHistoryMeta;
++  merged: ConversationTurn[];
++  completeMerged: ConversationTurn[];
++} {
++  const completeMerged = buildMergedTurns(historyTurns);
++  const budgeted = applyTranscriptCharBudget(completeMerged, maxChars);
+   return {
+     transcript: budgeted.transcript,
+     merged: budgeted.turns,
++    completeMerged,
+     meta: {
+       ...historyMeta,
+       loaded: budgeted.turns.length,
+       truncated: historyMeta.truncated || budgeted.truncated,
+       oldestAt: budgeted.turns[0]?.createdAt ?? historyMeta.oldestAt,
+       newestAt:
+         budgeted.turns[budgeted.turns.length - 1]?.createdAt ?? historyMeta.newestAt,
+     },
+   };
+ }
+diff --git a/supabase/functions/_shared/inboxAiContext.ts b/supabase/functions/_shared/inboxAiContext.ts
+index 3141f2b..6840434 100644
+--- a/supabase/functions/_shared/inboxAiContext.ts
++++ b/supabase/functions/_shared/inboxAiContext.ts
+@@ -17,51 +17,60 @@ import {
+   normalizeDirectoryPhoneE164,
+ } from './directoryPhone.ts';
+ import { runFirestoreQuery } from './firebaseAdminRest.ts';
+ import { scheduledDateToIso } from './clientSegments.ts';
+ import { normalizePhone } from './whatsappIdentity.ts';
+ import {
+   INBOX_AI_SYSTEM_INSTRUCTION,
+   buildPropertyLocationSummary,
+   formatInboxAiContextBlock,
+   groundBookingClientInfo,
++  groundBookingPayment,
++  mapInboxAiAppointmentPayment,
+   type InboxAiAppointment,
+   type InboxAiDirectory,
+   type InboxAiPropertySummary,
+ } from './inboxAiContextFormat.ts';
++import {
++  buildMetaSessionWindow,
++  type MetaSessionWindow,
++} from './metaSessionWindow.ts';
+ 
+ export {
+   INBOX_AI_SYSTEM_INSTRUCTION,
+   buildPropertyLocationSummary,
+   formatInboxAiContextBlock,
+   groundBookingClientInfo,
++  groundBookingPayment,
+ };
+ export type { InboxAiAppointment, InboxAiDirectory, InboxAiPropertySummary };
++export type { MetaSessionWindow };
+ 
+ type SupabaseClient = any;
+ 
+ const NOTES_SUMMARY_MAX = 400;
+ const UPCOMING_APPTS = 5;
+ const PAST_APPTS = 5;
+ const APPT_QUERY_LIMIT = 40;
+ const APPT_LOOKBACK_MONTHS = 18;
+ 
+ export interface InboxAiContext {
+   phone: string;
+   transcript: string;
+   historyMeta: ConversationHistoryMeta;
+   conversationTags: string[];
+   directory: InboxAiDirectory | null;
+   appointments: InboxAiAppointment[];
+   /** Total de citas en lookback (antes del slice de listado). */
+   appointmentCount: number;
+   propertySummary: InboxAiPropertySummary;
++  sessionWindow: MetaSessionWindow;
+   formattedBlock: string;
+   /** Rol del ├║ltimo turn tras merge (el presupuesto recorta desde lo antiguo). */
+   lastTurnRole: 'user' | 'bot' | null;
+ }
+ 
+ function asTrimmedString(value: unknown): string | null {
+   if (typeof value !== 'string') return null;
+   const t = value.trim();
+   return t.length > 0 ? t : null;
+ }
+@@ -146,21 +155,21 @@ async function loadDirectoryByPhone(
+   supabase: SupabaseClient,
+   phone: string,
+ ): Promise<InboxAiDirectory | null> {
+   const e164 = normalizeDirectoryPhoneE164(phone) ?? phone;
+   const variants = directoryPhoneLookupVariants(e164);
+   const lookupPhones = variants.length > 0 ? variants : [phone];
+ 
+   const { data: rows, error } = await supabase
+     .from('crm_directory')
+     .select(
+-      'id, full_name, display_name, phone, email, address, preferred_service_address_line, notes, internal_notes, tags, app_user_id, metadata',
++      'id, full_name, display_name, phone, email, address, preferred_service_address_line, notes, internal_notes, tags, app_user_id, payment_status, metadata',
+     )
+     .in('phone', lookupPhones)
+     .order('updated_at', { ascending: false })
+     .limit(5);
+ 
+   if (error) throw error;
+ 
+   const targetKey = directoryPhoneKey(phone);
+   const row =
+     (rows ?? []).find((r: Record<string, unknown>) => {
+@@ -183,20 +192,21 @@ async function loadDirectoryByPhone(
+   return {
+     id: String(row.id),
+     fullName: asTrimmedString(row.display_name) ?? asTrimmedString(row.full_name),
+     email: asTrimmedString(row.email),
+     address: asTrimmedString(row.address),
+     preferredServiceAddress: asTrimmedString(row.preferred_service_address_line),
+     city: cityFromDirectoryRow(row as Record<string, unknown>),
+     tags,
+     appUserId,
+     notesSummary: notes,
++    paymentStatus: asTrimmedString(row.payment_status),
+     isReturningClient: Boolean(appUserId),
+   };
+ }
+ 
+ function resolveProviderName(data: Record<string, unknown>): string | null {
+   const rawNames = Array.isArray(data.assignedTeamMemberNames)
+     ? data.assignedTeamMemberNames
+     : [];
+   const assignedNames = rawNames
+     .map((name) => (typeof name === 'string' ? name.trim() : ''))
+@@ -217,20 +227,21 @@ function mapAppointmentDoc(doc: { id: string; data: Record<string, unknown> }):
+     status: asTrimmedString(doc.data.status),
+     serviceName:
+       asTrimmedString(doc.data.serviceTitle) ??
+       asTrimmedString(doc.data.serviceName) ??
+       asTrimmedString(doc.data.serviceId),
+     address: resolveAddressLine(doc.data),
+     addressReference: resolveAddressReference(doc.data),
+     duration: asFiniteNumber(doc.data.duration),
+     clientName: asTrimmedString(doc.data.clientName),
+     providerName: resolveProviderName(doc.data),
++    ...mapInboxAiAppointmentPayment(doc.data),
+   };
+ }
+ 
+ async function queryAppointmentsByField(
+   fieldPath: string,
+   stringValue: string,
+ ): Promise<InboxAiAppointment[]> {
+   const lookback = new Date();
+   lookback.setMonth(lookback.getMonth() - APPT_LOOKBACK_MONTHS);
+   const lookbackIso = lookback.toISOString();
+@@ -361,29 +372,31 @@ export async function buildInboxAiContext(
+   const historyLimit = options?.historyLimit ?? DEFAULT_HISTORY_LIMIT;
+   const charBudget = options?.transcriptCharBudget ?? DEFAULT_TRANSCRIPT_CHAR_BUDGET;
+ 
+   const history = await getConversationHistoryWithMeta(supabase, stableKey, historyLimit, {
+     includeVoiceTranscriptions: options?.includeVoiceTranscriptions === true,
+   });
+   if (!history.turns.length) {
+     throw new Error('No se encontr├│ historial de conversaci├│n.');
+   }
+ 
+-  const { transcript, meta: historyMeta, merged } = buildTranscriptWithBudget(
++  const { transcript, meta: historyMeta, merged, completeMerged } = buildTranscriptWithBudget(
+     history.turns,
+     history.meta,
+     charBudget,
+   );
+   if (!transcript.trim() || !merged.length) {
+     throw new Error('No hay mensajes del cliente en el historial.');
+   }
+   const lastTurnRole = merged[merged.length - 1]?.role ?? null;
++  const nowIso = new Date().toISOString();
++  const sessionWindow = buildMetaSessionWindow(completeMerged, nowIso);
+ 
+   let conversationTags: string[] = [];
+   try {
+     conversationTags = await loadConversationTags(supabase, stableKey);
+   } catch (err) {
+     console.warn(
+       JSON.stringify({
+         scope: 'inbox-ai-context',
+         event: 'conversation-tags-failed',
+         error: String((err as Error)?.message ?? err),
+@@ -432,37 +445,38 @@ export async function buildInboxAiContext(
+   if (directory && appointmentCount > 0) {
+     directory = { ...directory, isReturningClient: true };
+   }
+ 
+   const propertySummary = buildPropertyLocationSummary({
+     appointments: allAppointments,
+     preferredDirectoryAddress:
+       directory?.preferredServiceAddress ?? directory?.address ?? null,
+   });
+ 
+-  const nowIso = new Date().toISOString();
+   const formattedBlock = formatInboxAiContextBlock({
+     phone,
+     transcript,
+     historyMeta,
+     conversationTags,
+     directory,
+     appointments,
+     appointmentCount,
+     allAppointmentsForProperties: allAppointments,
+     propertySummary,
++    sessionWindow,
+     nowIso,
+   });
+ 
+   return {
+     phone,
+     transcript,
+     historyMeta,
+     conversationTags,
+     directory,
+     appointments,
+     appointmentCount,
+     propertySummary,
++    sessionWindow,
+     formattedBlock,
+     lastTurnRole,
+   };
+ }
+diff --git a/supabase/functions/_shared/inboxAiContextFormat.ts b/supabase/functions/_shared/inboxAiContextFormat.ts
+index d09e282..6562223 100644
+--- a/supabase/functions/_shared/inboxAiContextFormat.ts
++++ b/supabase/functions/_shared/inboxAiContextFormat.ts
+@@ -1,49 +1,81 @@
+ /**
+  * Formato puro del bloque de contexto AI del inbox (sin Deno/Firebase).
+  * Testeable con Vitest.
+  */
+ 
+ import type { ConversationHistoryMeta } from './conversationHistory.ts';
++import type { MetaSessionWindow } from './metaSessionWindow.ts';
+ import { formatPricingCatalogBlock } from './pricingCatalog.ts';
+ 
+ const UPCOMING_APPTS = 5;
+ const PAST_APPTS = 5;
+ const BOGOTA_TZ = 'America/Bogota';
+ const MAX_PROPERTIES_IN_SUMMARY = 8;
+ 
+ export interface InboxAiDirectory {
+   id?: string;
+   fullName?: string | null;
+   email?: string | null;
+   address?: string | null;
+   /** Direcci├│n preferida de servicio en directorio (si existe). */
+   preferredServiceAddress?: string | null;
+   city?: string | null;
+   tags?: string[];
+   appUserId?: string | null;
+   notesSummary?: string | null;
++  paymentStatus?: string | null;
+   isReturningClient: boolean;
+ }
+ 
+ export interface InboxAiAppointment {
+   id: string;
+   scheduledDate: string;
+   status?: string | null;
+   serviceName?: string | null;
+   address?: string | null;
+   /** Referencia de ubicaci├│n (apto, torre, etc.). */
+   addressReference?: string | null;
+   duration?: number | null;
+   clientName?: string | null;
+   /** Auxiliar(es) / profesional asignado. */
+   providerName?: string | null;
++  paymentStatus?: string | null;
++  totalAmount?: number | null;
++  paymentMethod?: string | null;
++  wompiReference?: string | null;
++}
++
++export function mapInboxAiAppointmentPayment(
++  data: Record<string, unknown>,
++): Pick<
++  InboxAiAppointment,
++  'paymentStatus' | 'totalAmount' | 'paymentMethod' | 'wompiReference'
++> {
++  const text = (value: unknown): string | null => {
++    if (typeof value !== 'string') return null;
++    const trimmed = value.trim();
++    return trimmed || null;
++  };
++  const number = (value: unknown): number | null => {
++    if (typeof value === 'number' && Number.isFinite(value)) return value;
++    if (typeof value !== 'string' || !value.trim()) return null;
++    const parsed = Number(value);
++    return Number.isFinite(parsed) ? parsed : null;
++  };
++
++  return {
++    paymentStatus: text(data.paymentStatus),
++    totalAmount: number(data.totalAmount),
++    paymentMethod: text(data.paymentMethod),
++    wompiReference: text(data.wompiReference),
++  };
+ }
+ 
+ export type PropertyPattern = 'none' | 'single' | 'multiple' | 'unknown';
+ 
+ export interface InboxAiPropertyEntry {
+   address: string;
+   reference?: string | null;
+   appointmentCount: number;
+   firstDate?: string;
+   lastDate?: string;
+@@ -62,20 +94,21 @@ export interface InboxAiPropertySummary {
+ export interface InboxAiContextSlice {
+   phone: string;
+   transcript: string;
+   historyMeta: ConversationHistoryMeta;
+   conversationTags: string[];
+   directory: InboxAiDirectory | null;
+   appointments: InboxAiAppointment[];
+   /** Total de citas encontradas en la ventana de lookback (no solo las listadas). */
+   appointmentCount?: number;
+   propertySummary?: InboxAiPropertySummary | null;
++  sessionWindow: MetaSessionWindow;
+ }
+ 
+ /** Fecha/hora legible en zona Colombia (America/Bogota). */
+ export function formatBogotaDateTime(iso: string): string {
+   const d = new Date(iso);
+   if (Number.isNaN(d.getTime())) return iso;
+   try {
+     return new Intl.DateTimeFormat('es-CO', {
+       timeZone: BOGOTA_TZ,
+       year: 'numeric',
+@@ -224,20 +257,26 @@ function formatAppointmentLine(a: InboxAiAppointment): string {
+   const place = displayAddress(a) ?? 'sin direcci├│n';
+   const parts = [
+     when,
+     a.status ?? 'ÔÇö',
+     a.serviceName ?? 'servicio',
+     `cliente: ${a.clientName ?? 'ÔÇö'}`,
+     `auxiliar: ${a.providerName ?? 'sin asignar'}`,
+     `direcci├│n: ${place}`,
+   ];
+   if (a.duration != null) parts.push(`${a.duration}h`);
++  if (a.paymentStatus) parts.push(`pago: ${a.paymentStatus}`);
++  if (a.totalAmount != null) {
++    parts.push(`valor: COP ${String(a.totalAmount).replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`);
++  }
++  if (a.paymentMethod) parts.push(`m├®todo: ${a.paymentMethod}`);
++  if (a.wompiReference) parts.push(`referencia Wompi: ${a.wompiReference}`);
+   return `- ${parts.join(' | ')}`;
+ }
+ 
+ function formatPropertySummaryBlock(summary: InboxAiPropertySummary): string[] {
+   const lines: string[] = [];
+   lines.push('=== Propiedades / ubicaciones de apoyos ===');
+   lines.push(summary.patternLabel);
+   lines.push(`Propiedades ├║nicas: ${summary.uniquePropertyCount}`);
+   if (summary.appointmentsWithoutAddress > 0) {
+     lines.push(`Apoyos sin direcci├│n: ${summary.appointmentsWithoutAddress}`);
+@@ -266,47 +305,58 @@ export function formatInboxAiContextBlock(params: {
+   phone: string;
+   transcript: string;
+   historyMeta: ConversationHistoryMeta;
+   conversationTags: string[];
+   directory: InboxAiDirectory | null;
+   appointments: InboxAiAppointment[];
+   appointmentCount?: number;
+   /** Citas completas de lookback para resumen de propiedades (si no, usa appointments). */
+   allAppointmentsForProperties?: InboxAiAppointment[];
+   propertySummary?: InboxAiPropertySummary | null;
++  sessionWindow: MetaSessionWindow;
+   nowIso?: string;
+ }): string {
+   const nowIso = params.nowIso ?? new Date().toISOString();
+   const now = new Date(nowIso).getTime();
+   const lines: string[] = [];
+ 
+   lines.push('=== Momento actual ===');
+   lines.push(`Fecha/hora actual (Colombia): ${formatBogotaDateTime(nowIso)} (${nowIso})`);
+   lines.push('Usa esta fecha como referencia temporal al interpretar "hoy", "ma├▒ana", "ayer" y el historial.');
+   lines.push(
+     'Pol├¡tica operativa: si el cliente indica que a cierta hora no habr├í nadie / se va la persona, ' +
+       'prop├│n llegada ~1 h antes para recepci├│n segura del personal (nunca esa hora exacta).',
+   );
+ 
++  lines.push('');
++  lines.push('=== Canal / ventana WhatsApp ===');
++  lines.push(`Estado: ${params.sessionWindow.status}`);
++  lines.push(`├Ültimo mensaje inbound: ${params.sessionWindow.lastInboundAt ?? 'desconocido'}`);
++  lines.push(`Expira: ${params.sessionWindow.expiresAt ?? 'desconocido'}`);
++  lines.push(`Requiere plantilla: ${params.sessionWindow.requiresTemplate ? 's├¡' : 'no'}`);
++
+   lines.push('');
+   lines.push('=== Perfil directorio ===');
+   if (params.directory) {
+     const d = params.directory;
+     lines.push(`Nombre: ${d.fullName ?? 'ÔÇö'}`);
+     lines.push(`Tel├®fono: ${params.phone}`);
+     if (d.email) lines.push(`Email: ${d.email}`);
+     if (d.city) lines.push(`Ciudad: ${d.city}`);
+     if (d.address) lines.push(`Direcci├│n de contacto: ${d.address}`);
+     if (d.preferredServiceAddress) {
+       lines.push(`Direcci├│n preferida de servicio: ${d.preferredServiceAddress}`);
+     }
+     lines.push(`Cliente recurrente (CRM): ${d.isReturningClient ? 's├¡' : 'no'}`);
++    if (d.paymentStatus) {
++      lines.push(`Estado de pago (directorio): ${d.paymentStatus}`);
++    }
+     if (d.appUserId) lines.push(`app_user_id: ${d.appUserId}`);
+     if (d.notesSummary) lines.push(`Notas: ${d.notesSummary}`);
+   } else {
+     lines.push(`Sin entrada en crm_directory. Tel├®fono: ${params.phone}`);
+   }
+ 
+   const totalAppts =
+     typeof params.appointmentCount === 'number'
+       ? params.appointmentCount
+       : params.appointments.length;
+@@ -351,21 +401,21 @@ export function formatInboxAiContextBlock(params: {
+     .sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate))
+     .slice(0, UPCOMING_APPTS);
+   const past = params.appointments
+     .filter((a) => new Date(a.scheduledDate).getTime() < now)
+     .sort((a, b) => b.scheduledDate.localeCompare(a.scheduledDate))
+     .slice(0, PAST_APPTS);
+ 
+   lines.push('');
+   lines.push('=== Citas / apoyos (Firestore, fuente de verdad) ===');
+   lines.push(
+-    'Cada apoyo incluye fecha/hora (Colombia), estado, servicio, cliente, auxiliar y direcci├│n del servicio.',
++    'Cada apoyo incluye fecha/hora (Colombia), estado, servicio, cliente, auxiliar, direcci├│n y pago cuando existen.',
+   );
+   if (!upcoming.length && !past.length) {
+     lines.push('Sin citas/apoyos encontrados para este contacto.');
+   } else {
+     if (upcoming.length) {
+       lines.push('Pr├│ximos:');
+       for (const a of upcoming) lines.push(formatAppointmentLine(a));
+     }
+     if (past.length) {
+       lines.push('Pasados recientes:');
+@@ -430,29 +480,108 @@ export function groundBookingClientInfo<
+     d?.address ??
+     null;
+   if (groundedAddress) info.address = groundedAddress;
+ 
+   if (d?.city) info.city = d.city;
+   info.isReturningClient = Boolean(d?.isReturningClient);
+   if (d?.appUserId) info.userId = d.appUserId;
+   return { ...bookingContext, clientInfo: info };
+ }
+ 
++type GroundedBookingPayment<T> = Omit<T, 'paymentStatus' | 'paymentAmount'> & {
++  paymentStatus: 'APPROVED' | 'PENDING' | 'none';
++  paymentAmount: number | null;
++};
++
++function normalizeAppointmentPaymentStatus(
++  value: string | null | undefined,
++): 'APPROVED' | 'PENDING' | null {
++  const status = value?.trim().toUpperCase();
++  if (!status) return null;
++  if (['APPROVED', 'PAID', 'PAGO_ACEPTADO', 'SUCCESSFUL'].includes(status)) {
++    return 'APPROVED';
++  }
++  if (['PENDING', 'PAGO_PENDIENTE', 'PAGO_EN_PROCESO'].includes(status)) {
++    return 'PENDING';
++  }
++  return null;
++}
++
++function isRelevantUpcomingAppointment(
++  appointment: InboxAiAppointment,
++  now: number,
++): boolean {
++  const scheduledAt = new Date(appointment.scheduledDate).getTime();
++  if (!Number.isFinite(scheduledAt) || scheduledAt < now) return false;
++  const status = appointment.status?.trim().toUpperCase();
++  return !status || !['CANCELLED', 'CANCELED', 'REJECTED'].includes(status);
++}
++
++/**
++ * Sustituye afirmaciones de pago inferidas por datos reales de la cita pr├│xima
++ * m├ís cercana. Sin datos autoritativos elimina estado y monto inventados.
++ */
++export function groundBookingPayment<
++  T extends {
++    paymentStatus?: unknown;
++    paymentAmount?: unknown;
++  },
++>(
++  bookingContext: T,
++  ctx: Pick<InboxAiContextSlice, 'appointments'>,
++  nowIso = new Date().toISOString(),
++): GroundedBookingPayment<T> {
++  const now = new Date(nowIso).getTime();
++  const closest = ctx.appointments
++    .filter((appointment) => isRelevantUpcomingAppointment(appointment, now))
++    .sort(
++      (a, b) =>
++        new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime(),
++    )
++    .find(
++      (appointment) =>
++        normalizeAppointmentPaymentStatus(appointment.paymentStatus) != null ||
++        (appointment.totalAmount != null && Number.isFinite(appointment.totalAmount)),
++    );
++
++  if (!closest) {
++    return {
++      ...bookingContext,
++      paymentStatus: 'none',
++      paymentAmount: null,
++    };
++  }
++
++  return {
++    ...bookingContext,
++    paymentStatus:
++      normalizeAppointmentPaymentStatus(closest.paymentStatus) ?? 'none',
++    paymentAmount:
++      closest.totalAmount != null && Number.isFinite(closest.totalAmount)
++        ? closest.totalAmount
++        : null,
++  };
++}
++
+ export const INBOX_AI_SYSTEM_INSTRUCTION =
+   'Eres un agente de ventas de Prosavis (limpieza residencial y empresas en Colombia). ' +
+   'Responde en espa├▒ol, cordial y concreto. ' +
+   'Usa el perfil CRM, tags, apoyos/citas Firestore y sus direcciones como fuente de verdad; no inventes citas, tags, precios, direcciones ni datos del cliente. ' +
+   'Ten en cuenta la fecha/hora actual (Colombia) y las fechas de los mensajes y apoyos para contextualizar "hoy", "ma├▒ana", retrasos y seguimiento. ' +
+   'Si el cliente tiene apoyos previos, tr├ítarlo como cliente con historial (no como lead fr├¡o). ' +
+   'Respeta el patr├│n de propiedades: si siempre ha sido la misma direcci├│n, as├║mela como habitual; ' +
+   'si ha tenido varias ubicaciones, pregunta en cu├íl quiere el pr├│ximo apoyo. ' +
+   'SEGURIDAD Y ACCESO A LA PROPIEDAD (prioridad alta): ' +
+   'Si el cliente indica que a cierta hora se va / no habr├í nadie en la casa / nadie puede recibir, ' +
+   'NUNCA propongas llegar exactamente a esa hora. Ofrece llegar con antelaci├│n (t├¡picamente 1 hora antes, ' +
+   'p. ej. si se van a las 8:00 ÔåÆ propone 7:00) para que alguien reciba al personal, entregar llaves/acceso ' +
+   'y garantizar limpieza correcta y seguridad. Explica brevemente que priorizamos seguridad y confianza. ' +
+   'Si no queda claro qui├®n recibe, pregunta c├│mo nos abrir├ín o si prefieren llegada anticipada. ' +
+   'Al hablar de apoyos, usa fecha/hora, direcci├│n, cliente y auxiliar solo si aporta; no inventes auxiliares ni direcciones. ' +
+-  'No inventes precios distintos a los del contexto. Si hay link de pago, menci├│nalo al final. ' +
++  'Usa precios ├║nicamente desde el cat├ílogo oficial incluido en el contexto. ' +
++  'Nunca afirmes un pago sin datos autoritativos de CRM/Firestore. ' +
++  'Nunca inventes horarios disponibles; usa solo disponibilidad confirmada por una fuente real. ' +
++  'Cuando la ventana Meta est├® cerrada, propone una plantilla aprobada en vez de texto libre. ' +
++  'Si hay link de pago, menci├│nalo al final. ' +
+   'Adapta el tono a los tags (p. ej. Empresas vs residencial). ' +
+   'Si hay tags sensibles internos (Bloqueado, Decline, lista negra), no empujes venta agresiva y no reveles esos tags al cliente en el texto. ' +
+   'Si hay citas pr├│ximas, tenlas en cuenta al responder (no ofrezcas re-agendar ignor├índolas).';
+diff --git a/supabase/functions/_shared/metaSessionWindow.ts b/supabase/functions/_shared/metaSessionWindow.ts
+new file mode 100644
+index 0000000..f9f3683
+--- /dev/null
++++ b/supabase/functions/_shared/metaSessionWindow.ts
+@@ -0,0 +1,78 @@
++export const META_SESSION_WINDOW_MS = 24 * 60 * 60 * 1000;
++
++export type MetaSessionWindowStatus = 'open' | 'closed' | 'unknown';
++
++export interface MetaSessionWindow {
++  status: MetaSessionWindowStatus;
++  lastInboundAt: string | null;
++  expiresAt: string | null;
++  requiresTemplate: boolean;
++}
++
++export interface MetaSessionMessage {
++  direction?: string | null;
++  role?: string | null;
++  createdAt?: string | Date | null;
++}
++
++type TimestampInput = string | Date | null | undefined;
++
++function timestampMillis(value: TimestampInput): number | null {
++  const millis = value instanceof Date ? value.getTime() : new Date(value ?? '').getTime();
++  return Number.isFinite(millis) ? millis : null;
++}
++
++function unknownWindow(): MetaSessionWindow {
++  return {
++    status: 'unknown',
++    lastInboundAt: null,
++    expiresAt: null,
++    requiresTemplate: true,
++  };
++}
++
++export function getMetaSessionWindow(
++  lastInboundAt: TimestampInput,
++  now: TimestampInput = new Date(),
++): MetaSessionWindow {
++  const inboundMillis = timestampMillis(lastInboundAt);
++  const nowMillis = timestampMillis(now);
++  if (inboundMillis == null || nowMillis == null || inboundMillis > nowMillis) {
++    return unknownWindow();
++  }
++
++  const expiresMillis = inboundMillis + META_SESSION_WINDOW_MS;
++  const status: MetaSessionWindowStatus =
++    nowMillis < expiresMillis ? 'open' : 'closed';
++
++  return {
++    status,
++    lastInboundAt: new Date(inboundMillis).toISOString(),
++    expiresAt: new Date(expiresMillis).toISOString(),
++    requiresTemplate: status !== 'open',
++  };
++}
++
++export function buildMetaSessionWindow(
++  messages: readonly MetaSessionMessage[],
++  now: TimestampInput = new Date(),
++): MetaSessionWindow {
++  let newestInboundMillis: number | null = null;
++
++  for (const message of messages) {
++    const isInbound =
++      message.direction === 'inbound' ||
++      (message.direction == null && message.role === 'user');
++    if (!isInbound) continue;
++
++    const millis = timestampMillis(message.createdAt);
++    if (millis == null) continue;
++    if (newestInboundMillis == null || millis > newestInboundMillis) {
++      newestInboundMillis = millis;
++    }
++  }
++
++  return newestInboundMillis == null
++    ? unknownWindow()
++    : getMetaSessionWindow(new Date(newestInboundMillis), now);
++}
+diff --git a/supabase/functions/get-whatsapp-booking-context/index.ts b/supabase/functions/get-whatsapp-booking-context/index.ts
+index 113505e..04b56d2 100644
+--- a/supabase/functions/get-whatsapp-booking-context/index.ts
++++ b/supabase/functions/get-whatsapp-booking-context/index.ts
+@@ -2,20 +2,21 @@ import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
+ import { requireCrmAdmin } from '../_shared/supabase.ts';
+ import { formatError } from '../_shared/whatsappOutbound.ts';
+ import {
+   getGeminiApiKey,
+   geminiGenerateJson,
+ } from '../_shared/geminiClient.ts';
+ import { resolveBookingPricingCheckout } from '../_shared/pricingCatalog.ts';
+ import {
+   buildInboxAiContext,
+   groundBookingClientInfo,
++  groundBookingPayment,
+ } from '../_shared/inboxAiContext.ts';
+ 
+ Deno.serve(async (req) => {
+   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+ 
+   try {
+     const { supabase } = await requireCrmAdmin(req);
+     const body = await req.json().catch(() => ({}));
+     const stableKey = String(body.stableKey ?? '').trim();
+     const includeVoiceTranscriptions = body.includeVoiceTranscriptions === true;
+@@ -29,42 +30,44 @@ Deno.serve(async (req) => {
+     try {
+       ctx = await buildInboxAiContext(supabase, stableKey, { includeVoiceTranscriptions });
+     } catch (err) {
+       const msg = String((err as Error)?.message ?? err);
+       if (msg.includes('historial') || msg.includes('mensajes del cliente')) {
+         return jsonResponse({ error: msg }, 404);
+       }
+       throw err;
+     }
+ 
+-    const inferredBookingContext = await geminiGenerateJson<unknown>({
++    const inferredBookingContext = await geminiGenerateJson<Record<string, unknown>>({
+       apiKey,
+       prompt:
+         'Analiza esta conversaci├│n de WhatsApp de Prosavis y responde SOLO JSON con stage, collectedData, ' +
+         'missingData, availableSlots, paymentStatus, paymentAmount, wantsKit, clientInfo. ' +
+         'Devuelve collectedData.duration en minutos usando solo una duraci├│n oficial del cat├ílogo y wantsKit como booleano. ' +
+         'No devuelvas precios ni links de pago; esos valores se resuelven en c├│digo. ' +
+         'Usa el perfil CRM y citas Firestore como fuente de verdad cuando existan; no inventes citas. ' +
+         `Tel├®fono: ${ctx.phone}\n\n${ctx.formattedBlock}`,
+     }).catch(() => ({}));
+ 
++    const groundedPaymentContext = groundBookingPayment(inferredBookingContext, ctx);
+     const {
+       bookingContext: pricedBookingContext,
+       wompiCheckoutUrl,
+       wompiPaymentReference,
+       wompiAmountCOP,
+-    } = resolveBookingPricingCheckout(inferredBookingContext, ctx.phone);
++    } = resolveBookingPricingCheckout(groundedPaymentContext, ctx.phone);
+     const bookingContext = groundBookingClientInfo(pricedBookingContext, ctx);
+ 
+     return jsonResponse({
+       bookingContext,
+       historyMeta: ctx.historyMeta,
+       conversationTags: ctx.conversationTags,
++      sessionWindow: ctx.sessionWindow,
+       ...(wompiCheckoutUrl ? { wompiCheckoutUrl } : {}),
+       ...(wompiPaymentReference ? { wompiPaymentReference } : {}),
+       ...(wompiAmountCOP ? { wompiAmountCOP } : {}),
+     });
+   } catch (error) {
+     if (error instanceof Response) return error;
+     return jsonResponse({ error: formatError(error) }, 500);
+   }
+ });
+diff --git a/supabase/functions/suggest-whatsapp-agent-reply/index.ts b/supabase/functions/suggest-whatsapp-agent-reply/index.ts
+index 0054572..1604eb0 100644
+--- a/supabase/functions/suggest-whatsapp-agent-reply/index.ts
++++ b/supabase/functions/suggest-whatsapp-agent-reply/index.ts
+@@ -4,20 +4,21 @@ import { formatError } from '../_shared/whatsappOutbound.ts';
+ import {
+   getGeminiApiKey,
+   geminiGenerateJson,
+   geminiGenerateText,
+ } from '../_shared/geminiClient.ts';
+ import { resolveBookingPricingCheckout } from '../_shared/pricingCatalog.ts';
+ import {
+   INBOX_AI_SYSTEM_INSTRUCTION,
+   buildInboxAiContext,
+   groundBookingClientInfo,
++  groundBookingPayment,
+ } from '../_shared/inboxAiContext.ts';
+ 
+ const MAX_EXTRA_CONTEXT_CHARS = 2000;
+ 
+ function normalizeExtraContext(value: unknown): string {
+   if (typeof value !== 'string') return '';
+   const text = value.trim();
+   if (!text) return '';
+   return text.length <= MAX_EXTRA_CONTEXT_CHARS ? text : `${text.slice(0, MAX_EXTRA_CONTEXT_CHARS)}ÔÇª`;
+ }
+@@ -49,77 +50,80 @@ Deno.serve(async (req) => {
+       throw err;
+     }
+ 
+     if (ctx.lastTurnRole === 'bot' && !forceGenerate) {
+       return jsonResponse({
+         suggestion: null,
+         lastMessageIsOutbound: true,
+         hint: 'El ├║ltimo mensaje es saliente. Usa forceGenerate para redactar igualmente.',
+         historyMeta: ctx.historyMeta,
+         conversationTags: ctx.conversationTags,
++        sessionWindow: ctx.sessionWindow,
+       });
+     }
+ 
+     console.log(
+       JSON.stringify({
+         scope: 'suggest-whatsapp-agent-reply',
+         event: 'context-built',
+         historyMeta: ctx.historyMeta,
+         conversationTagCount: ctx.conversationTags.length,
+         hasDirectory: Boolean(ctx.directory),
+         appointmentCount: ctx.appointmentCount,
+         listedAppointments: ctx.appointments.length,
+         propertyPattern: ctx.propertySummary.pattern,
+         uniqueProperties: ctx.propertySummary.uniquePropertyCount,
+       }),
+     );
+ 
+     // ÔöÇÔöÇÔöÇ Booking Context ÔöÇÔöÇÔöÇ
+-    const inferredBookingContext = await geminiGenerateJson<unknown>({
++    const inferredBookingContext = await geminiGenerateJson<Record<string, unknown>>({
+       apiKey,
+       prompt:
+         'Analiza esta conversaci├│n de WhatsApp de Prosavis (limpieza en Colombia) y responde SOLO JSON con ' +
+         'stage, collectedData {date,time,duration,address,addressSource}, missingData[], availableSlots[], ' +
+         'paymentStatus, paymentAmount, wantsKit, clientInfo {name,phone,email,address,city,isReturningClient,userId}. ' +
+         'Devuelve duration en minutos usando solo una duraci├│n oficial del cat├ílogo y wantsKit como booleano. ' +
+         'No devuelvas precios ni links de pago; esos valores se resuelven en c├│digo. ' +
+         'Usa el perfil CRM y citas como fuente de verdad cuando existan; no inventes citas. ' +
+         'SEGURIDAD: si el cliente dice que a la hora H se va / no habr├í nadie, pon collectedData.time una hora ANTES ' +
+         '(p. ej. se van a las 08:00 ÔåÆ time "07:00"), nunca H exacta cuando la casa quedar├¡a sola. ' +
+         `Tel├®fono cliente: ${ctx.phone}\n\n${ctx.formattedBlock}`,
+     }).catch(() => ({}));
+ 
++    const groundedPaymentContext = groundBookingPayment(inferredBookingContext, ctx);
+     const {
+       bookingContext: pricedBookingContext,
+       wompiCheckoutUrl,
+       wompiPaymentReference,
+       wompiAmountCOP,
+-    } = resolveBookingPricingCheckout(inferredBookingContext, ctx.phone);
++    } = resolveBookingPricingCheckout(groundedPaymentContext, ctx.phone);
+     const bookingContext = groundBookingClientInfo(pricedBookingContext, ctx);
+ 
+     // ÔöÇÔöÇÔöÇ Generar sugerencia de respuesta ÔöÇÔöÇÔöÇ
+     const suggestion = await geminiGenerateText({
+       apiKey,
+       systemInstruction: INBOX_AI_SYSTEM_INSTRUCTION,
+       userText:
+         `${extraContext ? `Contexto extra del agente:\n${extraContext}\n\n` : ''}` +
+         `${ctx.formattedBlock}\n\n` +
+         `Contexto booking (inferido + CRM):\n${JSON.stringify(bookingContext)}` +
+         (wompiCheckoutUrl ? `\nLink Wompi: ${wompiCheckoutUrl}` : ''),
+       temperature: 0.4,
+     });
+ 
+     return jsonResponse({
+       suggestion,
+       lastMessageIsOutbound: false,
+       bookingContext,
+       historyMeta: ctx.historyMeta,
+       conversationTags: ctx.conversationTags,
++      sessionWindow: ctx.sessionWindow,
+       ...(wompiCheckoutUrl ? { wompiCheckoutUrl } : {}),
+       ...(wompiPaymentReference ? { wompiPaymentReference } : {}),
+       ...(wompiAmountCOP ? { wompiAmountCOP } : {}),
+     });
+   } catch (error) {
+     if (error instanceof Response) return error;
+     return jsonResponse({ error: formatError(error) }, 500);
+   }
+ });
+diff --git a/src/components/whatsapp/BookingAssistantDrawer.tsx b/src/components/whatsapp/BookingAssistantDrawer.tsx
+index bd843b6..36da241 100644
+--- a/src/components/whatsapp/BookingAssistantDrawer.tsx
++++ b/src/components/whatsapp/BookingAssistantDrawer.tsx
+@@ -32,44 +32,48 @@ import {
+   type WhatsAppTemplateSummary,
+ } from '@/services/whatsappService';
+ import MetaTemplateEditor from '@/components/whatsapp/templates/MetaTemplateEditor';
+ import TemplateLibrary from '@/components/whatsapp/templates/TemplateLibrary';
+ import {
+   buildDisplayMessageBody,
+   buildTemplateSendComponents,
+   countSlotsForTemplate,
+ } from '@/utils/whatsappTemplateHelpers';
+ import {
+-  isWithinMetaSessionWindow,
+   selectWhatsAppTemplateSuggestion,
+   type WhatsAppTemplateSuggestion,
+ } from '@/utils/whatsappTemplateSuggestions';
++import {
++  getMetaSessionWindow,
++  type MetaSessionWindow,
++} from '../../../supabase/functions/_shared/metaSessionWindow';
+ 
+ interface BookingAssistantDrawerProps {
+   open: boolean;
+   onClose: () => void;
+   bookingContext: BookingContextData;
+   suggestion: string | null;
+   onUseSuggestion: (text: string) => void;
+   /** Desde la ├║ltima sugerencia IA con checkout din├ímico */
+   wompiCheckoutUrl?: string | null;
+   wompiPaymentReference?: string | null;
+   wompiAmountCOP?: number | null;
+   /** Se incrementa al recibir nueva sugerencia con contexto booking para sincronizar el formulario */
+   checkoutSyncEpoch: number;
+   onInsertPaymentLink: (url: string) => void;
+   wabaId?: string;
+   phoneNumberId?: string;
+   recipientPhone?: string;
+   conversationDisplayName?: string;
+   lastInboundAt?: Date | null;
+   lastMessageDirection?: 'inbound' | 'outbound';
++  sessionWindow?: MetaSessionWindow | null;
+ }
+ 
+ const STAGE_LABELS: Record<string, string> = {
+   no_booking: 'Sin intenci├│n de reserva',
+   info_gathering: 'Recopilando datos',
+   availability: 'Verificando disponibilidad',
+   summary_confirmation: 'Confirmaci├│n del cliente',
+   payment_pending: 'Esperando pago',
+   payment_confirmed: 'Pago confirmado',
+ };
+@@ -111,23 +115,28 @@ const BookingAssistantDrawer: React.FC<BookingAssistantDrawerProps> = ({
+   wompiPaymentReference = null,
+   wompiAmountCOP = null,
+   checkoutSyncEpoch,
+   onInsertPaymentLink,
+   wabaId,
+   phoneNumberId,
+   recipientPhone,
+   conversationDisplayName,
+   lastInboundAt = null,
+   lastMessageDirection,
++  sessionWindow = null,
+ }) => {
+   const activeStep = getActiveStep(bookingContext.stage);
+   const { collectedData, missingData, availableSlots, paymentStatus, calculatedPrice, clientInfo } = bookingContext;
++  const effectiveSessionWindow = useMemo(
++    () => sessionWindow ?? getMetaSessionWindow(lastInboundAt),
++    [lastInboundAt, sessionWindow],
++  );
+ 
+   const [amountInput, setAmountInput] = useState('');
+   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
+   const [paymentRef, setPaymentRef] = useState<string | null>(null);
+   const [checkoutLoading, setCheckoutLoading] = useState(false);
+   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+   const [metaTemplates, setMetaTemplates] = useState<WhatsAppTemplateSummary[]>([]);
+   const [metaTemplatesLoading, setMetaTemplatesLoading] = useState(false);
+   const [metaTemplatesError, setMetaTemplatesError] = useState<string | null>(null);
+   const [templateHeaderValues, setTemplateHeaderValues] = useState<string[]>([]);
+@@ -140,45 +149,47 @@ const BookingAssistantDrawer: React.FC<BookingAssistantDrawerProps> = ({
+   useLayoutEffect(() => {
+     if (!open) return;
+     const base = wompiAmountCOP ?? calculatedPrice;
+     setAmountInput(base != null && base > 0 ? String(Math.round(base)) : '');
+     setCheckoutUrl(wompiCheckoutUrl);
+     setPaymentRef(wompiPaymentReference);
+     setCheckoutError(null);
+   }, [open, checkoutSyncEpoch, wompiCheckoutUrl, wompiPaymentReference, wompiAmountCOP, calculatedPrice]);
+ 
+   useEffect(() => {
+-    if (!open || !wabaId || isWithinMetaSessionWindow(lastInboundAt)) return;
++    if (!open || !wabaId || !effectiveSessionWindow.requiresTemplate) return;
+ 
+     setMetaTemplatesLoading(true);
+     setMetaTemplatesError(null);
+     listWhatsAppMessageTemplates(wabaId)
+       .then((templates) => setMetaTemplates(templates))
+       .catch((error: unknown) => {
+         const message = error instanceof Error ? error.message : 'No se pudieron cargar plantillas Meta';
+         setMetaTemplatesError(message);
+         setMetaTemplates([]);
+       })
+       .finally(() => setMetaTemplatesLoading(false));
+-  }, [lastInboundAt, open, wabaId]);
++  }, [effectiveSessionWindow.requiresTemplate, open, wabaId]);
+ 
+   const templateSuggestion: WhatsAppTemplateSuggestion | null = useMemo(
+     () =>
+       selectWhatsAppTemplateSuggestion(metaTemplates, {
+         bookingContext,
+         conversationDisplayName,
+         lastInboundAt,
+         lastMessageDirection,
++        sessionWindow: effectiveSessionWindow,
+       }),
+     [
+       bookingContext,
+       conversationDisplayName,
++      effectiveSessionWindow,
+       lastInboundAt,
+       lastMessageDirection,
+       metaTemplates,
+     ],
+   );
+ 
+   useEffect(() => {
+     if (!templateSuggestion) {
+       setTemplateHeaderValues([]);
+       setTemplateBodyValues([]);
+@@ -309,22 +320,29 @@ const BookingAssistantDrawer: React.FC<BookingAssistantDrawerProps> = ({
+     parsedAmount !== wompiAmountCOP;
+   const MIN_REASONABLE_AMOUNT_COP = 10000;
+   const amountTooLow =
+     Number.isFinite(parsedAmount) && parsedAmount > 0 && parsedAmount < MIN_REASONABLE_AMOUNT_COP;
+   const suggestionContext = useMemo(
+     () => ({
+       bookingContext,
+       conversationDisplayName,
+       lastInboundAt,
+       lastMessageDirection,
++      sessionWindow: effectiveSessionWindow,
+     }),
+-    [bookingContext, conversationDisplayName, lastInboundAt, lastMessageDirection],
++    [
++      bookingContext,
++      conversationDisplayName,
++      effectiveSessionWindow,
++      lastInboundAt,
++      lastMessageDirection,
++    ],
+   );
+ 
+   return (
+     <>
+     <Drawer
+       anchor="right"
+       open={open}
+       onClose={onClose}
+       PaperProps={{
+         sx: { width: { xs: '100%', sm: 380 }, p: 0 },
+diff --git a/src/components/whatsapp/ChatArea.tsx b/src/components/whatsapp/ChatArea.tsx
+index 7ee0606..055db0e 100644
+--- a/src/components/whatsapp/ChatArea.tsx
++++ b/src/components/whatsapp/ChatArea.tsx
+@@ -81,20 +81,21 @@ import BookingAssistantDrawer from './BookingAssistantDrawer';
+ import type { ForwardWhatsAppResult } from '@/services/forwardWhatsAppMessage';
+ import { isForwardableMessage } from '@/services/forwardWhatsAppMessage';
+ import { ContactAvatar } from '@/components/common/ContactAvatar';
+ import { pickContactPhotoUrl } from '@/utils/contactAvatar';
+ import { getLastInboundAt } from '@/utils/whatsappTemplateSuggestions';
+ import { coloredChipSx } from '@/utils/coloredChipStyles';
+ import { prepareWhatsAppSticker } from '@/utils/prepareWhatsAppSticker';
+ import { summarizePeerPresences } from '@/utils/whatsappAdminPresence';
+ import type { WhatsAppTagFolder } from '@/types/whatsapp';
+ import TagListGrouped from './TagListGrouped';
++import type { MetaSessionWindow } from '../../../supabase/functions/_shared/metaSessionWindow';
+ 
+ interface ChatAreaProps {
+   conversation: WhatsAppConversation;
+   phoneNumberId?: string;
+   wabaId?: string;
+   headerDisplayName: string;
+   headerPhotoUrl?: string;
+   onToggleContactPanel: () => void;
+   contactPanelOpen: boolean;
+   templatesPanelOpen: boolean;
+@@ -207,20 +208,21 @@ const ChatArea: React.FC<ChatAreaProps> = ({
+ }) => {
+   const theme = useTheme();
+   const [messages, setMessages] = useState<WhatsAppMessage[]>([]);
+   const [loading, setLoading] = useState(true);
+   const [suggestionDraft, setSuggestionDraft] = useState('');
+   const [suggestionLoading, setSuggestionLoading] = useState(false);
+   const [suggestionHint, setSuggestionHint] = useState<string | null>(null);
+   const [aiContextDialogOpen, setAiContextDialogOpen] = useState(false);
+   const [aiExtraContext, setAiExtraContext] = useState('');
+   const [bookingContext, setBookingContext] = useState<BookingContextData | null>(null);
++  const [sessionWindow, setSessionWindow] = useState<MetaSessionWindow | null>(null);
+   const [bookingDrawerOpen, setBookingDrawerOpen] = useState(false);
+   const [bookingContextLoading, setBookingContextLoading] = useState(false);
+   const [wompiCheckoutUrl, setWompiCheckoutUrl] = useState<string | null>(null);
+   const [wompiPaymentReference, setWompiPaymentReference] = useState<string | null>(null);
+   const [wompiAmountCOP, setWompiAmountCOP] = useState<number | null>(null);
+   const [bookingCheckoutSyncEpoch, setBookingCheckoutSyncEpoch] = useState(0);
+ 
+   const [selectionMode, setSelectionMode] = useState(false);
+   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+   const [forwardDialogOpen, setForwardDialogOpen] = useState(false);
+@@ -274,20 +276,21 @@ const ChatArea: React.FC<ChatAreaProps> = ({
+       },
+     );
+ 
+     return () => unsub();
+   }, [stableKey]);
+ 
+   useEffect(() => {
+     setSuggestionDraft('');
+     setSuggestionHint(null);
+     setBookingContext(null);
++    setSessionWindow(null);
+     setBookingDrawerOpen(false);
+     setWompiCheckoutUrl(null);
+     setWompiPaymentReference(null);
+     setWompiAmountCOP(null);
+     setBookingCheckoutSyncEpoch(0);
+     setPendingReactions({});
+     Object.values(reactionTimersRef.current).forEach((timer) => window.clearTimeout(timer));
+     reactionTimersRef.current = {};
+   }, [stableKey]);
+ 
+@@ -558,20 +561,21 @@ const ChatArea: React.FC<ChatAreaProps> = ({
+   const handleRequestSuggestion = useCallback(async (forceGenerate = false, extraContext?: string) => {
+     setSuggestionLoading(true);
+     setSuggestionHint(null);
+     try {
+       const result = await suggestWhatsAppAgentReply(
+         stableKey,
+         forceGenerate,
+         includeVoiceTranscriptions,
+         extraContext,
+       );
++      setSessionWindow(result.sessionWindow);
+       if (result.suggestion) {
+         setSuggestionDraft(result.suggestion);
+         setSuggestionHint(null);
+       } else if (result.lastMessageIsOutbound) {
+         setSuggestionHint(result.hint || 'El ├║ltimo mensaje fue tuyo. Espera respuesta del cliente.');
+       }
+       const nextCtx = result.bookingContext;
+       const nextHasAnyData = !!nextCtx && (
+         !!nextCtx.collectedData.date ||
+         !!nextCtx.collectedData.time ||
+@@ -648,20 +652,21 @@ const ChatArea: React.FC<ChatAreaProps> = ({
+     // Si ya tenemos contexto cargado (v├¡a sugerencia de IA o carga previa),
+     // simplemente abrimos el drawer sin re-extraer.
+     if (bookingContext) {
+       setBookingDrawerOpen(true);
+       return;
+     }
+ 
+     setBookingContextLoading(true);
+     try {
+       const result = await getWhatsAppBookingContext(stableKey, includeVoiceTranscriptions);
++      setSessionWindow(result.sessionWindow);
+       if (result.bookingContext) {
+         setBookingContext(result.bookingContext);
+         if (result.wompiCheckoutUrl) {
+           setWompiCheckoutUrl(result.wompiCheckoutUrl);
+           setWompiPaymentReference(result.wompiPaymentReference ?? null);
+           setWompiAmountCOP(result.wompiAmountCOP ?? null);
+         }
+         setBookingCheckoutSyncEpoch((e) => e + 1);
+         setBookingDrawerOpen(true);
+       } else {
+@@ -1310,20 +1315,21 @@ const ChatArea: React.FC<ChatAreaProps> = ({
+               }
+               return `${prev.trim()}\n\n${url}`;
+             });
+           }}
+           wabaId={wabaId}
+           phoneNumberId={phoneNumberId}
+           recipientPhone={conversation.contactPhone || conversation.phone || stableKey}
+           conversationDisplayName={displayName}
+           lastInboundAt={lastInboundAt}
+           lastMessageDirection={conversation.lastMessageDirection}
++          sessionWindow={sessionWindow}
+         />
+       )}
+ 
+       {/* Tag picker popover */}
+       <Popover
+         open={Boolean(tagAnchor)}
+         anchorEl={tagAnchor}
+         onClose={() => setTagAnchor(null)}
+         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+diff --git a/src/components/whatsapp/TemplatesSidePanel.tsx b/src/components/whatsapp/TemplatesSidePanel.tsx
+index beaec10..d28c872 100644
+--- a/src/components/whatsapp/TemplatesSidePanel.tsx
++++ b/src/components/whatsapp/TemplatesSidePanel.tsx
+@@ -1,18 +1,19 @@
+ import React, { useEffect, useMemo, useState } from 'react';
+ import TemplateLibrary from '@/components/whatsapp/templates/TemplateLibrary';
+ import {
+   getWhatsAppBookingContext,
+   type BookingContextData,
+   type WhatsAppSnippet,
+ } from '@/services/whatsappService';
+ import type { WhatsAppTemplateSuggestionContext } from '@/utils/whatsappTemplateSuggestions';
++import type { MetaSessionWindow } from '../../../supabase/functions/_shared/metaSessionWindow';
+ 
+ interface TemplatesSidePanelProps {
+   wabaId: string;
+   phoneNumberId: string;
+   recipientPhone: string;
+   onApplyDraftToComposer?: (text: string) => void;
+   snippets?: WhatsAppSnippet[];
+   onSnippetsChanged?: () => void;
+   conversationStableKey?: string;
+   conversationDisplayName?: string;
+@@ -26,50 +27,65 @@ const TemplatesSidePanel: React.FC<TemplatesSidePanelProps> = ({
+   recipientPhone,
+   onApplyDraftToComposer,
+   snippets = [],
+   onSnippetsChanged,
+   conversationStableKey,
+   conversationDisplayName,
+   lastInboundAt = null,
+   lastMessageDirection,
+ }) => {
+   const [bookingContext, setBookingContext] = useState<BookingContextData | null>(null);
++  const [sessionWindow, setSessionWindow] = useState<MetaSessionWindow | null>(null);
+ 
+   useEffect(() => {
+     if (!conversationStableKey) {
+       setBookingContext(null);
++      setSessionWindow(null);
+       return;
+     }
+ 
+     let cancelled = false;
+     void getWhatsAppBookingContext(conversationStableKey, false)
+       .then((result) => {
+-        if (!cancelled) setBookingContext(result.bookingContext ?? null);
++        if (!cancelled) {
++          setBookingContext(result.bookingContext ?? null);
++          setSessionWindow(result.sessionWindow);
++        }
+       })
+       .catch(() => {
+-        if (!cancelled) setBookingContext(null);
++        if (!cancelled) {
++          setBookingContext(null);
++          setSessionWindow(null);
++        }
+       });
+ 
+     return () => {
+       cancelled = true;
+     };
+   }, [conversationStableKey]);
+ 
+   const suggestionContext = useMemo<WhatsAppTemplateSuggestionContext | undefined>(() => {
+     if (!bookingContext) return undefined;
+     return {
+       bookingContext,
+       conversationDisplayName,
+       lastInboundAt,
+       lastMessageDirection,
++      sessionWindow,
+     };
+-  }, [bookingContext, conversationDisplayName, lastInboundAt, lastMessageDirection]);
++  }, [
++    bookingContext,
++    conversationDisplayName,
++    lastInboundAt,
++    lastMessageDirection,
++    sessionWindow,
++  ]);
+ 
+   return (
+     <TemplateLibrary
+       mode="inbox"
+       wabaId={wabaId}
+       phoneNumberId={phoneNumberId}
+       recipientPhone={recipientPhone}
+       onApplyDraft={onApplyDraftToComposer}
+       snippets={snippets}
+       onSnippetsChanged={onSnippetsChanged}
+diff --git a/src/services/whatsappService.ts b/src/services/whatsappService.ts
+index 88f0dec..0db0feb 100644
+--- a/src/services/whatsappService.ts
++++ b/src/services/whatsappService.ts
+@@ -1,15 +1,19 @@
+ import type { RealtimeChannel } from '@supabase/supabase-js';
+ import { supabase } from '@/config/supabase';
+ import type { Database } from '@/types/database';
+ import type { WhatsAppMetrics } from '@/types/whatsapp';
+ import type { NormalizedBookingContext } from '../../supabase/functions/_shared/bookingContext';
++import {
++  getMetaSessionWindow,
++  type MetaSessionWindow,
++} from '../../supabase/functions/_shared/metaSessionWindow';
+ import {
+   presenceStateToEntries,
+   type WhatsAppPresenceTrackPayload,
+ } from '@/utils/whatsappAdminPresence';
+ 
+ type ConversationRow = Database['public']['Tables']['whatsapp_conversations']['Row'];
+ type MessageRow = Database['public']['Tables']['whatsapp_message_log']['Row'];
+ type TagRow = Database['public']['Tables']['whatsapp_chat_tags']['Row'];
+ 
+ type Unsubscribe = () => void;
+@@ -766,20 +770,21 @@ export async function sendWhatsAppTemplateMessageAdmin(params: {
+   );
+ }
+ 
+ export type BookingContextData = NormalizedBookingContext;
+ 
+ export interface SuggestReplyResult {
+   suggestion: string | null;
+   lastMessageIsOutbound: boolean;
+   hint?: string;
+   bookingContext?: BookingContextData;
++  sessionWindow: MetaSessionWindow;
+   wompiCheckoutUrl?: string;
+   wompiPaymentReference?: string;
+   wompiAmountCOP?: number;
+ }
+ 
+ export async function suggestWhatsAppAgentReply(
+   stableKey: string,
+   forceGenerate = false,
+   includeVoiceTranscriptions = false,
+   extraContext?: string,
+@@ -793,43 +798,46 @@ export async function suggestWhatsAppAgentReply(
+     stableKey,
+     forceGenerate,
+     includeVoiceTranscriptions,
+     ...(extraContext?.trim() ? { extraContext: extraContext.trim() } : {}),
+   });
+   return {
+     suggestion: data.suggestion ?? null,
+     lastMessageIsOutbound: data.lastMessageIsOutbound ?? false,
+     hint: data.hint,
+     bookingContext: data.bookingContext,
++    sessionWindow: data.sessionWindow ?? getMetaSessionWindow(null),
+     wompiCheckoutUrl: data.wompiCheckoutUrl,
+     wompiPaymentReference: data.wompiPaymentReference,
+     wompiAmountCOP: data.wompiAmountCOP,
+   };
+ }
+ 
+ export interface BookingContextResult {
+   bookingContext: BookingContextData | null;
++  sessionWindow: MetaSessionWindow;
+   wompiCheckoutUrl?: string;
+   wompiPaymentReference?: string;
+   wompiAmountCOP?: number;
+ }
+ 
+ export async function getWhatsAppBookingContext(
+   stableKey: string,
+   includeVoiceTranscriptions = false,
+ ): Promise<BookingContextResult> {
+   const data = await invokeFn<BookingContextResult>('get-whatsapp-booking-context', {
+     stableKey,
+     includeVoiceTranscriptions,
+   });
+   return {
+     bookingContext: data.bookingContext ?? null,
++    sessionWindow: data.sessionWindow ?? getMetaSessionWindow(null),
+     wompiCheckoutUrl: data.wompiCheckoutUrl,
+     wompiPaymentReference: data.wompiPaymentReference,
+     wompiAmountCOP: data.wompiAmountCOP,
+   };
+ }
+ 
+ export async function getProsavisCleaningWompiCheckoutUrl(amountCOP: number): Promise<{
+   url: string;
+   reference: string | null;
+   amountInCents: number;
+diff --git a/src/utils/conversationHistory.test.ts b/src/utils/conversationHistory.test.ts
+index 9b17f8b..efea1d0 100644
+--- a/src/utils/conversationHistory.test.ts
++++ b/src/utils/conversationHistory.test.ts
+@@ -23,20 +23,39 @@ describe('buildMergedTurns', () => {
+   it('merges consecutive same-role turns', () => {
+     const turns: ConversationTurn[] = [
+       { role: 'user', text: 'Hola' },
+       { role: 'user', text: '┬┐Precios?' },
+       { role: 'bot', text: 'Desde 80k' },
+     ];
+     const merged = buildMergedTurns(turns);
+     expect(merged).toHaveLength(2);
+     expect(merged[0].text).toBe('Hola\n┬┐Precios?');
+   });
++
++  it('preserves the newest valid timestamp when a merged turn has an invalid timestamp', () => {
++    const turns: ConversationTurn[] = [
++      {
++        role: 'user',
++        text: 'Primero',
++        createdAt: '2026-08-05T10:00:00.000Z',
++      },
++      {
++        role: 'user',
++        text: 'Segundo',
++        createdAt: 'invalid',
++      },
++    ];
++
++    expect(buildMergedTurns(turns)[0]?.createdAt).toBe(
++      '2026-08-05T10:00:00.000Z',
++    );
++  });
+ });
+ 
+ describe('applyTranscriptCharBudget', () => {
+   it('keeps full transcript under budget', () => {
+     const merged: ConversationTurn[] = [
+       { role: 'user', text: 'hola', createdAt: '2026-01-01T00:00:00Z' },
+       { role: 'bot', text: 'ok', createdAt: '2026-01-01T00:01:00Z' },
+     ];
+     const result = applyTranscriptCharBudget(merged, 1000);
+     expect(result.truncated).toBe(false);
+diff --git a/src/utils/inboxAiContextFormat.test.ts b/src/utils/inboxAiContextFormat.test.ts
+index 0045c44..1b78df5 100644
+--- a/src/utils/inboxAiContextFormat.test.ts
++++ b/src/utils/inboxAiContextFormat.test.ts
+@@ -277,20 +277,47 @@ describe('groundBookingPayment', () => {
+             scheduledDate: '2026-08-10T14:00:00.000Z',
+           },
+         ],
+       },
+       '2026-08-05T12:00:00.000Z',
+     );
+ 
+     expect(grounded.paymentStatus).toBe('none');
+     expect(grounded.paymentAmount).toBeNull();
+   });
++
++  it('does not borrow payment data from a later appointment', () => {
++    const grounded = groundBookingPayment(
++      {
++        paymentStatus: 'APPROVED',
++        paymentAmount: 999_999,
++      },
++      {
++        appointments: [
++          {
++            id: 'closest-without-payment',
++            scheduledDate: '2026-08-10T14:00:00.000Z',
++          },
++          {
++            id: 'later-paid',
++            scheduledDate: '2026-08-20T14:00:00.000Z',
++            paymentStatus: 'PAGO_ACEPTADO',
++            totalAmount: 118_000,
++          },
++        ],
++      },
++      '2026-08-05T12:00:00.000Z',
++    );
++
++    expect(grounded.paymentStatus).toBe('none');
++    expect(grounded.paymentAmount).toBeNull();
++  });
+ });
+ 
+ describe('mapInboxAiAppointmentPayment', () => {
+   it('maps Firestore payment fields without trusting incompatible values', () => {
+     expect(
+       mapInboxAiAppointmentPayment({
+         paymentStatus: 'PAGO_ACEPTADO',
+         totalAmount: '88000',
+         paymentMethod: 'WOMPI',
+         wompiReference: 'APPT-123',
+diff --git a/src/utils/whatsappTemplateSuggestions.ts b/src/utils/whatsappTemplateSuggestions.ts
+index 0f5ca10..20a870d 100644
+--- a/src/utils/whatsappTemplateSuggestions.ts
++++ b/src/utils/whatsappTemplateSuggestions.ts
+@@ -1,27 +1,31 @@
+ import type {
+   BookingContextData,
+   WhatsAppMessage,
+   WhatsAppTemplateSummary,
+ } from '@/services/whatsappService';
+ import {
+   countSlotsForTemplate,
+   getExampleValues,
+ } from './whatsappTemplateHelpers';
+-
+-const META_SESSION_WINDOW_MS = 24 * 60 * 60 * 1000;
++import {
++  buildMetaSessionWindow,
++  getMetaSessionWindow,
++  type MetaSessionWindow,
++} from '../../supabase/functions/_shared/metaSessionWindow';
+ 
+ export interface WhatsAppTemplateSuggestionContext {
+   bookingContext: BookingContextData;
+   conversationDisplayName?: string;
+   lastInboundAt: Date | null;
+   lastMessageDirection?: 'inbound' | 'outbound';
++  sessionWindow?: MetaSessionWindow | null;
+ }
+ 
+ export interface WhatsAppTemplateSuggestion {
+   template: WhatsAppTemplateSummary;
+   reason: string;
+   headerValues: string[];
+   bodyValues: string[];
+   sessionExpired: boolean;
+ }
+ 
+@@ -41,48 +45,48 @@ const WARM_LEAD_PRIORITY = [
+ ];
+ 
+ const COLD_OUTREACH_PRIORITY = [
+   'outreach_intro_prosavis',
+   'outreach_invitacion_agendar',
+   'outreach_respuesta_si_quiere_precios',
+   'welcome_greeting',
+ ];
+ 
+ export function getLastInboundAt(messages: WhatsAppMessage[]): Date | null {
+-  const inbound = [...messages]
+-    .reverse()
+-    .find((message) => message.direction === 'inbound' && message.createdAt);
+-  return inbound?.createdAt ?? null;
++  const sessionWindow = buildMetaSessionWindow(messages);
++  return sessionWindow.lastInboundAt
++    ? new Date(sessionWindow.lastInboundAt)
++    : null;
+ }
+ 
+ export function isWithinMetaSessionWindow(lastInboundAt: Date | null, now = new Date()): boolean {
+-  if (!lastInboundAt) return false;
+-  const age = now.getTime() - lastInboundAt.getTime();
+-  return age >= 0 && age <= META_SESSION_WINDOW_MS;
++  return getMetaSessionWindow(lastInboundAt, now).status === 'open';
+ }
+ 
+ export function filterApprovedSpanishTemplates(
+   templates: WhatsAppTemplateSummary[],
+ ): WhatsAppTemplateSummary[] {
+   const approved = templates.filter((template) => template.status === 'APPROVED');
+   const esCo = approved.filter((template) => template.language === 'es_CO');
+   const esAny = approved.filter(
+     (template) => typeof template.language === 'string' && template.language.startsWith('es'),
+   );
+   return esCo.length ? esCo : esAny.length ? esAny : approved;
+ }
+ 
+ export function selectWhatsAppTemplateSuggestion(
+   templates: WhatsAppTemplateSummary[],
+   context: WhatsAppTemplateSuggestionContext,
+ ): WhatsAppTemplateSuggestion | null {
+-  const sessionExpired = !isWithinMetaSessionWindow(context.lastInboundAt);
++  const sessionWindow =
++    context.sessionWindow ?? getMetaSessionWindow(context.lastInboundAt);
++  const sessionExpired = sessionWindow.requiresTemplate;
+   if (!sessionExpired) return null;
+ 
+   const availableTemplates = filterApprovedSpanishTemplates(templates);
+   const byName = new Map(availableTemplates.map((template) => [template.name, template]));
+   const isReturningClient = context.bookingContext.clientInfo.isReturningClient;
+   const hasUsefulThread = Boolean(context.lastInboundAt || context.lastMessageDirection);
+ 
+   const priorities = isReturningClient
+     ? RETURNING_CLIENT_PRIORITY
+     : hasUsefulThread
+diff --git a/supabase/functions/_shared/conversationHistory.ts b/supabase/functions/_shared/conversationHistory.ts
+index 4776c25..6c7a973 100644
+--- a/supabase/functions/_shared/conversationHistory.ts
++++ b/supabase/functions/_shared/conversationHistory.ts
+@@ -98,26 +98,32 @@ export async function getConversationHistoryWithMeta(
+ export function buildMergedTurns(turns: ConversationTurn[]): ConversationTurn[] {
+   const firstUserIdx = turns.findIndex((t) => t.role === 'user' && t.text.trim());
+   if (firstUserIdx === -1) return [];
+   const sliced = turns.slice(firstUserIdx).filter((t) => t.text.trim());
+   const merged: ConversationTurn[] = [];
+   for (const t of sliced) {
+     const text = t.text.trim();
+     const last = merged[merged.length - 1];
+     if (last && last.role === t.role) {
+       last.text = `${last.text}\n${text}`;
+-      if (t.createdAt) last.createdAt = t.createdAt;
++      if (t.createdAt && Number.isFinite(new Date(t.createdAt).getTime())) {
++        last.createdAt = t.createdAt;
++      }
+     } else {
++      const createdAt =
++        t.createdAt && Number.isFinite(new Date(t.createdAt).getTime())
++          ? t.createdAt
++          : null;
+       merged.push({
+         role: t.role,
+         text,
+-        ...(t.createdAt ? { createdAt: t.createdAt } : {}),
++        ...(createdAt ? { createdAt } : {}),
+       });
+     }
+   }
+   return merged;
+ }
+ 
+ /** Formatea createdAt ISO a etiqueta corta en America/Bogota. */
+ export function formatTurnTimestamp(iso: string): string {
+   const d = new Date(iso);
+   if (Number.isNaN(d.getTime())) return iso;
+diff --git a/supabase/functions/_shared/inboxAiContextFormat.ts b/supabase/functions/_shared/inboxAiContextFormat.ts
+index 6562223..3f62e41 100644
+--- a/supabase/functions/_shared/inboxAiContextFormat.ts
++++ b/supabase/functions/_shared/inboxAiContextFormat.ts
+@@ -529,28 +529,27 @@ export function groundBookingPayment<
+   bookingContext: T,
+   ctx: Pick<InboxAiContextSlice, 'appointments'>,
+   nowIso = new Date().toISOString(),
+ ): GroundedBookingPayment<T> {
+   const now = new Date(nowIso).getTime();
+   const closest = ctx.appointments
+     .filter((appointment) => isRelevantUpcomingAppointment(appointment, now))
+     .sort(
+       (a, b) =>
+         new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime(),
+-    )
+-    .find(
+-      (appointment) =>
+-        normalizeAppointmentPaymentStatus(appointment.paymentStatus) != null ||
+-        (appointment.totalAmount != null && Number.isFinite(appointment.totalAmount)),
+-    );
++    )[0];
+ 
+-  if (!closest) {
++  const hasAuthoritativePayment =
++    closest != null &&
++    (normalizeAppointmentPaymentStatus(closest.paymentStatus) != null ||
++      (closest.totalAmount != null && Number.isFinite(closest.totalAmount)));
++  if (!closest || !hasAuthoritativePayment) {
+     return {
+       ...bookingContext,
+       paymentStatus: 'none',
+       paymentAmount: null,
+     };
+   }
+ 
+   return {
+     ...bookingContext,
+     paymentStatus:
+diff --git a/supabase/functions/get-whatsapp-booking-context/index.ts b/supabase/functions/get-whatsapp-booking-context/index.ts
+index 04b56d2..faf077c 100644
+--- a/supabase/functions/get-whatsapp-booking-context/index.ts
++++ b/supabase/functions/get-whatsapp-booking-context/index.ts
+@@ -36,20 +36,21 @@ Deno.serve(async (req) => {
+       }
+       throw err;
+     }
+ 
+     const inferredBookingContext = await geminiGenerateJson<Record<string, unknown>>({
+       apiKey,
+       prompt:
+         'Analiza esta conversaci├│n de WhatsApp de Prosavis y responde SOLO JSON con stage, collectedData, ' +
+         'missingData, availableSlots, paymentStatus, paymentAmount, wantsKit, clientInfo. ' +
+         'Devuelve collectedData.duration en minutos usando solo una duraci├│n oficial del cat├ílogo y wantsKit como booleano. ' +
++        'No inventes availableSlots: d├®jalo vac├¡o salvo que el contexto incluya disponibilidad confirmada. ' +
+         'No devuelvas precios ni links de pago; esos valores se resuelven en c├│digo. ' +
+         'Usa el perfil CRM y citas Firestore como fuente de verdad cuando existan; no inventes citas. ' +
+         `Tel├®fono: ${ctx.phone}\n\n${ctx.formattedBlock}`,
+     }).catch(() => ({}));
+ 
+     const groundedPaymentContext = groundBookingPayment(inferredBookingContext, ctx);
+     const {
+       bookingContext: pricedBookingContext,
+       wompiCheckoutUrl,
+       wompiPaymentReference,
+diff --git a/supabase/functions/suggest-whatsapp-agent-reply/index.ts b/supabase/functions/suggest-whatsapp-agent-reply/index.ts
+index 1604eb0..cdb1f97 100644
+--- a/supabase/functions/suggest-whatsapp-agent-reply/index.ts
++++ b/supabase/functions/suggest-whatsapp-agent-reply/index.ts
+@@ -76,20 +76,21 @@ Deno.serve(async (req) => {
+     );
+ 
+     // ÔöÇÔöÇÔöÇ Booking Context ÔöÇÔöÇÔöÇ
+     const inferredBookingContext = await geminiGenerateJson<Record<string, unknown>>({
+       apiKey,
+       prompt:
+         'Analiza esta conversaci├│n de WhatsApp de Prosavis (limpieza en Colombia) y responde SOLO JSON con ' +
+         'stage, collectedData {date,time,duration,address,addressSource}, missingData[], availableSlots[], ' +
+         'paymentStatus, paymentAmount, wantsKit, clientInfo {name,phone,email,address,city,isReturningClient,userId}. ' +
+         'Devuelve duration en minutos usando solo una duraci├│n oficial del cat├ílogo y wantsKit como booleano. ' +
++        'No inventes availableSlots: d├®jalo vac├¡o salvo que el contexto incluya disponibilidad confirmada. ' +
+         'No devuelvas precios ni links de pago; esos valores se resuelven en c├│digo. ' +
+         'Usa el perfil CRM y citas como fuente de verdad cuando existan; no inventes citas. ' +
+         'SEGURIDAD: si el cliente dice que a la hora H se va / no habr├í nadie, pon collectedData.time una hora ANTES ' +
+         '(p. ej. se van a las 08:00 ÔåÆ time "07:00"), nunca H exacta cuando la casa quedar├¡a sola. ' +
+         `Tel├®fono cliente: ${ctx.phone}\n\n${ctx.formattedBlock}`,
+     }).catch(() => ({}));
+ 
+     const groundedPaymentContext = groundBookingPayment(inferredBookingContext, ctx);
+     const {
+       bookingContext: pricedBookingContext,
+diff --git a/src/services/whatsappService.types.test.ts b/src/services/whatsappService.types.test.ts
+new file mode 100644
+index 0000000..41e48fa
+--- /dev/null
++++ b/src/services/whatsappService.types.test.ts
+@@ -0,0 +1,34 @@
++import { describe, expect, it } from 'vitest';
++import type { MetaSessionWindow } from '../../supabase/functions/_shared/metaSessionWindow';
++import type {
++  BookingContextResult,
++  SuggestReplyResult,
++} from './whatsappService';
++
++const sessionWindow: MetaSessionWindow = {
++  status: 'closed',
++  lastInboundAt: '2026-08-04T12:00:00.000Z',
++  expiresAt: '2026-08-05T12:00:00.000Z',
++  requiresTemplate: true,
++};
++
++describe('Inbox AI response contracts', () => {
++  it('exposes sessionWindow from suggestion responses', () => {
++    const result: SuggestReplyResult = {
++      suggestion: null,
++      lastMessageIsOutbound: true,
++      sessionWindow,
++    };
++
++    expect(result.sessionWindow).toEqual(sessionWindow);
++  });
++
++  it('exposes sessionWindow from booking context responses', () => {
++    const result: BookingContextResult = {
++      bookingContext: null,
++      sessionWindow,
++    };
++
++    expect(result.sessionWindow.requiresTemplate).toBe(true);
++  });
++});

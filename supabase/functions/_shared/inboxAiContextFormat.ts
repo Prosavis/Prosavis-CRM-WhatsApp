@@ -516,12 +516,72 @@ function isRelevantUpcomingAppointment(
   return !status || !['CANCELLED', 'CANCELED', 'REJECTED'].includes(status);
 }
 
+function bookingTargetString(
+  collectedData: Record<string, unknown> | null,
+  field: 'date' | 'time' | 'address',
+): string | null {
+  const value = collectedData?.[field];
+  if (typeof value !== 'string') return null;
+  return value.trim() || null;
+}
+
+function appointmentBogotaDateTime(
+  scheduledDate: string,
+): { date: string; time: string } | null {
+  const parsed = new Date(scheduledDate);
+  if (!Number.isFinite(parsed.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: BOGOTA_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(parsed);
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? '';
+  return {
+    date: `${value('year')}-${value('month')}-${value('day')}`,
+    time: `${value('hour')}:${value('minute')}`,
+  };
+}
+
+function appointmentMatchesBookingTarget(
+  appointment: InboxAiAppointment,
+  target: { date: string | null; time: string | null; address: string | null },
+): boolean {
+  const scheduled = appointmentBogotaDateTime(appointment.scheduledDate);
+  if (target.date && (!scheduled || scheduled.date !== target.date)) return false;
+  if (target.time && (!scheduled || scheduled.time !== target.time)) return false;
+  if (target.address) {
+    const targetAddress = normalizeAddressKey(target.address);
+    const appointmentAddress = normalizeAddressKey(appointment.address);
+    if (!targetAddress || !appointmentAddress || targetAddress !== appointmentAddress) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function hasAuthoritativeAppointmentPayment(
+  appointment: InboxAiAppointment,
+): boolean {
+  return (
+    normalizeAppointmentPaymentStatus(appointment.paymentStatus) != null ||
+    (appointment.totalAmount != null &&
+      Number.isFinite(appointment.totalAmount) &&
+      appointment.totalAmount > 0)
+  );
+}
+
 /**
- * Sustituye afirmaciones de pago inferidas por datos reales de la cita próxima
- * más cercana. Sin datos autoritativos elimina estado y monto inventados.
+ * Sustituye afirmaciones de pago inferidas por la cita que corresponde a la
+ * reserva conversada. Sin objetivo explícito usa la cita próxima más cercana.
  */
 export function groundBookingPayment<
   T extends {
+    collectedData?: unknown;
     paymentStatus?: unknown;
     paymentAmount?: unknown;
   },
@@ -531,19 +591,31 @@ export function groundBookingPayment<
   nowIso = new Date().toISOString(),
 ): GroundedBookingPayment<T> {
   const now = new Date(nowIso).getTime();
-  const closest = ctx.appointments
+  const candidates = ctx.appointments
     .filter((appointment) => isRelevantUpcomingAppointment(appointment, now))
     .sort(
       (a, b) =>
         new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime(),
-    )
-    .find(
-      (appointment) =>
-        normalizeAppointmentPaymentStatus(appointment.paymentStatus) != null ||
-        (appointment.totalAmount != null && Number.isFinite(appointment.totalAmount)),
     );
+  const collectedData =
+    typeof bookingContext.collectedData === 'object' &&
+    bookingContext.collectedData !== null &&
+    !Array.isArray(bookingContext.collectedData)
+      ? bookingContext.collectedData as Record<string, unknown>
+      : null;
+  const target = {
+    date: bookingTargetString(collectedData, 'date'),
+    time: bookingTargetString(collectedData, 'time'),
+    address: bookingTargetString(collectedData, 'address'),
+  };
+  const hasExplicitTarget = Boolean(target.date || target.time || target.address);
+  const appointment = hasExplicitTarget
+    ? candidates
+        .filter((candidate) => appointmentMatchesBookingTarget(candidate, target))
+        .find(hasAuthoritativeAppointmentPayment)
+    : candidates[0];
 
-  if (!closest) {
+  if (!appointment || !hasAuthoritativeAppointmentPayment(appointment)) {
     return {
       ...bookingContext,
       paymentStatus: 'none',
@@ -554,10 +626,12 @@ export function groundBookingPayment<
   return {
     ...bookingContext,
     paymentStatus:
-      normalizeAppointmentPaymentStatus(closest.paymentStatus) ?? 'none',
+      normalizeAppointmentPaymentStatus(appointment.paymentStatus) ?? 'none',
     paymentAmount:
-      closest.totalAmount != null && Number.isFinite(closest.totalAmount)
-        ? closest.totalAmount
+      appointment.totalAmount != null &&
+      Number.isFinite(appointment.totalAmount) &&
+      appointment.totalAmount > 0
+        ? appointment.totalAmount
         : null,
   };
 }

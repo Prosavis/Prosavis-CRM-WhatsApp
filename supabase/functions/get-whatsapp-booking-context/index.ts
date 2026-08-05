@@ -43,6 +43,7 @@ Deno.serve(async (req) => {
         'Analiza esta conversación de WhatsApp de Prosavis y responde SOLO JSON con stage, collectedData, ' +
         'missingData, availableSlots, paymentStatus, paymentAmount, wantsKit, clientInfo. ' +
         'Devuelve collectedData.duration en minutos usando solo una duración oficial del catálogo y wantsKit como booleano. ' +
+        'No inventes availableSlots: déjalo vacío salvo que el contexto incluya disponibilidad confirmada. ' +
         'No devuelvas precios ni links de pago; esos valores se resuelven en código. ' +
         'Usa el perfil CRM y citas Firestore como fuente de verdad cuando existan; no inventes citas. ' +
         `Teléfono: ${ctx.phone}\n\n${ctx.formattedBlock}`,

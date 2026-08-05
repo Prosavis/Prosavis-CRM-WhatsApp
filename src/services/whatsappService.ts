@@ -4,6 +4,10 @@ import type { Database } from '@/types/database';
 import type { WhatsAppMetrics } from '@/types/whatsapp';
 import type { NormalizedBookingContext } from '../../supabase/functions/_shared/bookingContext';
 import {
+  getMetaSessionWindow,
+  type MetaSessionWindow,
+} from '../../supabase/functions/_shared/metaSessionWindow';
+import {
   presenceStateToEntries,
   type WhatsAppPresenceTrackPayload,
 } from '@/utils/whatsappAdminPresence';
@@ -773,6 +777,7 @@ export interface SuggestReplyResult {
   lastMessageIsOutbound: boolean;
   hint?: string;
   bookingContext?: BookingContextData;
+  sessionWindow: MetaSessionWindow;
   wompiCheckoutUrl?: string;
   wompiPaymentReference?: string;
   wompiAmountCOP?: number;
@@ -800,6 +805,7 @@ export async function suggestWhatsAppAgentReply(
     lastMessageIsOutbound: data.lastMessageIsOutbound ?? false,
     hint: data.hint,
     bookingContext: data.bookingContext,
+    sessionWindow: data.sessionWindow ?? getMetaSessionWindow(null),
     wompiCheckoutUrl: data.wompiCheckoutUrl,
     wompiPaymentReference: data.wompiPaymentReference,
     wompiAmountCOP: data.wompiAmountCOP,
@@ -808,6 +814,7 @@ export async function suggestWhatsAppAgentReply(
 
 export interface BookingContextResult {
   bookingContext: BookingContextData | null;
+  sessionWindow: MetaSessionWindow;
   wompiCheckoutUrl?: string;
   wompiPaymentReference?: string;
   wompiAmountCOP?: number;
@@ -823,6 +830,7 @@ export async function getWhatsAppBookingContext(
   });
   return {
     bookingContext: data.bookingContext ?? null,
+    sessionWindow: data.sessionWindow ?? getMetaSessionWindow(null),
     wompiCheckoutUrl: data.wompiCheckoutUrl,
     wompiPaymentReference: data.wompiPaymentReference,
     wompiAmountCOP: data.wompiAmountCOP,

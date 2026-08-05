@@ -39,10 +39,13 @@ import {
   countSlotsForTemplate,
 } from '@/utils/whatsappTemplateHelpers';
 import {
-  isWithinMetaSessionWindow,
   selectWhatsAppTemplateSuggestion,
   type WhatsAppTemplateSuggestion,
 } from '@/utils/whatsappTemplateSuggestions';
+import {
+  type MetaSessionWindow,
+} from '../../../supabase/functions/_shared/metaSessionWindow';
+import { useMetaSessionWindow } from '@/hooks/useMetaSessionWindow';
 
 interface BookingAssistantDrawerProps {
   open: boolean;
@@ -63,6 +66,7 @@ interface BookingAssistantDrawerProps {
   conversationDisplayName?: string;
   lastInboundAt?: Date | null;
   lastMessageDirection?: 'inbound' | 'outbound';
+  sessionWindow?: MetaSessionWindow | null;
 }
 
 const STAGE_LABELS: Record<string, string> = {
@@ -118,9 +122,11 @@ const BookingAssistantDrawer: React.FC<BookingAssistantDrawerProps> = ({
   conversationDisplayName,
   lastInboundAt = null,
   lastMessageDirection,
+  sessionWindow = null,
 }) => {
   const activeStep = getActiveStep(bookingContext.stage);
   const { collectedData, missingData, availableSlots, paymentStatus, calculatedPrice, clientInfo } = bookingContext;
+  const effectiveSessionWindow = useMetaSessionWindow(sessionWindow, lastInboundAt);
 
   const [amountInput, setAmountInput] = useState('');
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
@@ -147,7 +153,7 @@ const BookingAssistantDrawer: React.FC<BookingAssistantDrawerProps> = ({
   }, [open, checkoutSyncEpoch, wompiCheckoutUrl, wompiPaymentReference, wompiAmountCOP, calculatedPrice]);
 
   useEffect(() => {
-    if (!open || !wabaId || isWithinMetaSessionWindow(lastInboundAt)) return;
+    if (!open || !wabaId || !effectiveSessionWindow.requiresTemplate) return;
 
     setMetaTemplatesLoading(true);
     setMetaTemplatesError(null);
@@ -159,7 +165,7 @@ const BookingAssistantDrawer: React.FC<BookingAssistantDrawerProps> = ({
         setMetaTemplates([]);
       })
       .finally(() => setMetaTemplatesLoading(false));
-  }, [lastInboundAt, open, wabaId]);
+  }, [effectiveSessionWindow.requiresTemplate, open, wabaId]);
 
   const templateSuggestion: WhatsAppTemplateSuggestion | null = useMemo(
     () =>
@@ -168,10 +174,12 @@ const BookingAssistantDrawer: React.FC<BookingAssistantDrawerProps> = ({
         conversationDisplayName,
         lastInboundAt,
         lastMessageDirection,
+        sessionWindow: effectiveSessionWindow,
       }),
     [
       bookingContext,
       conversationDisplayName,
+      effectiveSessionWindow,
       lastInboundAt,
       lastMessageDirection,
       metaTemplates,
@@ -316,8 +324,15 @@ const BookingAssistantDrawer: React.FC<BookingAssistantDrawerProps> = ({
       conversationDisplayName,
       lastInboundAt,
       lastMessageDirection,
+      sessionWindow: effectiveSessionWindow,
     }),
-    [bookingContext, conversationDisplayName, lastInboundAt, lastMessageDirection],
+    [
+      bookingContext,
+      conversationDisplayName,
+      effectiveSessionWindow,
+      lastInboundAt,
+      lastMessageDirection,
+    ],
   );
 
   return (

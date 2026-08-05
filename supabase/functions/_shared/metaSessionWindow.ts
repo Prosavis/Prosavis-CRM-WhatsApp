@@ -53,6 +53,26 @@ export function getMetaSessionWindow(
   };
 }
 
+export function resolveMetaSessionWindow(params: {
+  snapshot?: MetaSessionWindow | null;
+  lastInboundAt?: TimestampInput;
+  now?: TimestampInput;
+}): MetaSessionWindow {
+  const snapshotMillis = timestampMillis(params.snapshot?.lastInboundAt);
+  const currentInboundMillis = timestampMillis(params.lastInboundAt);
+  const newestInboundMillis =
+    snapshotMillis == null
+      ? currentInboundMillis
+      : currentInboundMillis == null
+        ? snapshotMillis
+        : Math.max(snapshotMillis, currentInboundMillis);
+
+  return getMetaSessionWindow(
+    newestInboundMillis == null ? null : new Date(newestInboundMillis),
+    params.now,
+  );
+}
+
 export function buildMetaSessionWindow(
   messages: readonly MetaSessionMessage[],
   now: TimestampInput = new Date(),
