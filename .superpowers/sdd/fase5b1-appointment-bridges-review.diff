@@ -1,0 +1,1959 @@
+﻿1d2dc3c style: normalize bridge file ending
+022aef0 feat: add CRM appointment bridges
+ .../calendar/appointmentCanonicalHandlers.test.ts  |  23 +
+ functions/src/calendar/createAppointment.ts        |  28 +-
+ .../src/calendar/crmAppointmentBridgeFunctions.ts  | 112 ++++
+ .../src/calendar/crmAppointmentBridges.test.ts     | 469 +++++++++++++++
+ functions/src/calendar/crmAppointmentBridges.ts    | 631 +++++++++++++++++++++
+ functions/src/calendar/crmBridgeHttp.ts            |  36 ++
+ functions/src/calendar/crmGetAvailableSlots.ts     |  44 +-
+ functions/src/calendar/crmRescheduleAppointment.ts |  27 +-
+ functions/src/calendar/getAvailableSlots.test.ts   |  38 +-
+ functions/src/calendar/getAvailableSlots.ts        |  66 ++-
+ functions/src/index.ts                             |   4 +
+ 11 files changed, 1421 insertions(+), 57 deletions(-)
+diff --git a/functions/src/calendar/appointmentCanonicalHandlers.test.ts b/functions/src/calendar/appointmentCanonicalHandlers.test.ts
+new file mode 100644
+index 0000000..0c16cfe
+--- /dev/null
++++ b/functions/src/calendar/appointmentCanonicalHandlers.test.ts
+@@ -0,0 +1,23 @@
++import { HttpsError } from 'firebase-functions/v2/https';
++import { handleCreateAppointment } from './createAppointment';
++import { handleCrmRescheduleAppointmentCore } from './crmRescheduleAppointment';
++
++jest.mock('../crm/professionalDayStatus', () => ({
++  assertProviderActiveOnDate: jest.fn(),
++}));
++
++describe('canonical appointment handlers', () => {
++  test.each([
++    ['createAppointment', handleCreateAppointment],
++    ['crmRescheduleAppointment', handleCrmRescheduleAppointmentCore],
++  ])('%s preserves callable authentication', async (_name, handler) => {
++    const promise = handler(
++      { auth: undefined, data: {} } as never
++    );
++
++    await expect(promise).rejects.toBeInstanceOf(HttpsError);
++    await expect(promise).rejects.toMatchObject({
++      code: 'unauthenticated',
++    });
++  });
++});
+diff --git a/functions/src/calendar/createAppointment.ts b/functions/src/calendar/createAppointment.ts
+index f8c2ef2..12f5448 100644
+--- a/functions/src/calendar/createAppointment.ts
++++ b/functions/src/calendar/createAppointment.ts
+@@ -1,19 +1,23 @@
+ import {
+   FieldValue,
+   GeoPoint,
+   getFirestore,
+   Timestamp,
+   type Firestore,
+ } from 'firebase-admin/firestore';
+ import { logger } from 'firebase-functions/v2';
+-import { HttpsError, onCall } from 'firebase-functions/v2/https';
++import {
++  CallableRequest,
++  HttpsError,
++  onCall,
++} from 'firebase-functions/v2/https';
+ import { defineSecret } from 'firebase-functions/params';
+ import { allowsOverlap } from '../config/serviceExceptions';
+ import {
+   getPriceForDuration,
+   PROSAVIS_CLEANING_PROFESSIONAL_KIT_ADDON_COP,
+   PROSAVIS_LIMPIEZA_SERVICE_ID,
+ } from '../constants/pricing';
+ import {
+   Appointment,
+   AppointmentPaymentStatus,
+@@ -136,27 +140,30 @@ async function canBypassProsavisOfficialCleaningPriceMatch(
+ 
+   const teamMemberSnap = await db
+     .collection('services')
+     .doc(serviceId)
+     .collection('teamMembers')
+     .doc(providerId)
+     .get();
+   return teamMemberSnap.exists;
+ }
+ 
++export type AppointmentExecutionOrigin = 'callable' | 'crm_bridge';
++
+ /**
+- * Cloud Function para crear una nueva cita
+- * Valida disponibilidad y previene overbooking mediante transacciones
++ * Handler can├│nico para crear una nueva cita.
++ * El origen interno no concede bypasses; solo identifica la invocaci├│n.
+  */
+-export const createAppointment = onCall(
+-  { region: 'us-central1', secrets: [supabaseServiceRoleKey, googleMapsApiKey] },
+-  async (request) => {
++export async function handleCreateAppointment(
++  request: CallableRequest<unknown>,
++  origin: AppointmentExecutionOrigin = 'callable'
++) {
+     // Verificar autenticaci├│n
+     if (!request.auth) {
+       throw new HttpsError(
+         'unauthenticated',
+         'Debes iniciar sesi├│n para crear una cita'
+       );
+     }
+ 
+     const userId = request.auth.uid;
+     const callerEmail = await resolveCallerEmail(
+@@ -1349,21 +1356,21 @@ export const createAppointment = onCall(
+           }
+         );
+         throw new HttpsError(
+           'internal',
+           'Error al crear la cita: el documento no se guard├│ correctamente'
+         );
+       }
+ 
+       logger.info('Ô£à Verificaci├│n: Documento existe en Firestore', {
+         appointmentId: result.appointmentId,
+-        documentData: verifyDoc.data(),
++        ...(origin === 'callable' ? { documentData: verifyDoc.data() } : {}),
+       });
+ 
+       if (resolvedCrmPricing?.discountCodeId) {
+         try {
+           await redeemDiscountCodeOnce(db, resolvedCrmPricing.discountCodeId, {
+             appointmentId: result.appointmentId,
+             userId,
+           });
+         } catch (redeemErr) {
+           logger.error('No se pudo redimir c├│digo de descuento tras crear cita', {
+@@ -1422,11 +1429,18 @@ export const createAppointment = onCall(
+         );
+       }
+ 
+       const msg =
+         typeof error?.message === 'string' && error.message.trim().length > 0
+           ? `Error al crear la cita: ${error.message}`
+           : 'Error al crear la cita. Por favor intenta nuevamente.';
+       throw new HttpsError('internal', msg);
+     }
+   }
++
++/**
++ * Cloud Function callable existente. Conserva auth, contrato y configuraci├│n.
++ */
++export const createAppointment = onCall(
++  { region: 'us-central1', secrets: [supabaseServiceRoleKey, googleMapsApiKey] },
++  (request) => handleCreateAppointment(request)
+ );
+diff --git a/functions/src/calendar/crmAppointmentBridgeFunctions.ts b/functions/src/calendar/crmAppointmentBridgeFunctions.ts
+new file mode 100644
+index 0000000..e8e9ca3
+--- /dev/null
++++ b/functions/src/calendar/crmAppointmentBridgeFunctions.ts
+@@ -0,0 +1,112 @@
++import { getFirestore } from 'firebase-admin/firestore';
++import { defineSecret } from 'firebase-functions/params';
++import {
++  CallableRequest,
++  HttpsError,
++  onRequest,
++} from 'firebase-functions/v2/https';
++import {
++  createCrmBridgeIdempotencyRunner,
++  CrmBridgeIdempotencyRunner,
++  FirestoreCrmBridgeActionStore,
++  handleCrmCreateAppointment,
++  handleCrmRescheduleAppointment,
++} from './crmAppointmentBridges';
++import { handleCreateAppointment } from './createAppointment';
++import { handleCrmRescheduleAppointmentCore } from './crmRescheduleAppointment';
++import { resolveAvailableProviderForExactSlot } from './getAvailableSlots';
++
++const CRM_BRIDGE_ACTOR_UID = 'crm-ai-bridge';
++const firebaseCrmBridgeSecret = defineSecret('FIREBASE_CRM_BRIDGE_SECRET');
++const supabaseServiceRoleKey = defineSecret('SUPABASE_SERVICE_ROLE_KEY');
++const googleMapsApiKey = defineSecret('GOOGLE_MAPS_API_KEY');
++
++function syntheticCallableRequest(data: unknown): CallableRequest<unknown> {
++  return {
++    auth: {
++      uid: CRM_BRIDGE_ACTOR_UID,
++      token: {},
++    },
++    data,
++  } as CallableRequest<unknown>;
++}
++
++function productionIdempotencyRunner(): CrmBridgeIdempotencyRunner {
++  return createCrmBridgeIdempotencyRunner(
++    new FirestoreCrmBridgeActionStore(getFirestore())
++  );
++}
++
++export const crmCreateAppointment = onRequest(
++  {
++    region: 'us-central1',
++    secrets: [
++      firebaseCrmBridgeSecret,
++      supabaseServiceRoleKey,
++      googleMapsApiKey,
++    ],
++    cors: false,
++  },
++  async (req, res) => {
++    const result = await handleCrmCreateAppointment(
++      {
++        method: req.method,
++        secretHeader: req.get('x-crm-secret') ?? undefined,
++        body: req.body,
++      },
++      {
++        expectedSecret: firebaseCrmBridgeSecret.value(),
++        runIdempotent: productionIdempotencyRunner(),
++        resolveProvider: resolveAvailableProviderForExactSlot,
++        createAppointment: async ({ data, origin }) =>
++          handleCreateAppointment(syntheticCallableRequest(data), origin),
++      }
++    );
++    if (result.status === 405) res.set('Allow', 'POST');
++    res.status(result.status).json(result.body);
++  }
++);
++
++export const crmRescheduleAppointmentHttp = onRequest(
++  {
++    region: 'us-central1',
++    secrets: [firebaseCrmBridgeSecret, supabaseServiceRoleKey],
++    cors: false,
++  },
++  async (req, res) => {
++    const db = getFirestore();
++    const result = await handleCrmRescheduleAppointment(
++      {
++        method: req.method,
++        secretHeader: req.get('x-crm-secret') ?? undefined,
++        body: req.body,
++      },
++      {
++        expectedSecret: firebaseCrmBridgeSecret.value(),
++        runIdempotent: productionIdempotencyRunner(),
++        getAppointmentContext: async (appointmentId) => {
++          const snapshot = await db
++            .collection('appointments')
++            .doc(appointmentId)
++            .get();
++          if (!snapshot.exists) {
++            throw new HttpsError('not-found', 'Cita no encontrada');
++          }
++          const data = snapshot.data()!;
++          return {
++            serviceId: String(data.serviceId ?? ''),
++            duration: Number(data.duration),
++          };
++        },
++        resolveProvider: resolveAvailableProviderForExactSlot,
++        rescheduleAppointment: async ({ data, origin }) =>
++          handleCrmRescheduleAppointmentCore(
++            syntheticCallableRequest(data),
++            origin
++          ),
++      }
++    );
++    if (result.status === 405) res.set('Allow', 'POST');
++    res.status(result.status).json(result.body);
++  }
++);
+diff --git a/functions/src/calendar/crmAppointmentBridges.test.ts b/functions/src/calendar/crmAppointmentBridges.test.ts
+new file mode 100644
+index 0000000..f6fed19
+--- /dev/null
++++ b/functions/src/calendar/crmAppointmentBridges.test.ts
+@@ -0,0 +1,469 @@
++import { Timestamp } from 'firebase-admin/firestore';
++import { HttpsError } from 'firebase-functions/v2/https';
++import {
++  createCrmBridgeIdempotencyRunner,
++  CrmBridgeActionRecord,
++  CrmBridgeActionStore,
++  CrmBridgeIdempotencyRunner,
++  handleCrmCreateAppointment,
++  handleCrmRescheduleAppointment,
++  validateCrmCreateAppointmentRequest,
++  validateCrmRescheduleAppointmentRequest,
++} from './crmAppointmentBridges';
++import {
++  APPOINTMENT_PRICES_BY_DURATION,
++  PROSAVIS_CLEANING_PROFESSIONAL_KIT_ADDON_COP,
++  PROSAVIS_LIMPIEZA_SERVICE_ID,
++} from '../constants/pricing';
++
++const VALID_CREATE_BODY = {
++  actionId: '123e4567-e89b-42d3-a456-426614174000',
++  clientId: 'client-123',
++  scheduledDate: '2099-08-06T14:00:00.000Z',
++  duration: 240,
++  address: 'Calle 1 # 2-3',
++  wantsKit: false,
++};
++
++const VALID_RESCHEDULE_BODY = {
++  actionId: '223e4567-e89b-42d3-a456-426614174000',
++  appointmentId: 'appointment-123',
++  scheduledDate: '2099-08-07T14:00:00.000Z',
++};
++
++describe('handleCrmCreateAppointment', () => {
++  test('requires POST and the bridge secret before executing dependencies', async () => {
++    const dependencies = createDependencies();
++
++    await expect(
++      handleCrmCreateAppointment(
++        { method: 'GET', secretHeader: 'bridge-secret', body: VALID_CREATE_BODY },
++        dependencies
++      )
++    ).resolves.toEqual({
++      status: 405,
++      body: { error: 'method_not_allowed' },
++    });
++
++    await expect(
++      handleCrmCreateAppointment(
++        { method: 'POST', secretHeader: 'wrong-secret', body: VALID_CREATE_BODY },
++        dependencies
++      )
++    ).resolves.toEqual({
++      status: 401,
++      body: { error: 'unauthorized' },
++    });
++
++    expect(dependencies.createAppointment).not.toHaveBeenCalled();
++    expect(dependencies.resolveProvider).not.toHaveBeenCalled();
++  });
++
++  test('grounds service, price, kit and a real provider before invoking the canonical core once', async () => {
++    const dependencies = createDependencies();
++    dependencies.resolveProvider.mockResolvedValue('provider-real');
++    dependencies.createAppointment.mockResolvedValue({
++      appointmentId: 'appointment-1',
++      status: 'CONFIRMED',
++      availabilityWarnings: [],
++    });
++
++    const result = await handleCrmCreateAppointment(
++      {
++        method: 'POST',
++        secretHeader: 'bridge-secret',
++        body: { ...VALID_CREATE_BODY, wantsKit: true },
++      },
++      dependencies
++    );
++
++    expect(dependencies.resolveProvider).toHaveBeenCalledTimes(1);
++    expect(dependencies.resolveProvider).toHaveBeenCalledWith({
++      serviceId: PROSAVIS_LIMPIEZA_SERVICE_ID,
++      scheduledDate: new Date(VALID_CREATE_BODY.scheduledDate),
++      duration: VALID_CREATE_BODY.duration,
++    });
++    expect(dependencies.createAppointment).toHaveBeenCalledTimes(1);
++    const canonicalRequest = dependencies.createAppointment.mock.calls[0][0];
++    expect(canonicalRequest.origin).toBe('crm_bridge');
++    expect(canonicalRequest.actorUid).toBe('crm-ai-bridge');
++    expect(canonicalRequest.data).toMatchObject({
++      serviceId: PROSAVIS_LIMPIEZA_SERVICE_ID,
++      providerId: 'provider-real',
++      clientId: VALID_CREATE_BODY.clientId,
++      duration: VALID_CREATE_BODY.duration,
++      price:
++        APPOINTMENT_PRICES_BY_DURATION[VALID_CREATE_BODY.duration] +
++        PROSAVIS_CLEANING_PROFESSIONAL_KIT_ADDON_COP,
++      serviceAddress: { addressLine: VALID_CREATE_BODY.address },
++      isConfirmed: true,
++      includeProfessionalKit: true,
++      sourceChannel: 'crm_ai_bridge',
++      assignedVia: 'auto',
++    });
++    expect(canonicalRequest.data.scheduledDate).toBeInstanceOf(Timestamp);
++    expect(result).toEqual({
++      status: 200,
++      body: {
++        success: true,
++        appointmentId: 'appointment-1',
++        status: 'CONFIRMED',
++        availabilityWarnings: [],
++      },
++    });
++  });
++
++  test('returns the persisted result for sequential and concurrent retries without repeating the core', async () => {
++    const store = new MemoryActionStore();
++    const runner = createCrmBridgeIdempotencyRunner(store, {
++      pollIntervalMs: 1,
++      waitTimeoutMs: 1000,
++    });
++    const dependencies = createDependencies(runner);
++    dependencies.resolveProvider.mockResolvedValue('provider-real');
++    dependencies.createAppointment.mockImplementation(async () => {
++      await new Promise((resolve) => setTimeout(resolve, 20));
++      return {
++        appointmentId: 'appointment-idempotent',
++        status: 'CONFIRMED',
++        availabilityWarnings: [],
++      };
++    });
++    const request = {
++      method: 'POST',
++      secretHeader: 'bridge-secret',
++      body: VALID_CREATE_BODY,
++    };
++
++    const [first, concurrent] = await Promise.all([
++      handleCrmCreateAppointment(request, dependencies),
++      handleCrmCreateAppointment(request, dependencies),
++    ]);
++    const sequential = await handleCrmCreateAppointment(request, dependencies);
++
++    expect(first).toEqual(concurrent);
++    expect(sequential).toEqual(first);
++    expect(dependencies.createAppointment).toHaveBeenCalledTimes(1);
++    expect(dependencies.resolveProvider).toHaveBeenCalledTimes(1);
++  });
++
++  test('rejects actionId reuse with another payload and persists an unequivocal failed state', async () => {
++    const store = new MemoryActionStore();
++    const runner = createCrmBridgeIdempotencyRunner(store, {
++      pollIntervalMs: 1,
++      waitTimeoutMs: 100,
++    });
++    const dependencies = createDependencies(runner);
++    dependencies.resolveProvider.mockResolvedValue('provider-real');
++    dependencies.createAppointment.mockRejectedValue(
++      new Error('sensitive canonical failure')
++    );
++    const request = {
++      method: 'POST',
++      secretHeader: 'bridge-secret',
++      body: VALID_CREATE_BODY,
++    };
++
++    await expect(
++      handleCrmCreateAppointment(request, dependencies)
++    ).resolves.toEqual({
++      status: 500,
++      body: { error: 'internal' },
++    });
++    await expect(
++      handleCrmCreateAppointment(request, dependencies)
++    ).resolves.toEqual({
++      status: 409,
++      body: { error: 'action_failed' },
++    });
++    await expect(
++      handleCrmCreateAppointment(
++        {
++          ...request,
++          body: { ...VALID_CREATE_BODY, address: 'Otra direcci├│n' },
++        },
++        dependencies
++      )
++    ).resolves.toEqual({
++      status: 409,
++      body: { error: 'action_conflict' },
++    });
++    expect(dependencies.createAppointment).toHaveBeenCalledTimes(1);
++  });
++});
++
++describe('validateCrmCreateAppointmentRequest', () => {
++  test('accepts each official duration and canonical future ISO datetime', () => {
++    for (const duration of [120, 180, 240, 360, 480]) {
++      expect(
++        validateCrmCreateAppointmentRequest({
++          ...VALID_CREATE_BODY,
++          duration,
++        })
++      ).toEqual({
++        ...VALID_CREATE_BODY,
++        duration,
++      });
++    }
++  });
++
++  test.each([
++    [{ ...VALID_CREATE_BODY, actionId: 'not-a-uuid' }, 'actionId'],
++    [{ ...VALID_CREATE_BODY, scheduledDate: '2099-08-06T14:00:00Z' }, 'scheduledDate'],
++    [{ ...VALID_CREATE_BODY, scheduledDate: '2020-08-06T14:00:00.000Z' }, 'futuro'],
++    [{ ...VALID_CREATE_BODY, duration: 60 }, 'duration'],
++    [{ ...VALID_CREATE_BODY, clientId: '' }, 'clientId'],
++    [{ ...VALID_CREATE_BODY, address: '' }, 'address'],
++    [{ ...VALID_CREATE_BODY, wantsKit: 'yes' }, 'wantsKit'],
++    [{ ...VALID_CREATE_BODY, providerId: 'attacker-provider' }, 'providerId'],
++    [{ ...VALID_CREATE_BODY, serviceId: 'attacker-service' }, 'serviceId'],
++    [{ ...VALID_CREATE_BODY, price: 1 }, 'price'],
++    [{ ...VALID_CREATE_BODY, coverageOverride: true }, 'coverageOverride'],
++    [{ ...VALID_CREATE_BODY, allowPastDate: true }, 'allowPastDate'],
++    [{ ...VALID_CREATE_BODY, assignedTeamMemberIds: ['attacker'] }, 'assignedTeamMemberIds'],
++    [{ ...VALID_CREATE_BODY, status: 'COMPLETED' }, 'status'],
++    [{ ...VALID_CREATE_BODY, paymentStatus: 'PAID' }, 'paymentStatus'],
++  ])('rejects invalid or caller-controlled create payload %#', (body, message) => {
++    expect(() => validateCrmCreateAppointmentRequest(body)).toThrow(message);
++  });
++});
++
++describe('handleCrmRescheduleAppointment', () => {
++  test('requires POST and the bridge secret before loading an appointment', async () => {
++    const dependencies = createRescheduleDependencies();
++
++    await expect(
++      handleCrmRescheduleAppointment(
++        {
++          method: 'GET',
++          secretHeader: 'bridge-secret',
++          body: VALID_RESCHEDULE_BODY,
++        },
++        dependencies
++      )
++    ).resolves.toEqual({
++      status: 405,
++      body: { error: 'method_not_allowed' },
++    });
++    await expect(
++      handleCrmRescheduleAppointment(
++        {
++          method: 'POST',
++          secretHeader: 'wrong-secret',
++          body: VALID_RESCHEDULE_BODY,
++        },
++        dependencies
++      )
++    ).resolves.toEqual({
++      status: 401,
++      body: { error: 'unauthorized' },
++    });
++    expect(dependencies.getAppointmentContext).not.toHaveBeenCalled();
++  });
++
++  test('resolves an official-team provider and invokes the canonical core once without caller overrides', async () => {
++    const dependencies = createRescheduleDependencies();
++    dependencies.getAppointmentContext.mockResolvedValue({
++      serviceId: PROSAVIS_LIMPIEZA_SERVICE_ID,
++      duration: 240,
++    });
++    dependencies.resolveProvider.mockResolvedValue('provider-real');
++    dependencies.rescheduleAppointment.mockResolvedValue({
++      success: true,
++      appointmentId: VALID_RESCHEDULE_BODY.appointmentId,
++      availabilityWarnings: [],
++    });
++
++    const result = await handleCrmRescheduleAppointment(
++      {
++        method: 'POST',
++        secretHeader: 'bridge-secret',
++        body: VALID_RESCHEDULE_BODY,
++      },
++      dependencies
++    );
++
++    expect(dependencies.getAppointmentContext).toHaveBeenCalledTimes(1);
++    expect(dependencies.resolveProvider).toHaveBeenCalledTimes(1);
++    expect(dependencies.resolveProvider).toHaveBeenCalledWith({
++      serviceId: PROSAVIS_LIMPIEZA_SERVICE_ID,
++      scheduledDate: new Date(VALID_RESCHEDULE_BODY.scheduledDate),
++      duration: 240,
++      excludeAppointmentId: VALID_RESCHEDULE_BODY.appointmentId,
++    });
++    expect(dependencies.rescheduleAppointment).toHaveBeenCalledTimes(1);
++    const canonicalRequest = dependencies.rescheduleAppointment.mock.calls[0][0];
++    expect(canonicalRequest).toMatchObject({
++      actorUid: 'crm-ai-bridge',
++      origin: 'crm_bridge',
++      data: {
++        appointmentId: VALID_RESCHEDULE_BODY.appointmentId,
++        providerId: 'provider-real',
++        reason: 'Reagendada desde CRM Inbox IA tras confirmaci├│n humana',
++      },
++    });
++    expect(canonicalRequest.data.scheduledDate).toBeInstanceOf(Timestamp);
++    expect(result).toEqual({
++      status: 200,
++      body: {
++        success: true,
++        appointmentId: VALID_RESCHEDULE_BODY.appointmentId,
++        availabilityWarnings: [],
++      },
++    });
++  });
++
++  test('maps missing/final appointments and hidden internal failures without exposing details', async () => {
++    const notFoundDependencies = createRescheduleDependencies();
++    notFoundDependencies.getAppointmentContext.mockRejectedValue(
++      new HttpsError('not-found', 'Cita no encontrada')
++    );
++    await expect(
++      handleCrmRescheduleAppointment(
++        {
++          method: 'POST',
++          secretHeader: 'bridge-secret',
++          body: VALID_RESCHEDULE_BODY,
++        },
++        notFoundDependencies
++      )
++    ).resolves.toEqual({
++      status: 404,
++      body: { error: 'Cita no encontrada' },
++    });
++
++    const finalAppointmentDependencies = createRescheduleDependencies();
++    finalAppointmentDependencies.getAppointmentContext.mockResolvedValue({
++      serviceId: PROSAVIS_LIMPIEZA_SERVICE_ID,
++      duration: 240,
++    });
++    finalAppointmentDependencies.resolveProvider.mockResolvedValue(
++      'provider-real'
++    );
++    finalAppointmentDependencies.rescheduleAppointment.mockRejectedValue(
++      new HttpsError(
++        'failed-precondition',
++        'No se puede reagendar una cita finalizada o cancelada.'
++      )
++    );
++    await expect(
++      handleCrmRescheduleAppointment(
++        {
++          method: 'POST',
++          secretHeader: 'bridge-secret',
++          body: VALID_RESCHEDULE_BODY,
++        },
++        finalAppointmentDependencies
++      )
++    ).resolves.toEqual({
++      status: 409,
++      body: {
++        error: 'No se puede reagendar una cita finalizada o cancelada.',
++      },
++    });
++
++    const failureDependencies = createRescheduleDependencies();
++    failureDependencies.getAppointmentContext.mockRejectedValue(
++      new Error('sensitive firestore failure')
++    );
++    await expect(
++      handleCrmRescheduleAppointment(
++        {
++          method: 'POST',
++          secretHeader: 'bridge-secret',
++          body: VALID_RESCHEDULE_BODY,
++        },
++        failureDependencies
++      )
++    ).resolves.toEqual({
++      status: 500,
++      body: { error: 'internal' },
++    });
++  });
++});
++
++describe('validateCrmRescheduleAppointmentRequest', () => {
++  test('accepts only actionId, appointmentId and canonical future datetime', () => {
++    expect(
++      validateCrmRescheduleAppointmentRequest(VALID_RESCHEDULE_BODY)
++    ).toEqual(VALID_RESCHEDULE_BODY);
++  });
++
++  test.each([
++    [{ ...VALID_RESCHEDULE_BODY, actionId: 'not-v4' }, 'actionId'],
++    [{ ...VALID_RESCHEDULE_BODY, appointmentId: '' }, 'appointmentId'],
++    [{ ...VALID_RESCHEDULE_BODY, scheduledDate: 'not-iso' }, 'scheduledDate'],
++    [{ ...VALID_RESCHEDULE_BODY, providerId: 'invented' }, 'providerId'],
++    [{ ...VALID_RESCHEDULE_BODY, allowPastDate: true }, 'allowPastDate'],
++    [{ ...VALID_RESCHEDULE_BODY, assignedTeamMemberIds: ['invented'] }, 'assignedTeamMemberIds'],
++    [{ ...VALID_RESCHEDULE_BODY, status: 'COMPLETED' }, 'status'],
++    [{ ...VALID_RESCHEDULE_BODY, paymentStatus: 'PAID' }, 'paymentStatus'],
++  ])('rejects invalid or caller-controlled reschedule payload %#', (body, message) => {
++    expect(() => validateCrmRescheduleAppointmentRequest(body)).toThrow(message);
++  });
++});
++
++function createDependencies(
++  runIdempotent: CrmBridgeIdempotencyRunner = jest.fn(
++    async (
++      _actionId: string,
++      _operation: string,
++      _requestHash: string,
++      action: () => Promise<unknown>
++    ) => action()
++  )
++) {
++  return {
++    expectedSecret: 'bridge-secret',
++    runIdempotent,
++    resolveProvider: jest.fn(),
++    createAppointment: jest.fn(),
++  };
++}
++
++class MemoryActionStore implements CrmBridgeActionStore {
++  private readonly records = new Map<string, CrmBridgeActionRecord>();
++
++  async get(actionId: string): Promise<CrmBridgeActionRecord | null> {
++    return this.records.get(actionId) ?? null;
++  }
++
++  async createIfAbsent(
++    actionId: string,
++    record: CrmBridgeActionRecord
++  ): Promise<boolean> {
++    if (this.records.has(actionId)) return false;
++    this.records.set(actionId, record);
++    return true;
++  }
++
++  async setIfLease(
++    actionId: string,
++    leaseToken: string,
++    record: CrmBridgeActionRecord
++  ): Promise<boolean> {
++    const current = this.records.get(actionId);
++    if (!current || current.leaseToken !== leaseToken) return false;
++    this.records.set(actionId, record);
++    return true;
++  }
++}
++
++function createRescheduleDependencies(
++  runIdempotent: CrmBridgeIdempotencyRunner = jest.fn(
++    async (
++      _actionId: string,
++      _operation: string,
++      _requestHash: string,
++      action: () => Promise<unknown>
++    ) => action()
++  )
++) {
++  return {
++    expectedSecret: 'bridge-secret',
++    runIdempotent,
++    getAppointmentContext: jest.fn(),
++    resolveProvider: jest.fn(),
++    rescheduleAppointment: jest.fn(),
++  };
++}
+diff --git a/functions/src/calendar/crmAppointmentBridges.ts b/functions/src/calendar/crmAppointmentBridges.ts
+new file mode 100644
+index 0000000..cd9014b
+--- /dev/null
++++ b/functions/src/calendar/crmAppointmentBridges.ts
+@@ -0,0 +1,631 @@
++import { createHash, randomUUID } from 'crypto';
++import {
++  Firestore,
++  Timestamp,
++} from 'firebase-admin/firestore';
++import { logger } from 'firebase-functions/v2';
++import { HttpsError } from 'firebase-functions/v2/https';
++import {
++  APPOINTMENT_PRICES_BY_DURATION,
++  PROSAVIS_CLEANING_PROFESSIONAL_KIT_ADDON_COP,
++  PROSAVIS_LIMPIEZA_SERVICE_ID,
++} from '../constants/pricing';
++import {
++  crmBridgeClientErrorStatus,
++  crmBridgeSecretsMatch,
++  CrmBridgeHttpResult,
++  CrmBridgeRequest,
++} from './crmBridgeHttp';
++
++const CRM_BRIDGE_ACTOR_UID = 'crm-ai-bridge';
++const CRM_BRIDGE_ACTIONS_COLLECTION = '_crm_bridge_actions';
++const OFFICIAL_DURATIONS = new Set([120, 180, 240, 360, 480]);
++const UUID_V4_PATTERN =
++  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
++const CREATE_FIELDS = new Set([
++  'actionId',
++  'clientId',
++  'scheduledDate',
++  'duration',
++  'address',
++  'wantsKit',
++]);
++const RESCHEDULE_FIELDS = new Set([
++  'actionId',
++  'appointmentId',
++  'scheduledDate',
++]);
++
++export interface CrmBridgeActionRecord {
++  operation: string;
++  requestHash: string;
++  status: 'processing' | 'completed' | 'failed';
++  createdAtMs: number;
++  updatedAtMs: number;
++  leaseToken?: string;
++  result?: unknown;
++}
++export interface CrmBridgeActionStore {
++  get(actionId: string): Promise<CrmBridgeActionRecord | null>;
++  createIfAbsent(
++    actionId: string,
++    record: CrmBridgeActionRecord
++  ): Promise<boolean>;
++  setIfLease(
++    actionId: string,
++    leaseToken: string,
++    record: CrmBridgeActionRecord
++  ): Promise<boolean>;
++}
++
++export class FirestoreCrmBridgeActionStore implements CrmBridgeActionStore {
++  constructor(private readonly db: Firestore) {}
++
++  async get(actionId: string): Promise<CrmBridgeActionRecord | null> {
++    const snapshot = await this.db
++      .collection(CRM_BRIDGE_ACTIONS_COLLECTION)
++      .doc(actionId)
++      .get();
++    if (!snapshot.exists) return null;
++    return snapshot.data() as CrmBridgeActionRecord;
++  }
++
++  async createIfAbsent(
++    actionId: string,
++    record: CrmBridgeActionRecord
++  ): Promise<boolean> {
++    const ref = this.db
++      .collection(CRM_BRIDGE_ACTIONS_COLLECTION)
++      .doc(actionId);
++    return this.db.runTransaction(async (transaction) => {
++      const snapshot = await transaction.get(ref);
++      if (snapshot.exists) return false;
++      transaction.set(ref, record);
++      return true;
++    });
++  }
++
++  async setIfLease(
++    actionId: string,
++    leaseToken: string,
++    record: CrmBridgeActionRecord
++  ): Promise<boolean> {
++    const ref = this.db
++      .collection(CRM_BRIDGE_ACTIONS_COLLECTION)
++      .doc(actionId);
++    return this.db.runTransaction(async (transaction) => {
++      const snapshot = await transaction.get(ref);
++      if (!snapshot.exists || snapshot.data()?.leaseToken !== leaseToken) {
++        return false;
++      }
++      transaction.set(ref, record);
++      return true;
++    });
++  }
++}
++
++interface CrmBridgeIdempotencyOptions {
++  pollIntervalMs?: number;
++  waitTimeoutMs?: number;
++}
++
++export type CrmBridgeIdempotencyRunner = (
++  actionId: string,
++  operation: string,
++  requestHash: string,
++  action: () => Promise<unknown>
++) => Promise<unknown>;
++
++export interface CrmCreateAppointmentRequest {
++  actionId: string;
++  clientId: string;
++  scheduledDate: string;
++  duration: number;
++  address: string;
++  wantsKit: boolean;
++}
++
++interface CanonicalCreateAppointmentRequest {
++  actorUid: string;
++  origin: 'crm_bridge';
++  data: {
++    serviceId: string;
++    serviceTitle: string;
++    providerId: string;
++    clientId: string;
++    scheduledDate: Timestamp;
++    duration: number;
++    price: number;
++    serviceAddress: { addressLine: string };
++    notes: string;
++    isConfirmed: true;
++    includeProfessionalKit: boolean;
++    sourceChannel: string;
++    assignedVia: string;
++  };
++}
++
++interface CanonicalCreateAppointmentResult {
++  appointmentId: string;
++  status: string;
++  availabilityWarnings?: unknown[];
++}
++
++export interface CrmRescheduleAppointmentRequest {
++  actionId: string;
++  appointmentId: string;
++  scheduledDate: string;
++}
++
++interface CanonicalRescheduleAppointmentRequest {
++  actorUid: string;
++  origin: 'crm_bridge';
++  data: {
++    appointmentId: string;
++    scheduledDate: Timestamp;
++    providerId: string;
++    reason: string;
++  };
++}
++
++interface CanonicalRescheduleAppointmentResult {
++  success: boolean;
++  appointmentId: string;
++  availabilityWarnings?: unknown[];
++}
++
++export interface CrmRescheduleAppointmentResponse {
++  success: true;
++  appointmentId: string;
++  availabilityWarnings: unknown[];
++}
++
++export interface CrmCreateAppointmentResponse {
++  success: true;
++  appointmentId: string;
++  status: string;
++  availabilityWarnings: unknown[];
++}
++
++interface CrmCreateBridgeDependencies {
++  expectedSecret: string;
++  runIdempotent: (
++    actionId: string,
++    operation: string,
++    requestHash: string,
++    action: () => Promise<CrmCreateAppointmentResponse>
++  ) => Promise<unknown>;
++  resolveProvider: (params: {
++    serviceId: string;
++    scheduledDate: Date;
++    duration: number;
++  }) => Promise<string>;
++  createAppointment: (
++    request: CanonicalCreateAppointmentRequest
++  ) => Promise<CanonicalCreateAppointmentResult>;
++}
++
++interface CrmRescheduleBridgeDependencies {
++  expectedSecret: string;
++  runIdempotent: CrmBridgeIdempotencyRunner;
++  getAppointmentContext: (appointmentId: string) => Promise<{
++    serviceId: string;
++    duration: number;
++  }>;
++  resolveProvider: (params: {
++    serviceId: string;
++    scheduledDate: Date;
++    duration: number;
++    excludeAppointmentId: string;
++  }) => Promise<string>;
++  rescheduleAppointment: (
++    request: CanonicalRescheduleAppointmentRequest
++  ) => Promise<CanonicalRescheduleAppointmentResult>;
++}
++
++class CrmAppointmentValidationError extends Error {}
++
++function assertMatchingAction(
++  record: CrmBridgeActionRecord,
++  operation: string,
++  requestHash: string
++): void {
++  if (
++    record.operation !== operation ||
++    record.requestHash !== requestHash
++  ) {
++    throw new HttpsError('failed-precondition', 'action_conflict');
++  }
++}
++
++function resultFromSettledAction(record: CrmBridgeActionRecord): unknown {
++  if (record.status === 'completed') return record.result;
++  if (record.status === 'failed') {
++    throw new HttpsError('failed-precondition', 'action_failed');
++  }
++  return undefined;
++}
++
++async function waitForSettledAction(
++  store: CrmBridgeActionStore,
++  actionId: string,
++  operation: string,
++  requestHash: string,
++  pollIntervalMs: number,
++  waitTimeoutMs: number
++): Promise<unknown> {
++  const deadline = Date.now() + waitTimeoutMs;
++  while (Date.now() < deadline) {
++    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
++    const current = await store.get(actionId);
++    if (!current) {
++      throw new HttpsError('internal', 'action_state_missing');
++    }
++    assertMatchingAction(current, operation, requestHash);
++    if (current.status !== 'processing') {
++      return resultFromSettledAction(current);
++    }
++  }
++  throw new HttpsError('failed-precondition', 'action_state_unknown');
++}
++
++export function createCrmBridgeIdempotencyRunner(
++  store: CrmBridgeActionStore,
++  options: CrmBridgeIdempotencyOptions = {}
++): CrmBridgeIdempotencyRunner {
++  const pollIntervalMs = options.pollIntervalMs ?? 100;
++  const waitTimeoutMs = options.waitTimeoutMs ?? 30_000;
++
++  return async (actionId, operation, requestHash, action) => {
++    const nowMs = Date.now();
++    const leaseToken = randomUUID();
++    const processingRecord: CrmBridgeActionRecord = {
++      operation,
++      requestHash,
++      status: 'processing',
++      createdAtMs: nowMs,
++      updatedAtMs: nowMs,
++      leaseToken,
++    };
++    const acquired = await store.createIfAbsent(actionId, processingRecord);
++
++    if (!acquired) {
++      const existing = await store.get(actionId);
++      if (!existing) {
++        throw new HttpsError('internal', 'action_state_missing');
++      }
++      assertMatchingAction(existing, operation, requestHash);
++      if (existing.status !== 'processing') {
++        return resultFromSettledAction(existing);
++      }
++      return waitForSettledAction(
++        store,
++        actionId,
++        operation,
++        requestHash,
++        pollIntervalMs,
++        waitTimeoutMs
++      );
++    }
++
++    try {
++      const result = await action();
++      const completed = await store.setIfLease(actionId, leaseToken, {
++        operation,
++        requestHash,
++        status: 'completed',
++        createdAtMs: nowMs,
++        updatedAtMs: Date.now(),
++        result,
++      });
++      if (!completed) {
++        throw new HttpsError('internal', 'action_lease_lost');
++      }
++      return result;
++    } catch (error) {
++      await store.setIfLease(actionId, leaseToken, {
++        operation,
++        requestHash,
++        status: 'failed',
++        createdAtMs: nowMs,
++        updatedAtMs: Date.now(),
++      });
++      throw error;
++    }
++  };
++}
++
++function isRecord(value: unknown): value is Record<string, unknown> {
++  return typeof value === 'object' && value !== null && !Array.isArray(value);
++}
++
++function assertOnlyFields(
++  body: Record<string, unknown>,
++  allowedFields: ReadonlySet<string>
++): void {
++  const forbidden = Object.keys(body).find((field) => !allowedFields.has(field));
++  if (forbidden) {
++    throw new CrmAppointmentValidationError(
++      `${forbidden} no es controlable por caller`
++    );
++  }
++}
++
++function parseBoundedId(value: unknown, field: string): string {
++  if (typeof value !== 'string') {
++    throw new CrmAppointmentValidationError(`${field} debe ser string`);
++  }
++  const trimmed = value.trim();
++  if (!trimmed || trimmed.length > 128 || trimmed.includes('/')) {
++    throw new CrmAppointmentValidationError(`${field} no es v├ílido`);
++  }
++  return trimmed;
++}
++
++function parseCanonicalFutureIso(value: unknown): string {
++  if (typeof value !== 'string') {
++    throw new CrmAppointmentValidationError(
++      'scheduledDate debe ser ISO datetime'
++    );
++  }
++  const parsed = new Date(value);
++  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString() !== value) {
++    throw new CrmAppointmentValidationError(
++      'scheduledDate debe ser ISO datetime can├│nico'
++    );
++  }
++  if (parsed.getTime() <= Date.now()) {
++    throw new CrmAppointmentValidationError(
++      'scheduledDate debe estar en el futuro'
++    );
++  }
++  return value;
++}
++
++export function validateCrmCreateAppointmentRequest(
++  body: unknown
++): CrmCreateAppointmentRequest {
++  if (!isRecord(body)) {
++    throw new CrmAppointmentValidationError('body debe ser un objeto');
++  }
++  assertOnlyFields(body, CREATE_FIELDS);
++
++  const actionId = parseBoundedId(body.actionId, 'actionId');
++  if (!UUID_V4_PATTERN.test(actionId)) {
++    throw new CrmAppointmentValidationError('actionId debe ser UUID v4');
++  }
++  const clientId = parseBoundedId(body.clientId, 'clientId');
++  const scheduledDate = parseCanonicalFutureIso(body.scheduledDate);
++  const duration = body.duration;
++  if (
++    typeof duration !== 'number' ||
++    !Number.isInteger(duration) ||
++    !OFFICIAL_DURATIONS.has(duration)
++  ) {
++    throw new CrmAppointmentValidationError('duration no es oficial');
++  }
++  if (typeof body.address !== 'string') {
++    throw new CrmAppointmentValidationError('address debe ser string');
++  }
++  const address = body.address.trim();
++  if (!address || address.length > 500) {
++    throw new CrmAppointmentValidationError('address no es v├ílida');
++  }
++  if (typeof body.wantsKit !== 'boolean') {
++    throw new CrmAppointmentValidationError('wantsKit debe ser boolean');
++  }
++
++  return {
++    actionId,
++    clientId,
++    scheduledDate,
++    duration,
++    address,
++    wantsKit: body.wantsKit,
++  };
++}
++
++export function validateCrmRescheduleAppointmentRequest(
++  body: unknown
++): CrmRescheduleAppointmentRequest {
++  if (!isRecord(body)) {
++    throw new CrmAppointmentValidationError('body debe ser un objeto');
++  }
++  assertOnlyFields(body, RESCHEDULE_FIELDS);
++
++  const actionId = parseBoundedId(body.actionId, 'actionId');
++  if (!UUID_V4_PATTERN.test(actionId)) {
++    throw new CrmAppointmentValidationError('actionId debe ser UUID v4');
++  }
++  const appointmentId = parseBoundedId(body.appointmentId, 'appointmentId');
++  const scheduledDate = parseCanonicalFutureIso(body.scheduledDate);
++  return { actionId, appointmentId, scheduledDate };
++}
++
++function hashCreateRequest(params: CrmCreateAppointmentRequest): string {
++  return createHash('sha256')
++    .update(JSON.stringify(params))
++    .digest('hex');
++}
++
++function hashRescheduleRequest(
++  params: CrmRescheduleAppointmentRequest
++): string {
++  return createHash('sha256')
++    .update(JSON.stringify(params))
++    .digest('hex');
++}
++
++export async function handleCrmCreateAppointment(
++  request: CrmBridgeRequest,
++  dependencies: CrmCreateBridgeDependencies
++): Promise<CrmBridgeHttpResult<CrmCreateAppointmentResponse>> {
++  if (request.method.toUpperCase() !== 'POST') {
++    return { status: 405, body: { error: 'method_not_allowed' } };
++  }
++  if (!crmBridgeSecretsMatch(request.secretHeader, dependencies.expectedSecret)) {
++    return { status: 401, body: { error: 'unauthorized' } };
++  }
++
++  let params: CrmCreateAppointmentRequest;
++  try {
++    params = validateCrmCreateAppointmentRequest(request.body);
++  } catch (error) {
++    if (error instanceof CrmAppointmentValidationError) {
++      return { status: 400, body: { error: error.message } };
++    }
++    return { status: 400, body: { error: 'invalid_request' } };
++  }
++
++  try {
++    const result = await dependencies.runIdempotent(
++      params.actionId,
++      'create_appointment',
++      hashCreateRequest(params),
++      async () => {
++        const scheduledDate = new Date(params.scheduledDate);
++        const providerId = await dependencies.resolveProvider({
++          serviceId: PROSAVIS_LIMPIEZA_SERVICE_ID,
++          scheduledDate,
++          duration: params.duration,
++        });
++        const officialPrice =
++          APPOINTMENT_PRICES_BY_DURATION[params.duration] +
++          (params.wantsKit
++            ? PROSAVIS_CLEANING_PROFESSIONAL_KIT_ADDON_COP
++            : 0);
++        const canonicalResult = await dependencies.createAppointment({
++          actorUid: CRM_BRIDGE_ACTOR_UID,
++          origin: 'crm_bridge',
++          data: {
++            serviceId: PROSAVIS_LIMPIEZA_SERVICE_ID,
++            serviceTitle: 'Prosavis Limpieza',
++            providerId,
++            clientId: params.clientId,
++            scheduledDate: Timestamp.fromDate(scheduledDate),
++            duration: params.duration,
++            price: officialPrice,
++            serviceAddress: { addressLine: params.address },
++            notes: 'Creada desde CRM Inbox IA tras confirmaci├│n humana',
++            isConfirmed: true,
++            includeProfessionalKit: params.wantsKit,
++            sourceChannel: 'crm_ai_bridge',
++            assignedVia: 'auto',
++          },
++        });
++        return {
++          success: true,
++          appointmentId: canonicalResult.appointmentId,
++          status: canonicalResult.status,
++          availabilityWarnings:
++            canonicalResult.availabilityWarnings ?? [],
++        };
++      }
++    );
++    return {
++      status: 200,
++      body: result as CrmCreateAppointmentResponse,
++    };
++  } catch (error) {
++    if (error instanceof HttpsError) {
++      const status = crmBridgeClientErrorStatus(error);
++      if (status !== null) {
++        return { status, body: { error: error.message } };
++      }
++    }
++    logger.error('[crmCreateAppointment] Internal failure', {
++      actionId: params.actionId,
++      errorType: error instanceof Error ? error.name : typeof error,
++    });
++    return { status: 500, body: { error: 'internal' } };
++  }
++}
++
++export async function handleCrmRescheduleAppointment(
++  request: CrmBridgeRequest,
++  dependencies: CrmRescheduleBridgeDependencies
++): Promise<CrmBridgeHttpResult<CrmRescheduleAppointmentResponse>> {
++  if (request.method.toUpperCase() !== 'POST') {
++    return { status: 405, body: { error: 'method_not_allowed' } };
++  }
++  if (!crmBridgeSecretsMatch(request.secretHeader, dependencies.expectedSecret)) {
++    return { status: 401, body: { error: 'unauthorized' } };
++  }
++
++  let params: CrmRescheduleAppointmentRequest;
++  try {
++    params = validateCrmRescheduleAppointmentRequest(request.body);
++  } catch (error) {
++    if (error instanceof CrmAppointmentValidationError) {
++      return { status: 400, body: { error: error.message } };
++    }
++    return { status: 400, body: { error: 'invalid_request' } };
++  }
++
++  try {
++    const result = await dependencies.runIdempotent(
++      params.actionId,
++      'reschedule_appointment',
++      hashRescheduleRequest(params),
++      async () => {
++        const appointment = await dependencies.getAppointmentContext(
++          params.appointmentId
++        );
++        if (appointment.serviceId !== PROSAVIS_LIMPIEZA_SERVICE_ID) {
++          throw new HttpsError(
++            'failed-precondition',
++            'La cita no pertenece al servicio oficial'
++          );
++        }
++        if (!OFFICIAL_DURATIONS.has(appointment.duration)) {
++          throw new HttpsError(
++            'failed-precondition',
++            'La cita no tiene una duraci├│n oficial'
++          );
++        }
++        const scheduledDate = new Date(params.scheduledDate);
++        const providerId = await dependencies.resolveProvider({
++          serviceId: appointment.serviceId,
++          scheduledDate,
++          duration: appointment.duration,
++          excludeAppointmentId: params.appointmentId,
++        });
++        const canonicalResult = await dependencies.rescheduleAppointment({
++          actorUid: CRM_BRIDGE_ACTOR_UID,
++          origin: 'crm_bridge',
++          data: {
++            appointmentId: params.appointmentId,
++            scheduledDate: Timestamp.fromDate(scheduledDate),
++            providerId,
++            reason:
++              'Reagendada desde CRM Inbox IA tras confirmaci├│n humana',
++          },
++        });
++        return {
++          success: true,
++          appointmentId: canonicalResult.appointmentId,
++          availabilityWarnings:
++            canonicalResult.availabilityWarnings ?? [],
++        };
++      }
++    );
++    return {
++      status: 200,
++      body: result as CrmRescheduleAppointmentResponse,
++    };
++  } catch (error) {
++    if (error instanceof HttpsError) {
++      const status = crmBridgeClientErrorStatus(error);
++      if (status !== null) {
++        return { status, body: { error: error.message } };
++      }
++    }
++    logger.error('[crmRescheduleAppointmentHttp] Internal failure', {
++      actionId: params.actionId,
++      appointmentId: params.appointmentId,
++      errorType: error instanceof Error ? error.name : typeof error,
++    });
++    return { status: 500, body: { error: 'internal' } };
++  }
++}
++
+diff --git a/functions/src/calendar/crmBridgeHttp.ts b/functions/src/calendar/crmBridgeHttp.ts
+new file mode 100644
+index 0000000..9ed94cc
+--- /dev/null
++++ b/functions/src/calendar/crmBridgeHttp.ts
+@@ -0,0 +1,36 @@
++import { createHash, timingSafeEqual } from 'crypto';
++import { HttpsError } from 'firebase-functions/v2/https';
++
++export interface CrmBridgeRequest {
++  method: string;
++  secretHeader?: string;
++  body: unknown;
++}
++
++export type CrmBridgeHttpResult<T> =
++  | { status: 200; body: T }
++  | { status: number; body: { error: string } };
++
++export function crmBridgeSecretsMatch(
++  provided: string | undefined,
++  expected: string
++): boolean {
++  if (!provided || !expected) return false;
++  const providedDigest = createHash('sha256').update(provided).digest();
++  const expectedDigest = createHash('sha256').update(expected).digest();
++  return timingSafeEqual(providedDigest, expectedDigest);
++}
++
++export function crmBridgeClientErrorStatus(error: HttpsError): number | null {
++  const statusByCode: Partial<Record<HttpsError['code'], number>> = {
++    'invalid-argument': 400,
++    unauthenticated: 401,
++    'permission-denied': 403,
++    'not-found': 404,
++    'already-exists': 409,
++    aborted: 409,
++    'failed-precondition': 409,
++    'resource-exhausted': 429,
++  };
++  return statusByCode[error.code] ?? null;
++}
+diff --git a/functions/src/calendar/crmGetAvailableSlots.ts b/functions/src/calendar/crmGetAvailableSlots.ts
+index b62dff7..c3b76b1 100644
+--- a/functions/src/calendar/crmGetAvailableSlots.ts
++++ b/functions/src/calendar/crmGetAvailableSlots.ts
+@@ -1,58 +1,53 @@
+-import { createHash, timingSafeEqual } from 'crypto';
+ import { logger } from 'firebase-functions/v2';
+ import { HttpsError, onRequest } from 'firebase-functions/v2/https';
+ import { defineSecret } from 'firebase-functions/params';
+ import { PROSAVIS_LIMPIEZA_SERVICE_ID } from '../constants/pricing';
+ import { GetAvailableSlotsParams } from '../types/calendar';
++import {
++  crmBridgeClientErrorStatus,
++  crmBridgeSecretsMatch,
++  CrmBridgeHttpResult,
++  CrmBridgeRequest,
++} from './crmBridgeHttp';
+ import { getAvailableSlotsInternal } from './getAvailableSlots';
+ 
+ const firebaseCrmBridgeSecret = defineSecret('FIREBASE_CRM_BRIDGE_SECRET');
+ const OFFICIAL_DURATIONS = new Set([120, 180, 240, 360, 480]);
+ const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+ const DAY_MS = 24 * 60 * 60 * 1000;
+ 
+ export interface CrmAvailabilityRequest {
+   startDate: string;
+   endDate: string;
+   duration: number;
+ }
+ 
+ export interface CrmAvailabilityResponse {
+   slots: string[];
+ }
+ 
+-interface BridgeRequest {
+-  method: string;
+-  secretHeader?: string;
+-  body: unknown;
+-}
+-
+ interface InternalAvailabilityResult {
+   slots: Array<{
+     dateTime: string;
+     isAvailable: boolean;
+     appointmentId?: string;
+   }>;
+ }
+ 
+ interface BridgeDependencies {
+   expectedSecret: string;
+   getAvailableSlots: (
+     params: GetAvailableSlotsParams
+   ) => Promise<InternalAvailabilityResult>;
+ }
+ 
+-type BridgeResult =
+-  | { status: 200; body: CrmAvailabilityResponse }
+-  | { status: number; body: { error: string } };
+-
+ class CrmAvailabilityValidationError extends Error {}
+ 
+ function isRecord(value: unknown): value is Record<string, unknown> {
+   return typeof value === 'object' && value !== null && !Array.isArray(value);
+ }
+ 
+ function parseDateKey(value: unknown, field: 'startDate' | 'endDate'): string {
+   if (typeof value !== 'string' || !DATE_ONLY_PATTERN.test(value)) {
+     throw new CrmAvailabilityValidationError(`${field} debe ser YYYY-MM-DD`);
+   }
+@@ -95,52 +90,33 @@ export function validateCrmAvailabilityRequest(
+   if (endMs < startMs) {
+     throw new CrmAvailabilityValidationError('endDate debe ser igual o posterior a startDate');
+   }
+   if ((endMs - startMs) / DAY_MS + 1 > 7) {
+     throw new CrmAvailabilityValidationError('El rango m├íximo es de 7 d├¡as');
+   }
+ 
+   return { startDate, endDate, duration };
+ }
+ 
+-function secretsMatch(provided: string | undefined, expected: string): boolean {
+-  if (!provided || !expected) return false;
+-  const providedDigest = createHash('sha256').update(provided).digest();
+-  const expectedDigest = createHash('sha256').update(expected).digest();
+-  return timingSafeEqual(providedDigest, expectedDigest);
+-}
+-
+-function clientErrorStatus(error: HttpsError): number | null {
+-  const statusByCode: Partial<Record<HttpsError['code'], number>> = {
+-    'invalid-argument': 400,
+-    unauthenticated: 401,
+-    'permission-denied': 403,
+-    'not-found': 404,
+-    'failed-precondition': 409,
+-    'resource-exhausted': 429,
+-  };
+-  return statusByCode[error.code] ?? null;
+-}
+-
+ function isIsoDateTime(value: string): boolean {
+   const parsed = new Date(value);
+   return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
+ }
+ 
+ export async function handleCrmGetAvailableSlots(
+-  request: BridgeRequest,
++  request: CrmBridgeRequest,
+   dependencies: BridgeDependencies
+-): Promise<BridgeResult> {
++): Promise<CrmBridgeHttpResult<CrmAvailabilityResponse>> {
+   if (request.method.toUpperCase() !== 'POST') {
+     return { status: 405, body: { error: 'method_not_allowed' } };
+   }
+-  if (!secretsMatch(request.secretHeader, dependencies.expectedSecret)) {
++  if (!crmBridgeSecretsMatch(request.secretHeader, dependencies.expectedSecret)) {
+     return { status: 401, body: { error: 'unauthorized' } };
+   }
+ 
+   let params: CrmAvailabilityRequest;
+   try {
+     params = validateCrmAvailabilityRequest(request.body);
+   } catch (error) {
+     if (error instanceof CrmAvailabilityValidationError) {
+       return { status: 400, body: { error: error.message } };
+     }
+@@ -154,21 +130,21 @@ export async function handleCrmGetAvailableSlots(
+       endDate: params.endDate,
+       duration: params.duration,
+       checkEntireTeam: true,
+     });
+     const slots = result.slots
+       .filter((slot) => slot.isAvailable && isIsoDateTime(slot.dateTime))
+       .map((slot) => slot.dateTime);
+     return { status: 200, body: { slots } };
+   } catch (error) {
+     if (error instanceof HttpsError) {
+-      const status = clientErrorStatus(error);
++      const status = crmBridgeClientErrorStatus(error);
+       if (status !== null) {
+         return { status, body: { error: error.message } };
+       }
+     }
+     logger.error('[crmGetAvailableSlots] Internal failure', { error });
+     return { status: 500, body: { error: 'internal' } };
+   }
+ }
+ 
+ export const crmGetAvailableSlots = onRequest(
+diff --git a/functions/src/calendar/crmRescheduleAppointment.ts b/functions/src/calendar/crmRescheduleAppointment.ts
+index 1b2e3d9..85c0e68 100644
+--- a/functions/src/calendar/crmRescheduleAppointment.ts
++++ b/functions/src/calendar/crmRescheduleAppointment.ts
+@@ -1,13 +1,17 @@
+ import { FieldValue, getFirestore, Timestamp } from 'firebase-admin/firestore';
+ import { logger } from 'firebase-functions/v2';
+-import { HttpsError, onCall } from 'firebase-functions/v2/https';
++import {
++  CallableRequest,
++  HttpsError,
++  onCall,
++} from 'firebase-functions/v2/https';
+ import { defineSecret } from 'firebase-functions/params';
+ import { allowsOverlap } from '../config/serviceExceptions';
+ import { assertProviderIdForTeamMember } from '../services/resolveProviderIdForTeamMember';
+ import { Appointment, AppointmentStatus } from '../types/calendar';
+ import { deleteAppointmentTask, } from './utils/appointmentCloudTasks';
+ import {
+   appendStatusHistory,
+   // buildBookingSnapshot, // OLD FLOW: ya no se necesita bookingSnapshot
+   // createPendingRescheduleRequest, // OLD FLOW
+   createStatusHistoryEntry,
+@@ -24,20 +28,21 @@ import {
+   checkMemberScheduleConflicts,
+   getAppointmentAssignedMemberIds,
+   getAppointmentDurationForMember,
+   isAssignmentPrincipalSynced,
+   remapTeamDurationsForMembers,
+   secondaryIdsAfterPrincipalReassign,
+   validateTeamMemberAssignment,
+   type ScheduleConflict,
+ } from './appointmentTeamAssignment';
+ import { assertProviderActiveOnDate } from '../crm/professionalDayStatus';
++import { AppointmentExecutionOrigin } from './createAppointment';
+ 
+ const supabaseServiceRoleKey = defineSecret('SUPABASE_SERVICE_ROLE_KEY');
+ 
+ const BUFFER_MINUTES = 60;
+ const BUFFER_MS = BUFFER_MINUTES * 60 * 1000;
+ 
+ /** Tolerancia para considerar mismo instante de cita (parseo cliente Ôåö Firestore). */
+ const SAME_SLOT_REASSIGN_TOLERANCE_MS = 120_000;
+ 
+ function appointmentScheduledMillis(appt: Appointment): number {
+@@ -46,26 +51,27 @@ function appointmentScheduledMillis(appt: Appointment): number {
+     return sd.toMillis();
+   }
+   const raw = appt.scheduledDate as unknown as { seconds?: number; nanoseconds?: number };
+   if (typeof raw?.seconds === 'number') {
+     return raw.seconds * 1000 + (raw.nanoseconds ?? 0) / 1e6;
+   }
+   return NaN;
+ }
+ 
+ /**
+- * Cloud Function para reprogramar citas desde el CRM (DailyView Drag-and-Drop).
+- * Soporta cambio de hora y reasignaci├│n a otro profesional del equipo.
++ * Handler can├│nico para reprogramar citas desde el CRM.
++ * `crm_bridge` autoriza solo la entrada S2S ya validada; no concede bypasses.
+  */
+-export const crmRescheduleAppointment = onCall(
+-  { region: 'us-central1', cors: true, secrets: [supabaseServiceRoleKey] },
+-  async (request) => {
++export async function handleCrmRescheduleAppointmentCore(
++  request: CallableRequest<unknown>,
++  origin: AppointmentExecutionOrigin = 'callable'
++) {
+     if (!request.auth) {
+       throw new HttpsError(
+         'unauthenticated',
+         'Debes iniciar sesi├│n para reprogramar una cita'
+       );
+     }
+ 
+     const userId = request.auth.uid;
+     const data = request.data as any;
+ 
+@@ -134,21 +140,21 @@ export const crmRescheduleAppointment = onCall(
+         const memberDoc = await db
+           .collection('services')
+           .doc(appointment.serviceId)
+           .collection('teamMembers')
+           .doc(userId)
+           .get();
+         isMember = memberDoc.exists;
+         isMemberAdmin = memberDoc.exists && memberDoc.data()?.role === 'admin';
+       }
+ 
+-      if (!isAdmin && !isMember) {
++      if (origin !== 'crm_bridge' && !isAdmin && !isMember) {
+         throw new HttpsError(
+           'permission-denied',
+           'No tienes permiso para reprogramar citas de este servicio'
+         );
+       }
+ 
+       // Admin CRM: allowPastDate omite domingo/festivo (mismo criterio que createAppointment).
+       let allowPastDate = false;
+       if (data.allowPastDate === true) {
+         if (!isAdmin && !isMemberAdmin) {
+@@ -495,11 +501,18 @@ export const crmRescheduleAppointment = onCall(
+       };
+     } catch (error: any) {
+       if (error instanceof HttpsError) throw error;
+       logger.error('Error al reprogramar cita desde CRM', { error, userId });
+       throw new HttpsError(
+         'internal',
+         'Error al reprogramar la cita. Por favor intenta nuevamente.'
+       );
+     }
+   }
++
++/**
++ * Cloud Function callable existente. Conserva auth, contrato y configuraci├│n.
++ */
++export const crmRescheduleAppointment = onCall(
++  { region: 'us-central1', cors: true, secrets: [supabaseServiceRoleKey] },
++  (request) => handleCrmRescheduleAppointmentCore(request)
+ );
+diff --git a/functions/src/calendar/getAvailableSlots.test.ts b/functions/src/calendar/getAvailableSlots.test.ts
+index 13642bd..86fc8f3 100644
+--- a/functions/src/calendar/getAvailableSlots.test.ts
++++ b/functions/src/calendar/getAvailableSlots.test.ts
+@@ -1,17 +1,20 @@
+ import {
+   Firestore,
+   Timestamp,
+   getFirestore,
+ } from 'firebase-admin/firestore';
+ import { AppointmentStatus } from '../types/calendar';
+-import { getAvailableSlotsInternal } from './getAvailableSlots';
++import {
++  getAvailableSlotsInternal,
++  resolveAvailableProviderForExactSlot,
++} from './getAvailableSlots';
+ 
+ jest.mock('firebase-admin/firestore', () => ({
+   ...jest.requireActual('firebase-admin/firestore'),
+   getFirestore: jest.fn(),
+ }));
+ 
+ interface FakeDocument {
+   id: string;
+   data: Record<string, unknown>;
+ }
+@@ -286,11 +289,44 @@ describe('getAvailableSlotsInternal', () => {
+       );
+       expect((start?.value as Timestamp).toMillis()).toBe(
+         new Date('2026-08-10T00:00:00-05:00').getTime()
+       );
+       expect((end?.value as Timestamp).toMillis()).toBe(
+         new Date('2026-08-10T23:59:59-05:00').getTime()
+       );
+       expect(query.limit).toBe(5000);
+     }
+   });
++
++  it('returns a real bookable team member for the exact requested slot', async () => {
++    await expect(
++      resolveAvailableProviderForExactSlot({
++        serviceId: 'cleaning-service',
++        scheduledDate: new Date('2026-08-10T15:00:00.000Z'),
++        duration: 120,
++      })
++    ).resolves.toBe('auxiliary');
++  });
++
++  it('rejects the exact slot when the provider is no longer available', async () => {
++    await expect(
++      resolveAvailableProviderForExactSlot({
++        serviceId: 'cleaning-service',
++        scheduledDate: new Date('2026-08-10T12:00:00.000Z'),
++        duration: 120,
++      })
++    ).rejects.toMatchObject({
++      code: 'already-exists',
++    });
++  });
++
++  it('excludes the appointment being rescheduled from exact-slot conflicts', async () => {
++    await expect(
++      resolveAvailableProviderForExactSlot({
++        serviceId: 'cleaning-service',
++        scheduledDate: new Date('2026-08-10T12:00:00.000Z'),
++        duration: 120,
++        excludeAppointmentId: 'coassigned-appointment',
++      })
++    ).resolves.toBe('auxiliary');
++  });
+ });
+diff --git a/functions/src/calendar/getAvailableSlots.ts b/functions/src/calendar/getAvailableSlots.ts
+index 87b3b4a..ffa78f6 100644
+--- a/functions/src/calendar/getAvailableSlots.ts
++++ b/functions/src/calendar/getAvailableSlots.ts
+@@ -228,38 +228,38 @@ export const getAvailableSlots = onCall(
+       return { slots: serializedSlots };
+     } catch (error: any) {
+       logger.error('ÔØî Error en getAvailableSlots', { error });
+       if (error instanceof HttpsError) throw error;
+       throw new HttpsError('internal', 'Error interno al obtener slots');
+     }
+   }
+ );
+ 
+ /** Obtiene slots donde al menos un miembro del equipo est├í disponible */
+-async function getSlotsForEntireTeam(
++async function getBookableProviderIds(
+   db: Firestore,
+-  params: GetAvailableSlotsParams
+-): Promise<{ slots: Array<{ dateTime: string; isAvailable: boolean; appointmentId?: string }> }> {
+-  const serviceDoc = await db.collection('services').doc(params.serviceId).get();
++  serviceId: string
++): Promise<string[]> {
++  const serviceDoc = await db.collection('services').doc(serviceId).get();
+   if (!serviceDoc.exists) {
+     throw new HttpsError('not-found', 'Servicio no encontrado');
+   }
+   const serviceData = serviceDoc.data()!;
+   const providerId = serviceData.providerId as string;
+   const hideAdminInTeam = serviceData.hideAdminInTeam === true;
+-  const isCleaning = params.serviceId === PROSAVIS_CLEANING_SERVICE_ID;
++  const isCleaning = serviceId === PROSAVIS_CLEANING_SERVICE_ID;
+ 
+   const providerIds: string[] = [providerId];
+ 
+   const membersSnap = await db
+     .collection('services')
+-    .doc(params.serviceId)
++    .doc(serviceId)
+     .collection('teamMembers')
+     .get();
+ 
+   for (const doc of membersSnap.docs) {
+     const memberId = doc.id;
+     const memberData = doc.data();
+     const isBookableByClients = memberData.bookableByClients !== false;
+     const isActive = memberData.isActive !== false;
+     if (memberId === providerId || !isBookableByClients || !isActive) {
+       continue;
+@@ -287,20 +287,28 @@ async function getSlotsForEntireTeam(
+       const idx = providerIds.indexOf(providerId);
+       if (idx >= 0) providerIds.splice(idx, 1);
+     }
+   } else if (hideAdminInTeam) {
+     const idx = providerIds.indexOf(providerId);
+     if (idx >= 0) providerIds.splice(idx, 1);
+   }
+   if (providerIds.length === 0) {
+     providerIds.push(providerId);
+   }
++  return providerIds;
++}
++
++async function getSlotsForEntireTeam(
++  db: Firestore,
++  params: GetAvailableSlotsParams
++): Promise<{ slots: Array<{ dateTime: string; isAvailable: boolean; appointmentId?: string }> }> {
++  const providerIds = await getBookableProviderIds(db, params.serviceId);
+ 
+   const allSlotsByTime = new Map<number, boolean>();
+   for (const pid of providerIds) {
+     const singleParams: GetAvailableSlotsParams = {
+       ...params,
+       providerId: pid,
+       checkEntireTeam: false,
+     };
+     const result = await getSlotsForSingleProvider(db, singleParams);
+     for (const slot of result) {
+@@ -345,24 +353,64 @@ export async function getAvailableSlotsInternal(
+     .filter((s) => s.isAvailable)
+     .map((s) => ({
+       dateTime: s.dateTime.toISOString(),
+       isAvailable: true,
+       appointmentId: s.appointmentId,
+     }));
+ 
+   return { slots: serialized };
+ }
+ 
++export async function resolveAvailableProviderForExactSlot(params: {
++  serviceId: string;
++  scheduledDate: Date;
++  duration: number;
++  excludeAppointmentId?: string;
++}): Promise<string> {
++  const db = getFirestore();
++  const dateKey = params.scheduledDate.toLocaleDateString('en-CA', {
++    timeZone: 'America/Bogota',
++  });
++  const providerIds = await getBookableProviderIds(db, params.serviceId);
++
++  for (const providerId of providerIds) {
++    const slots = await getSlotsForSingleProvider(
++      db,
++      {
++        serviceId: params.serviceId,
++        providerId,
++        startDate: dateKey,
++        endDate: dateKey,
++        duration: params.duration,
++        checkEntireTeam: false,
++      },
++      { excludeAppointmentId: params.excludeAppointmentId }
++    );
++    const exactSlot = slots.find(
++      (slot) =>
++        slot.isAvailable &&
++        slot.dateTime.getTime() === params.scheduledDate.getTime()
++    );
++    if (exactSlot) return providerId;
++  }
++
++  throw new HttpsError(
++    'already-exists',
++    'El horario seleccionado ya no est├í disponible'
++  );
++}
++
+ /** Obtiene slots para un solo proveedor (l├│gica extra├¡da) */
+ async function getSlotsForSingleProvider(
+   db: Firestore,
+-  params: GetAvailableSlotsParams
++  params: GetAvailableSlotsParams,
++  options: { excludeAppointmentId?: string } = {}
+ ): Promise<TimeSlot[]> {
+   const providerId = params.providerId!;
+   const serviceIdTrimmed = params.serviceId.trim();
+ 
+   // Preferir availability del profesional; serviceId solo como fallback legado.
+   let availabilityDoc = await db.collection('availability').doc(providerId).get();
+   if (!availabilityDoc.exists) {
+     availabilityDoc = await db.collection('availability').doc(serviceIdTrimmed).get();
+   }
+ 
+@@ -408,21 +456,23 @@ async function getSlotsForSingleProvider(
+   const endDateTime = new Date(`${params.endDate}T23:59:59-05:00`);
+ 
+   const existingAppointments = await getBlockingAppointmentsForMember(
+     db,
+     providerId,
+     startDateTime,
+     endDateTime
+   );
+   const appointmentsForSlots = allowsOverlap(serviceIdTrimmed)
+     ? []
+-    : existingAppointments;
++    : existingAppointments.filter(
++        (appointment) => appointment.id !== options.excludeAppointmentId
++      );
+   return calculateAvailableSlots(
+     availability,
+     settings,
+     appointmentsForSlots,
+     params.startDate,
+     params.endDate,
+     params.duration,
+     serviceIdTrimmed
+   );
+ }
+diff --git a/functions/src/index.ts b/functions/src/index.ts
+index 45d1a33..b84b359 100644
+--- a/functions/src/index.ts
++++ b/functions/src/index.ts
+@@ -111,20 +111,24 @@ export {
+   approveAuthRequest,
+   completeAuthRequest,
+   createAuthRequest,
+   rejectAuthRequest,
+ } from './auth/authRequest';
+ 
+ // =============================================================================
+ // ├░┼©ÔÇ£ÔÇª CALENDAR - Sistema de agendamiento y citas
+ // =============================================================================
+ export { createAppointment } from './calendar/createAppointment';
++export {
++  crmCreateAppointment,
++  crmRescheduleAppointmentHttp,
++} from './calendar/crmAppointmentBridgeFunctions';
+ export { createRecurringAppointments } from './calendar/createRecurringAppointments';
+ export { crmGetAvailableSlots } from './calendar/crmGetAvailableSlots';
+ export { crmRescheduleAppointment } from './calendar/crmRescheduleAppointment';
+ export { deleteAppointment } from './calendar/deleteAppointment';
+ export { getAvailableProfessionals } from './calendar/getAvailableProfessionals';
+ export { getAvailableSlots } from './calendar/getAvailableSlots';
+ export { setMemberAvailability } from './calendar/setMemberAvailability';
+ export {
+   triggerAppointmentCompletionReminder,
+   triggerAppointmentEnRouteReminder,
