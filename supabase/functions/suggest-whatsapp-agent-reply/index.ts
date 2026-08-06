@@ -4,8 +4,8 @@ import { formatError } from '../_shared/whatsappOutbound.ts';
 import {
   getGeminiApiKey,
   geminiGenerateJson,
-  geminiGenerateText,
 } from '../_shared/geminiClient.ts';
+import { generateInboxAiSuggestion } from '../_shared/inboxAiActions.ts';
 import { resolveBookingPricingCheckout } from '../_shared/pricingCatalog.ts';
 import {
   appendRealAvailabilityContext,
@@ -58,6 +58,7 @@ Deno.serve(async (req) => {
     if (ctx.lastTurnRole === 'bot' && !forceGenerate) {
       return jsonResponse({
         suggestion: null,
+        proposedActions: [],
         lastMessageIsOutbound: true,
         hint: 'El último mensaje es saliente. Usa forceGenerate para redactar igualmente.',
         historyMeta: ctx.historyMeta,
@@ -117,19 +118,26 @@ Deno.serve(async (req) => {
     );
 
     // ─── Generar sugerencia de respuesta ───
-    const suggestion = await geminiGenerateText({
+    const suggestionOutput = await generateInboxAiSuggestion({
       apiKey,
-      systemInstruction: INBOX_AI_SYSTEM_INSTRUCTION,
-      userText:
+      contextPrompt:
+        `${INBOX_AI_SYSTEM_INSTRUCTION}\n\n` +
         `${extraContext ? `Contexto extra del agente:\n${extraContext}\n\n` : ''}` +
         `${groundedContext}\n\n` +
         `Contexto booking (inferido + CRM):\n${JSON.stringify(bookingContext)}` +
         (wompiCheckoutUrl ? `\nLink Wompi: ${wompiCheckoutUrl}` : ''),
-      temperature: 0.4,
+      grounding: {
+        bookingContext,
+        appointments: ctx.appointments,
+        wompiCheckoutUrl,
+        wompiPaymentReference,
+        wompiAmountCOP,
+      },
     });
 
     return jsonResponse({
-      suggestion,
+      suggestion: suggestionOutput.suggestion,
+      proposedActions: suggestionOutput.proposedActions,
       lastMessageIsOutbound: false,
       bookingContext,
       historyMeta: ctx.historyMeta,

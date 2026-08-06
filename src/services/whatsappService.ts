@@ -3,6 +3,7 @@ import { supabase } from '@/config/supabase';
 import type { Database } from '@/types/database';
 import type { WhatsAppMetrics } from '@/types/whatsapp';
 import type { NormalizedBookingContext } from '../../supabase/functions/_shared/bookingContext';
+import type { InboxAiProposedAction } from '../../supabase/functions/_shared/inboxAiActions';
 import {
   getMetaSessionWindow,
   type MetaSessionWindow,
@@ -11,6 +12,8 @@ import {
   presenceStateToEntries,
   type WhatsAppPresenceTrackPayload,
 } from '@/utils/whatsappAdminPresence';
+
+export type { InboxAiProposedAction };
 
 type ConversationRow = Database['public']['Tables']['whatsapp_conversations']['Row'];
 type MessageRow = Database['public']['Tables']['whatsapp_message_log']['Row'];
@@ -774,6 +777,7 @@ export type BookingContextData = NormalizedBookingContext;
 
 export interface SuggestReplyResult {
   suggestion: string | null;
+  proposedActions: InboxAiProposedAction[];
   lastMessageIsOutbound: boolean;
   hint?: string;
   bookingContext?: BookingContextData;
@@ -802,6 +806,7 @@ export async function suggestWhatsAppAgentReply(
   });
   return {
     suggestion: data.suggestion ?? null,
+    proposedActions: data.proposedActions ?? [],
     lastMessageIsOutbound: data.lastMessageIsOutbound ?? false,
     hint: data.hint,
     bookingContext: data.bookingContext,
