@@ -7,6 +7,8 @@ Estado: `DONE_WITH_CONCERNS`
 
 - Se creó `_shared/inboxAiActions.ts` con la unión discriminada pública, `InboxAiProposedActionType`, `InboxAiProposedAction`, `InboxAiSuggestionOutput` y un JSON Schema estricto.
 - La generación final usa una sola llamada `geminiGenerateJson` con `responseJsonSchema`, `additionalProperties: false`, máximo de cinco acciones y prompt de no ejecución/confirmación/grounding.
+- Los discriminadores del schema usan `type: string` + `enum: [valor]`; no se emite `const` ni otra keyword fuera del subset verificado para Gemini.
+- `geminiGenerateJson` y `geminiGenerateJsonWithMeta` aceptan `systemInstruction` opcional y lo envían por el canal HTTP dedicado. `INBOX_AI_SYSTEM_INSTRUCTION` vuelve a esa jerarquía y el historial/contexto queda exclusivamente en el prompt de usuario.
 - La normalización genera IDs en código, fuerza `requiresConfirmation: true`, limita, limpia, recorta y deduplica acciones.
 - Citas, reagendamientos y pagos se reconstruyen o validan contra slots, citas, booking y Wompi grounded. Tags nunca conservan IDs del modelo.
 - El camino de último mensaje outbound responde `proposedActions: []`.
@@ -22,16 +24,18 @@ Estado: `DONE_WITH_CONCERNS`
 - Entradas malformadas: RED porque detenían el procesamiento; GREEN descartándolas y preservando acciones válidas posteriores.
 - Transporte JSON: RED por helper inexistente; GREEN verificando el request HTTP real con `generationConfig.responseJsonSchema`.
 - Frontend: RED de TypeScript por miembros inexistentes; GREEN con tipos y retorno expuestos.
+- Gate schema: RED por `const` fuera del subset; GREEN con discriminadores `enum` y recorrido recursivo de keywords soportadas.
+- Gate de jerarquía: RED porque `systemInstruction` no llegaba al body; GREEN verificando canales HTTP separados para sistema y usuario.
 
 ## Verificaciones
 
-- Tests enfocados: `12/12` pasan en `3` archivos.
-- Vitest completo: `179/179` pasan en `22` archivos.
+- Tests enfocados del fix: `11/11` pasan en `2` archivos.
+- Vitest completo: `181/181` pasan en `22` archivos.
 - `npm run type-check`: pasa.
 - ESLint enfocado a archivos Fase 5A: pasa sin hallazgos.
 - Diagnósticos IDE de archivos modificados: sin errores.
 - `git diff --check`: pasa.
-- `graphify update .`: pasa; grafo actualizado a `59.122` nodos, `169.433` edges y `1.398` comunidades.
+- `graphify update .`: pasa; grafo actualizado a `59.128` nodos, `169.438` edges y `1.426` comunidades.
 
 ## Preocupaciones
 

@@ -287,6 +287,50 @@ describe('normalizeInboxAiSuggestionOutput', () => {
 });
 
 describe('generateInboxAiSuggestion', () => {
+  it('emits only JSON Schema keywords supported by Gemini structured output', () => {
+    const supportedKeywords = new Set([
+      'type',
+      'properties',
+      'required',
+      'additionalProperties',
+      'items',
+      'anyOf',
+      'enum',
+      'minLength',
+      'maxLength',
+      'maxItems',
+    ]);
+
+    const visitSchema = (schema: unknown, path = '$'): void => {
+      expect(schema, path).toBeTypeOf('object');
+      expect(schema, path).not.toBeNull();
+      expect(Array.isArray(schema), path).toBe(false);
+      for (const [keyword, value] of Object.entries(
+        schema as Record<string, unknown>,
+      )) {
+        expect(supportedKeywords.has(keyword), `${path}.${keyword}`).toBe(true);
+        if (keyword === 'properties') {
+          for (const [propertyName, propertySchema] of Object.entries(
+            value as Record<string, unknown>,
+          )) {
+            visitSchema(propertySchema, `${path}.properties.${propertyName}`);
+          }
+        } else if (
+          keyword === 'items' ||
+          (keyword === 'additionalProperties' && typeof value === 'object')
+        ) {
+          visitSchema(value, `${path}.${keyword}`);
+        } else if (keyword === 'anyOf') {
+          for (const [index, option] of (value as unknown[]).entries()) {
+            visitSchema(option, `${path}.anyOf[${index}]`);
+          }
+        }
+      }
+    };
+
+    visitSchema(INBOX_AI_SUGGESTION_JSON_SCHEMA);
+  });
+
   it('uses the strict responseJsonSchema on the real Gemini HTTP request', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       candidates: [{
@@ -305,6 +349,7 @@ describe('generateInboxAiSuggestion', () => {
 
     await expect(generateInboxAiSuggestion({
       apiKey: 'test-api-key',
+      systemInstruction: 'INSTRUCCIÓN DEL INBOX',
       contextPrompt: 'Contexto grounded de prueba',
       grounding,
     })).resolves.toEqual({
@@ -314,6 +359,7 @@ describe('generateInboxAiSuggestion', () => {
 
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
     const body = JSON.parse(String(request.body)) as {
+      systemInstruction?: { parts: Array<{ text: string }> };
       contents: Array<{ parts: Array<{ text: string }> }>;
       generationConfig: Record<string, unknown>;
     };
@@ -329,14 +375,23 @@ describe('generateInboxAiSuggestion', () => {
         proposedActions: { type: 'array', maxItems: 5 },
       },
     });
-    expect(body.contents[0]?.parts[0]?.text).toContain(
+    expect(body.systemInstruction?.parts[0]?.text).toContain(
+      'INSTRUCCIÓN DEL INBOX',
+    );
+    expect(body.systemInstruction?.parts[0]?.text).toContain(
       'no se han ejecutado',
     );
-    expect(body.contents[0]?.parts[0]?.text).toContain(
+    expect(body.systemInstruction?.parts[0]?.text).toContain(
       'confirmación humana',
     );
-    expect(body.contents[0]?.parts[0]?.text).toContain(
+    expect(body.systemInstruction?.parts[0]?.text).toContain(
       'No inventes slots, IDs de citas, links, montos, tags ni plantillas',
+    );
+    expect(body.contents[0]?.parts[0]?.text).toBe(
+      'Contexto grounded de prueba',
+    );
+    expect(body.contents[0]?.parts[0]?.text).not.toContain(
+      'INSTRUCCIÓN DEL INBOX',
     );
   });
 });

@@ -120,8 +120,8 @@ Deno.serve(async (req) => {
     // ─── Generar sugerencia de respuesta ───
     const suggestionOutput = await generateInboxAiSuggestion({
       apiKey,
+      systemInstruction: INBOX_AI_SYSTEM_INSTRUCTION,
       contextPrompt:
-        `${INBOX_AI_SYSTEM_INSTRUCTION}\n\n` +
         `${extraContext ? `Contexto extra del agente:\n${extraContext}\n\n` : ''}` +
         `${groundedContext}\n\n` +
         `Contexto booking (inferido + CRM):\n${JSON.stringify(bookingContext)}` +

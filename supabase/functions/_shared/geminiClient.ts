@@ -261,6 +261,7 @@ export interface GeminiJsonResult<T> {
 export async function geminiGenerateJson<T>(params: {
   apiKey: string;
   model?: string;
+  systemInstruction?: string;
   prompt: string;
   temperature?: number;
   maxOutputTokens?: number;
@@ -277,6 +278,7 @@ export async function geminiGenerateJson<T>(params: {
 export async function geminiGenerateJsonWithMeta<T>(params: {
   apiKey: string;
   model?: string;
+  systemInstruction?: string;
   prompt: string;
   temperature?: number;
   maxOutputTokens?: number;
@@ -302,6 +304,7 @@ export async function geminiGenerateJsonWithMeta<T>(params: {
     apiKey: params.apiKey,
     model,
     contents: [{ role: 'user', parts: [{ text: params.prompt }] }],
+    systemInstruction: params.systemInstruction,
     temperature: params.temperature ?? 0,
     maxOutputTokens: params.maxOutputTokens ?? 8192,
     responseMimeType: 'application/json',

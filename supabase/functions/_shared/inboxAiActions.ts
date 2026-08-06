@@ -91,7 +91,7 @@ export const INBOX_AI_SUGGESTION_JSON_SCHEMA: Record<string, unknown> = {
             additionalProperties: false,
             required: ['type', 'label', 'reason', 'payload'],
             properties: {
-              type: { const: 'create_appointment' },
+              type: { type: 'string', enum: ['create_appointment'] },
               ...ACTION_COPY_SCHEMA,
               payload: {
                 type: 'object',
@@ -116,7 +116,7 @@ export const INBOX_AI_SUGGESTION_JSON_SCHEMA: Record<string, unknown> = {
             additionalProperties: false,
             required: ['type', 'label', 'reason', 'payload'],
             properties: {
-              type: { const: 'reschedule_appointment' },
+              type: { type: 'string', enum: ['reschedule_appointment'] },
               ...ACTION_COPY_SCHEMA,
               payload: {
                 type: 'object',
@@ -134,7 +134,7 @@ export const INBOX_AI_SUGGESTION_JSON_SCHEMA: Record<string, unknown> = {
             additionalProperties: false,
             required: ['type', 'label', 'reason', 'payload'],
             properties: {
-              type: { const: 'send_payment_link' },
+              type: { type: 'string', enum: ['send_payment_link'] },
               ...ACTION_COPY_SCHEMA,
               payload: {
                 type: 'object',
@@ -153,7 +153,7 @@ export const INBOX_AI_SUGGESTION_JSON_SCHEMA: Record<string, unknown> = {
             additionalProperties: false,
             required: ['type', 'label', 'reason', 'payload'],
             properties: {
-              type: { const: 'apply_tag' },
+              type: { type: 'string', enum: ['apply_tag'] },
               ...ACTION_COPY_SCHEMA,
               payload: {
                 type: 'object',
@@ -170,7 +170,7 @@ export const INBOX_AI_SUGGESTION_JSON_SCHEMA: Record<string, unknown> = {
             additionalProperties: false,
             required: ['type', 'label', 'reason', 'payload'],
             properties: {
-              type: { const: 'send_template' },
+              type: { type: 'string', enum: ['send_template'] },
               ...ACTION_COPY_SCHEMA,
               payload: {
                 type: 'object',
@@ -445,12 +445,15 @@ const ACTION_GENERATION_INSTRUCTIONS = [
 
 export async function generateInboxAiSuggestion(params: {
   apiKey: string;
+  systemInstruction: string;
   contextPrompt: string;
   grounding: InboxAiActionGrounding;
 }): Promise<InboxAiSuggestionOutput> {
   const raw = await geminiGenerateJson<unknown>({
     apiKey: params.apiKey,
-    prompt: `${ACTION_GENERATION_INSTRUCTIONS}\n\n${params.contextPrompt}`,
+    systemInstruction:
+      `${params.systemInstruction}\n\n${ACTION_GENERATION_INSTRUCTIONS}`,
+    prompt: params.contextPrompt,
     temperature: 0.4,
     responseJsonSchema: INBOX_AI_SUGGESTION_JSON_SCHEMA,
     logScope: 'suggest-whatsapp-agent-reply',

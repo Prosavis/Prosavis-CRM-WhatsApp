@@ -45,6 +45,41 @@ describe('geminiGenerateJson HTTP transport', () => {
     expect(body.generationConfig).not.toHaveProperty('responseSchema');
   });
 
+  it('sends system instructions separately from the user prompt', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      candidates: [{
+        content: {
+          parts: [{ text: '{"summary":"ok"}' }],
+        },
+        finishReason: 'STOP',
+      }],
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await geminiGenerateJson({
+      apiKey: 'test-api-key',
+      model: 'gemini-3.6-flash',
+      systemInstruction: 'REGLAS DEL SISTEMA',
+      prompt: 'HISTORIAL Y CONTEXTO GROUNDED',
+    });
+
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const body = JSON.parse(String(request.body)) as {
+      systemInstruction?: { parts: Array<{ text: string }> };
+      contents: Array<{ role: string; parts: Array<{ text: string }> }>;
+    };
+    expect(body.systemInstruction?.parts[0]?.text).toBe(
+      'REGLAS DEL SISTEMA',
+    );
+    expect(body.contents).toEqual([{
+      role: 'user',
+      parts: [{ text: 'HISTORIAL Y CONTEXTO GROUNDED' }],
+    }]);
+    expect(body.contents[0]?.parts[0]?.text).not.toContain(
+      'REGLAS DEL SISTEMA',
+    );
+  });
+
   it('keeps legacy responseSchema callers on generationConfig.responseSchema', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       candidates: [{
