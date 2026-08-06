@@ -26,7 +26,7 @@ export const INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET = 78_000;
  * Incluye heading y contenido de cada sección. La suma (77.000) deja margen
  * para separadores sin desplazar el transcript reciente de 60.000 caracteres.
  */
-export const SECTION_CHAR_BUDGETS: Readonly<Record<string, number>> = Object.freeze({
+export const SECTION_CHAR_BUDGETS = Object.freeze({
   '=== Momento actual ===': 700,
   '=== Canal / ventana WhatsApp ===': 350,
   '=== Perfil directorio ===': 1_200,
@@ -39,7 +39,9 @@ export const SECTION_CHAR_BUDGETS: Readonly<Record<string, number>> = Object.fre
   '=== Respuestas oficiales de la casa ===': 4_500,
   '=== Citas / apoyos (Firestore, fuente de verdad) ===': 3_000,
   '=== Historial WhatsApp ===': 60_500,
-});
+} as const);
+
+export type InboxAiSectionHeading = keyof typeof SECTION_CHAR_BUDGETS;
 
 export interface InboxAiDirectory {
   id?: string;
@@ -314,7 +316,6 @@ function formatAppointmentLine(a: InboxAiAppointment): string {
 
 function formatPropertySummaryBlock(summary: InboxAiPropertySummary): string[] {
   const lines: string[] = [];
-  lines.push('=== Propiedades / ubicaciones de apoyos ===');
   lines.push(summary.patternLabel);
   lines.push(`Propiedades únicas: ${summary.uniquePropertyCount}`);
   if (summary.appointmentsWithoutAddress > 0) {
@@ -339,14 +340,21 @@ function formatPropertySummaryBlock(summary: InboxAiPropertySummary): string[] {
   return lines;
 }
 
-function clipSection(section: string, heading: string): string {
-  const budget = SECTION_CHAR_BUDGETS[heading];
-  if (!budget || section.length <= budget) return section;
+export function getSectionCharBudget(heading: string): number {
+  if (!Object.prototype.hasOwnProperty.call(SECTION_CHAR_BUDGETS, heading)) {
+    throw new Error(`Heading sin presupuesto de caracteres: ${heading}`);
+  }
+  return SECTION_CHAR_BUDGETS[heading as InboxAiSectionHeading];
+}
+
+function clipSection(section: string, heading: InboxAiSectionHeading): string {
+  const budget = getSectionCharBudget(heading);
+  if (section.length <= budget) return section;
   const suffix = `\n${SECTION_TRUNCATION_MARKER}`;
   return `${section.slice(0, Math.max(heading.length, budget - suffix.length)).trimEnd()}${suffix}`;
 }
 
-function buildSection(heading: string, lines: string[]): string {
+function buildSection(heading: InboxAiSectionHeading, lines: string[]): string {
   return clipSection([heading, ...lines].join('\n'), heading);
 }
 
@@ -490,8 +498,10 @@ export function formatInboxAiContextBlock(params: {
         directory?.preferredServiceAddress ?? directory?.address ?? null,
     });
   const propertyLines = formatPropertySummaryBlock(propertySummary);
-  const propertyHeading = propertyLines.shift()!;
-  sections.push(buildSection(propertyHeading, propertyLines));
+  sections.push(buildSection(
+    '=== Propiedades / ubicaciones de apoyos ===',
+    propertyLines,
+  ));
 
   const directoryTags = directory?.tags ?? [];
   sections.push(buildSection('=== Tags ===', [
@@ -500,8 +510,11 @@ export function formatInboxAiContextBlock(params: {
   ]));
 
   const pricingLines = formatPricingCatalogBlock().split('\n');
-  const pricingHeading = pricingLines.shift()!;
-  sections.push(buildSection(pricingHeading, pricingLines));
+  pricingLines.shift();
+  sections.push(buildSection(
+    '=== Catálogo oficial de precios (fuente de verdad) ===',
+    pricingLines,
+  ));
 
   sections.push(buildSection(
     '=== Respuestas oficiales de la casa ===',

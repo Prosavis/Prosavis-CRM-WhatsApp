@@ -110,7 +110,36 @@ describe('loadConversationContext', () => {
     });
     expect(calls.some((call) =>
       call.table === 'whatsapp_chat_tags' && call.method === 'limit'
-    )).toBe(true);
+    )).toBe(false);
+  });
+
+  it('preserves every active tag when a conversation has more than 50 tag IDs', async () => {
+    const tagIds = Array.from({ length: 125 }, (_, index) => `tag-${index}`);
+    const { client, calls } = createSupabaseDouble({
+      whatsapp_conversations: [{
+        stable_key: '573001112233',
+        tag_ids: tagIds,
+      }],
+      whatsapp_chat_tags: tagIds.map((id, index) => ({
+        id,
+        name: `Tag ${index}`,
+        archived: false,
+      })),
+    });
+
+    const result = await loadConversationContext(client, '573001112233');
+
+    expect(result.tags).toHaveLength(125);
+    expect(result.tags[0]).toBe('Tag 0');
+    expect(result.tags[124]).toBe('Tag 124');
+    expect(calls.some((call) =>
+      call.table === 'whatsapp_chat_tags' && call.method === 'limit'
+    )).toBe(false);
+    const batches = calls.filter((call) =>
+      call.table === 'whatsapp_chat_tags' && call.method === 'in'
+    );
+    expect(batches).toHaveLength(2);
+    expect(batches.flatMap((call) => call.args[1] as string[])).toEqual(tagIds);
   });
 });
 

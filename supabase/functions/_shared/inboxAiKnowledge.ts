@@ -10,7 +10,7 @@ import type { InboxAiDirectory } from './inboxAiContextFormat.ts';
 
 type SupabaseClient = any;
 
-const CONVERSATION_TAG_QUERY_LIMIT = 50;
+const CONVERSATION_TAG_QUERY_BATCH_SIZE = 100;
 const DIRECTORY_QUERY_LIMIT = 5;
 const DIRECTORY_NOTES_MAX = 400;
 const SNIPPET_SHORTCUT_MAX = 80;
@@ -105,24 +105,30 @@ export async function loadConversationContext(
   const tagIds: string[] = Array.isArray(conversation?.tag_ids)
     ? conversation.tag_ids.filter((id: unknown): id is string =>
       typeof id === 'string' && id.length > 0
-    ).slice(0, CONVERSATION_TAG_QUERY_LIMIT)
+    )
     : [];
   const tags: string[] = [];
 
   if (tagIds.length > 0) {
-    const { data: tagRows, error: tagsError } = await supabase
-      .from('whatsapp_chat_tags')
-      .select('id, name, archived')
-      .in('id', tagIds)
-      .eq('archived', false)
-      .limit(CONVERSATION_TAG_QUERY_LIMIT);
-    if (tagsError) throw tagsError;
-
     const namesById = new Map<string, string>();
-    for (const row of tagRows ?? []) {
-      const id = asTrimmedString(row?.id);
-      const name = asTrimmedString(row?.name);
-      if (id && name) namesById.set(id, name);
+    for (
+      let start = 0;
+      start < tagIds.length;
+      start += CONVERSATION_TAG_QUERY_BATCH_SIZE
+    ) {
+      const batch = tagIds.slice(start, start + CONVERSATION_TAG_QUERY_BATCH_SIZE);
+      const { data: tagRows, error: tagsError } = await supabase
+        .from('whatsapp_chat_tags')
+        .select('id, name, archived')
+        .in('id', batch)
+        .eq('archived', false);
+      if (tagsError) throw tagsError;
+
+      for (const row of tagRows ?? []) {
+        const id = asTrimmedString(row?.id);
+        const name = asTrimmedString(row?.name);
+        if (id && name) namesById.set(id, name);
+      }
     }
     tags.push(...tagIds.map((id) => namesById.get(id)).filter(
       (name): name is string => Boolean(name),

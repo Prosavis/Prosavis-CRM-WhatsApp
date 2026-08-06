@@ -6,10 +6,12 @@ import {
   buildPropertyLocationSummary,
   formatBogotaDateTime,
   formatInboxAiContextBlock,
+  getSectionCharBudget,
   groundBookingClientInfo,
   groundBookingPayment,
   mapInboxAiAppointmentPayment,
   normalizeAddressKey,
+  type InboxAiSectionHeading,
 } from '../../supabase/functions/_shared/inboxAiContextFormat';
 
 describe('normalizeAddressKey / buildPropertyLocationSummary', () => {
@@ -67,6 +69,12 @@ describe('normalizeAddressKey / buildPropertyLocationSummary', () => {
 });
 
 describe('formatInboxAiContextBlock', () => {
+  it('rejects an unbudgeted section heading instead of formatting it silently', () => {
+    expect(() => getSectionCharBudget('=== Sección sin presupuesto ===')).toThrow(
+      /heading sin presupuesto/i,
+    );
+  });
+
   it('includes property summary, addresses, appointment count and current time', () => {
     const block = formatInboxAiContextBlock({
       phone: '573001112233',
@@ -326,7 +334,7 @@ describe('formatInboxAiContextBlock', () => {
       nowIso: '2026-08-05T12:00:00.000Z',
     });
 
-    const headings = Object.keys(SECTION_CHAR_BUDGETS);
+    const headings = Object.keys(SECTION_CHAR_BUDGETS) as InboxAiSectionHeading[];
     for (const [index, heading] of headings.entries()) {
       const start = block.indexOf(heading);
       expect(start, heading).toBeGreaterThanOrEqual(0);
