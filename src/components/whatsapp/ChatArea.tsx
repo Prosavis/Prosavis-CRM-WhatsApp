@@ -82,7 +82,10 @@ import type { ForwardWhatsAppResult } from '@/services/forwardWhatsAppMessage';
 import { isForwardableMessage } from '@/services/forwardWhatsAppMessage';
 import { ContactAvatar } from '@/components/common/ContactAvatar';
 import { pickContactPhotoUrl } from '@/utils/contactAvatar';
-import { getLastInboundAt } from '@/utils/whatsappTemplateSuggestions';
+import {
+  getLoadedConversationInbound,
+  type LoadedConversationInbound,
+} from '@/utils/whatsappTemplateSuggestions';
 import { coloredChipSx } from '@/utils/coloredChipStyles';
 import { prepareWhatsAppSticker } from '@/utils/prepareWhatsAppSticker';
 import { summarizePeerPresences } from '@/utils/whatsappAdminPresence';
@@ -115,6 +118,7 @@ interface ChatAreaProps {
   myDisplayName?: string;
   /** Otros admins (excluye al usuario actual) actualmente activos en este chat. */
   peerPresences?: WhatsAppAdminPresence[];
+  onLoadedConversationInbound?: (inbound: LoadedConversationInbound) => void;
 }
 
 function groupMessagesByDate(messages: WhatsAppMessage[]): Map<string, WhatsAppMessage[]> {
@@ -205,6 +209,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   myUid,
   myDisplayName,
   peerPresences = [],
+  onLoadedConversationInbound,
 }) => {
   const theme = useTheme();
   const [messages, setMessages] = useState<WhatsAppMessage[]>([]);
@@ -924,7 +929,16 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     () => messages.filter((message) => !message.reactionTo),
     [messages],
   );
-  const lastInboundAt = useMemo(() => getLastInboundAt(visibleMessages), [visibleMessages]);
+  const loadedConversationInbound = useMemo(
+    () => getLoadedConversationInbound(conversation.id, visibleMessages),
+    [conversation.id, visibleMessages],
+  );
+  const lastInboundAt = loadedConversationInbound.lastInboundAt;
+  useEffect(() => {
+    if (!loading) {
+      onLoadedConversationInbound?.(loadedConversationInbound);
+    }
+  }, [loadedConversationInbound, loading, onLoadedConversationInbound]);
   const pendingInboundAudioCount = useMemo(
     () =>
       visibleMessages.filter(

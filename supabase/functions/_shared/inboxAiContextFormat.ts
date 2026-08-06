@@ -265,7 +265,11 @@ function formatAppointmentLine(a: InboxAiAppointment): string {
   ];
   if (a.duration != null) parts.push(`${a.duration}h`);
   if (a.paymentStatus) parts.push(`pago: ${a.paymentStatus}`);
-  if (a.totalAmount != null) {
+  if (
+    a.totalAmount != null &&
+    Number.isFinite(a.totalAmount) &&
+    a.totalAmount > 0
+  ) {
     parts.push(`valor: COP ${String(a.totalAmount).replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`);
   }
   if (a.paymentMethod) parts.push(`método: ${a.paymentMethod}`);
@@ -611,8 +615,7 @@ export function groundBookingPayment<
   const hasExplicitTarget = Boolean(target.date || target.time || target.address);
   const appointment = hasExplicitTarget
     ? candidates
-        .filter((candidate) => appointmentMatchesBookingTarget(candidate, target))
-        .find(hasAuthoritativeAppointmentPayment)
+        .find((candidate) => appointmentMatchesBookingTarget(candidate, target))
     : candidates[0];
 
   if (!appointment || !hasAuthoritativeAppointmentPayment(appointment)) {

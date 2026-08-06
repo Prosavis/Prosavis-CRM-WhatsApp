@@ -171,6 +171,38 @@ describe('formatInboxAiContextBlock', () => {
     expect(block).toContain('Estado: unknown');
     expect(block).toContain('Ventana truncada');
   });
+
+  it('omits zero and negative appointment totals from formatted context', () => {
+    const block = formatInboxAiContextBlock({
+      phone: '573009998877',
+      transcript: 'Cliente: info',
+      historyMeta: { loaded: 1, truncated: false },
+      conversationTags: [],
+      directory: null,
+      appointments: [
+        {
+          id: 'zero-total',
+          scheduledDate: '2026-08-10T14:00:00.000Z',
+          totalAmount: 0,
+        },
+        {
+          id: 'negative-total',
+          scheduledDate: '2026-08-11T14:00:00.000Z',
+          totalAmount: -88_000,
+        },
+      ],
+      sessionWindow: {
+        status: 'unknown',
+        lastInboundAt: null,
+        expiresAt: null,
+        requiresTemplate: true,
+      },
+      nowIso: '2026-08-05T12:00:00.000Z',
+    });
+
+    expect(block).not.toContain('valor: COP 0');
+    expect(block).not.toContain('valor: COP -88.000');
+  });
 });
 
 describe('INBOX_AI_SYSTEM_INSTRUCTION', () => {
@@ -367,6 +399,36 @@ describe('groundBookingPayment', () => {
             address: 'Otra dirección #3-4',
             paymentStatus: 'PAGO_ACEPTADO',
             totalAmount: 88_000,
+          },
+        ],
+      },
+      '2026-08-05T12:00:00.000Z',
+    );
+
+    expect(grounded.paymentStatus).toBe('none');
+    expect(grounded.paymentAmount).toBeNull();
+  });
+
+  it('does not borrow payment from a later match for a partial target', () => {
+    const grounded = groundBookingPayment(
+      {
+        collectedData: {
+          date: '2026-08-10',
+        },
+        paymentStatus: 'APPROVED',
+        paymentAmount: 999_999,
+      },
+      {
+        appointments: [
+          {
+            id: 'nearest-matching-unpaid',
+            scheduledDate: '2026-08-10T14:00:00.000Z',
+          },
+          {
+            id: 'later-matching-paid',
+            scheduledDate: '2026-08-10T18:00:00.000Z',
+            paymentStatus: 'PAGO_ACEPTADO',
+            totalAmount: 118_000,
           },
         ],
       },

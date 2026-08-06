@@ -4,7 +4,10 @@ import {
   getMetaSessionWindow,
   resolveMetaSessionWindow,
 } from '../../supabase/functions/_shared/metaSessionWindow';
-import { isWithinMetaSessionWindow } from './whatsappTemplateSuggestions';
+import {
+  getLoadedConversationInbound,
+  isWithinMetaSessionWindow,
+} from './whatsappTemplateSuggestions';
 import { scheduleMetaSessionExpiry } from '../hooks/useMetaSessionWindow';
 
 afterEach(() => {
@@ -85,6 +88,32 @@ describe('buildMetaSessionWindow', () => {
       expiresAt: null,
       requiresTemplate: true,
     });
+  });
+});
+
+describe('getLoadedConversationInbound', () => {
+  it('preserves the newest inbound timestamp when a later outbound message exists', () => {
+    const loadedInbound = getLoadedConversationInbound('conversation-1', [
+      {
+        id: 'inbound',
+        direction: 'inbound',
+        senderType: 'user',
+        status: 'received',
+        createdAt: new Date('2026-08-05T11:00:00.000Z'),
+      },
+      {
+        id: 'outbound',
+        direction: 'outbound',
+        senderType: 'agent',
+        status: 'sent',
+        createdAt: new Date('2026-08-05T11:30:00.000Z'),
+      },
+    ]);
+
+    expect(loadedInbound.conversationId).toBe('conversation-1');
+    expect(loadedInbound.lastInboundAt?.toISOString()).toBe(
+      '2026-08-05T11:00:00.000Z',
+    );
   });
 });
 

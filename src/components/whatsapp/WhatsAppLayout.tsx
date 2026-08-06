@@ -46,6 +46,7 @@ import {
   canShowDesktopNotifications,
   showInboundMessageNotification,
 } from '@/utils/desktopNotifications';
+import type { LoadedConversationInbound } from '@/utils/whatsappTemplateSuggestions';
 import useSoundEffects from '@/hooks/useSoundEffects';
 
 const INBOUND_NOTIFY_AUDIO = `${import.meta.env.BASE_URL}assets/audio/WhatsAppSound.mp3`;
@@ -166,6 +167,8 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   const { user, profile, session, loading: authLoading } = useAuth();
   const [conversations, setConversations] = useState<WhatsAppConversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<WhatsAppConversation | null>(null);
+  const [loadedConversationInbound, setLoadedConversationInbound] =
+    useState<LoadedConversationInbound | null>(null);
   const [loading, setLoading] = useState(true);
   const [inboxError, setInboxError] = useState<string | null>(null);
   const [subscriptionKey, setSubscriptionKey] = useState(0);
@@ -560,6 +563,13 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   const canShowTemplates =
     Boolean(selectedConversation && wabaId && phoneNumberId) &&
     templateRecipientDigits.length >= 10;
+  const templateLastInboundAt =
+    loadedConversationInbound &&
+    loadedConversationInbound.conversationId === selectedConversation?.id
+      ? loadedConversationInbound.lastInboundAt
+      : selectedConversation?.lastMessageDirection === 'inbound'
+        ? selectedConversation.lastMessageAt ?? null
+        : null;
 
   useEffect(() => {
     if (!selectedConversation) {
@@ -933,6 +943,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
               myUid={myUid}
               myDisplayName={myDisplayName}
               peerPresences={peersInSelectedChat}
+              onLoadedConversationInbound={setLoadedConversationInbound}
             />
           ) : (
             <WhatsAppEmptyState />
@@ -949,11 +960,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
             onSnippetsChanged={loadSnippets}
             conversationStableKey={selectedConversation.phone || selectedConversation.id}
             conversationDisplayName={contactCtx.displayName ?? undefined}
-            lastInboundAt={
-              selectedConversation.lastMessageDirection === 'inbound'
-                ? selectedConversation.lastMessageAt ?? null
-                : null
-            }
+            lastInboundAt={templateLastInboundAt}
             lastMessageDirection={selectedConversation.lastMessageDirection}
           />
         )}

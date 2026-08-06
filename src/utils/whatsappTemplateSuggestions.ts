@@ -30,6 +30,11 @@ export interface WhatsAppTemplateSuggestion {
   sessionExpired: boolean;
 }
 
+export interface LoadedConversationInbound {
+  conversationId: string;
+  lastInboundAt: Date | null;
+}
+
 const RETURNING_CLIENT_PRIORITY = [
   'react_cliente_antigua_fecha',
   'react_cliente_hace_tiempo',
@@ -57,6 +62,16 @@ export function getLastInboundAt(messages: WhatsAppMessage[]): Date | null {
   return sessionWindow.lastInboundAt
     ? new Date(sessionWindow.lastInboundAt)
     : null;
+}
+
+export function getLoadedConversationInbound(
+  conversationId: string,
+  messages: WhatsAppMessage[],
+): LoadedConversationInbound {
+  return {
+    conversationId,
+    lastInboundAt: getLastInboundAt(messages),
+  };
 }
 
 export function isWithinMetaSessionWindow(lastInboundAt: Date | null, now = new Date()): boolean {
