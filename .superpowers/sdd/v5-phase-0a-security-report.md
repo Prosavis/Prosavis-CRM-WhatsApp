@@ -392,3 +392,97 @@ ModuleNotFoundError: No module named 'graphify'
 
 No se realizaron llamadas a Firebase, Supabase o Firestore reales, ni
 mutaciones remotas.
+
+## Addendum — evidencia V5 task-scoped
+
+### Procedencia corregida
+
+La re-revisión confirmó que la versión inicial del test
+`V5 guard denies Firestore admin document without active flags` había sido
+capturada por un commit concurrente ajeno al task de seguridad. No se
+reescribió historia.
+
+Se modificó ese mismo test —sin duplicarlo— para crear evidencia nueva,
+task-scoped y más sensible. Ahora usa una tabla con:
+
+- `{ role: "admin" }` sin `isActive`/`active`, desde un origen permitido;
+- `{ isAdmin: true }` sin `isActive`/`active`, desde un origen desconocido.
+
+Ambos casos verifican `403`. El primero comprueba reflexión exacta del origen
+permitido y el segundo comprueba ausencia de
+`Access-Control-Allow-Origin`.
+
+No se modificó código de producción.
+
+### Commit exclusivo del test
+
+```text
+5ecf4ceadf2f720e9513c087ec3b3435ca08528a
+test(security): strengthen strict Firebase admin evidence
+```
+
+El commit contiene exclusivamente:
+
+```text
+supabase/functions/_shared/adminAuth.test.ts
+```
+
+### Verificación
+
+Tests:
+
+```powershell
+npx --yes deno test --allow-env supabase/functions/_shared/adminAuth.test.ts supabase/functions/_shared/strictCors.test.ts
+```
+
+Salida resumida exacta:
+
+```text
+running 14 tests from ./supabase/functions/_shared/adminAuth.test.ts
+V5 guard denies Firestore admin document without active flags ... ok
+running 7 tests from ./supabase/functions/_shared/strictCors.test.ts
+ok | 21 passed | 0 failed
+```
+
+Exit code: `0`.
+
+Formato:
+
+```powershell
+npx --yes deno fmt --check supabase/functions/_shared/adminAuth.ts supabase/functions/_shared/adminAuth.test.ts supabase/functions/_shared/strictCors.ts supabase/functions/_shared/strictCors.test.ts supabase/functions/_shared/directoryMonitorAuth.ts
+```
+
+Salida exacta:
+
+```text
+Checked 5 files
+```
+
+Exit code: `0`.
+
+Lint:
+
+```powershell
+npx --yes deno lint supabase/functions/_shared/adminAuth.ts supabase/functions/_shared/adminAuth.test.ts supabase/functions/_shared/strictCors.ts supabase/functions/_shared/strictCors.test.ts supabase/functions/_shared/directoryMonitorAuth.ts
+```
+
+Salida exacta:
+
+```text
+Checked 5 files
+```
+
+Exit code: `0`.
+
+IDE diagnostics del test: `No linter errors found`.
+
+### Concern operativo
+
+`graphify update .` continúa bloqueado por la instalación local:
+
+```text
+ModuleNotFoundError: No module named 'graphify'
+```
+
+La consulta inicial del codebase sí se realizó mediante MCP Graphify. No hubo
+mutaciones remotas.
