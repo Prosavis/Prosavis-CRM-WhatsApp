@@ -212,3 +212,10 @@ verify_jwt = false
 
 [functions.app-automations-admin]
 verify_jwt = false
+
+# V5 valida tokens Firebase/Supabase dentro del guard dual.
+[functions.ops-metrics]
+verify_jwt = false
+
+[functions.pago-verificado]
+verify_jwt = false
