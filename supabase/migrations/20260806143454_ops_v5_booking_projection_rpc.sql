@@ -115,6 +115,17 @@ begin
       message = 'child service_id must match booking service_id';
   end if;
 
+  if pg_catalog.jsonb_array_length(p_crew) > 0
+     and (
+       select count(*)
+       from pg_catalog.jsonb_array_elements(p_crew) as crew(child)
+       where coalesce((child ->> 'is_lead')::boolean, false)
+     ) <> 1 then
+    raise exception using
+      errcode = '22023',
+      message = 'non-empty crew must contain exactly one lead';
+  end if;
+
   perform pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended(
       v_booking.service_id || pg_catalog.chr(31) || v_booking.appointment_id,
@@ -394,6 +405,13 @@ $$;
 
 revoke execute on function public.apply_ops_booking_projection(jsonb, jsonb, jsonb, jsonb)
 from public, anon, authenticated;
+
+grant select, insert, update, delete on table
+  public.bookings,
+  public.booking_crew,
+  public.booking_addons,
+  public.booking_events
+to service_role;
 
 grant execute on function public.apply_ops_booking_projection(jsonb, jsonb, jsonb, jsonb)
 to service_role;

@@ -88,3 +88,68 @@ Checks estáticos ejecutados:
   y `npx supabase db lint --local --level error` cuando Docker esté disponible.
 - Los archivos y commits concurrentes ajenos se conservaron sin incluirlos en
   el commit funcional.
+
+## Follow-up — correcciones de revisión task-scoped
+
+Se corrigieron los cuatro findings de la revisión `Needs fixes`:
+
+- crew no vacía exige exactamente un `is_lead=true`; crew vacía sigue válida;
+- `service_role` recibe grants explícitos `SELECT/INSERT/UPDATE/DELETE` sobre
+  `bookings`, `booking_crew`, `booking_addons` y `booking_events`;
+- pgTAP ejecuta una proyección completa bajo `SET LOCAL ROLE service_role`;
+- el retry idéntico repite exactamente booking y children originales;
+- stale y revision conflict validan el JSON completo de respuesta;
+- pgTAP cubre cero leads y confirma rollback de booking, crew, addons y events.
+
+### Red
+
+Tras añadir primero las regresiones:
+
+```text
+npx supabase test db --local
+Connecting to local database...
+LegacyDbConnectError: failed to connect to postgres:
+dial error (connect ECONNREFUSED 127.0.0.1:54322)
+Suggestion: Make sure Docker is running, then run: supabase start
+Exit code: 1
+```
+
+### Checks posteriores
+
+```text
+npx supabase db reset --local
+LegacyDbBootstrapError: failed to inspect service
+Exit code: 1
+```
+
+```text
+npx supabase test db --local
+Connecting to local database...
+LegacyDbConnectError: failed to connect to postgres:
+dial error (connect ECONNREFUSED 127.0.0.1:54322)
+Suggestion: Make sure Docker is running, then run: supabase start
+Exit code: 1
+```
+
+```text
+npx supabase db lint --local --level error
+Connecting to local database...
+LegacyDbConnectError: failed to connect to postgres:
+dial error (connect ECONNREFUSED 127.0.0.1:54322)
+Suggestion: Make sure Docker is running, then run: supabase start
+Exit code: 1
+```
+
+```text
+git diff --check
+Exit code: 0
+Warnings CRLF sobre archivos del task y cambios concurrentes; sin errores.
+```
+
+Diagnósticos IDE de migración y pgTAP: sin errores.
+
+### Concern vigente
+
+La compilación PL/pgSQL y la ejecución pgTAP continúan sin evidencia runtime
+hasta que el stack local PostgreSQL pueda iniciar. No se usó producción como
+sustituto.

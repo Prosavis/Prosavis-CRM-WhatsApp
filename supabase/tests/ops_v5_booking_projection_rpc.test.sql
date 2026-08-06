@@ -99,12 +99,95 @@ select ok(
   'service_role can execute the projection RPC'
 );
 
+select is(
+  (
+    select count(*)
+    from unnest(array[
+      'bookings',
+      'booking_crew',
+      'booking_addons',
+      'booking_events'
+    ]) as table_names(name)
+    cross join unnest(array[
+      'SELECT',
+      'INSERT',
+      'UPDATE',
+      'DELETE'
+    ]) as privileges(privilege)
+    where has_table_privilege(
+      'service_role',
+      format('public.%I', name),
+      privilege
+    )
+  ),
+  16::bigint,
+  'service_role receives explicit CRUD grants on every projection table'
+);
+
 insert into public.crm_team_members
   (service_id, id, user_id, name, email)
 values
   ('svc-projection', 'cleaner-1', 'projection-user-1', 'Cleaner 1', 'projection-1@example.test'),
   ('svc-projection', 'cleaner-2', 'projection-user-2', 'Cleaner 2', 'projection-2@example.test'),
-  ('svc-projection', 'cleaner-3', 'projection-user-3', 'Cleaner 3', 'projection-3@example.test');
+  ('svc-projection', 'cleaner-3', 'projection-user-3', 'Cleaner 3', 'projection-3@example.test'),
+  (
+    'svc-service-role',
+    'cleaner-service-role',
+    'projection-service-role-user',
+    'Cleaner Service Role',
+    'projection-service-role@example.test'
+  );
+
+set local role service_role;
+
+select is(
+  (
+    public.apply_ops_booking_projection(
+      '{
+        "service_id": "svc-service-role",
+        "appointment_id": "appointment-service-role",
+        "source_revision": 1,
+        "source_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "source_updated_at": "2026-08-06T09:59:00Z",
+        "status": "CONFIRMED",
+        "fulfillment": "single",
+        "crew_size": 1
+      }'::jsonb,
+      '[{
+        "cleaner_id": "cleaner-service-role",
+        "assigned_minutes": 60,
+        "is_lead": true
+      }]'::jsonb,
+      '[{
+        "addon_id": "service-role-addon",
+        "minutes": 15,
+        "price_cop": 5000,
+        "sold_at": "checkout"
+      }]'::jsonb,
+      '[{
+        "event": "confirmado",
+        "payload": {"source": "service_role"},
+        "actor": "system"
+      }]'::jsonb
+    ) ->> 'reason'
+  ),
+  'inserted',
+  'service_role executes a complete projection successfully'
+);
+
+reset role;
+
+select results_eq(
+  $$
+    select
+      (select count(*) from public.bookings where service_id = 'svc-service-role'),
+      (select count(*) from public.booking_crew where service_id = 'svc-service-role'),
+      (select count(*) from public.booking_addons where service_id = 'svc-service-role'),
+      (select count(*) from public.booking_events where service_id = 'svc-service-role')
+  $$,
+  $$values (1::bigint, 1::bigint, 1::bigint, 1::bigint)$$,
+  'service_role persists booking and all child projections'
+);
 
 insert into projection_results (test_case, result)
 select
@@ -308,15 +391,59 @@ select
       "appointment_id": "appointment-1",
       "source_revision": 100,
       "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source_created_at": "2026-08-06T10:00:00Z",
       "source_updated_at": "2026-08-06T10:05:00Z",
-      "status": "PENDING",
-      "fulfillment": "single",
-      "crew_size": 1,
-      "total_cop": 1
+      "status": "CONFIRMED",
+      "required_cleaner_minutes": 180,
+      "scheduled_start": "2026-08-07T13:00:00Z",
+      "scheduled_end": "2026-08-07T16:00:00Z",
+      "fulfillment": "composite",
+      "crew_size": 2,
+      "client_name": "Cliente V5",
+      "payment_status": "PAGO_ACEPTADO",
+      "subtotal_cop": 120000,
+      "total_cop": 145000,
+      "paid_cop": 145000,
+      "pending_cop": 0,
+      "has_addons": true,
+      "addon_total_cop": 25000
     }'::jsonb,
-    '[]'::jsonb,
-    '[]'::jsonb,
-    '[]'::jsonb
+    '[
+      {
+        "service_id": "svc-projection",
+        "booking_id": "99999999-9999-9999-9999-999999999999",
+        "cleaner_id": "cleaner-1",
+        "assigned_minutes": 90,
+        "is_lead": true,
+        "estimated_marginal_cost_cop": 18000
+      },
+      {
+        "cleaner_id": "cleaner-2",
+        "assigned_minutes": 90,
+        "is_lead": false,
+        "estimated_marginal_cost_cop": 17000
+      }
+    ]'::jsonb,
+    '[
+      {
+        "service_id": "svc-projection",
+        "booking_id": "99999999-9999-9999-9999-999999999999",
+        "addon_id": "inside-fridge",
+        "minutes": 30,
+        "price_cop": 25000,
+        "sold_at": "checkout"
+      }
+    ]'::jsonb,
+    '[
+      {
+        "service_id": "svc-projection",
+        "booking_id": "99999999-9999-9999-9999-999999999999",
+        "event": "creado",
+        "payload": {"channel": "app"},
+        "actor": "client"
+      },
+      {"event": "confirmado", "payload": {"payment": "approved"}, "actor": "system"}
+    ]'::jsonb
   );
 
 select is(
@@ -368,9 +495,19 @@ select
   );
 
 select is(
-  (select result ->> 'reason' from projection_results where test_case = 'stale_revision'),
-  'stale_revision',
-  'older revision is a no-op'
+  (select result from projection_results where test_case = 'stale_revision'),
+  (
+    select pg_catalog.jsonb_build_object(
+      'booking_id', id,
+      'applied', false,
+      'reason', 'stale_revision',
+      'source_revision', 99
+    )
+    from public.bookings
+    where service_id = 'svc-projection'
+      and appointment_id = 'appointment-1'
+  ),
+  'older revision returns the complete no-op response'
 );
 select results_eq(
   $$
@@ -401,9 +538,19 @@ select
   );
 
 select is(
-  (select result ->> 'reason' from projection_results where test_case = 'revision_conflict'),
-  'revision_conflict',
-  'same revision with a different hash reports a conflict'
+  (select result from projection_results where test_case = 'revision_conflict'),
+  (
+    select pg_catalog.jsonb_build_object(
+      'booking_id', id,
+      'applied', false,
+      'reason', 'revision_conflict',
+      'source_revision', 100
+    )
+    from public.bookings
+    where service_id = 'svc-projection'
+      and appointment_id = 'appointment-1'
+  ),
+  'revision conflict returns the complete no-op response'
 );
 select results_eq(
   $$
@@ -519,6 +666,71 @@ select is(
     select public.apply_ops_booking_projection(
       '{
         "service_id": "svc-projection",
+        "appointment_id": "appointment-1",
+        "source_revision": 102,
+        "source_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "source_updated_at": "2026-08-06T10:07:00Z",
+        "status": "CONFIRMED",
+        "fulfillment": "single",
+        "crew_size": 1,
+        "total_cop": 190000
+      }'::jsonb,
+      '[{
+        "cleaner_id": "cleaner-1",
+        "assigned_minutes": 120,
+        "is_lead": false
+      }]'::jsonb,
+      '[{
+        "addon_id": "zero-lead-addon",
+        "minutes": 10,
+        "price_cop": 10000,
+        "sold_at": "onsite"
+      }]'::jsonb,
+      '[{
+        "event": "reasignado",
+        "payload": {"reason": "zero lead"},
+        "actor": "system"
+      }]'::jsonb
+    )
+  $sql$),
+  '22023',
+  'non-empty crew with zero leads is rejected'
+);
+select results_eq(
+  $$
+    select
+      source_revision,
+      status,
+      total_cop,
+      (select count(*) from public.booking_crew where service_id = 'svc-projection'),
+      (select min(cleaner_id) from public.booking_crew where service_id = 'svc-projection'),
+      (select count(*) from public.booking_addons where service_id = 'svc-projection'),
+      (select sum(price_cop) from public.booking_addons where service_id = 'svc-projection'),
+      (select count(*) from public.booking_events where service_id = 'svc-projection'),
+      (select min(event) from public.booking_events where service_id = 'svc-projection')
+    from public.bookings
+    where service_id = 'svc-projection'
+      and appointment_id = 'appointment-1'
+  $$,
+  $$values (
+    101::bigint,
+    'COMPLETED'::text,
+    180000::bigint,
+    1::bigint,
+    'cleaner-3'::text,
+    2::bigint,
+    30000::numeric,
+    1::bigint,
+    'finalizado'::text
+  )$$,
+  'zero-lead rejection rolls back booking and every child snapshot'
+);
+
+select is(
+  pg_temp.sqlstate_of($sql$
+    select public.apply_ops_booking_projection(
+      '{
+        "service_id": "svc-projection",
         "appointment_id": "appointment-cross-service",
         "source_revision": 1,
         "source_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
@@ -587,7 +799,7 @@ select is(
       ]'::jsonb
     )
   $sql$),
-  '23505',
+  '22023',
   'two crew leads are rejected'
 );
 select results_eq(
