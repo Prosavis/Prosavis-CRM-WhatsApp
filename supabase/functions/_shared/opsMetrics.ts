@@ -24,6 +24,24 @@ export interface OpsRollupRow {
   cash_margin_cop?: number | null;
 }
 
+export interface CleanerDayFactRow {
+  cleaner_id: string;
+  operational_date: string;
+  offered_minutes?: number | null;
+  accepted_minutes?: number | null;
+  sold_minutes?: number | null;
+  lost_minutes?: number | null;
+  recoverable_minutes?: number | null;
+  orphan_minutes?: number | null;
+  equivalent_days?: number | null;
+  utilization?: number | null;
+}
+
+export interface OpsTeamMemberRow {
+  id: string;
+  name: string;
+}
+
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const SERVICE_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const DAY_MS = 86_400_000;
@@ -89,6 +107,24 @@ function comparison(current: number, previous: number) {
     absoluteChange,
     percentChange: previous === 0 ? null : (absoluteChange / previous) * 100,
   };
+}
+
+export function buildCleanerCapacityPayload(
+  rows: readonly CleanerDayFactRow[],
+  members: readonly OpsTeamMemberRow[],
+) {
+  const names = new Map(members.map((member) => [member.id, member.name]));
+  return rows
+    .map((row) => ({
+      ...row,
+      cleaner_name: names.get(row.cleaner_id) ?? "Operaria",
+    }))
+    .sort(
+      (left, right) =>
+        left.operational_date.localeCompare(right.operational_date) ||
+        left.cleaner_name.localeCompare(right.cleaner_name) ||
+        left.cleaner_id.localeCompare(right.cleaner_id),
+    );
 }
 
 export function buildOpsMetricsPayload(

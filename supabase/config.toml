@@ -219,3 +219,18 @@ verify_jwt = false
 
 [functions.pago-verificado]
 verify_jwt = false
+
+[functions.agenda-opciones]
+verify_jwt = false
+
+[functions.agenda-perdida]
+verify_jwt = false
+
+[functions.visitas-ruta]
+verify_jwt = false
+
+[functions.visitas-registrar]
+verify_jwt = false
+
+[functions.ai-context]
+verify_jwt = false

@@ -1,5 +1,9 @@
 import { assertEquals, assertThrows } from "jsr:@std/assert";
-import { buildOpsMetricsPayload, parseOpsMetricsQuery } from "./opsMetrics.ts";
+import {
+  buildCleanerCapacityPayload,
+  buildOpsMetricsPayload,
+  parseOpsMetricsQuery,
+} from "./opsMetrics.ts";
 
 Deno.test(
   "parseOpsMetricsQuery validates and derives equal comparison range",
@@ -125,3 +129,53 @@ Deno.test("zero accepted minutes stays out of utilization denominator", () => {
   ]);
   assertEquals(payload.capacity.utilization, null);
 });
+
+Deno.test(
+  "buildCleanerCapacityPayload adds member names and stable ordering",
+  () => {
+    const payload = buildCleanerCapacityPayload(
+      [
+        {
+          cleaner_id: "cleaner-2",
+          operational_date: "2026-08-07",
+          accepted_minutes: 240,
+          sold_minutes: 120,
+          recoverable_minutes: 120,
+          utilization: 0.5,
+        },
+        {
+          cleaner_id: "cleaner-1",
+          operational_date: "2026-08-06",
+          accepted_minutes: 480,
+          sold_minutes: 480,
+          recoverable_minutes: 0,
+          utilization: 1,
+        },
+      ],
+      [
+        { id: "cleaner-1", name: "Ana" },
+        { id: "cleaner-2", name: "Beatriz" },
+      ],
+    );
+
+    assertEquals(
+      payload.map(({ cleaner_id, cleaner_name, operational_date }) => ({
+        cleaner_id,
+        cleaner_name,
+        operational_date,
+      })),
+      [
+        {
+          cleaner_id: "cleaner-1",
+          cleaner_name: "Ana",
+          operational_date: "2026-08-06",
+        },
+        {
+          cleaner_id: "cleaner-2",
+          cleaner_name: "Beatriz",
+          operational_date: "2026-08-07",
+        },
+      ],
+    );
+  },
+);

@@ -4,9 +4,12 @@ import {
   strictPreflightResponse,
 } from "../_shared/strictCors.ts";
 import {
+  buildCleanerCapacityPayload,
   buildOpsMetricsPayload,
   parseOpsMetricsQuery,
+  type CleanerDayFactRow,
   type OpsRollupRow,
+  type OpsTeamMemberRow,
 } from "../_shared/opsMetrics.ts";
 
 const ROLLUP_FIELDS = [
@@ -25,6 +28,19 @@ const ROLLUP_FIELDS = [
   "contribution_before_cac_cop",
   "contribution_after_cac_cop",
   "cash_margin_cop",
+].join(",");
+
+const CLEANER_DAY_FIELDS = [
+  "cleaner_id",
+  "operational_date",
+  "offered_minutes",
+  "accepted_minutes",
+  "sold_minutes",
+  "lost_minutes",
+  "recoverable_minutes",
+  "orphan_minutes",
+  "equivalent_days",
+  "utilization",
 ].join(",");
 
 Deno.serve(async (request) => {
@@ -74,9 +90,25 @@ Deno.serve(async (request) => {
     .gte("operational_date", range.previousFrom)
     .lte("operational_date", range.previousTo)
     .order("operational_date", { ascending: true });
+  const cleanerFactsQuery = context.supabase
+    .from("cleaner_day_facts")
+    .select(CLEANER_DAY_FIELDS)
+    .eq("service_id", range.serviceId)
+    .gte("operational_date", range.from)
+    .lte("operational_date", range.to);
+  const membersQuery = context.supabase
+    .from("crm_team_members")
+    .select("id,name")
+    .eq("service_id", range.serviceId)
+    .eq("is_active", true);
 
-  const [current, previous] = await Promise.all([currentQuery, previousQuery]);
-  if (current.error || previous.error) {
+  const [current, previous, cleanerFacts, members] = await Promise.all([
+    currentQuery,
+    previousQuery,
+    cleanerFactsQuery,
+    membersQuery,
+  ]);
+  if (current.error || previous.error || cleanerFacts.error || members.error) {
     console.error("[ops-metrics] Query failed", {
       request_id: crypto.randomUUID(),
       spec_version: "v5",
@@ -97,6 +129,10 @@ Deno.serve(async (request) => {
     data: {
       range,
       ...payload,
+      cleaners: buildCleanerCapacityPayload(
+        (cleanerFacts.data ?? []) as CleanerDayFactRow[],
+        (members.data ?? []) as OpsTeamMemberRow[],
+      ),
     },
   });
 });
