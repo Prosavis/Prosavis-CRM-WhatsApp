@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(23);
+select plan(26);
 
 select has_table(
   'public',
@@ -157,6 +157,24 @@ select is(
   'duplicate source event is idempotent'
 );
 
+select throws_ok(
+  $$
+    select public.apply_ops_rating_event(
+      jsonb_build_object(
+        'service_id', 'service-rating-payroll-test',
+        'cleaner_id', 'cleaner-rating-payroll-test',
+        'appointment_id', 'appointment-rating-new',
+        'source', 'firebase_team_member_review',
+        'source_event_id', 'appointment-rating-new:cleaner-rating-payroll-test',
+        'rating', 4,
+        'occurred_at', '2026-08-06T12:00:00Z'
+      )
+    )
+  $$,
+  'rating source_event_id conflict',
+  'duplicate source id rejects a conflicting immutable payload'
+);
+
 select is(
   (
     select count(*)::integer
@@ -279,6 +297,30 @@ select is(
   ) ->> 'rounded_payable_cop',
   '140000',
   'closed payroll uses configured rounding increment'
+);
+
+select is(
+  public.refresh_cleaner_monthly_payroll(
+    'service-rating-payroll-test',
+    'cleaner-rating-payroll-test',
+    '2026-08-01',
+    'closed'
+  ) ->> 'applied',
+  'false',
+  'repeated payroll close is idempotent'
+);
+
+select ok(
+  nullif(
+    public.refresh_cleaner_monthly_payroll(
+      'service-rating-payroll-test',
+      'cleaner-rating-payroll-test',
+      '2026-08-01',
+      'closed'
+    ) ->> 'payroll_id',
+    ''
+  ) is not null,
+  'idempotent payroll close returns the existing ledger id'
 );
 
 select is(
