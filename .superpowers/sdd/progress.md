@@ -9,3 +9,5 @@
 - V5 Fase 0A security: complete (commits 70546de..a2f8fcf, task review approved; 21/21 Deno tests, fmt and lint verified).
 - V5 Fase 0A gate: executable checks complete; `supabase db reset --local` remains blocked because Docker/Podman is unavailable.
 - V5 Fase 0B projection RPC: complete (commits cec71cd..8f15ec5, static task review approved; PostgreSQL runtime pending Docker/Podman).
+- Fase 3 availability: complete (commits 8a94973, df5cda4; 507 tests and build passed; task review Spec PASS / Quality APPROVED; deploy Firestore index before or with Function).
+- Fase 4 memory: complete (commits cb21116, d8ebd18; 171 tests, type-check and lint passed; task review Spec PASS / Quality APPROVED; migration runtime pending Docker/Podman).

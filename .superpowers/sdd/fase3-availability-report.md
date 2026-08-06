@@ -175,3 +175,71 @@ Los diagnósticos IDE de los cuatro archivos no reportaron errores y
   refresco.
 - Aunque se solicitó un commit solamente local, `8a94973` apareció en
   `origin/main` por actividad concurrente posterior al commit.
+
+### Corrección de rendimiento post re-revisión
+
+La re-revisión detectó que el helper compartido ejecutaba las consultas por
+principal y coasignado sin filtros, por lo que disponibilidad descargaba el
+historial completo y solo después aplicaba rango y estado en memoria.
+
+Se añadieron opciones de consulta al helper compartido. Los chequeos canónicos
+existentes siguen llamándolo sin opciones y conservan su comportamiento;
+disponibilidad ahora aplica en **ambas** consultas:
+
+- estados bloqueantes mediante `status in`;
+- `scheduledDate >= startDate`;
+- `scheduledDate <= endDate`;
+- `limit(5000)`.
+
+La deduplicación por ID y `getAppointmentDurationForMember` permanecen en el
+helper común.
+
+#### Índices
+
+`firestore.indexes.json` ya contenía el índice de `appointments` para
+`providerId + status + scheduledDate`. La rama
+`assignedTeamMemberIds array-contains + status + scheduledDate` sí requiere un
+índice compuesto distinto, que se añadió a la configuración. No se desplegó;
+debe publicarse antes o junto con la Function para que esa consulta no falle
+por índice faltante.
+
+#### TDD RED
+
+```text
+npm test -- --runInBand src/calendar/getAvailableSlots.test.ts
+Test Suites: 1 failed, 1 total
+Tests:       1 failed, 1 total
+Received query: solo providerId/assignedTeamMemberIds, sin status, rango ni límite
+```
+
+La prueba sigue entrando por
+`getAvailableSlotsInternal(checkEntireTeam: true)` y observa las dos consultas
+Firestore emitidas por el recorrido real.
+
+#### GREEN y verificación
+
+```text
+npm test -- --runInBand src/calendar/getAvailableSlots.test.ts src/calendar/appointmentTeamAssignment.test.ts
+Test Suites: 2 passed, 2 total
+Tests:       39 passed, 39 total
+
+npm test -- --runInBand
+Test Suites: 65 passed, 65 total
+Tests:       507 passed, 507 total
+Snapshots:   1 passed, 1 total
+
+npm run build
+Exit 0
+```
+
+Los diagnósticos IDE y `git diff --check` no reportaron errores.
+
+#### Commit
+
+- Firebase local, sin push: `df5cda4`
+  (`Bound team availability appointment queries`).
+- Archivos exclusivos:
+  - `firestore.indexes.json`
+  - `functions/src/calendar/appointmentTeamAssignment.ts`
+  - `functions/src/calendar/getAvailableSlots.ts`
+  - `functions/src/calendar/getAvailableSlots.test.ts`
