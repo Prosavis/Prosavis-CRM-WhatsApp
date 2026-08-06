@@ -7,6 +7,7 @@ import {
   parseVisitRegistration,
   type VisitRegistrationInput,
 } from "../_shared/visitRegistration.ts";
+import { buildVisitAttentionAlert } from "../_shared/visitAttentionAlert.ts";
 
 const MAX_BODY_BYTES = 32_768;
 
@@ -16,9 +17,10 @@ interface PersistedRow {
 }
 
 async function findByIdempotency(
-  supabase: ReturnType<typeof requireAdmin> extends Promise<
-    { supabase: infer Client }
-  > ? Client
+  supabase: ReturnType<typeof requireAdmin> extends Promise<{
+    supabase: infer Client;
+  }>
+    ? Client
     : never,
   table: string,
   serviceId: string,
@@ -126,9 +128,7 @@ async function persistReferral(
   context: Awaited<ReturnType<typeof requireAdmin>>,
   input: VisitRegistrationInput,
   visitId: string,
-): Promise<
-  { referral: PersistedRow; opportunity: PersistedRow } | null
-> {
+): Promise<{ referral: PersistedRow; opportunity: PersistedRow } | null> {
   if (!input.referral) return null;
   const referralKey = `${input.idempotencyKey}:referral`;
   let referral = await findByIdempotency(
@@ -260,6 +260,59 @@ async function persistOpportunity(
   );
 }
 
+async function sendAttentionTodayAlertBestEffort(input: {
+  complaint: PersistedRow | null;
+  satisfaction: number;
+  duplicate: boolean;
+}): Promise<void> {
+  if (!input.complaint || input.duplicate) return;
+  try {
+    const to = Deno.env.get("VISITS_ALERT_PHONE")?.trim() ?? "";
+    const userConsoleUrl = Deno.env.get("USER_CONSOLE_URL")?.trim() ?? "";
+    const accessToken = Deno.env.get("WHATSAPP_ACCESS_TOKEN")?.trim() ?? "";
+    const phoneNumberId =
+      Deno.env.get("WHATSAPP_PHONE_NUMBER_ID")?.trim() ?? "";
+    const enabled =
+      Deno.env.get("ENABLE_META_SEND")?.trim().toLowerCase() === "true";
+    if (!to || !userConsoleUrl || !accessToken || !phoneNumberId || !enabled) {
+      return;
+    }
+    const response = await fetch(
+      `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          recipient_type: "individual",
+          to,
+          type: "text",
+          text: {
+            preview_url: false,
+            body: buildVisitAttentionAlert({
+              satisfaction: input.satisfaction,
+              complaintId: input.complaint.id,
+              userConsoleUrl,
+            }),
+          },
+        }),
+      },
+    );
+    if (!response.ok) {
+      throw new Error("Meta send failed");
+    }
+  } catch {
+    console.warn("[visitas-registrar] attention alert unavailable", {
+      request_id: crypto.randomUUID(),
+      spec_version: "v5",
+      error_type: "visit_attention_alert_error",
+    });
+  }
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return strictPreflightResponse(request);
   if (request.method !== "POST") {
@@ -319,6 +372,11 @@ Deno.serve(async (request) => {
       input,
       persisted.visit.id,
     );
+    await sendAttentionTodayAlertBestEffort({
+      complaint,
+      satisfaction: input.satisfaction,
+      duplicate: persisted.duplicate,
+    });
 
     return strictJsonResponse(
       request,
@@ -344,9 +402,10 @@ Deno.serve(async (request) => {
     return strictJsonResponse(
       request,
       {
-        error: error instanceof Error
-          ? error.message
-          : "No fue posible registrar la visita.",
+        error:
+          error instanceof Error
+            ? error.message
+            : "No fue posible registrar la visita.",
       },
       409,
     );
