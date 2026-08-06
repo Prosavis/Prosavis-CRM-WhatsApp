@@ -1,0 +1,1884 @@
+TASK COMMITS ONLY: 70546de 043060a 2dd1383 02e0fc4 5ecf4ce a2f8fcf
+
+commit 70546ded3afabcf7a7e0fc4558da899b2201ff0e
+Author:     Nicol+ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+AuthorDate: Wed Aug 5 17:19:27 2026 -0500
+Commit:     Nicol+ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+CommitDate: Wed Aug 5 17:19:27 2026 -0500
+
+    feat(security): add strict CORS and dual admin auth
+    
+    Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ supabase/functions/_shared/adminAuth.test.ts       | 282 +++++++++++++++++++++
+ supabase/functions/_shared/adminAuth.ts            | 242 ++++++++++++++++++
+ supabase/functions/_shared/directoryMonitorAuth.ts | 124 +--------
+ supabase/functions/_shared/strictCors.test.ts      | 130 ++++++++++
+ supabase/functions/_shared/strictCors.ts           |  64 +++++
+ 5 files changed, 727 insertions(+), 115 deletions(-)
+
+diff --git a/supabase/functions/_shared/adminAuth.test.ts b/supabase/functions/_shared/adminAuth.test.ts
+new file mode 100644
+index 0000000..dea660e
+--- /dev/null
++++ b/supabase/functions/_shared/adminAuth.test.ts
+@@ -0,0 +1,282 @@
++import {
++  type AdminAuthDependencies,
++  createAdminGuard,
++  requireAdmin,
++} from "./adminAuth.ts";
++import { requireDirectoryAdmin } from "./directoryMonitorAuth.ts";
++
++interface FakeClient {
++  name: string;
++}
++
++function assertEquals<T>(actual: T, expected: T, message?: string): void {
++  if (!Object.is(actual, expected)) {
++    throw new Error(
++      message ?? `Expected ${String(expected)}, received ${String(actual)}`,
++    );
++  }
++}
++
++function authRequest(
++  token?: string,
++  origin = "https://userconsole.prosavis.com",
++): Request {
++  const headers = new Headers({ Origin: origin });
++  if (token) headers.set("Authorization", `Bearer ${token}`);
++  return new Request("https://example.test/functions/v1/admin", { headers });
++}
++
++function unsignedToken(payload: Record<string, unknown>): string {
++  const encode = (value: Record<string, unknown>) =>
++    btoa(JSON.stringify(value))
++      .replace(/\+/g, "-")
++      .replace(/\//g, "_")
++      .replace(/=+$/g, "");
++  return `${encode({ alg: "none" })}.${encode(payload)}.signature`;
++}
++
++function dependencies(
++  overrides: Partial<AdminAuthDependencies<FakeClient>> = {},
++): AdminAuthDependencies<FakeClient> {
++  return {
++    createServiceClient: () => ({ name: "service-role-client" }),
++    verifyFirebaseToken: () => Promise.resolve(null),
++    getFirebaseAdminDoc: () => Promise.resolve(null),
++    verifySupabaseToken: () => Promise.resolve(null),
++    getSupabaseAdminProfile: () => Promise.resolve(null),
++    authorizedAdminEmails: [],
++    ...overrides,
++  };
++}
++
++async function thrownResponse(
++  action: () => Promise<unknown>,
++): Promise<Response> {
++  try {
++    await action();
++  } catch (error) {
++    if (error instanceof Response) return error;
++    throw error;
++  }
++  throw new Error("Expected the guard to throw a Response");
++}
++
++Deno.test("missing bearer token returns strict 401 JSON", async () => {
++  const requireAdmin = createAdminGuard(dependencies());
++  const response = await thrownResponse(() => requireAdmin(authRequest()));
++
++  assertEquals(response.status, 401);
++  assertEquals(response.headers.get("Content-Type"), "application/json");
++  assertEquals(
++    response.headers.get("Access-Control-Allow-Origin"),
++    "https://userconsole.prosavis.com",
++  );
++  assertEquals((await response.json()).error, "Usuario no autenticado.");
++});
++
++Deno.test("invalid Firebase token returns 401", async () => {
++  let verificationCalls = 0;
++  const requireAdmin = createAdminGuard(
++    dependencies({
++      verifyFirebaseToken: () => {
++        verificationCalls++;
++        return Promise.resolve(null);
++      },
++    }),
++  );
++  const token = unsignedToken({
++    iss: "https://securetoken.google.com/prosavis",
++    sub: "firebase-user",
++  });
++
++  const response = await thrownResponse(() => requireAdmin(authRequest(token)));
++
++  assertEquals(verificationCalls, 1);
++  assertEquals(response.status, 401);
++  assertEquals((await response.json()).error, "Usuario no autenticado.");
++});
++
++Deno.test("valid non-admin Firebase identity returns 403", async () => {
++  const requireAdmin = createAdminGuard(
++    dependencies({
++      verifyFirebaseToken: () => Promise.resolve({ uid: "firebase-user" }),
++    }),
++  );
++  const token = unsignedToken({
++    iss: "https://securetoken.google.com/prosavis",
++    sub: "firebase-user",
++    email: "member@example.com",
++  });
++
++  const response = await thrownResponse(() => requireAdmin(authRequest(token)));
++
++  assertEquals(response.status, 403);
++  assertEquals(
++    (await response.json()).error,
++    "Usuario sin permisos de administrador.",
++  );
++});
++
++Deno.test("Firebase admin claim returns normalized Firebase context", async () => {
++  const client = { name: "claim-client" };
++  const requireAdmin = createAdminGuard(
++    dependencies({
++      createServiceClient: () => client,
++      verifyFirebaseToken: () => Promise.resolve({ uid: "firebase-admin" }),
++    }),
++  );
++  const token = unsignedToken({
++    iss: "https://securetoken.google.com/prosavis",
++    sub: "firebase-admin",
++    email: "admin@example.com",
++    admin: true,
++  });
++
++  const context = await requireAdmin(authRequest(token));
++
++  assertEquals(context.supabase, client);
++  assertEquals(context.actor.kind, "firebase");
++  assertEquals(context.actor.uid, "firebase-admin");
++  assertEquals(context.actor.email, "admin@example.com");
++});
++
++Deno.test("allowlisted Firebase email returns admin context case-insensitively", async () => {
++  const requireAdmin = createAdminGuard(
++    dependencies({
++      verifyFirebaseToken: () => Promise.resolve({ uid: "allowlisted-admin" }),
++      authorizedAdminEmails: ["admin@prosavis.com"],
++    }),
++  );
++  const token = unsignedToken({
++    iss: "https://securetoken.google.com/prosavis",
++    sub: "allowlisted-admin",
++    email: "Admin@Prosavis.com",
++  });
++
++  const context = await requireAdmin(authRequest(token));
++
++  assertEquals(context.actor.kind, "firebase");
++  assertEquals(context.actor.uid, "allowlisted-admin");
++  assertEquals(context.actor.email, "Admin@Prosavis.com");
++});
++
++Deno.test("active Firestore admin document returns Firebase context", async () => {
++  const requireAdmin = createAdminGuard(
++    dependencies({
++      verifyFirebaseToken: () => Promise.resolve({ uid: "firestore-admin" }),
++      getFirebaseAdminDoc: (uid) => {
++        assertEquals(uid, "firestore-admin");
++        return Promise.resolve({ role: "admin", isActive: true });
++      },
++    }),
++  );
++  const token = unsignedToken({
++    iss: "https://securetoken.google.com/prosavis",
++    sub: "firestore-admin",
++    email: "firestore@example.com",
++  });
++
++  const context = await requireAdmin(authRequest(token));
++
++  assertEquals(context.actor.kind, "firebase");
++  assertEquals(context.actor.uid, "firestore-admin");
++});
++
++Deno.test("invalid Supabase token returns 401", async () => {
++  let verificationCalls = 0;
++  const requireAdmin = createAdminGuard(
++    dependencies({
++      verifySupabaseToken: () => {
++        verificationCalls++;
++        return Promise.resolve(null);
++      },
++    }),
++  );
++  const token = unsignedToken({
++    iss: "https://project.supabase.co/auth/v1",
++    sub: "supabase-user",
++  });
++
++  const response = await thrownResponse(() => requireAdmin(authRequest(token)));
++
++  assertEquals(verificationCalls, 1);
++  assertEquals(response.status, 401);
++});
++
++Deno.test("valid Supabase user without active admin profile returns 403", async () => {
++  let profileCalls = 0;
++  const requireAdmin = createAdminGuard(
++    dependencies({
++      verifySupabaseToken: () =>
++        Promise.resolve({
++          uid: "supabase-member",
++          email: "member@example.com",
++        }),
++      getSupabaseAdminProfile: () => {
++        profileCalls++;
++        return Promise.resolve(null);
++      },
++    }),
++  );
++  const token = unsignedToken({
++    iss: "https://project.supabase.co/auth/v1",
++    sub: "supabase-member",
++  });
++
++  const response = await thrownResponse(() => requireAdmin(authRequest(token)));
++
++  assertEquals(profileCalls, 1);
++  assertEquals(response.status, 403);
++  assertEquals(
++    (await response.json()).error,
++    "Usuario sin permisos de administrador.",
++  );
++});
++
++Deno.test("active Supabase admin and super_admin return normalized contexts", async () => {
++  for (const role of ["admin", "super_admin"]) {
++    const client = { name: `${role}-client` };
++    const requireAdmin = createAdminGuard(
++      dependencies({
++        createServiceClient: () => client,
++        verifySupabaseToken: () =>
++          Promise.resolve({ uid: `${role}-uid`, email: "auth@example.com" }),
++        getSupabaseAdminProfile: () =>
++          Promise.resolve({
++            email: `${role}@example.com`,
++            role,
++            isActive: true,
++          }),
++      }),
++    );
++    const token = unsignedToken({
++      iss: "https://project.supabase.co/auth/v1",
++      sub: `${role}-uid`,
++    });
++
++    const context = await requireAdmin(authRequest(token));
++
++    assertEquals(context.supabase, client);
++    assertEquals(context.actor.kind, "supabase");
++    assertEquals(context.actor.uid, `${role}-uid`);
++    assertEquals(context.actor.email, `${role}@example.com`);
++  }
++});
++
++Deno.test("public guard denies missing auth without reflecting an unknown origin", async () => {
++  const response = await thrownResponse(() =>
++    requireAdmin(authRequest(undefined, "https://attacker.example"))
++  );
++
++  assertEquals(response.status, 401);
++  assertEquals(response.headers.has("Access-Control-Allow-Origin"), false);
++});
++
++Deno.test("requireDirectoryAdmin remains a strict-compatible facade", async () => {
++  const response = await thrownResponse(() =>
++    requireDirectoryAdmin(authRequest(undefined, "https://attacker.example"))
++  );
++
++  assertEquals(response.status, 401);
++  assertEquals(response.headers.has("Access-Control-Allow-Origin"), false);
++});
+diff --git a/supabase/functions/_shared/adminAuth.ts b/supabase/functions/_shared/adminAuth.ts
+new file mode 100644
+index 0000000..d26bde4
+--- /dev/null
++++ b/supabase/functions/_shared/adminAuth.ts
+@@ -0,0 +1,242 @@
++import { getFirestoreAdminDoc } from "./firebaseAdminRest.ts";
++import { verifyFirebaseToken } from "./firebaseAuth.ts";
++import { getServiceClient } from "./supabase.ts";
++import { strictJsonResponse } from "./strictCors.ts";
++
++type ServiceClient = ReturnType<typeof getServiceClient>;
++
++const FALLBACK_ADMIN_EMAILS = [
++  "admin@prosavis.com",
++  "support@prosavis.com",
++  "oliverafrancy@gmail.com",
++];
++
++export interface AdminActor {
++  kind: "firebase" | "supabase";
++  uid: string;
++  email?: string;
++}
++
++export interface AdminContext<Client> {
++  supabase: Client;
++  actor: AdminActor;
++}
++
++export interface FirebaseIdentity {
++  uid: string;
++}
++
++export interface SupabaseIdentity {
++  uid: string;
++  email?: string;
++}
++
++export interface SupabaseAdminProfile {
++  email?: string | null;
++  role: string;
++  isActive: boolean;
++}
++
++export interface AdminAuthDependencies<Client> {
++  createServiceClient: () => Client;
++  verifyFirebaseToken: (request: Request) => Promise<FirebaseIdentity | null>;
++  getFirebaseAdminDoc: (uid: string) => Promise<Record<string, unknown> | null>;
++  verifySupabaseToken: (
++    token: string,
++    client: Client,
++  ) => Promise<SupabaseIdentity | null>;
++  getSupabaseAdminProfile: (
++    uid: string,
++    client: Client,
++  ) => Promise<SupabaseAdminProfile | null>;
++  authorizedAdminEmails: readonly string[];
++}
++
++function bearerToken(request: Request): string | null {
++  const authorization = request.headers.get("Authorization") ?? "";
++  const match = authorization.match(/^Bearer\s+(.+)$/i);
++  return match?.[1].trim() || null;
++}
++
++function decodeJwtPayload(token: string): Record<string, unknown> | null {
++  const payload = token.split(".")[1];
++  if (!payload) return null;
++
++  try {
++    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
++    const padded = base64.padEnd(
++      base64.length + ((4 - base64.length % 4) % 4),
++      "=",
++    );
++    return JSON.parse(atob(padded)) as Record<string, unknown>;
++  } catch {
++    return null;
++  }
++}
++
++function isFirebaseIssuer(payload: Record<string, unknown> | null): boolean {
++  return typeof payload?.iss === "string" &&
++    payload.iss.startsWith("https://securetoken.google.com/");
++}
++
++export function createAdminGuard<Client>(
++  dependencies: AdminAuthDependencies<Client>,
++): (request: Request) => Promise<AdminContext<Client>> {
++  return async (request: Request): Promise<AdminContext<Client>> => {
++    const token = bearerToken(request);
++    if (!token) {
++      throw strictJsonResponse(
++        request,
++        { error: "Usuario no autenticado." },
++        401,
++      );
++    }
++
++    const payload = decodeJwtPayload(token);
++    if (isFirebaseIssuer(payload)) {
++      let identity: FirebaseIdentity | null = null;
++      try {
++        identity = await dependencies.verifyFirebaseToken(request);
++      } catch {
++        // Normalize legacy verifier errors through strict CORS below.
++      }
++      if (!identity) {
++        throw strictJsonResponse(
++          request,
++          { error: "Usuario no autenticado." },
++          401,
++        );
++      }
++      const email = typeof payload?.email === "string"
++        ? payload.email
++        : undefined;
++      const allowlisted = email !== undefined &&
++        dependencies.authorizedAdminEmails.some(
++          (authorizedEmail) =>
++            authorizedEmail.toLowerCase() === email.toLowerCase(),
++        );
++      if (payload?.admin === true || allowlisted) {
++        return {
++          supabase: dependencies.createServiceClient(),
++          actor: { kind: "firebase", uid: identity.uid, email },
++        };
++      }
++
++      let adminDocument: Record<string, unknown> | null = null;
++      try {
++        adminDocument = await dependencies.getFirebaseAdminDoc(identity.uid);
++      } catch {
++        // Unavailable admin lookup does not grant access.
++      }
++      const role = String(adminDocument?.role ?? "");
++      const hasAdminRole = adminDocument?.isAdmin === true ||
++        ["admin", "super_admin", "superadmin"].includes(role);
++      const isActive = adminDocument?.isActive === true ||
++        adminDocument?.active === true;
++      if (hasAdminRole && isActive) {
++        return {
++          supabase: dependencies.createServiceClient(),
++          actor: { kind: "firebase", uid: identity.uid, email },
++        };
++      }
++
++      throw strictJsonResponse(
++        request,
++        { error: "Usuario sin permisos de administrador." },
++        403,
++      );
++    }
++
++    const supabase = dependencies.createServiceClient();
++    let identity: SupabaseIdentity | null = null;
++    try {
++      identity = await dependencies.verifySupabaseToken(token, supabase);
++    } catch {
++      // Authentication failures are intentionally normalized.
++    }
++    if (!identity) {
++      throw strictJsonResponse(
++        request,
++        { error: "Usuario no autenticado." },
++        401,
++      );
++    }
++
++    let profile: SupabaseAdminProfile | null = null;
++    try {
++      profile = await dependencies.getSupabaseAdminProfile(
++        identity.uid,
++        supabase,
++      );
++    } catch {
++      // Profile lookup failures do not grant access.
++    }
++    if (profile?.isActive && ["admin", "super_admin"].includes(profile.role)) {
++      return {
++        supabase,
++        actor: {
++          kind: "supabase",
++          uid: identity.uid,
++          email: profile.email ?? identity.email,
++        },
++      };
++    }
++    throw strictJsonResponse(
++      request,
++      { error: "Usuario sin permisos de administrador." },
++      403,
++    );
++  };
++}
++
++function authorizedAdminEmails(): string[] {
++  const configured = Deno.env.get("AUTHORIZED_ADMIN_EMAILS");
++  const values = configured ? configured.split(",") : FALLBACK_ADMIN_EMAILS;
++  return values.map((email) => email.trim().toLowerCase()).filter(Boolean);
++}
++
++async function verifySupabaseIdentity(
++  token: string,
++  client: ServiceClient,
++): Promise<SupabaseIdentity | null> {
++  const { data, error } = await client.auth.getUser(token);
++  if (error || !data.user) return null;
++  return {
++    uid: data.user.id,
++    email: data.user.email,
++  };
++}
++
++async function getSupabaseAdminProfile(
++  uid: string,
++  client: ServiceClient,
++): Promise<SupabaseAdminProfile | null> {
++  const { data, error } = await client
++    .from("admin_profiles")
++    .select("email,role,is_active")
++    .eq("id", uid)
++    .single();
++  if (error || !data) return null;
++  return {
++    email: typeof data.email === "string" ? data.email : null,
++    role: String(data.role ?? ""),
++    isActive: data.is_active === true,
++  };
++}
++
++const defaultDependencies: AdminAuthDependencies<ServiceClient> = {
++  createServiceClient: getServiceClient,
++  verifyFirebaseToken,
++  getFirebaseAdminDoc: getFirestoreAdminDoc,
++  verifySupabaseToken: verifySupabaseIdentity,
++  getSupabaseAdminProfile,
++  authorizedAdminEmails: authorizedAdminEmails(),
++};
++
++const defaultRequireAdmin = createAdminGuard(defaultDependencies);
++
++export function requireAdmin(
++  request: Request,
++): Promise<AdminContext<ServiceClient>> {
++  return defaultRequireAdmin(request);
++}
+diff --git a/supabase/functions/_shared/directoryMonitorAuth.ts b/supabase/functions/_shared/directoryMonitorAuth.ts
+index 9262a08..04b150c 100644
+--- a/supabase/functions/_shared/directoryMonitorAuth.ts
++++ b/supabase/functions/_shared/directoryMonitorAuth.ts
+@@ -1,120 +1,14 @@
+-// Autenticaci+¦n unificada para el monitor de directorio.
+-// Acepta dos or+¡genes de admin:
+-//  - CRM WhatsApp  ÔåÆ JWT de Supabase Auth (admin_profiles)
+-//  - User Console  ÔåÆ ID token de Firebase Auth (claim admin / allowlist / admins/{uid})
+-// El gateway de Supabase tiene verify_jwt=false para esta funci+¦n; la validaci+¦n
+-// real (firma + rol admin) se hace aqu+¡.
++import { type AdminActor, requireAdmin } from "./adminAuth.ts";
+ 
+-import { jsonResponse } from './cors.ts';
+-import { getServiceClient, requireCrmAdmin } from './supabase.ts';
+-import { verifyFirebaseToken } from './firebaseAuth.ts';
+-import { getFirestoreAdminDoc } from './firebaseAdminRest.ts';
+-
+-// deno-lint-ignore no-explicit-any
+-type SupabaseClient = any;
+-
+-export interface DirectoryAdminActor {
+-  kind: 'firebase' | 'supabase';
+-  uid: string;
+-  email?: string;
+-}
+-
+-export interface DirectoryAdminContext {
+-  supabase: SupabaseClient;
+-  actor: DirectoryAdminActor;
+-}
+-
+-const FALLBACK_ADMIN_EMAILS = [
+-  'admin@prosavis.com',
+-  'support@prosavis.com',
+-  'oliverafrancy@gmail.com',
+-];
+-
+-let cachedAdminEmails: string[] | null = null;
+-
+-function getAuthorizedAdminEmails(): string[] {
+-  if (cachedAdminEmails) return cachedAdminEmails;
+-  const env = Deno.env.get('AUTHORIZED_ADMIN_EMAILS');
+-  const list = env
+-    ? env.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean)
+-    : FALLBACK_ADMIN_EMAILS.map((e) => e.toLowerCase());
+-  cachedAdminEmails = list;
+-  return list;
+-}
+-
+-function decodeJwtPayload(token: string): Record<string, unknown> | null {
+-  const parts = token.split('.');
+-  if (parts.length < 2) return null;
+-  try {
+-    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+-    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
+-    const json = atob(padded);
+-    return JSON.parse(json) as Record<string, unknown>;
+-  } catch (_e) {
+-    return null;
+-  }
+-}
+-
+-async function isFirebaseAdmin(
+-  uid: string,
+-  email: string | undefined,
+-  payload: Record<string, unknown> | null,
+-): Promise<boolean> {
+-  if (payload?.admin === true) return true;
+-
+-  const allow = getAuthorizedAdminEmails();
+-  if (email && allow.includes(email.toLowerCase())) return true;
+-
+-  try {
+-    const doc = await getFirestoreAdminDoc(uid);
+-    if (doc) {
+-      const role = String(doc.role ?? '');
+-      const isAdmin =
+-        doc.isAdmin === true || ['admin', 'super_admin', 'superadmin'].includes(role);
+-      const isActive =
+-        doc.isActive === true ||
+-        doc.active === true ||
+-        (doc.isActive === undefined && doc.active === undefined);
+-      if (isAdmin && isActive) return true;
+-    }
+-  } catch (_e) {
+-    // Sin acceso a Firestore: cae a 403 m+ís abajo.
+-  }
+-  return false;
+-}
++export type DirectoryAdminActor = AdminActor;
++export type DirectoryAdminContext = Awaited<ReturnType<typeof requireAdmin>>;
+ 
+ /**
+- * Verifica que el solicitante sea administrador (CRM o plataforma) y devuelve un
+- * cliente Supabase con service_role para operar sobre el directorio.
+- * Lanza una Response (CORS) con 401/403 si no procede.
++ * Facade compatible para los monitores existentes. La validaci+¦n dual y los
++ * errores con CORS estricto viven en el guard V5 compartido.
+  */
+-export async function requireDirectoryAdmin(req: Request): Promise<DirectoryAdminContext> {
+-  const authHeader = req.headers.get('Authorization') ?? '';
+-  const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+-  if (!token) {
+-    throw jsonResponse({ error: 'Usuario no autenticado.' }, 401);
+-  }
+-
+-  const payload = decodeJwtPayload(token);
+-  const issuer = String(payload?.iss ?? '');
+-
+-  if (issuer.includes('securetoken.google.com')) {
+-    const { uid } = await verifyFirebaseToken(req);
+-    const email = typeof payload?.email === 'string' ? (payload.email as string) : undefined;
+-    const admin = await isFirebaseAdmin(uid, email, payload);
+-    if (!admin) {
+-      throw jsonResponse({ error: 'Usuario sin permisos de administrador.' }, 403);
+-    }
+-    return {
+-      supabase: getServiceClient(),
+-      actor: { kind: 'firebase', uid, email },
+-    };
+-  }
+-
+-  // Supabase Auth (CRM WhatsApp): reutiliza la validaci+¦n existente.
+-  const { supabase, user, profile } = await requireCrmAdmin(req);
+-  return {
+-    supabase,
+-    actor: { kind: 'supabase', uid: user.id, email: profile.email ?? undefined },
+-  };
++export function requireDirectoryAdmin(
++  request: Request,
++): Promise<DirectoryAdminContext> {
++  return requireAdmin(request);
+ }
+diff --git a/supabase/functions/_shared/strictCors.test.ts b/supabase/functions/_shared/strictCors.test.ts
+new file mode 100644
+index 0000000..9ba5141
+--- /dev/null
++++ b/supabase/functions/_shared/strictCors.test.ts
+@@ -0,0 +1,130 @@
++import {
++  corsHeadersForRequest,
++  isOriginAllowed,
++  strictJsonResponse,
++  strictPreflightResponse,
++} from "./strictCors.ts";
++
++const DEFAULT_ALLOWED_ORIGINS = [
++  "https://prosavis-userconsole.web.app",
++  "https://prosavis-userconsole.firebaseapp.com",
++  "https://userconsole.prosavis.com",
++  "https://prosavis-crm-whatsapp.vercel.app",
++  "http://localhost:3000",
++  "http://127.0.0.1:3000",
++  "http://localhost:3001",
++  "http://127.0.0.1:3001",
++];
++
++function assert(
++  condition: unknown,
++  message = "Assertion failed",
++): asserts condition {
++  if (!condition) throw new Error(message);
++}
++
++function assertEquals<T>(actual: T, expected: T, message?: string): void {
++  if (!Object.is(actual, expected)) {
++    throw new Error(
++      message ?? `Expected ${String(expected)}, received ${String(actual)}`,
++    );
++  }
++}
++
++function request(origin?: string, method = "GET"): Request {
++  const headers = new Headers();
++  if (origin !== undefined) headers.set("Origin", origin);
++  return new Request("https://example.test/functions/v1/example", {
++    headers,
++    method,
++  });
++}
++
++Deno.test("allows every exact default origin", () => {
++  for (const origin of DEFAULT_ALLOWED_ORIGINS) {
++    assert(isOriginAllowed(origin), `Expected ${origin} to be allowed`);
++    const headers = corsHeadersForRequest(request(origin));
++    assertEquals(headers.get("Access-Control-Allow-Origin"), origin);
++    assertEquals(headers.get("Vary"), "Origin");
++  }
++});
++
++Deno.test("allows exact origins configured through OPS_V5_ALLOWED_ORIGINS", () => {
++  const configured = "https://ops.prosavis.com, https://preview.prosavis.com";
++  assert(isOriginAllowed("https://ops.prosavis.com", configured));
++  assert(isOriginAllowed("https://preview.prosavis.com", configured));
++});
++
++Deno.test("rejects lookalikes, wildcard configuration, null and unknown origins", () => {
++  const rejected = [
++    "https://evil.userconsole.prosavis.com",
++    "https://userconsole.prosavis.com.evil.example",
++    "null",
++    "https://unknown.example",
++  ];
++
++  for (const origin of rejected) {
++    assertEquals(
++      isOriginAllowed(origin),
++      false,
++      `Expected ${origin} to be rejected`,
++    );
++    assertEquals(
++      corsHeadersForRequest(request(origin)).has("Access-Control-Allow-Origin"),
++      false,
++    );
++  }
++  assertEquals(isOriginAllowed("https://unknown.example", "*"), false);
++});
++
++Deno.test("server-to-server requests without Origin receive no ACAO header", () => {
++  const headers = corsHeadersForRequest(request());
++  assertEquals(headers.has("Access-Control-Allow-Origin"), false);
++});
++
++Deno.test("allowed preflight returns the strict methods and headers", () => {
++  const origin = DEFAULT_ALLOWED_ORIGINS[0];
++  const response = strictPreflightResponse(request(origin, "OPTIONS"));
++
++  assertEquals(response.status, 204);
++  assertEquals(response.headers.get("Access-Control-Allow-Origin"), origin);
++  assertEquals(
++    response.headers.get("Access-Control-Allow-Methods"),
++    "GET, POST, OPTIONS",
++  );
++  assertEquals(
++    response.headers.get("Access-Control-Allow-Headers"),
++    "authorization, x-client-info, apikey, content-type",
++  );
++});
++
++Deno.test("denied preflight returns 403 without ACAO", async () => {
++  const response = strictPreflightResponse(
++    request("https://attacker.example", "OPTIONS"),
++  );
++
++  assertEquals(response.status, 403);
++  assertEquals(response.headers.has("Access-Control-Allow-Origin"), false);
++  assertEquals(response.headers.get("Content-Type"), "application/json");
++  assertEquals((await response.json()).error, "Origin no permitido.");
++});
++
++Deno.test("JSON responses always set content type and only reflect allowed origins", async () => {
++  const allowedOrigin = DEFAULT_ALLOWED_ORIGINS[2];
++  const allowed = strictJsonResponse(request(allowedOrigin), { ok: true }, 201);
++  const denied = strictJsonResponse(request("https://attacker.example"), {
++    ok: false,
++  }, 400);
++
++  assertEquals(allowed.status, 201);
++  assertEquals(allowed.headers.get("Content-Type"), "application/json");
++  assertEquals(
++    allowed.headers.get("Access-Control-Allow-Origin"),
++    allowedOrigin,
++  );
++  assertEquals((await allowed.json()).ok, true);
++
++  assertEquals(denied.status, 400);
++  assertEquals(denied.headers.get("Content-Type"), "application/json");
++  assertEquals(denied.headers.has("Access-Control-Allow-Origin"), false);
++});
+diff --git a/supabase/functions/_shared/strictCors.ts b/supabase/functions/_shared/strictCors.ts
+new file mode 100644
+index 0000000..7dc6adf
+--- /dev/null
++++ b/supabase/functions/_shared/strictCors.ts
+@@ -0,0 +1,64 @@
++const DEFAULT_ALLOWED_ORIGINS = new Set([
++  "https://prosavis-userconsole.web.app",
++  "https://prosavis-userconsole.firebaseapp.com",
++  "https://userconsole.prosavis.com",
++  "https://prosavis-crm-whatsapp.vercel.app",
++  "http://localhost:3000",
++  "http://127.0.0.1:3000",
++  "http://localhost:3001",
++  "http://127.0.0.1:3001",
++]);
++
++const ALLOWED_METHODS = "GET, POST, OPTIONS";
++const ALLOWED_HEADERS = "authorization, x-client-info, apikey, content-type";
++
++function configuredOrigins(value: string | undefined): string[] {
++  if (!value) return [];
++  return value
++    .split(",")
++    .map((origin) => origin.trim())
++    .filter((origin) => origin.length > 0 && !origin.includes("*"));
++}
++
++export function isOriginAllowed(
++  origin: string | null,
++  configuredValue = Deno.env.get("OPS_V5_ALLOWED_ORIGINS"),
++): boolean {
++  if (!origin || origin === "null") return false;
++  return DEFAULT_ALLOWED_ORIGINS.has(origin) ||
++    configuredOrigins(configuredValue).includes(origin);
++}
++
++export function corsHeadersForRequest(request: Request): Headers {
++  const headers = new Headers();
++  const origin = request.headers.get("Origin");
++
++  if (!origin || !isOriginAllowed(origin)) return headers;
++
++  headers.set("Access-Control-Allow-Origin", origin);
++  headers.set("Access-Control-Allow-Methods", ALLOWED_METHODS);
++  headers.set("Access-Control-Allow-Headers", ALLOWED_HEADERS);
++  headers.set("Vary", "Origin");
++  return headers;
++}
++
++export function strictJsonResponse(
++  request: Request,
++  body: unknown,
++  status = 200,
++): Response {
++  const headers = corsHeadersForRequest(request);
++  headers.set("Content-Type", "application/json");
++  return new Response(JSON.stringify(body), { status, headers });
++}
++
++export function strictPreflightResponse(request: Request): Response {
++  if (!isOriginAllowed(request.headers.get("Origin"))) {
++    return strictJsonResponse(request, { error: "Origin no permitido." }, 403);
++  }
++
++  return new Response(null, {
++    status: 204,
++    headers: corsHeadersForRequest(request),
++  });
++}
+
+commit 043060a20cd38ec6aca43e7677bc8afe7d9c0df6
+Author:     Nicol+ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+AuthorDate: Wed Aug 5 17:20:54 2026 -0500
+Commit:     Nicol+ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+CommitDate: Wed Aug 5 17:20:54 2026 -0500
+
+    docs(security): report phase 0A delivery
+    
+    Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ .superpowers/sdd/v5-phase-0a-security-report.md | 244 ++++++++++++++++++++++++
+ 1 file changed, 244 insertions(+)
+
+diff --git a/.superpowers/sdd/v5-phase-0a-security-report.md b/.superpowers/sdd/v5-phase-0a-security-report.md
+new file mode 100644
+index 0000000..a235278
+--- /dev/null
++++ b/.superpowers/sdd/v5-phase-0a-security-report.md
+@@ -0,0 +1,244 @@
++# V5 Fase 0A ÔÇö Reporte de auth dual y CORS estricto
++
++## Estado
++
++Implementado en `master` el bloque acotado de auth/CORS de Fase 0A, sin crear
++ramas/worktrees, sin reescribir historia, sin desplegar y sin mutaciones
++remotas.
++
++Resultado:
++
++- CORS estricto con allowlist exacta, extensi+¦n por
++  `OPS_V5_ALLOWED_ORIGINS`, JSON estricto y preflight permitido/denegado.
++- Guard dual `requireAdmin` para Firebase Auth y Supabase Auth con inyecci+¦n
++  expl+¡cita de dependencias.
++- Errores 401/403 del guard generados con CORS estricto.
++- `requireDirectoryAdmin` conservado como facade compatible.
++- 18 pruebas Deno pasan; formato y lint pasan.
++
++## Archivos del task
++
++- `supabase/functions/_shared/strictCors.ts` ÔÇö helper CORS estricto.
++- `supabase/functions/_shared/strictCors.test.ts` ÔÇö 7 pruebas del seam
++  request ÔåÆ headers/Response.
++- `supabase/functions/_shared/adminAuth.ts` ÔÇö guard dual y factory inyectable.
++- `supabase/functions/_shared/adminAuth.test.ts` ÔÇö 11 pruebas del seam
++  request ÔåÆ contexto/Response, incluida la facade legacy.
++- `supabase/functions/_shared/directoryMonitorAuth.ts` ÔÇö facade compatible
++  delegada a `requireAdmin`.
++- `.superpowers/sdd/v5-phase-0a-security-report.md` ÔÇö este reporte.
++
++No se modificaron `supabase/config.toml`, Edge Functions V5, frontends ni
++helpers CORS legacy ajenos.
++
++## Decisiones de implementaci+¦n
++
++### CORS
++
++- Allowlist por defecto exactamente igual al brief (8 or+¡genes).
++- `OPS_V5_ALLOWED_ORIGINS` se divide por comas, se recorta y descarta cualquier
++  entrada que contenga `*`.
++- No hay matching por sufijo ni reflexi+¦n de or+¡genes desconocidos.
++- Un origen permitido recibe su valor exacto en
++  `Access-Control-Allow-Origin` y `Vary: Origin`.
++- Requests sin `Origin` no reciben headers CORS.
++- Preflight permitido: 204, m+®todos `GET, POST, OPTIONS` y headers
++  `authorization, x-client-info, apikey, content-type`.
++- Preflight denegado: 403 JSON sin ACAO.
++- Toda respuesta de `strictJsonResponse` usa
++  `Content-Type: application/json`.
++
++### Auth
++
++- El header se acepta +¦nicamente con esquema `Bearer`.
++- El issuer Firebase solo selecciona la ruta; claims/email se autorizan
++  +¦nicamente despu+®s de que `verifyFirebaseToken` valida el ID token.
++- Firebase admin: claim `admin === true`, email allowlisted o documento
++  `admins/{uid}` con rol admin y flag activo expl+¡cito.
++- Supabase: `auth.getUser(token)` y luego `admin_profiles`; solo
++  `is_active === true` con rol `admin` o `super_admin`.
++- El service-role key no se retorna ni se serializa; el contrato retorna el
++  cliente service-role y el actor normalizado.
++- La factory `createAdminGuard` permite pruebas con fakes sin llamadas reales.
++- La facade legacy elimina la tercera l+¦gica divergente.
++
++Se consultaron el changelog vigente y las gu+¡as actuales de Supabase para
++Edge Functions CORS, authorization headers y `auth.getUser`. La resoluci+¦n
++inicial de imports est+íticos descarg+¦ m+¦dulos de `esm.sh`; las pruebas de auth
++no invocaron Firebase, Supabase ni Firestore reales.
++
++## Ciclos red ÔåÆ green
++
++Todos los ciclos usaron:
++
++```powershell
++npx --yes deno test --allow-env supabase/functions/_shared/<test>.test.ts
++```
++
++### CORS
++
++1. Red inicial:
++
++```text
++TS2307 [ERROR]: Cannot find module '.../strictCors.ts'.
++error: Type checking failed.
++```
++
++2. Green tras implementar el helper:
++
++```text
++running 7 tests from ./supabase/functions/_shared/strictCors.test.ts
++ok | 7 passed | 0 failed
++```
++
++### Auth
++
++Los slices se a+¦adieron uno a uno. Cada fallo observado antes de su
++implementaci+¦n fue:
++
++```text
++TS2307 [ERROR]: Cannot find module '.../adminAuth.ts'.
++Expected 1, received 0
++Expected 403, received 401
++Response { ... status: 403 ... }  # claim Firebase a+¦n no implementado
++Response { ... status: 403 ... }  # allowlist a+¦n no implementada
++Response { ... status: 403 ... }  # Firestore admin a+¦n no implementado
++Expected 1, received 0             # verificaci+¦n Supabase no invocada
++Expected 1, received 0             # perfil Supabase no consultado
++Response { ... status: 403 ... }  # roles Supabase a+¦n no implementados
++TS2305 [ERROR]: Module '".../adminAuth.ts"' has no exported member 'requireAdmin'.
++Expected false, received true      # facade a+¦n devolv+¡a ACAO wildcard
++```
++
++Green final de auth:
++
++```text
++running 11 tests from ./supabase/functions/_shared/adminAuth.test.ts
++ok | 11 passed | 0 failed
++```
++
++## Verificaci+¦n final requerida
++
++### Formato
++
++```powershell
++npx --yes deno fmt --check supabase/functions/_shared/adminAuth.ts supabase/functions/_shared/adminAuth.test.ts supabase/functions/_shared/strictCors.ts supabase/functions/_shared/strictCors.test.ts
++```
++
++Salida exacta:
++
++```text
++Checked 4 files
++```
++
++Exit code: `0`.
++
++### Lint
++
++```powershell
++npx --yes deno lint supabase/functions/_shared/adminAuth.ts supabase/functions/_shared/adminAuth.test.ts supabase/functions/_shared/strictCors.ts supabase/functions/_shared/strictCors.test.ts
++```
++
++Salida exacta:
++
++```text
++Checked 4 files
++```
++
++Exit code: `0`.
++
++La facade tambi+®n se verific+¦ por separado:
++
++```text
++Checked 1 file
++Checked 1 file
++```
++
++### Tests
++
++```powershell
++npx --yes deno test --allow-env supabase/functions/_shared/adminAuth.test.ts supabase/functions/_shared/strictCors.test.ts
++```
++
++Salida exacta final (sin c+¦digos ANSI ni tiempos variables):
++
++```text
++Check supabase/functions/_shared/adminAuth.test.ts
++Check supabase/functions/_shared/strictCors.test.ts
++running 11 tests from ./supabase/functions/_shared/adminAuth.test.ts
++missing bearer token returns strict 401 JSON ... ok
++invalid Firebase token returns 401 ... ok
++valid non-admin Firebase identity returns 403 ... ok
++Firebase admin claim returns normalized Firebase context ... ok
++allowlisted Firebase email returns admin context case-insensitively ... ok
++active Firestore admin document returns Firebase context ... ok
++invalid Supabase token returns 401 ... ok
++valid Supabase user without active admin profile returns 403 ... ok
++active Supabase admin and super_admin return normalized contexts ... ok
++public guard denies missing auth without reflecting an unknown origin ... ok
++requireDirectoryAdmin remains a strict-compatible facade ... ok
++running 7 tests from ./supabase/functions/_shared/strictCors.test.ts
++allows every exact default origin ... ok
++allows exact origins configured through OPS_V5_ALLOWED_ORIGINS ... ok
++rejects lookalikes, wildcard configuration, null and unknown origins ... ok
++server-to-server requests without Origin receive no ACAO header ... ok
++allowed preflight returns the strict methods and headers ... ok
++denied preflight returns 403 without ACAO ... ok
++JSON responses always set content type and only reflect allowed origins ... ok
++ok | 18 passed | 0 failed
++```
++
++Exit code: `0`.
++
++IDE diagnostics sobre los cinco archivos de c+¦digo/prueba: `No linter errors
++found`.
++
++## Commit task-scoped
++
++```text
++70546ded3afabcf7a7e0fc4558da899b2201ff0e
++feat(security): add strict CORS and dual admin auth
++```
++
++El commit contiene exclusivamente los cinco archivos de c+¦digo/prueba del
++task. Este reporte se entrega en un commit documental separado para no mezclar
++el artefacto de ejecuci+¦n con el cambio funcional.
++
++## Concerns y l+¡mites
++
++1. El `deno check` ampliado de los cuatro call sites legacy alcanz+¦ c+¦digo
++   ajeno y termin+¦ con 5 errores preexistentes, no relacionados con esta
++   implementaci+¦n:
++
++```text
++directoryAnalyze.ts:608:71 TS2339 Property 'toLowerCase' does not exist on type '{}'.
++directoryAnalyze.ts:818:7 TS2322 Type 'string | null' is not assignable to type 'string | undefined'.
++directoryAnalyze.ts:839:9 TS2322 Type 'string | null' is not assignable to type 'string | undefined'.
++whatsappMediaStorage.ts:32:56 TS2345 Uint8Array<ArrayBufferLike> is not assignable to BufferSource.
++whatsappMediaStorage.ts:271:7 TS2769 Uint8Array<ArrayBufferLike> is not assignable to BodyInit.
++Found 5 errors.
++error: Type checking failed.
++```
++
++   Los tests de este bloque s+¡ type-checkean y pasan. No se tocaron esos
++   archivos por estar fuera de alcance.
++
++2. `graphify update .` no pudo ejecutarse por una instalaci+¦n local rota:
++
++```text
++ModuleNotFoundError: No module named 'graphify'
++```
++
++   La exploraci+¦n inicial s+¡ se hizo mediante el MCP Graphify.
++
++3. El contrato exige documento Firebase admin activo. Por ello, un documento
++   legacy que tenga rol admin pero no `isActive: true` ni `active: true` ahora
++   recibe 403; conviene confirmar que los documentos productivos tengan el flag
++   expl+¡cito antes de adoptar el guard en m+ís funciones.
++
++4. No se conect+¦ `strictCors.ts` a respuestas exitosas/preflight de funciones
++   legacy. Este bloque entrega el helper y garantiza CORS estricto en errores
++   del guard; migrar CORS legacy o crear endpoints V5 qued+¦ fuera de este task.
++
++5. Hab+¡a cambios y commits concurrentes ajenos durante la ejecuci+¦n. Se
++   preservaron y no se incluyeron en el commit del task.
+
+commit 2dd1383988b0303a8b18a93392d15ff72407fd73
+Author:     Nicol+ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+AuthorDate: Wed Aug 5 17:29:21 2026 -0500
+Commit:     Nicol+ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+CommitDate: Wed Aug 5 17:29:21 2026 -0500
+
+    Make admin guard active-policy configurable
+    
+    Add a configurable Firebase admin-document active policy to admin guards. Introduce FirebaseAdminDocumentActivePolicy and AdminGuardOptions, with two policies: requireExplicitFirebaseAdminActive and preserveLegacyFirebaseAdminActive. Update createAdminGuard to accept options and add createDefaultAdminGuard. Provide createDirectoryAdminGuard and a legacy facade in directoryMonitorAuth that preserves previous 'active' semantics. Adjust tests to cover legacy behavior and strict-CORS handling for inactive admin documents.
+---
+ supabase/functions/_shared/adminAuth.test.ts       | 61 +++++++++++++++++++++-
+ supabase/functions/_shared/adminAuth.ts            | 37 +++++++++++--
+ supabase/functions/_shared/directoryMonitorAuth.ts | 29 ++++++++--
+ 3 files changed, 120 insertions(+), 7 deletions(-)
+
+diff --git a/supabase/functions/_shared/adminAuth.test.ts b/supabase/functions/_shared/adminAuth.test.ts
+index ad39338..4524d1d 100644
+--- a/supabase/functions/_shared/adminAuth.test.ts
++++ b/supabase/functions/_shared/adminAuth.test.ts
+@@ -1,16 +1,19 @@
+ import {
+   type AdminAuthDependencies,
+   createAdminGuard,
+   requireAdmin,
+ } from "./adminAuth.ts";
+-import { requireDirectoryAdmin } from "./directoryMonitorAuth.ts";
++import {
++  createDirectoryAdminGuard,
++  requireDirectoryAdmin,
++} from "./directoryMonitorAuth.ts";
+ 
+ interface FakeClient {
+   name: string;
+ }
+ 
+ function assertEquals<T>(actual: T, expected: T, message?: string): void {
+   if (!Object.is(actual, expected)) {
+     throw new Error(
+       message ?? `Expected ${String(expected)}, received ${String(actual)}`,
+     );
+@@ -196,20 +199,76 @@ Deno.test("V5 guard denies Firestore admin document without active flags", async
+ 
+   const response = await thrownResponse(() => requireAdmin(authRequest(token)));
+ 
+   assertEquals(response.status, 403);
+   assertEquals(
+     response.headers.get("Access-Control-Allow-Origin"),
+     "https://userconsole.prosavis.com",
+   );
+ });
+ 
++Deno.test("legacy facade allows Firestore admin document without active flags", async () => {
++  const requireDirectoryAdmin = createDirectoryAdminGuard(
++    dependencies({
++      verifyFirebaseToken: () => Promise.resolve({ uid: "legacy-admin" }),
++      getFirebaseAdminDoc: () => Promise.resolve({ role: "admin" }),
++    }),
++  );
++  const token = unsignedToken({
++    iss: "https://securetoken.google.com/prosavis",
++    sub: "legacy-admin",
++  });
++
++  const context = await requireDirectoryAdmin(authRequest(token));
++
++  assertEquals(context.actor.kind, "firebase");
++  assertEquals(context.actor.uid, "legacy-admin");
++});
++
++Deno.test("legacy facade denies explicitly inactive admin documents with strict CORS", async () => {
++  const cases = [
++    {
++      document: { role: "admin", isActive: false },
++      origin: "https://userconsole.prosavis.com",
++      expectedOrigin: "https://userconsole.prosavis.com",
++    },
++    {
++      document: { isAdmin: true, active: false },
++      origin: "https://attacker.example",
++      expectedOrigin: null,
++    },
++  ];
++
++  for (const testCase of cases) {
++    const requireDirectoryAdmin = createDirectoryAdminGuard(
++      dependencies({
++        verifyFirebaseToken: () => Promise.resolve({ uid: "inactive-admin" }),
++        getFirebaseAdminDoc: () => Promise.resolve(testCase.document),
++      }),
++    );
++    const token = unsignedToken({
++      iss: "https://securetoken.google.com/prosavis",
++      sub: "inactive-admin",
++    });
++
++    const response = await thrownResponse(() =>
++      requireDirectoryAdmin(authRequest(token, testCase.origin))
++    );
++
++    assertEquals(response.status, 403);
++    assertEquals(
++      response.headers.get("Access-Control-Allow-Origin"),
++      testCase.expectedOrigin,
++    );
++  }
++});
++
+ Deno.test("invalid Supabase token returns 401", async () => {
+   let verificationCalls = 0;
+   const requireAdmin = createAdminGuard(
+     dependencies({
+       verifySupabaseToken: () => {
+         verificationCalls++;
+         return Promise.resolve(null);
+       },
+     }),
+   );
+diff --git a/supabase/functions/_shared/adminAuth.ts b/supabase/functions/_shared/adminAuth.ts
+index d26bde4..7ff498c 100644
+--- a/supabase/functions/_shared/adminAuth.ts
++++ b/supabase/functions/_shared/adminAuth.ts
+@@ -45,20 +45,41 @@ export interface AdminAuthDependencies<Client> {
+     token: string,
+     client: Client,
+   ) => Promise<SupabaseIdentity | null>;
+   getSupabaseAdminProfile: (
+     uid: string,
+     client: Client,
+   ) => Promise<SupabaseAdminProfile | null>;
+   authorizedAdminEmails: readonly string[];
+ }
+ 
++export type FirebaseAdminDocumentActivePolicy = (
++  document: Record<string, unknown>,
++) => boolean;
++
++export interface AdminGuardOptions {
++  isFirebaseAdminDocumentActive?: FirebaseAdminDocumentActivePolicy;
++}
++
++export const requireExplicitFirebaseAdminActive:
++  FirebaseAdminDocumentActivePolicy = (
++    document,
++  ) => document.isActive === true || document.active === true;
++
++export const preserveLegacyFirebaseAdminActive:
++  FirebaseAdminDocumentActivePolicy = (
++    document,
++  ) =>
++    document.isActive === true ||
++    document.active === true ||
++    (document.isActive === undefined && document.active === undefined);
++
+ function bearerToken(request: Request): string | null {
+   const authorization = request.headers.get("Authorization") ?? "";
+   const match = authorization.match(/^Bearer\s+(.+)$/i);
+   return match?.[1].trim() || null;
+ }
+ 
+ function decodeJwtPayload(token: string): Record<string, unknown> | null {
+   const payload = token.split(".")[1];
+   if (!payload) return null;
+ 
+@@ -74,21 +95,25 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
+   }
+ }
+ 
+ function isFirebaseIssuer(payload: Record<string, unknown> | null): boolean {
+   return typeof payload?.iss === "string" &&
+     payload.iss.startsWith("https://securetoken.google.com/");
+ }
+ 
+ export function createAdminGuard<Client>(
+   dependencies: AdminAuthDependencies<Client>,
++  options: AdminGuardOptions = {},
+ ): (request: Request) => Promise<AdminContext<Client>> {
++  const isFirebaseAdminDocumentActive = options.isFirebaseAdminDocumentActive ??
++    requireExplicitFirebaseAdminActive;
++
+   return async (request: Request): Promise<AdminContext<Client>> => {
+     const token = bearerToken(request);
+     if (!token) {
+       throw strictJsonResponse(
+         request,
+         { error: "Usuario no autenticado." },
+         401,
+       );
+     }
+ 
+@@ -124,22 +149,22 @@ export function createAdminGuard<Client>(
+ 
+       let adminDocument: Record<string, unknown> | null = null;
+       try {
+         adminDocument = await dependencies.getFirebaseAdminDoc(identity.uid);
+       } catch {
+         // Unavailable admin lookup does not grant access.
+       }
+       const role = String(adminDocument?.role ?? "");
+       const hasAdminRole = adminDocument?.isAdmin === true ||
+         ["admin", "super_admin", "superadmin"].includes(role);
+-      const isActive = adminDocument?.isActive === true ||
+-        adminDocument?.active === true;
++      const isActive = adminDocument !== null &&
++        isFirebaseAdminDocumentActive(adminDocument);
+       if (hasAdminRole && isActive) {
+         return {
+           supabase: dependencies.createServiceClient(),
+           actor: { kind: "firebase", uid: identity.uid, email },
+         };
+       }
+ 
+       throw strictJsonResponse(
+         request,
+         { error: "Usuario sin permisos de administrador." },
+@@ -226,17 +251,23 @@ async function getSupabaseAdminProfile(
+ 
+ const defaultDependencies: AdminAuthDependencies<ServiceClient> = {
+   createServiceClient: getServiceClient,
+   verifyFirebaseToken,
+   getFirebaseAdminDoc: getFirestoreAdminDoc,
+   verifySupabaseToken: verifySupabaseIdentity,
+   getSupabaseAdminProfile,
+   authorizedAdminEmails: authorizedAdminEmails(),
+ };
+ 
+-const defaultRequireAdmin = createAdminGuard(defaultDependencies);
++export function createDefaultAdminGuard(
++  options: AdminGuardOptions = {},
++): (request: Request) => Promise<AdminContext<ServiceClient>> {
++  return createAdminGuard(defaultDependencies, options);
++}
++
++const defaultRequireAdmin = createDefaultAdminGuard();
+ 
+ export function requireAdmin(
+   request: Request,
+ ): Promise<AdminContext<ServiceClient>> {
+   return defaultRequireAdmin(request);
+ }
+diff --git a/supabase/functions/_shared/directoryMonitorAuth.ts b/supabase/functions/_shared/directoryMonitorAuth.ts
+index 04b150c..118c9e0 100644
+--- a/supabase/functions/_shared/directoryMonitorAuth.ts
++++ b/supabase/functions/_shared/directoryMonitorAuth.ts
+@@ -1,14 +1,37 @@
+-import { type AdminActor, requireAdmin } from "./adminAuth.ts";
++import {
++  type AdminActor,
++  type AdminAuthDependencies,
++  type AdminContext,
++  createAdminGuard,
++  createDefaultAdminGuard,
++  preserveLegacyFirebaseAdminActive,
++} from "./adminAuth.ts";
+ 
+ export type DirectoryAdminActor = AdminActor;
+-export type DirectoryAdminContext = Awaited<ReturnType<typeof requireAdmin>>;
++export type DirectoryAdminContext = Awaited<
++  ReturnType<typeof defaultRequireDirectoryAdmin>
++>;
++
++const legacyAdminOptions = {
++  isFirebaseAdminDocumentActive: preserveLegacyFirebaseAdminActive,
++};
++
++export function createDirectoryAdminGuard<Client>(
++  dependencies: AdminAuthDependencies<Client>,
++): (request: Request) => Promise<AdminContext<Client>> {
++  return createAdminGuard(dependencies, legacyAdminOptions);
++}
++
++const defaultRequireDirectoryAdmin = createDefaultAdminGuard(
++  legacyAdminOptions,
++);
+ 
+ /**
+  * Facade compatible para los monitores existentes. La validaci+¦n dual y los
+  * errores con CORS estricto viven en el guard V5 compartido.
+  */
+ export function requireDirectoryAdmin(
+   request: Request,
+ ): Promise<DirectoryAdminContext> {
+-  return requireAdmin(request);
++  return defaultRequireDirectoryAdmin(request);
+ }
+
+commit 02e0fc44c7d82e4d854ce687afe786ce548c5c27
+Author:     Nicol+ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+AuthorDate: Wed Aug 5 17:31:10 2026 -0500
+Commit:     Nicol+ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+CommitDate: Wed Aug 5 17:31:10 2026 -0500
+
+    docs(security): record legacy auth compatibility fix
+    
+    Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ .superpowers/sdd/v5-phase-0a-security-report.md | 162 +++++++++++++++++++++++-
+ 1 file changed, 156 insertions(+), 6 deletions(-)
+
+diff --git a/.superpowers/sdd/v5-phase-0a-security-report.md b/.superpowers/sdd/v5-phase-0a-security-report.md
+index a235278..df28dc6 100644
+--- a/.superpowers/sdd/v5-phase-0a-security-report.md
++++ b/.superpowers/sdd/v5-phase-0a-security-report.md
+@@ -7,29 +7,29 @@ ramas/worktrees, sin reescribir historia, sin desplegar y sin mutaciones
+ remotas.
+ 
+ Resultado:
+ 
+ - CORS estricto con allowlist exacta, extensi+¦n por
+   `OPS_V5_ALLOWED_ORIGINS`, JSON estricto y preflight permitido/denegado.
+ - Guard dual `requireAdmin` para Firebase Auth y Supabase Auth con inyecci+¦n
+   expl+¡cita de dependencias.
+ - Errores 401/403 del guard generados con CORS estricto.
+ - `requireDirectoryAdmin` conservado como facade compatible.
+-- 18 pruebas Deno pasan; formato y lint pasan.
++- 21 pruebas Deno pasan; formato y lint pasan.
+ 
+ ## Archivos del task
+ 
+ - `supabase/functions/_shared/strictCors.ts` ÔÇö helper CORS estricto.
+ - `supabase/functions/_shared/strictCors.test.ts` ÔÇö 7 pruebas del seam
+   request ÔåÆ headers/Response.
+ - `supabase/functions/_shared/adminAuth.ts` ÔÇö guard dual y factory inyectable.
+-- `supabase/functions/_shared/adminAuth.test.ts` ÔÇö 11 pruebas del seam
++- `supabase/functions/_shared/adminAuth.test.ts` ÔÇö 14 pruebas del seam
+   request ÔåÆ contexto/Response, incluida la facade legacy.
+ - `supabase/functions/_shared/directoryMonitorAuth.ts` ÔÇö facade compatible
+   delegada a `requireAdmin`.
+ - `.superpowers/sdd/v5-phase-0a-security-report.md` ÔÇö este reporte.
+ 
+ No se modificaron `supabase/config.toml`, Edge Functions V5, frontends ni
+ helpers CORS legacy ajenos.
+ 
+ ## Decisiones de implementaci+¦n
+ 
+@@ -224,21 +224,171 @@ error: Type checking failed.
+    archivos por estar fuera de alcance.
+ 
+ 2. `graphify update .` no pudo ejecutarse por una instalaci+¦n local rota:
+ 
+ ```text
+ ModuleNotFoundError: No module named 'graphify'
+ ```
+ 
+    La exploraci+¦n inicial s+¡ se hizo mediante el MCP Graphify.
+ 
+-3. El contrato exige documento Firebase admin activo. Por ello, un documento
+-   legacy que tenga rol admin pero no `isActive: true` ni `active: true` ahora
+-   recibe 403; conviene confirmar que los documentos productivos tengan el flag
+-   expl+¡cito antes de adoptar el guard en m+ís funciones.
++3. El hallazgo de compatibilidad sobre documentos Firebase admin legacy qued+¦
++   resuelto en el addendum siguiente: V5 conserva el requisito expl+¡cito y la
++   facade mantiene exactamente la sem+íntica legacy.
+ 
+ 4. No se conect+¦ `strictCors.ts` a respuestas exitosas/preflight de funciones
+    legacy. Este bloque entrega el helper y garantiza CORS estricto en errores
+    del guard; migrar CORS legacy o crear endpoints V5 qued+¦ fuera de este task.
+ 
+ 5. Hab+¡a cambios y commits concurrentes ajenos durante la ejecuci+¦n. Se
+    preservaron y no se incluyeron en el commit del task.
++
++## Addendum ÔÇö compatibilidad Firebase admin legacy
++
++### Hallazgo corregido
++
++La revisi+¦n task-scoped detect+¦ que la primera facade delegaba al guard V5
++estricto y, por tanto, denegaba documentos legacy `admins/{uid}` v+ílidos cuando
++`isActive` y `active` estaban ambos ausentes.
++
++La correcci+¦n mantiene dos pol+¡ticas sobre un +¦nico core:
++
++- `requireAdmin` y `createAdminGuard` usan por defecto
++  `requireExplicitFirebaseAdminActive`: solo `isActive === true` o
++  `active === true` autorizan.
++- `requireDirectoryAdmin` se construye con
++  `preserveLegacyFirebaseAdminActive`: autoriza si alguno es `true` o si ambos
++  campos est+ín ausentes; deniega un `false` expl+¡cito cuando el otro campo no es
++  `true`.
++- `createDirectoryAdminGuard` expone el mismo wrapper para pruebas con
++  dependencias inyectadas, sin duplicar verificaci+¦n de tokens, roles,
++  allowlists, contexto ni respuestas CORS.
++
++### Archivos del fix
++
++- `supabase/functions/_shared/adminAuth.ts`
++- `supabase/functions/_shared/adminAuth.test.ts`
++- `supabase/functions/_shared/directoryMonitorAuth.ts`
++
++### TDD
++
++Caracterizaci+¦n del contrato V5 estricto antes del cambio:
++
++```text
++V5 guard denies Firestore admin document without active flags ... ok
++ok | 12 passed | 0 failed
++```
++
++Red de compatibilidad legacy:
++
++```text
++TS2305 [ERROR]: Module '".../directoryMonitorAuth.ts"' has no exported member 'createDirectoryAdminGuard'.
++error: Type checking failed.
++```
++
++Green despu+®s de introducir la policy inyectable y el wrapper:
++
++```text
++legacy facade allows Firestore admin document without active flags ... ok
++ok | 13 passed | 0 failed
++```
++
++Se a+¦adi+¦ adem+ís cobertura sensible para documentos expl+¡citamente inactivos:
++
++```text
++legacy facade denies explicitly inactive admin documents with strict CORS ... ok
++ok | 14 passed | 0 failed
++```
++
++Esa prueba cubre tanto un origen permitido ÔÇöreflejado exactamenteÔÇö como uno
++desconocido ÔÇösin `Access-Control-Allow-Origin`ÔÇö.
++
++### Verificaci+¦n final del fix
++
++Formato:
++
++```powershell
++npx --yes deno fmt --check --no-config supabase/functions/_shared/adminAuth.ts supabase/functions/_shared/adminAuth.test.ts supabase/functions/_shared/strictCors.ts supabase/functions/_shared/strictCors.test.ts supabase/functions/_shared/directoryMonitorAuth.ts
++```
++
++Salida exacta:
++
++```text
++Checked 5 files
++```
++
++Exit code: `0`.
++
++Lint:
++
++```powershell
++npx --yes deno lint --no-config supabase/functions/_shared/adminAuth.ts supabase/functions/_shared/adminAuth.test.ts supabase/functions/_shared/strictCors.ts supabase/functions/_shared/strictCors.test.ts supabase/functions/_shared/directoryMonitorAuth.ts
++```
++
++Salida exacta:
++
++```text
++Checked 5 files
++```
++
++Exit code: `0`.
++
++Tests auth/CORS:
++
++```powershell
++npx --yes deno test --allow-env --no-lock supabase/functions/_shared/adminAuth.test.ts supabase/functions/_shared/strictCors.test.ts
++```
++
++Salida exacta final (sin c+¦digos ANSI ni tiempos variables):
++
++```text
++Check supabase/functions/_shared/adminAuth.test.ts
++Check supabase/functions/_shared/strictCors.test.ts
++running 14 tests from ./supabase/functions/_shared/adminAuth.test.ts
++missing bearer token returns strict 401 JSON ... ok
++invalid Firebase token returns 401 ... ok
++valid non-admin Firebase identity returns 403 ... ok
++Firebase admin claim returns normalized Firebase context ... ok
++allowlisted Firebase email returns admin context case-insensitively ... ok
++active Firestore admin document returns Firebase context ... ok
++V5 guard denies Firestore admin document without active flags ... ok
++legacy facade allows Firestore admin document without active flags ... ok
++legacy facade denies explicitly inactive admin documents with strict CORS ... ok
++invalid Supabase token returns 401 ... ok
++valid Supabase user without active admin profile returns 403 ... ok
++active Supabase admin and super_admin return normalized contexts ... ok
++public guard denies missing auth without reflecting an unknown origin ... ok
++requireDirectoryAdmin remains a strict-compatible facade ... ok
++running 7 tests from ./supabase/functions/_shared/strictCors.test.ts
++allows every exact default origin ... ok
++allows exact origins configured through OPS_V5_ALLOWED_ORIGINS ... ok
++rejects lookalikes, wildcard configuration, null and unknown origins ... ok
++server-to-server requests without Origin receive no ACAO header ... ok
++allowed preflight returns the strict methods and headers ... ok
++denied preflight returns 403 without ACAO ... ok
++JSON responses always set content type and only reflect allowed origins ... ok
++ok | 21 passed | 0 failed
++```
++
++Exit code: `0`.
++
++### Commit del fix
++
++```text
++2dd1383988b0303a8b18a93392d15ff72407fd73
++Make admin guard active-policy configurable
++```
++
++El commit contiene exclusivamente los tres archivos del fix. Fue creado
++concurrentemente mientras se verificaba el working tree compartido; se audit+¦
++su diff completo y no se duplic+¦ ni reescribi+¦.
++
++### Concern operativo
++
++`graphify update .` volvi+¦ a fallar por la instalaci+¦n local ya documentada:
++
++```text
++ModuleNotFoundError: No module named 'graphify'
++```
++
++No se realizaron llamadas a Firebase, Supabase o Firestore reales, ni
++mutaciones remotas.
+
+commit 5ecf4ceadf2f720e9513c087ec3b3435ca08528a
+Author:     Nicol+ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+AuthorDate: Thu Aug 6 09:26:40 2026 -0500
+Commit:     Nicol+ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+CommitDate: Thu Aug 6 09:26:40 2026 -0500
+
+    test(security): strengthen strict Firebase admin evidence
+    
+    Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ supabase/functions/_shared/adminAuth.test.ts | 50 +++++++++++++++++++---------
+ 1 file changed, 34 insertions(+), 16 deletions(-)
+
+diff --git a/supabase/functions/_shared/adminAuth.test.ts b/supabase/functions/_shared/adminAuth.test.ts
+index 4524d1d..6076626 100644
+--- a/supabase/functions/_shared/adminAuth.test.ts
++++ b/supabase/functions/_shared/adminAuth.test.ts
+@@ -179,38 +179,56 @@ Deno.test("active Firestore admin document returns Firebase context", async () =
+     email: "firestore@example.com",
+   });
+ 
+   const context = await requireAdmin(authRequest(token));
+ 
+   assertEquals(context.actor.kind, "firebase");
+   assertEquals(context.actor.uid, "firestore-admin");
+ });
+ 
+ Deno.test("V5 guard denies Firestore admin document without active flags", async () => {
+-  const requireAdmin = createAdminGuard(
+-    dependencies({
+-      verifyFirebaseToken: () => Promise.resolve({ uid: "strict-admin" }),
+-      getFirebaseAdminDoc: () => Promise.resolve({ role: "admin" }),
+-    }),
+-  );
+-  const token = unsignedToken({
+-    iss: "https://securetoken.google.com/prosavis",
+-    sub: "strict-admin",
+-  });
++  const cases = [
++    {
++      document: { role: "admin" },
++      origin: "https://userconsole.prosavis.com",
++      expectedOrigin: "https://userconsole.prosavis.com",
++    },
++    {
++      document: { isAdmin: true },
++      origin: "https://attacker.example",
++      expectedOrigin: null,
++    },
++  ];
+ 
+-  const response = await thrownResponse(() => requireAdmin(authRequest(token)));
++  for (const [index, testCase] of cases.entries()) {
++    const uid = `strict-admin-${index}`;
++    const requireAdmin = createAdminGuard(
++      dependencies({
++        verifyFirebaseToken: () => Promise.resolve({ uid }),
++        getFirebaseAdminDoc: () => Promise.resolve(testCase.document),
++      }),
++    );
++    const token = unsignedToken({
++      iss: "https://securetoken.google.com/prosavis",
++      sub: uid,
++    });
+ 
+-  assertEquals(response.status, 403);
+-  assertEquals(
+-    response.headers.get("Access-Control-Allow-Origin"),
+-    "https://userconsole.prosavis.com",
+-  );
++    const response = await thrownResponse(() =>
++      requireAdmin(authRequest(token, testCase.origin))
++    );
++
++    assertEquals(response.status, 403);
++    assertEquals(
++      response.headers.get("Access-Control-Allow-Origin"),
++      testCase.expectedOrigin,
++    );
++  }
+ });
+ 
+ Deno.test("legacy facade allows Firestore admin document without active flags", async () => {
+   const requireDirectoryAdmin = createDirectoryAdminGuard(
+     dependencies({
+       verifyFirebaseToken: () => Promise.resolve({ uid: "legacy-admin" }),
+       getFirebaseAdminDoc: () => Promise.resolve({ role: "admin" }),
+     }),
+   );
+   const token = unsignedToken({
+
+commit a2f8fcfe5e19cef26c72ff5fcae20c21584a2941
+Author:     Nicol+ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+AuthorDate: Thu Aug 6 09:28:31 2026 -0500
+Commit:     Nicol+ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+CommitDate: Thu Aug 6 09:28:31 2026 -0500
+
+    docs(security): record scoped V5 test evidence
+    
+    Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ .superpowers/sdd/v5-phase-0a-security-report.md | 94 +++++++++++++++++++++++++
+ 1 file changed, 94 insertions(+)
+
+diff --git a/.superpowers/sdd/v5-phase-0a-security-report.md b/.superpowers/sdd/v5-phase-0a-security-report.md
+index df28dc6..4641c39 100644
+--- a/.superpowers/sdd/v5-phase-0a-security-report.md
++++ b/.superpowers/sdd/v5-phase-0a-security-report.md
+@@ -385,10 +385,104 @@ su diff completo y no se duplic+¦ ni reescribi+¦.
+ ### Concern operativo
+ 
+ `graphify update .` volvi+¦ a fallar por la instalaci+¦n local ya documentada:
+ 
+ ```text
+ ModuleNotFoundError: No module named 'graphify'
+ ```
+ 
+ No se realizaron llamadas a Firebase, Supabase o Firestore reales, ni
+ mutaciones remotas.
++
++## Addendum ÔÇö evidencia V5 task-scoped
++
++### Procedencia corregida
++
++La re-revisi+¦n confirm+¦ que la versi+¦n inicial del test
++`V5 guard denies Firestore admin document without active flags` hab+¡a sido
++capturada por un commit concurrente ajeno al task de seguridad. No se
++reescribi+¦ historia.
++
++Se modific+¦ ese mismo test ÔÇösin duplicarloÔÇö para crear evidencia nueva,
++task-scoped y m+ís sensible. Ahora usa una tabla con:
++
++- `{ role: "admin" }` sin `isActive`/`active`, desde un origen permitido;
++- `{ isAdmin: true }` sin `isActive`/`active`, desde un origen desconocido.
++
++Ambos casos verifican `403`. El primero comprueba reflexi+¦n exacta del origen
++permitido y el segundo comprueba ausencia de
++`Access-Control-Allow-Origin`.
++
++No se modific+¦ c+¦digo de producci+¦n.
++
++### Commit exclusivo del test
++
++```text
++5ecf4ceadf2f720e9513c087ec3b3435ca08528a
++test(security): strengthen strict Firebase admin evidence
++```
++
++El commit contiene exclusivamente:
++
++```text
++supabase/functions/_shared/adminAuth.test.ts
++```
++
++### Verificaci+¦n
++
++Tests:
++
++```powershell
++npx --yes deno test --allow-env supabase/functions/_shared/adminAuth.test.ts supabase/functions/_shared/strictCors.test.ts
++```
++
++Salida resumida exacta:
++
++```text
++running 14 tests from ./supabase/functions/_shared/adminAuth.test.ts
++V5 guard denies Firestore admin document without active flags ... ok
++running 7 tests from ./supabase/functions/_shared/strictCors.test.ts
++ok | 21 passed | 0 failed
++```
++
++Exit code: `0`.
++
++Formato:
++
++```powershell
++npx --yes deno fmt --check supabase/functions/_shared/adminAuth.ts supabase/functions/_shared/adminAuth.test.ts supabase/functions/_shared/strictCors.ts supabase/functions/_shared/strictCors.test.ts supabase/functions/_shared/directoryMonitorAuth.ts
++```
++
++Salida exacta:
++
++```text
++Checked 5 files
++```
++
++Exit code: `0`.
++
++Lint:
++
++```powershell
++npx --yes deno lint supabase/functions/_shared/adminAuth.ts supabase/functions/_shared/adminAuth.test.ts supabase/functions/_shared/strictCors.ts supabase/functions/_shared/strictCors.test.ts supabase/functions/_shared/directoryMonitorAuth.ts
++```
++
++Salida exacta:
++
++```text
++Checked 5 files
++```
++
++Exit code: `0`.
++
++IDE diagnostics del test: `No linter errors found`.
++
++### Concern operativo
++
++`graphify update .` contin+¦a bloqueado por la instalaci+¦n local:
++
++```text
++ModuleNotFoundError: No module named 'graphify'
++```
++
++La consulta inicial del codebase s+¡ se realiz+¦ mediante MCP Graphify. No hubo
++mutaciones remotas.

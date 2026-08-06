@@ -1,0 +1,1221 @@
+TASK COMMITS ONLY: cec71cd 32618b0
+
+commit cec71cd4574e3fc566f73b84d2cde0bd0c9aa6f5
+Author:     Nicol+ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+AuthorDate: Thu Aug 6 09:42:22 2026 -0500
+Commit:     Nicol+ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+CommitDate: Thu Aug 6 09:42:22 2026 -0500
+
+    feat(db): add V5 booking projection RPC
+    
+    Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ ...0260806143454_ops_v5_booking_projection_rpc.sql | 399 ++++++++++++
+ .../tests/ops_v5_booking_projection_rpc.test.sql   | 684 +++++++++++++++++++++
+ 2 files changed, 1083 insertions(+)
+
+diff --git a/supabase/migrations/20260806143454_ops_v5_booking_projection_rpc.sql b/supabase/migrations/20260806143454_ops_v5_booking_projection_rpc.sql
+new file mode 100644
+index 0000000..7f9c1b9
+--- /dev/null
++++ b/supabase/migrations/20260806143454_ops_v5_booking_projection_rpc.sql
+@@ -0,0 +1,399 @@
++create or replace function public.apply_ops_booking_projection(
++  p_booking jsonb,
++  p_crew jsonb default '[]'::jsonb,
++  p_addons jsonb default '[]'::jsonb,
++  p_events jsonb default '[]'::jsonb
++)
++returns jsonb
++language plpgsql
++security invoker
++set search_path = ''
++as $$
++declare
++  v_booking public.bookings%rowtype;
++  v_existing_booking public.bookings%rowtype;
++  v_booking_id uuid;
++  v_reason text;
++begin
++  if pg_catalog.jsonb_typeof(p_booking) is distinct from 'object' then
++    raise exception using
++      errcode = '22023',
++      message = 'p_booking must be a JSON object';
++  end if;
++
++  if not p_booking ?& array[
++    'service_id',
++    'appointment_id',
++    'source_revision',
++    'source_hash',
++    'source_updated_at'
++  ] then
++    raise exception using
++      errcode = '22023',
++      message = 'p_booking is missing required projection fields';
++  end if;
++
++  if pg_catalog.jsonb_typeof(p_booking -> 'service_id') is distinct from 'string'
++     or pg_catalog.jsonb_typeof(p_booking -> 'appointment_id') is distinct from 'string'
++     or nullif(p_booking ->> 'service_id', '') is null
++     or nullif(p_booking ->> 'appointment_id', '') is null then
++    raise exception using
++      errcode = '22023',
++      message = 'service_id and appointment_id must be non-empty strings';
++  end if;
++
++  if pg_catalog.jsonb_typeof(p_booking -> 'source_revision') is distinct from 'number'
++     or (p_booking ->> 'source_revision') !~ '^[0-9]+$' then
++    raise exception using
++      errcode = '22023',
++      message = 'source_revision must be a non-negative integer';
++  end if;
++
++  if pg_catalog.jsonb_typeof(p_booking -> 'source_hash') is distinct from 'string'
++     or (p_booking ->> 'source_hash') !~ '^[0-9a-fA-F]{64}$' then
++    raise exception using
++      errcode = '22023',
++      message = 'source_hash must be a 64-character hexadecimal SHA-256';
++  end if;
++
++  if pg_catalog.jsonb_typeof(p_booking -> 'source_updated_at') is distinct from 'string' then
++    raise exception using
++      errcode = '22023',
++      message = 'source_updated_at must be a timestamp string';
++  end if;
++
++  if pg_catalog.jsonb_typeof(p_crew) is distinct from 'array'
++     or pg_catalog.jsonb_typeof(p_addons) is distinct from 'array'
++     or pg_catalog.jsonb_typeof(p_events) is distinct from 'array' then
++    raise exception using
++      errcode = '22023',
++      message = 'p_crew, p_addons, and p_events must be JSON arrays';
++  end if;
++
++  select *
++  into v_booking
++  from pg_catalog.jsonb_populate_record(null::public.bookings, p_booking);
++
++  v_booking.source_hash := pg_catalog.lower(v_booking.source_hash);
++
++  if exists (
++    select 1
++    from (
++      select child
++      from pg_catalog.jsonb_array_elements(p_crew) as crew(child)
++      union all
++      select child
++      from pg_catalog.jsonb_array_elements(p_addons) as addons(child)
++      union all
++      select child
++      from pg_catalog.jsonb_array_elements(p_events) as events(child)
++    ) as children
++    where pg_catalog.jsonb_typeof(child) is distinct from 'object'
++  ) then
++    raise exception using
++      errcode = '22023',
++      message = 'every child projection must be a JSON object';
++  end if;
++
++  if exists (
++    select 1
++    from (
++      select child
++      from pg_catalog.jsonb_array_elements(p_crew) as crew(child)
++      union all
++      select child
++      from pg_catalog.jsonb_array_elements(p_addons) as addons(child)
++      union all
++      select child
++      from pg_catalog.jsonb_array_elements(p_events) as events(child)
++    ) as children
++    where child ? 'service_id'
++      and child ->> 'service_id' is distinct from v_booking.service_id
++  ) then
++    raise exception using
++      errcode = '22023',
++      message = 'child service_id must match booking service_id';
++  end if;
++
++  perform pg_catalog.pg_advisory_xact_lock(
++    pg_catalog.hashtextextended(
++      v_booking.service_id || pg_catalog.chr(31) || v_booking.appointment_id,
++      0
++    )
++  );
++
++  select *
++  into v_existing_booking
++  from public.bookings
++  where service_id = v_booking.service_id
++    and appointment_id = v_booking.appointment_id
++  for update;
++
++  if found then
++    v_booking_id := v_existing_booking.id;
++
++    if v_booking.source_revision < v_existing_booking.source_revision then
++      return pg_catalog.jsonb_build_object(
++        'booking_id', v_booking_id,
++        'applied', false,
++        'reason', 'stale_revision',
++        'source_revision', v_booking.source_revision
++      );
++    end if;
++
++    if v_booking.source_revision = v_existing_booking.source_revision then
++      return pg_catalog.jsonb_build_object(
++        'booking_id', v_booking_id,
++        'applied', false,
++        'reason', case
++          when v_booking.source_hash = v_existing_booking.source_hash
++            then 'same_revision'
++          else 'revision_conflict'
++        end,
++        'source_revision', v_booking.source_revision
++      );
++    end if;
++
++    update public.bookings
++    set
++      source_revision = v_booking.source_revision,
++      source_hash = v_booking.source_hash,
++      source_created_at = v_booking.source_created_at,
++      source_updated_at = v_booking.source_updated_at,
++      status = coalesce(v_booking.status, 'PENDING'),
++      tier = v_booking.tier,
++      required_cleaner_minutes = coalesce(v_booking.required_cleaner_minutes, 0),
++      scheduled_start = v_booking.scheduled_start,
++      scheduled_end = v_booking.scheduled_end,
++      fulfillment = coalesce(v_booking.fulfillment, 'single'),
++      crew_size = coalesce(v_booking.crew_size, 1),
++      building_id = v_booking.building_id,
++      location_address = v_booking.location_address,
++      barrio = v_booking.barrio,
++      comuna = v_booking.comuna,
++      latitude = v_booking.latitude,
++      longitude = v_booking.longitude,
++      client_id = v_booking.client_id,
++      client_name = v_booking.client_name,
++      client_phone = v_booking.client_phone,
++      client_app_user_id = v_booking.client_app_user_id,
++      window_start = v_booking.window_start,
++      window_end = v_booking.window_end,
++      payment_status = coalesce(v_booking.payment_status, 'PAGO_PENDIENTE'),
++      payment_method = v_booking.payment_method,
++      payment_id = v_booking.payment_id,
++      wompi_reference = v_booking.wompi_reference,
++      wompi_transaction_id = v_booking.wompi_transaction_id,
++      subtotal_cop = coalesce(v_booking.subtotal_cop, 0),
++      total_cop = coalesce(v_booking.total_cop, 0),
++      paid_cop = coalesce(v_booking.paid_cop, 0),
++      pending_cop = coalesce(v_booking.pending_cop, 0),
++      is_first_booking = coalesce(v_booking.is_first_booking, false),
++      acquisition_channel = v_booking.acquisition_channel,
++      cac_cop = coalesce(v_booking.cac_cop, 0),
++      has_addons = coalesce(v_booking.has_addons, false),
++      addon_total_cop = coalesce(v_booking.addon_total_cop, 0),
++      cancellation_fee_cop = coalesce(v_booking.cancellation_fee_cop, 0),
++      assignment_source = v_booking.assignment_source,
++      assignment_decision_id = v_booking.assignment_decision_id,
++      source_deleted_at = v_booking.source_deleted_at
++    where id = v_booking_id;
++
++    v_reason := 'updated';
++  else
++    insert into public.bookings (
++      service_id,
++      appointment_id,
++      source_revision,
++      source_hash,
++      source_created_at,
++      source_updated_at,
++      status,
++      tier,
++      required_cleaner_minutes,
++      scheduled_start,
++      scheduled_end,
++      fulfillment,
++      crew_size,
++      building_id,
++      location_address,
++      barrio,
++      comuna,
++      latitude,
++      longitude,
++      client_id,
++      client_name,
++      client_phone,
++      client_app_user_id,
++      window_start,
++      window_end,
++      payment_status,
++      payment_method,
++      payment_id,
++      wompi_reference,
++      wompi_transaction_id,
++      subtotal_cop,
++      total_cop,
++      paid_cop,
++      pending_cop,
++      is_first_booking,
++      acquisition_channel,
++      cac_cop,
++      has_addons,
++      addon_total_cop,
++      cancellation_fee_cop,
++      assignment_source,
++      assignment_decision_id,
++      source_deleted_at
++    )
++    values (
++      v_booking.service_id,
++      v_booking.appointment_id,
++      v_booking.source_revision,
++      v_booking.source_hash,
++      v_booking.source_created_at,
++      v_booking.source_updated_at,
++      coalesce(v_booking.status, 'PENDING'),
++      v_booking.tier,
++      coalesce(v_booking.required_cleaner_minutes, 0),
++      v_booking.scheduled_start,
++      v_booking.scheduled_end,
++      coalesce(v_booking.fulfillment, 'single'),
++      coalesce(v_booking.crew_size, 1),
++      v_booking.building_id,
++      v_booking.location_address,
++      v_booking.barrio,
++      v_booking.comuna,
++      v_booking.latitude,
++      v_booking.longitude,
++      v_booking.client_id,
++      v_booking.client_name,
++      v_booking.client_phone,
++      v_booking.client_app_user_id,
++      v_booking.window_start,
++      v_booking.window_end,
++      coalesce(v_booking.payment_status, 'PAGO_PENDIENTE'),
++      v_booking.payment_method,
++      v_booking.payment_id,
++      v_booking.wompi_reference,
++      v_booking.wompi_transaction_id,
++      coalesce(v_booking.subtotal_cop, 0),
++      coalesce(v_booking.total_cop, 0),
++      coalesce(v_booking.paid_cop, 0),
++      coalesce(v_booking.pending_cop, 0),
++      coalesce(v_booking.is_first_booking, false),
++      v_booking.acquisition_channel,
++      coalesce(v_booking.cac_cop, 0),
++      coalesce(v_booking.has_addons, false),
++      coalesce(v_booking.addon_total_cop, 0),
++      coalesce(v_booking.cancellation_fee_cop, 0),
++      v_booking.assignment_source,
++      v_booking.assignment_decision_id,
++      v_booking.source_deleted_at
++    )
++    returning id into v_booking_id;
++
++    v_reason := 'inserted';
++  end if;
++
++  delete from public.booking_crew
++  where service_id = v_booking.service_id
++    and booking_id = v_booking_id;
++
++  insert into public.booking_crew (
++    id,
++    service_id,
++    booking_id,
++    cleaner_id,
++    assigned_minutes,
++    is_lead,
++    scheduled_start,
++    scheduled_end,
++    actual_start,
++    actual_end,
++    ya_trabajaba_ese_dia,
++    estimated_marginal_cost_cop,
++    created_at,
++    updated_at
++  )
++  select
++    coalesce(nullif(child ->> 'id', '')::uuid, pg_catalog.gen_random_uuid()),
++    v_booking.service_id,
++    v_booking_id,
++    child ->> 'cleaner_id',
++    coalesce((child ->> 'assigned_minutes')::integer, 0),
++    coalesce((child ->> 'is_lead')::boolean, false),
++    (child ->> 'scheduled_start')::timestamptz,
++    (child ->> 'scheduled_end')::timestamptz,
++    (child ->> 'actual_start')::timestamptz,
++    (child ->> 'actual_end')::timestamptz,
++    coalesce((child ->> 'ya_trabajaba_ese_dia')::boolean, false),
++    coalesce((child ->> 'estimated_marginal_cost_cop')::bigint, 0),
++    coalesce((child ->> 'created_at')::timestamptz, pg_catalog.now()),
++    coalesce((child ->> 'updated_at')::timestamptz, pg_catalog.now())
++  from pg_catalog.jsonb_array_elements(p_crew) as crew(child);
++
++  delete from public.booking_addons
++  where service_id = v_booking.service_id
++    and booking_id = v_booking_id;
++
++  insert into public.booking_addons (
++    id,
++    service_id,
++    booking_id,
++    addon_id,
++    minutes,
++    price_cop,
++    sold_at,
++    created_at,
++    updated_at
++  )
++  select
++    coalesce(nullif(child ->> 'id', '')::uuid, pg_catalog.gen_random_uuid()),
++    v_booking.service_id,
++    v_booking_id,
++    child ->> 'addon_id',
++    coalesce((child ->> 'minutes')::integer, 0),
++    coalesce((child ->> 'price_cop')::bigint, 0),
++    child ->> 'sold_at',
++    coalesce((child ->> 'created_at')::timestamptz, pg_catalog.now()),
++    coalesce((child ->> 'updated_at')::timestamptz, pg_catalog.now())
++  from pg_catalog.jsonb_array_elements(p_addons) as addons(child);
++
++  delete from public.booking_events
++  where service_id = v_booking.service_id
++    and booking_id = v_booking_id;
++
++  insert into public.booking_events (
++    id,
++    service_id,
++    booking_id,
++    event,
++    payload,
++    actor,
++    created_at
++  )
++  select
++    coalesce(nullif(child ->> 'id', '')::uuid, pg_catalog.gen_random_uuid()),
++    v_booking.service_id,
++    v_booking_id,
++    child ->> 'event',
++    coalesce(child -> 'payload', '{}'::jsonb),
++    child ->> 'actor',
++    coalesce((child ->> 'created_at')::timestamptz, pg_catalog.now())
++  from pg_catalog.jsonb_array_elements(p_events) as events(child);
++
++  return pg_catalog.jsonb_build_object(
++    'booking_id', v_booking_id,
++    'applied', true,
++    'reason', v_reason,
++    'source_revision', v_booking.source_revision
++  );
++end;
++$$;
++
++revoke execute on function public.apply_ops_booking_projection(jsonb, jsonb, jsonb, jsonb)
++from public, anon, authenticated;
++
++grant execute on function public.apply_ops_booking_projection(jsonb, jsonb, jsonb, jsonb)
++to service_role;
+diff --git a/supabase/tests/ops_v5_booking_projection_rpc.test.sql b/supabase/tests/ops_v5_booking_projection_rpc.test.sql
+new file mode 100644
+index 0000000..c8a94f6
+--- /dev/null
++++ b/supabase/tests/ops_v5_booking_projection_rpc.test.sql
+@@ -0,0 +1,684 @@
++begin;
++
++create extension if not exists pgtap with schema extensions;
++set local search_path = public, extensions;
++select no_plan();
++
++create or replace function pg_temp.sqlstate_of(statement text)
++returns text
++language plpgsql
++as $$
++begin
++  execute statement;
++  return null;
++exception
++  when others then
++    return sqlstate;
++end;
++$$;
++
++create temporary table projection_results (
++  test_case text primary key,
++  result jsonb not null
++) on commit drop;
++
++select has_function(
++  'public',
++  'apply_ops_booking_projection',
++  array['jsonb', 'jsonb', 'jsonb', 'jsonb'],
++  'projection RPC exists with its contractual signature'
++);
++
++select is(
++  (
++    select p.prosecdef
++    from pg_proc p
++    join pg_namespace n on n.oid = p.pronamespace
++    where n.nspname = 'public'
++      and p.proname = 'apply_ops_booking_projection'
++      and pg_get_function_identity_arguments(p.oid) =
++        'p_booking jsonb, p_crew jsonb, p_addons jsonb, p_events jsonb'
++  ),
++  false,
++  'projection RPC is security invoker'
++);
++
++select is(
++  (
++    select p.proconfig
++    from pg_proc p
++    join pg_namespace n on n.oid = p.pronamespace
++    where n.nspname = 'public'
++      and p.proname = 'apply_ops_booking_projection'
++      and pg_get_function_identity_arguments(p.oid) =
++        'p_booking jsonb, p_crew jsonb, p_addons jsonb, p_events jsonb'
++  ),
++  array['search_path=""']::text[],
++  'projection RPC fixes an empty search_path'
++);
++
++select ok(
++  not exists (
++    select 1
++    from pg_proc p
++    join pg_namespace n on n.oid = p.pronamespace
++    cross join lateral pg_catalog.aclexplode(
++      coalesce(p.proacl, pg_catalog.acldefault('f', p.proowner))
++    ) as acl
++    where n.nspname = 'public'
++      and p.proname = 'apply_ops_booking_projection'
++      and pg_get_function_identity_arguments(p.oid) =
++        'p_booking jsonb, p_crew jsonb, p_addons jsonb, p_events jsonb'
++      and acl.grantee = 0
++      and acl.privilege_type = 'EXECUTE'
++  ),
++  'PUBLIC cannot execute the projection RPC'
++);
++select ok(
++  not has_function_privilege(
++    'anon',
++    'public.apply_ops_booking_projection(jsonb,jsonb,jsonb,jsonb)',
++    'EXECUTE'
++  ),
++  'anon cannot execute the projection RPC'
++);
++select ok(
++  not has_function_privilege(
++    'authenticated',
++    'public.apply_ops_booking_projection(jsonb,jsonb,jsonb,jsonb)',
++    'EXECUTE'
++  ),
++  'authenticated cannot execute the projection RPC'
++);
++select ok(
++  has_function_privilege(
++    'service_role',
++    'public.apply_ops_booking_projection(jsonb,jsonb,jsonb,jsonb)',
++    'EXECUTE'
++  ),
++  'service_role can execute the projection RPC'
++);
++
++insert into public.crm_team_members
++  (service_id, id, user_id, name, email)
++values
++  ('svc-projection', 'cleaner-1', 'projection-user-1', 'Cleaner 1', 'projection-1@example.test'),
++  ('svc-projection', 'cleaner-2', 'projection-user-2', 'Cleaner 2', 'projection-2@example.test'),
++  ('svc-projection', 'cleaner-3', 'projection-user-3', 'Cleaner 3', 'projection-3@example.test');
++
++insert into projection_results (test_case, result)
++select
++  'inserted',
++  public.apply_ops_booking_projection(
++    '{
++      "service_id": "svc-projection",
++      "appointment_id": "appointment-1",
++      "source_revision": 100,
++      "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++      "source_created_at": "2026-08-06T10:00:00Z",
++      "source_updated_at": "2026-08-06T10:05:00Z",
++      "status": "CONFIRMED",
++      "required_cleaner_minutes": 180,
++      "scheduled_start": "2026-08-07T13:00:00Z",
++      "scheduled_end": "2026-08-07T16:00:00Z",
++      "fulfillment": "composite",
++      "crew_size": 2,
++      "client_name": "Cliente V5",
++      "payment_status": "PAGO_ACEPTADO",
++      "subtotal_cop": 120000,
++      "total_cop": 145000,
++      "paid_cop": 145000,
++      "pending_cop": 0,
++      "has_addons": true,
++      "addon_total_cop": 25000
++    }'::jsonb,
++    '[
++      {
++        "service_id": "svc-projection",
++        "booking_id": "99999999-9999-9999-9999-999999999999",
++        "cleaner_id": "cleaner-1",
++        "assigned_minutes": 90,
++        "is_lead": true,
++        "estimated_marginal_cost_cop": 18000
++      },
++      {
++        "cleaner_id": "cleaner-2",
++        "assigned_minutes": 90,
++        "is_lead": false,
++        "estimated_marginal_cost_cop": 17000
++      }
++    ]'::jsonb,
++    '[
++      {
++        "service_id": "svc-projection",
++        "booking_id": "99999999-9999-9999-9999-999999999999",
++        "addon_id": "inside-fridge",
++        "minutes": 30,
++        "price_cop": 25000,
++        "sold_at": "checkout"
++      }
++    ]'::jsonb,
++    '[
++      {
++        "service_id": "svc-projection",
++        "booking_id": "99999999-9999-9999-9999-999999999999",
++        "event": "creado",
++        "payload": {"channel": "app"},
++        "actor": "client"
++      },
++      {"event": "confirmado", "payload": {"payment": "approved"}, "actor": "system"}
++    ]'::jsonb
++  );
++
++select is(
++  (select result ->> 'applied' from projection_results where test_case = 'inserted'),
++  'true',
++  'first projection is applied'
++);
++select is(
++  (select result ->> 'reason' from projection_results where test_case = 'inserted'),
++  'inserted',
++  'first projection reports inserted'
++);
++select is(
++  (select (result ->> 'source_revision')::bigint from projection_results where test_case = 'inserted'),
++  100::bigint,
++  'first projection reports the incoming revision'
++);
++select is(
++  (
++    select result ->> 'booking_id'
++    from projection_results
++    where test_case = 'inserted'
++  ),
++  (
++    select id::text
++    from public.bookings
++    where service_id = 'svc-projection'
++      and appointment_id = 'appointment-1'
++  ),
++  'first projection returns the resolved booking id'
++);
++select is(
++  (
++    select total_cop
++    from public.bookings
++    where service_id = 'svc-projection'
++      and appointment_id = 'appointment-1'
++  ),
++  145000::bigint,
++  'first projection persists the known booking total'
++);
++select is(
++  (
++    select count(*)
++    from public.booking_crew
++    where service_id = 'svc-projection'
++  ),
++  2::bigint,
++  'first projection inserts the full crew snapshot'
++);
++select is(
++  (
++    select sum(estimated_marginal_cost_cop)
++    from public.booking_crew
++    where service_id = 'svc-projection'
++  ),
++  35000::numeric,
++  'first projection preserves known crew costs'
++);
++select is(
++  (
++    select count(*)
++    from public.booking_addons
++    where service_id = 'svc-projection'
++  ),
++  1::bigint,
++  'first projection inserts the addon snapshot'
++);
++select is(
++  (
++    select count(*)
++    from public.booking_events
++    where service_id = 'svc-projection'
++  ),
++  2::bigint,
++  'first projection inserts the event snapshot'
++);
++select is(
++  (
++    select count(*)
++    from (
++      select service_id, booking_id from public.booking_crew
++      union all
++      select service_id, booking_id from public.booking_addons
++      union all
++      select service_id, booking_id from public.booking_events
++    ) as children
++    where service_id is distinct from 'svc-projection'
++      or booking_id is distinct from (
++        select id
++        from public.bookings
++        where service_id = 'svc-projection'
++          and appointment_id = 'appointment-1'
++      )
++  ),
++  0::bigint,
++  'all children are forced onto the resolved booking and service'
++);
++select results_eq(
++  $$
++    select
++      (id is not null)
++      and (created_at is not null)
++      and (updated_at is not null)
++    from public.booking_crew
++    where service_id = 'svc-projection'
++    order by cleaner_id
++  $$,
++  $$values (true), (true)$$,
++  'crew rows receive generated ids and timestamps'
++);
++select results_eq(
++  $$
++    select (id is not null) and (created_at is not null) and (updated_at is not null)
++    from public.booking_addons
++    where service_id = 'svc-projection'
++  $$,
++  $$values (true)$$,
++  'addon rows receive generated ids and timestamps'
++);
++select results_eq(
++  $$
++    select (id is not null) and (created_at is not null)
++    from public.booking_events
++    where service_id = 'svc-projection'
++    order by event
++  $$,
++  $$values (true), (true)$$,
++  'event rows receive generated ids and timestamps'
++);
++
++insert into projection_results (test_case, result)
++select
++  'same_revision',
++  public.apply_ops_booking_projection(
++    '{
++      "service_id": "svc-projection",
++      "appointment_id": "appointment-1",
++      "source_revision": 100,
++      "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++      "source_updated_at": "2026-08-06T10:05:00Z",
++      "status": "PENDING",
++      "fulfillment": "single",
++      "crew_size": 1,
++      "total_cop": 1
++    }'::jsonb,
++    '[]'::jsonb,
++    '[]'::jsonb,
++    '[]'::jsonb
++  );
++
++select is(
++  (select result ->> 'reason' from projection_results where test_case = 'same_revision'),
++  'same_revision',
++  'identical revision and hash is a no-op'
++);
++select is(
++  (select result ->> 'applied' from projection_results where test_case = 'same_revision'),
++  'false',
++  'identical retry reports applied false'
++);
++select is(
++  (
++    select total_cop
++    from public.bookings
++    where service_id = 'svc-projection'
++      and appointment_id = 'appointment-1'
++  ),
++  145000::bigint,
++  'identical retry does not overwrite booking data'
++);
++select results_eq(
++  $$
++    select
++      (select count(*) from public.booking_crew where service_id = 'svc-projection'),
++      (select count(*) from public.booking_addons where service_id = 'svc-projection'),
++      (select count(*) from public.booking_events where service_id = 'svc-projection')
++  $$,
++  $$values (2::bigint, 1::bigint, 2::bigint)$$,
++  'identical retry does not delete or duplicate children'
++);
++
++insert into projection_results (test_case, result)
++select
++  'stale_revision',
++  public.apply_ops_booking_projection(
++    '{
++      "service_id": "svc-projection",
++      "appointment_id": "appointment-1",
++      "source_revision": 99,
++      "source_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
++      "source_updated_at": "2026-08-06T10:04:00Z",
++      "status": "CANCELED",
++      "fulfillment": "single",
++      "crew_size": 1,
++      "total_cop": 0
++    }'::jsonb
++  );
++
++select is(
++  (select result ->> 'reason' from projection_results where test_case = 'stale_revision'),
++  'stale_revision',
++  'older revision is a no-op'
++);
++select results_eq(
++  $$
++    select source_revision, status, total_cop
++    from public.bookings
++    where service_id = 'svc-projection'
++      and appointment_id = 'appointment-1'
++  $$,
++  $$values (100::bigint, 'CONFIRMED'::text, 145000::bigint)$$,
++  'older revision does not revert the current booking'
++);
++
++insert into projection_results (test_case, result)
++select
++  'revision_conflict',
++  public.apply_ops_booking_projection(
++    '{
++      "service_id": "svc-projection",
++      "appointment_id": "appointment-1",
++      "source_revision": 100,
++      "source_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
++      "source_updated_at": "2026-08-06T10:05:00Z",
++      "status": "CANCELED",
++      "fulfillment": "single",
++      "crew_size": 1,
++      "total_cop": 0
++    }'::jsonb
++  );
++
++select is(
++  (select result ->> 'reason' from projection_results where test_case = 'revision_conflict'),
++  'revision_conflict',
++  'same revision with a different hash reports a conflict'
++);
++select results_eq(
++  $$
++    select
++      source_revision,
++      source_hash,
++      status,
++      (select count(*) from public.booking_crew where service_id = 'svc-projection'),
++      (select count(*) from public.booking_events where service_id = 'svc-projection')
++    from public.bookings
++    where service_id = 'svc-projection'
++      and appointment_id = 'appointment-1'
++  $$,
++  $$values (
++    100::bigint,
++    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'::text,
++    'CONFIRMED'::text,
++    2::bigint,
++    2::bigint
++  )$$,
++  'revision conflict leaves booking and children untouched'
++);
++
++insert into projection_results (test_case, result)
++select
++  'updated',
++  public.apply_ops_booking_projection(
++    '{
++      "service_id": "svc-projection",
++      "appointment_id": "appointment-1",
++      "source_revision": 101,
++      "source_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
++      "source_updated_at": "2026-08-06T10:06:00Z",
++      "status": "COMPLETED",
++      "required_cleaner_minutes": 120,
++      "fulfillment": "single",
++      "crew_size": 1,
++      "payment_status": "PAGO_ACEPTADO",
++      "subtotal_cop": 150000,
++      "total_cop": 180000,
++      "paid_cop": 180000,
++      "pending_cop": 0,
++      "has_addons": true,
++      "addon_total_cop": 30000
++    }'::jsonb,
++    '[
++      {
++        "cleaner_id": "cleaner-3",
++        "assigned_minutes": 120,
++        "is_lead": true,
++        "estimated_marginal_cost_cop": 26000
++      }
++    ]'::jsonb,
++    '[
++      {"addon_id": "oven", "minutes": 20, "price_cop": 12000, "sold_at": "onsite"},
++      {"addon_id": "windows", "minutes": 30, "price_cop": 18000, "sold_at": "rebook"}
++    ]'::jsonb,
++    '[
++      {"event": "finalizado", "payload": {"rating": 5}, "actor": "cleaner-3"}
++    ]'::jsonb
++  );
++
++select is(
++  (select result ->> 'reason' from projection_results where test_case = 'updated'),
++  'updated',
++  'newer revision reports updated'
++);
++select is(
++  (select result ->> 'applied' from projection_results where test_case = 'updated'),
++  'true',
++  'newer revision is applied'
++);
++select results_eq(
++  $$
++    select source_revision, status, total_cop
++    from public.bookings
++    where service_id = 'svc-projection'
++      and appointment_id = 'appointment-1'
++  $$,
++  $$values (101::bigint, 'COMPLETED'::text, 180000::bigint)$$,
++  'newer revision replaces the booking projection'
++);
++select results_eq(
++  $$
++    select cleaner_id, assigned_minutes, estimated_marginal_cost_cop
++    from public.booking_crew
++    where service_id = 'svc-projection'
++  $$,
++  $$values ('cleaner-3'::text, 120, 26000::bigint)$$,
++  'newer revision replaces the crew snapshot'
++);
++select results_eq(
++  $$
++    select count(*), sum(minutes), sum(price_cop)
++    from public.booking_addons
++    where service_id = 'svc-projection'
++  $$,
++  $$values (2::bigint, 50::bigint, 30000::numeric)$$,
++  'newer revision replaces addons without duplicate totals'
++);
++select results_eq(
++  $$
++    select count(*), min(event)
++    from public.booking_events
++    where service_id = 'svc-projection'
++  $$,
++  $$values (1::bigint, 'finalizado'::text)$$,
++  'newer revision replaces the event snapshot'
++);
++
++select is(
++  pg_temp.sqlstate_of($sql$
++    select public.apply_ops_booking_projection(
++      '{
++        "service_id": "svc-projection",
++        "appointment_id": "appointment-cross-service",
++        "source_revision": 1,
++        "source_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
++        "source_updated_at": "2026-08-06T11:00:00Z"
++      }'::jsonb,
++      '[{"service_id": "svc-other", "cleaner_id": "cleaner-1"}]'::jsonb
++    )
++  $sql$),
++  '22023',
++  'explicit child service mismatch is rejected'
++);
++select is(
++  (
++    select count(*)
++    from public.bookings
++    where service_id = 'svc-projection'
++      and appointment_id = 'appointment-cross-service'
++  ),
++  0::bigint,
++  'child service mismatch rolls back the booking'
++);
++
++select is(
++  pg_temp.sqlstate_of($sql$
++    select public.apply_ops_booking_projection(
++      '{
++        "service_id": "svc-projection",
++        "appointment_id": "appointment-invalid-status",
++        "source_revision": 1,
++        "source_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
++        "source_updated_at": "2026-08-06T11:01:00Z",
++        "status": "DONE"
++      }'::jsonb
++    )
++  $sql$),
++  '23514',
++  'invalid booking status is rejected by the schema'
++);
++select is(
++  (
++    select count(*)
++    from public.bookings
++    where service_id = 'svc-projection'
++      and appointment_id = 'appointment-invalid-status'
++  ),
++  0::bigint,
++  'invalid booking status leaves no partial booking'
++);
++
++select is(
++  pg_temp.sqlstate_of($sql$
++    select public.apply_ops_booking_projection(
++      '{
++        "service_id": "svc-projection",
++        "appointment_id": "appointment-1",
++        "source_revision": 102,
++        "source_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
++        "source_updated_at": "2026-08-06T11:02:00Z",
++        "status": "CONFIRMED",
++        "fulfillment": "composite",
++        "crew_size": 2
++      }'::jsonb,
++      '[
++        {"cleaner_id": "cleaner-1", "is_lead": true},
++        {"cleaner_id": "cleaner-2", "is_lead": true}
++      ]'::jsonb
++    )
++  $sql$),
++  '23505',
++  'two crew leads are rejected'
++);
++select results_eq(
++  $$
++    select
++      source_revision,
++      status,
++      (select count(*) from public.booking_crew where service_id = 'svc-projection'),
++      (select min(cleaner_id) from public.booking_crew where service_id = 'svc-projection')
++    from public.bookings
++    where service_id = 'svc-projection'
++      and appointment_id = 'appointment-1'
++  $$,
++  $$values (101::bigint, 'COMPLETED'::text, 1::bigint, 'cleaner-3'::text)$$,
++  'child constraint failure rolls back booking and child replacement'
++);
++
++select is(
++  pg_temp.sqlstate_of($sql$
++    select public.apply_ops_booking_projection(
++      '{
++        "service_id": "svc-projection",
++        "appointment_id": "appointment-invalid-arrays",
++        "source_revision": 1,
++        "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
++        "source_updated_at": "2026-08-06T11:03:00Z"
++      }'::jsonb,
++      '{}'::jsonb
++    )
++  $sql$),
++  '22023',
++  'non-array child payload is rejected'
++);
++
++select is(
++  pg_temp.sqlstate_of($sql$
++    select public.apply_ops_booking_projection(
++      '[]'::jsonb
++    )
++  $sql$),
++  '22023',
++  'non-object booking payload is rejected'
++);
++
++select is(
++  pg_temp.sqlstate_of($sql$
++    select public.apply_ops_booking_projection(
++      '{
++        "service_id": "svc-projection",
++        "appointment_id": "appointment-missing-required"
++      }'::jsonb
++    )
++  $sql$),
++  '22023',
++  'booking missing projection metadata is rejected'
++);
++
++insert into projection_results (test_case, result)
++select
++  'empty_children',
++  public.apply_ops_booking_projection(
++    '{
++      "service_id": "svc-projection",
++      "appointment_id": "appointment-1",
++      "source_revision": 103,
++      "source_hash": "2222222222222222222222222222222222222222222222222222222222222222",
++      "source_updated_at": "2026-08-06T11:04:00Z",
++      "status": "CANCELED",
++      "fulfillment": "single",
++      "crew_size": 1
++    }'::jsonb,
++    '[]'::jsonb,
++    '[]'::jsonb,
++    '[]'::jsonb
++  );
++
++select is(
++  (select result ->> 'reason' from projection_results where test_case = 'empty_children'),
++  'updated',
++  'newer projection with empty arrays is applied'
++);
++select results_eq(
++  $$
++    select
++      (select count(*) from public.booking_crew where service_id = 'svc-projection'),
++      (select count(*) from public.booking_addons where service_id = 'svc-projection'),
++      (select count(*) from public.booking_events where service_id = 'svc-projection')
++  $$,
++  $$values (0::bigint, 0::bigint, 0::bigint)$$,
++  'empty arrays remove all existing children'
++);
++
++select * from finish();
++rollback;
+
+commit 32618b0a5200f2aba0ec18854b9434b2d2831125
+Author:     Nicol+ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+AuthorDate: Thu Aug 6 09:44:58 2026 -0500
+Commit:     Nicol+ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+CommitDate: Thu Aug 6 09:44:58 2026 -0500
+
+    docs(sdd): report V5 projection RPC
+    
+    Co-authored-by: Cursor <cursoragent@cursor.com>
+---
+ .../sdd/v5-phase-0b-projection-rpc-report.md       | 90 ++++++++++++++++++++++
+ 1 file changed, 90 insertions(+)
+
+diff --git a/.superpowers/sdd/v5-phase-0b-projection-rpc-report.md b/.superpowers/sdd/v5-phase-0b-projection-rpc-report.md
+new file mode 100644
+index 0000000..2277751
+--- /dev/null
++++ b/.superpowers/sdd/v5-phase-0b-projection-rpc-report.md
+@@ -0,0 +1,90 @@
++# V5 Fase 0B ÔÇö Reporte RPC transaccional de proyecci+¦n
++
++## Estado
++
++- Implementaci+¦n funcional creada en `master`.
++- Commit funcional: `cec71cd` (`feat(db): add V5 booking projection RPC`).
++- No se cre+¦ rama ni worktree.
++- No se ejecut+¦ `db push`, `migration repair`, deploy ni mutaci+¦n remota.
++- La ejecuci+¦n PostgreSQL local qued+¦ bloqueada porque el stack local no est+í disponible.
++
++## Archivos funcionales
++
++- `supabase/migrations/20260806143454_ops_v5_booking_projection_rpc.sql`
++- `supabase/tests/ops_v5_booking_projection_rpc.test.sql`
++
++La migraci+¦n fue creada primero con:
++
++```text
++npx supabase migration new ops_v5_booking_projection_rpc
++{"path":"...\supabase\migrations\20260806143454_ops_v5_booking_projection_rpc.sql","message":"Migration created"}
++```
++
++El timestamp CLI `20260806143454` no colisiona con otra migraci+¦n local.
++
++## Red ÔåÆ green
++
++### Red
++
++Se cre+¦ primero la prueba pgTAP contra la migraci+¦n vac+¡a. El entorno impidi+¦
++observar el fallo contractual porque PostgreSQL local no lleg+¦ a iniciar:
++
++```text
++npx supabase db reset --local
++LegacyDbBootstrapError: failed to inspect service
++```
++
++```text
++npx supabase test db --local
++LegacyDbConnectError: failed to connect to postgres:
++dial error (connect ECONNREFUSED 127.0.0.1:54322)
++Suggestion: Make sure Docker is running, then run: supabase start
++```
++
++### Green
++
++Se implement+¦ `public.apply_ops_booking_projection(jsonb, jsonb, jsonb, jsonb)`
++con:
++
++- `security invoker` y `search_path = ''`;
++- `EXECUTE` revocado a `PUBLIC`, `anon` y `authenticated`, concedido solo a
++  `service_role`;
++- validaci+¦n de booking, arrays, revisi+¦n/hash y aislamiento por `service_id`;
++- serializaci+¦n transaccional por booking, reglas de revisi+¦n idempotentes y
++  conflicto de hash;
++- reemplazo at+¦mico de crew, addons y events +¦nicamente al aplicar;
++- IDs y timestamps child por defecto, con `service_id` y `booking_id` forzados.
++
++La suite pgTAP cubre inserci+¦n, retry id+®ntico, revisi+¦n obsoleta, conflicto,
++actualizaci+¦n/reemplazo, rollback por errores, grants, payloads inv+ílidos y
++arrays vac+¡os.
++
++La verificaci+¦n local posterior qued+¦ bloqueada por los mismos errores:
++
++```text
++npx supabase db reset --local
++LegacyDbBootstrapError: failed to inspect service
++
++npx supabase test db --local
++LegacyDbConnectError: ECONNREFUSED 127.0.0.1:54322
++
++npx supabase db lint --local --level error
++LegacyDbConnectError: ECONNREFUSED 127.0.0.1:54322
++```
++
++Checks est+íticos ejecutados:
++
++- `git diff --cached --check` ÔÇö exit `0`, sin salida.
++- Commit funcional verificado con exactamente los dos archivos SQL.
++- Diagn+¦sticos IDE sobre ambos SQL ÔÇö sin errores.
++- Inspecci+¦n est+ítica confirm+¦ timestamp +¦nico, funci+¦n, `security invoker`,
++  `search_path`, revokes/grant y todos los casos contractuales.
++
++## Concerns
++
++- No hay evidencia runtime de compilaci+¦n PL/pgSQL ni de pgTAP verde hasta que
++  Docker/Podman permita iniciar el stack local.
++- Debe repetirse `npx supabase db reset --local`, `npx supabase test db --local`
++  y `npx supabase db lint --local --level error` cuando Docker est+® disponible.
++- Los archivos y commits concurrentes ajenos se conservaron sin incluirlos en
++  el commit funcional.

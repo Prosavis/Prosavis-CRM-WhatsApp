@@ -1,0 +1,544 @@
+﻿874692b fix: close payment and Meta window findings
+ .../sdd/fase1-payment-window-close-brief.md        | 24 +++++++++
+ .../sdd/fase1-payment-window-close-report.md       | 36 +++++++++++++
+ src/components/whatsapp/ChatArea.tsx               | 18 ++++++-
+ src/components/whatsapp/WhatsAppLayout.tsx         | 17 ++++--
+ src/utils/inboxAiContextFormat.test.ts             | 62 ++++++++++++++++++++++
+ src/utils/metaSessionWindow.test.ts                | 31 ++++++++++-
+ src/utils/whatsappTemplateSuggestions.ts           | 15 ++++++
+ supabase/functions/_shared/inboxAiContextFormat.ts |  9 ++--
+ 8 files changed, 201 insertions(+), 11 deletions(-)
+commit 874692b723020407c2f41a96942661e42a4a36f7
+Author:     Nicol├ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+AuthorDate: Thu Aug 6 09:42:46 2026 -0500
+Commit:     Nicol├ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+CommitDate: Thu Aug 6 09:42:46 2026 -0500
+
+    fix: close payment and Meta window findings
+    
+    Co-authored-by: Cursor <cursoragent@cursor.com>
+
+diff --git a/src/components/whatsapp/ChatArea.tsx b/src/components/whatsapp/ChatArea.tsx
+index 055db0e..a56db18 100644
+--- a/src/components/whatsapp/ChatArea.tsx
++++ b/src/components/whatsapp/ChatArea.tsx
+@@ -75,21 +75,24 @@ import {
+   type WhatsAppSticker,
+   type WhatsAppStickerFolder,
+ } from '@/services/whatsappService';
+ import VisibilityIcon from '@mui/icons-material/Visibility';
+ import EditIcon from '@mui/icons-material/Edit';
+ import BookingAssistantDrawer from './BookingAssistantDrawer';
+ import type { ForwardWhatsAppResult } from '@/services/forwardWhatsAppMessage';
+ import { isForwardableMessage } from '@/services/forwardWhatsAppMessage';
+ import { ContactAvatar } from '@/components/common/ContactAvatar';
+ import { pickContactPhotoUrl } from '@/utils/contactAvatar';
+-import { getLastInboundAt } from '@/utils/whatsappTemplateSuggestions';
++import {
++  getLoadedConversationInbound,
++  type LoadedConversationInbound,
++} from '@/utils/whatsappTemplateSuggestions';
+ import { coloredChipSx } from '@/utils/coloredChipStyles';
+ import { prepareWhatsAppSticker } from '@/utils/prepareWhatsAppSticker';
+ import { summarizePeerPresences } from '@/utils/whatsappAdminPresence';
+ import type { WhatsAppTagFolder } from '@/types/whatsapp';
+ import TagListGrouped from './TagListGrouped';
+ import type { MetaSessionWindow } from '../../../supabase/functions/_shared/metaSessionWindow';
+ 
+ interface ChatAreaProps {
+   conversation: WhatsAppConversation;
+   phoneNumberId?: string;
+@@ -108,20 +111,21 @@ interface ChatAreaProps {
+   /** Abre el di├ílogo de gesti├│n de tags (crear, editar, eliminar). */
+   onManageTags?: () => void;
+   onConversationPermanentlyDeleted?: () => void;
+   snippets?: WhatsAppSnippet[];
+   /** Uid del admin actual (para escribir su doc de presencia). */
+   myUid?: string | null;
+   /** Nombre que ver├ín los dem├ís admins en los indicadores de presencia. */
+   myDisplayName?: string;
+   /** Otros admins (excluye al usuario actual) actualmente activos en este chat. */
+   peerPresences?: WhatsAppAdminPresence[];
++  onLoadedConversationInbound?: (inbound: LoadedConversationInbound) => void;
+ }
+ 
+ function groupMessagesByDate(messages: WhatsAppMessage[]): Map<string, WhatsAppMessage[]> {
+   const groups = new Map<string, WhatsAppMessage[]>();
+   for (const msg of messages) {
+     const dateKey = msg.createdAt.toLocaleDateString('es-CO', {
+       year: 'numeric',
+       month: 'long',
+       day: 'numeric',
+     });
+@@ -198,20 +202,21 @@ const ChatArea: React.FC<ChatAreaProps> = ({
+   onExternalDraftConsumed,
+   tags = [],
+   tagFolders = [],
+   onTagsChanged,
+   onManageTags,
+   onConversationPermanentlyDeleted,
+   snippets,
+   myUid,
+   myDisplayName,
+   peerPresences = [],
++  onLoadedConversationInbound,
+ }) => {
+   const theme = useTheme();
+   const [messages, setMessages] = useState<WhatsAppMessage[]>([]);
+   const [loading, setLoading] = useState(true);
+   const [suggestionDraft, setSuggestionDraft] = useState('');
+   const [suggestionLoading, setSuggestionLoading] = useState(false);
+   const [suggestionHint, setSuggestionHint] = useState<string | null>(null);
+   const [aiContextDialogOpen, setAiContextDialogOpen] = useState(false);
+   const [aiExtraContext, setAiExtraContext] = useState('');
+   const [bookingContext, setBookingContext] = useState<BookingContextData | null>(null);
+@@ -917,21 +922,30 @@ const ChatArea: React.FC<ChatAreaProps> = ({
+         });
+         setSnack({ open: true, message: msgText, severity: 'error' });
+       }
+     }, 500);
+   }, [myUid, phoneNumberId, stableKey]);
+ 
+   const visibleMessages = useMemo(
+     () => messages.filter((message) => !message.reactionTo),
+     [messages],
+   );
+-  const lastInboundAt = useMemo(() => getLastInboundAt(visibleMessages), [visibleMessages]);
++  const loadedConversationInbound = useMemo(
++    () => getLoadedConversationInbound(conversation.id, visibleMessages),
++    [conversation.id, visibleMessages],
++  );
++  const lastInboundAt = loadedConversationInbound.lastInboundAt;
++  useEffect(() => {
++    if (!loading) {
++      onLoadedConversationInbound?.(loadedConversationInbound);
++    }
++  }, [loadedConversationInbound, loading, onLoadedConversationInbound]);
+   const pendingInboundAudioCount = useMemo(
+     () =>
+       visibleMessages.filter(
+         (message) =>
+           message.direction === 'inbound' &&
+           message.mediaType === 'audio' &&
+           message.voiceTranscriptionStatus !== 'completed',
+       ).length,
+     [visibleMessages],
+   );
+diff --git a/src/components/whatsapp/WhatsAppLayout.tsx b/src/components/whatsapp/WhatsAppLayout.tsx
+index cd9f2be..c47b9fd 100644
+--- a/src/components/whatsapp/WhatsAppLayout.tsx
++++ b/src/components/whatsapp/WhatsAppLayout.tsx
+@@ -39,20 +39,21 @@ import {
+   type CategoryTagIdOverrides,
+   type WhatsAppInboxMetrics,
+ } from '@/utils/whatsappInboxStats';
+ import { dedupePresencesByUid } from '@/utils/whatsappAdminPresence';
+ import { clearAllComposerDrafts } from '@/utils/messageComposerDraftStore';
+ import { areSoundsEnabled, getSoundVolume } from '@/utils/soundPreferences';
+ import {
+   canShowDesktopNotifications,
+   showInboundMessageNotification,
+ } from '@/utils/desktopNotifications';
++import type { LoadedConversationInbound } from '@/utils/whatsappTemplateSuggestions';
+ import useSoundEffects from '@/hooks/useSoundEffects';
+ 
+ const INBOUND_NOTIFY_AUDIO = `${import.meta.env.BASE_URL}assets/audio/WhatsAppSound.mp3`;
+ 
+ function resolveAdminDisplayName(
+   adminName: string | undefined,
+   authDisplayName: string | undefined | null,
+   email: string | undefined | null,
+ ): string {
+   if (adminName && adminName.trim()) return adminName.trim();
+@@ -159,20 +160,22 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
+   onClearFocusPhone,
+   focusConversation,
+   onClearFocusConversation,
+   onClearFocusDeepLink,
+   onInboxMetrics,
+ }) => {
+   const theme = useTheme();
+   const { user, profile, session, loading: authLoading } = useAuth();
+   const [conversations, setConversations] = useState<WhatsAppConversation[]>([]);
+   const [selectedConversation, setSelectedConversation] = useState<WhatsAppConversation | null>(null);
++  const [loadedConversationInbound, setLoadedConversationInbound] =
++    useState<LoadedConversationInbound | null>(null);
+   const [loading, setLoading] = useState(true);
+   const [inboxError, setInboxError] = useState<string | null>(null);
+   const [subscriptionKey, setSubscriptionKey] = useState(0);
+   const [rightPanel, setRightPanel] = useState<RightPanelMode>('none');
+   const [composerDraft, setComposerDraft] = useState('');
+   const [tags, setTags] = useState<WhatsAppTag[]>([]);
+   const [tagFolders, setTagFolders] = useState<WhatsAppTagFolder[]>([]);
+   const [snippets, setSnippets] = useState<WhatsAppSnippet[]>([]);
+   const [tagManagerOpen, setTagManagerOpen] = useState(false);
+   const [newContactOpen, setNewContactOpen] = useState(false);
+@@ -553,20 +556,27 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
+     onClearFocusConversation,
+   ]);
+ 
+   const recipientPhoneForTemplates = selectedConversation
+     ? selectedConversation.contactPhone || selectedConversation.phone || ''
+     : '';
+   const templateRecipientDigits = recipientPhoneForTemplates.replace(/\D/g, '');
+   const canShowTemplates =
+     Boolean(selectedConversation && wabaId && phoneNumberId) &&
+     templateRecipientDigits.length >= 10;
++  const templateLastInboundAt =
++    loadedConversationInbound &&
++    loadedConversationInbound.conversationId === selectedConversation?.id
++      ? loadedConversationInbound.lastInboundAt
++      : selectedConversation?.lastMessageDirection === 'inbound'
++        ? selectedConversation.lastMessageAt ?? null
++        : null;
+ 
+   useEffect(() => {
+     if (!selectedConversation) {
+       setRightPanel('none');
+     }
+   }, [selectedConversation]);
+ 
+   useEffect(() => {
+     if (!canShowTemplates) {
+       setRightPanel((prev) => (prev === 'templates' ? 'none' : prev));
+@@ -926,41 +936,38 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
+               onExternalDraftConsumed={() => setComposerDraft('')}
+               tags={tags}
+               tagFolders={tagFolders}
+               onTagsChanged={loadTags}
+               onManageTags={() => setTagManagerOpen(true)}
+               onConversationPermanentlyDeleted={handleConversationPermanentlyDeleted}
+               snippets={snippets}
+               myUid={myUid}
+               myDisplayName={myDisplayName}
+               peerPresences={peersInSelectedChat}
++              onLoadedConversationInbound={setLoadedConversationInbound}
+             />
+           ) : (
+             <WhatsAppEmptyState />
+           )}
+         </Box>
+ 
+         {showRightColumn && selectedConversation && rightPanel === 'templates' && canShowTemplates && wabaId && phoneNumberId && (
+           <TemplatesSidePanel
+             wabaId={wabaId}
+             phoneNumberId={phoneNumberId}
+             recipientPhone={recipientPhoneForTemplates}
+             onApplyDraftToComposer={setComposerDraft}
+             snippets={snippets}
+             onSnippetsChanged={loadSnippets}
+             conversationStableKey={selectedConversation.phone || selectedConversation.id}
+             conversationDisplayName={contactCtx.displayName ?? undefined}
+-            lastInboundAt={
+-              selectedConversation.lastMessageDirection === 'inbound'
+-                ? selectedConversation.lastMessageAt ?? null
+-                : null
+-            }
++            lastInboundAt={templateLastInboundAt}
+             lastMessageDirection={selectedConversation.lastMessageDirection}
+           />
+         )}
+ 
+         {showRightColumn && selectedConversation && rightPanel === 'contact' && (
+           <WhatsAppContactSidePanel
+             conversation={selectedConversation}
+             contact={contactCtx}
+           />
+         )}
+diff --git a/src/utils/inboxAiContextFormat.test.ts b/src/utils/inboxAiContextFormat.test.ts
+index 128d773..a2a6d39 100644
+--- a/src/utils/inboxAiContextFormat.test.ts
++++ b/src/utils/inboxAiContextFormat.test.ts
+@@ -164,20 +164,52 @@ describe('formatInboxAiContextBlock', () => {
+       nowIso: '2026-08-05T12:00:00.000Z',
+     });
+     expect(block).toContain('Sin entrada en crm_directory');
+     expect(block).toContain('Sin citas/apoyos encontrados');
+     expect(block).toContain('Total apoyos/citas encontrados (ventana CRM): 0');
+     expect(block).toContain('=== Propiedades / ubicaciones de apoyos ===');
+     expect(block).toContain('=== Canal / ventana WhatsApp ===');
+     expect(block).toContain('Estado: unknown');
+     expect(block).toContain('Ventana truncada');
+   });
++
++  it('omits zero and negative appointment totals from formatted context', () => {
++    const block = formatInboxAiContextBlock({
++      phone: '573009998877',
++      transcript: 'Cliente: info',
++      historyMeta: { loaded: 1, truncated: false },
++      conversationTags: [],
++      directory: null,
++      appointments: [
++        {
++          id: 'zero-total',
++          scheduledDate: '2026-08-10T14:00:00.000Z',
++          totalAmount: 0,
++        },
++        {
++          id: 'negative-total',
++          scheduledDate: '2026-08-11T14:00:00.000Z',
++          totalAmount: -88_000,
++        },
++      ],
++      sessionWindow: {
++        status: 'unknown',
++        lastInboundAt: null,
++        expiresAt: null,
++        requiresTemplate: true,
++      },
++      nowIso: '2026-08-05T12:00:00.000Z',
++    });
++
++    expect(block).not.toContain('valor: COP 0');
++    expect(block).not.toContain('valor: COP -88.000');
++  });
+ });
+ 
+ describe('INBOX_AI_SYSTEM_INSTRUCTION', () => {
+   it('requires early arrival when house will be empty', () => {
+     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/SEGURIDAD Y ACCESO/);
+     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/1 hora antes/);
+     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/NUNCA propongas llegar exactamente/);
+   });
+ 
+   it('requires grounded prices, payments, availability and Meta templates', () => {
+@@ -370,20 +402,50 @@ describe('groundBookingPayment', () => {
+           },
+         ],
+       },
+       '2026-08-05T12:00:00.000Z',
+     );
+ 
+     expect(grounded.paymentStatus).toBe('none');
+     expect(grounded.paymentAmount).toBeNull();
+   });
+ 
++  it('does not borrow payment from a later match for a partial target', () => {
++    const grounded = groundBookingPayment(
++      {
++        collectedData: {
++          date: '2026-08-10',
++        },
++        paymentStatus: 'APPROVED',
++        paymentAmount: 999_999,
++      },
++      {
++        appointments: [
++          {
++            id: 'nearest-matching-unpaid',
++            scheduledDate: '2026-08-10T14:00:00.000Z',
++          },
++          {
++            id: 'later-matching-paid',
++            scheduledDate: '2026-08-10T18:00:00.000Z',
++            paymentStatus: 'PAGO_ACEPTADO',
++            totalAmount: 118_000,
++          },
++        ],
++      },
++      '2026-08-05T12:00:00.000Z',
++    );
++
++    expect(grounded.paymentStatus).toBe('none');
++    expect(grounded.paymentAmount).toBeNull();
++  });
++
+   it('never treats zero or negative appointment totals as authoritative amounts', () => {
+     const zero = groundBookingPayment(
+       { paymentStatus: 'APPROVED', paymentAmount: 999_999 },
+       {
+         appointments: [
+           {
+             id: 'zero',
+             scheduledDate: '2026-08-10T14:00:00.000Z',
+             paymentStatus: 'PAGO_ACEPTADO',
+             totalAmount: 0,
+diff --git a/src/utils/metaSessionWindow.test.ts b/src/utils/metaSessionWindow.test.ts
+index 7f1f537..b3ac5bd 100644
+--- a/src/utils/metaSessionWindow.test.ts
++++ b/src/utils/metaSessionWindow.test.ts
+@@ -1,17 +1,20 @@
+ import { afterEach, describe, expect, it, vi } from 'vitest';
+ import {
+   buildMetaSessionWindow,
+   getMetaSessionWindow,
+   resolveMetaSessionWindow,
+ } from '../../supabase/functions/_shared/metaSessionWindow';
+-import { isWithinMetaSessionWindow } from './whatsappTemplateSuggestions';
++import {
++  getLoadedConversationInbound,
++  isWithinMetaSessionWindow,
++} from './whatsappTemplateSuggestions';
+ import { scheduleMetaSessionExpiry } from '../hooks/useMetaSessionWindow';
+ 
+ afterEach(() => {
+   vi.useRealTimers();
+ });
+ 
+ describe('getMetaSessionWindow', () => {
+   it('closes deterministically at the exact 24-hour boundary', () => {
+     const lastInboundAt = '2026-08-04T12:00:00.000Z';
+ 
+@@ -81,20 +84,46 @@ describe('buildMetaSessionWindow', () => {
+       ),
+     ).toEqual({
+       status: 'unknown',
+       lastInboundAt: null,
+       expiresAt: null,
+       requiresTemplate: true,
+     });
+   });
+ });
+ 
++describe('getLoadedConversationInbound', () => {
++  it('preserves the newest inbound timestamp when a later outbound message exists', () => {
++    const loadedInbound = getLoadedConversationInbound('conversation-1', [
++      {
++        id: 'inbound',
++        direction: 'inbound',
++        senderType: 'user',
++        status: 'received',
++        createdAt: new Date('2026-08-05T11:00:00.000Z'),
++      },
++      {
++        id: 'outbound',
++        direction: 'outbound',
++        senderType: 'agent',
++        status: 'sent',
++        createdAt: new Date('2026-08-05T11:30:00.000Z'),
++      },
++    ]);
++
++    expect(loadedInbound.conversationId).toBe('conversation-1');
++    expect(loadedInbound.lastInboundAt?.toISOString()).toBe(
++      '2026-08-05T11:00:00.000Z',
++    );
++  });
++});
++
+ describe('resolveMetaSessionWindow', () => {
+   it('reevaluates a server snapshot against the current clock after expiry', () => {
+     const snapshot = {
+       status: 'open' as const,
+       lastInboundAt: '2026-08-04T12:00:00.000Z',
+       expiresAt: '2026-08-05T12:00:00.000Z',
+       requiresTemplate: false,
+     };
+ 
+     expect(
+diff --git a/src/utils/whatsappTemplateSuggestions.ts b/src/utils/whatsappTemplateSuggestions.ts
+index b8626ca..cfcc00d 100644
+--- a/src/utils/whatsappTemplateSuggestions.ts
++++ b/src/utils/whatsappTemplateSuggestions.ts
+@@ -23,20 +23,25 @@ export interface WhatsAppTemplateSuggestionContext {
+ }
+ 
+ export interface WhatsAppTemplateSuggestion {
+   template: WhatsAppTemplateSummary;
+   reason: string;
+   headerValues: string[];
+   bodyValues: string[];
+   sessionExpired: boolean;
+ }
+ 
++export interface LoadedConversationInbound {
++  conversationId: string;
++  lastInboundAt: Date | null;
++}
++
+ const RETURNING_CLIENT_PRIORITY = [
+   'react_cliente_antigua_fecha',
+   'react_cliente_hace_tiempo',
+   'react_cliente_misma_profesional',
+   'rebooking_frecuencia',
+ ];
+ 
+ const WARM_LEAD_PRIORITY = [
+   'react_followup_sin_respuesta_v2',
+   'react_followup_semanas_sin_contacto',
+@@ -52,20 +57,30 @@ const COLD_OUTREACH_PRIORITY = [
+   'welcome_greeting',
+ ];
+ 
+ export function getLastInboundAt(messages: WhatsAppMessage[]): Date | null {
+   const sessionWindow = buildMetaSessionWindow(messages);
+   return sessionWindow.lastInboundAt
+     ? new Date(sessionWindow.lastInboundAt)
+     : null;
+ }
+ 
++export function getLoadedConversationInbound(
++  conversationId: string,
++  messages: WhatsAppMessage[],
++): LoadedConversationInbound {
++  return {
++    conversationId,
++    lastInboundAt: getLastInboundAt(messages),
++  };
++}
++
+ export function isWithinMetaSessionWindow(lastInboundAt: Date | null, now = new Date()): boolean {
+   return getMetaSessionWindow(lastInboundAt, now).status === 'open';
+ }
+ 
+ export function filterApprovedSpanishTemplates(
+   templates: WhatsAppTemplateSummary[],
+ ): WhatsAppTemplateSummary[] {
+   const approved = templates.filter((template) => template.status === 'APPROVED');
+   const esCo = approved.filter((template) => template.language === 'es_CO');
+   const esAny = approved.filter(
+diff --git a/supabase/functions/_shared/inboxAiContextFormat.ts b/supabase/functions/_shared/inboxAiContextFormat.ts
+index 60f60c9..9e586c9 100644
+--- a/supabase/functions/_shared/inboxAiContextFormat.ts
++++ b/supabase/functions/_shared/inboxAiContextFormat.ts
+@@ -258,21 +258,25 @@ function formatAppointmentLine(a: InboxAiAppointment): string {
+   const parts = [
+     when,
+     a.status ?? 'ÔÇö',
+     a.serviceName ?? 'servicio',
+     `cliente: ${a.clientName ?? 'ÔÇö'}`,
+     `auxiliar: ${a.providerName ?? 'sin asignar'}`,
+     `direcci├│n: ${place}`,
+   ];
+   if (a.duration != null) parts.push(`${a.duration}h`);
+   if (a.paymentStatus) parts.push(`pago: ${a.paymentStatus}`);
+-  if (a.totalAmount != null) {
++  if (
++    a.totalAmount != null &&
++    Number.isFinite(a.totalAmount) &&
++    a.totalAmount > 0
++  ) {
+     parts.push(`valor: COP ${String(a.totalAmount).replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`);
+   }
+   if (a.paymentMethod) parts.push(`m├®todo: ${a.paymentMethod}`);
+   if (a.wompiReference) parts.push(`referencia Wompi: ${a.wompiReference}`);
+   return `- ${parts.join(' | ')}`;
+ }
+ 
+ function formatPropertySummaryBlock(summary: InboxAiPropertySummary): string[] {
+   const lines: string[] = [];
+   lines.push('=== Propiedades / ubicaciones de apoyos ===');
+@@ -604,22 +608,21 @@ export function groundBookingPayment<
+       ? bookingContext.collectedData as Record<string, unknown>
+       : null;
+   const target = {
+     date: bookingTargetString(collectedData, 'date'),
+     time: bookingTargetString(collectedData, 'time'),
+     address: bookingTargetString(collectedData, 'address'),
+   };
+   const hasExplicitTarget = Boolean(target.date || target.time || target.address);
+   const appointment = hasExplicitTarget
+     ? candidates
+-        .filter((candidate) => appointmentMatchesBookingTarget(candidate, target))
+-        .find(hasAuthoritativeAppointmentPayment)
++        .find((candidate) => appointmentMatchesBookingTarget(candidate, target))
+     : candidates[0];
+ 
+   if (!appointment || !hasAuthoritativeAppointmentPayment(appointment)) {
+     return {
+       ...bookingContext,
+       paymentStatus: 'none',
+       paymentAmount: null,
+     };
+   }
+ 

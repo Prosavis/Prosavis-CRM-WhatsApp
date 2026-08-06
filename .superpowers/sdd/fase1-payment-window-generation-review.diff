@@ -1,0 +1,460 @@
+﻿commit 4ca60abfd23e516cf0850b747363fd2d8c7b1b80
+Author:     Nicol├ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+AuthorDate: Thu Aug 6 10:06:38 2026 -0500
+Commit:     Nicol├ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+CommitDate: Thu Aug 6 10:06:38 2026 -0500
+
+    fix: reject stale message subscriptions
+    
+    Co-authored-by: Cursor <cursoragent@cursor.com>
+
+diff --git a/.superpowers/sdd/fase1-payment-window-close-report.md b/.superpowers/sdd/fase1-payment-window-close-report.md
+index 796dca2..2c25444 100644
+--- a/.superpowers/sdd/fase1-payment-window-close-report.md
++++ b/.superpowers/sdd/fase1-payment-window-close-report.md
+@@ -60,10 +60,36 @@ suscripci├│n anterior se ignoran en el reducer.
+   - que B emite ├║nicamente su propio inbound despu├®s de cargar.
+ 
+ ### Verificaci├│n adicional
+ 
+ - Pruebas enfocadas switching/ventana: 10/10 aprobadas en 2 archivos.
+ - Suite CRM completa: 124/124 aprobadas en 16 archivos.
+ - Type-check: aprobado (`tsc -b --noEmit`).
+ - Lint enfocado de la correcci├│n: aprobado.
+ - Diagn├│sticos IDE de los archivos modificados: sin errores.
+ - Graphify AST actualizado: 65.759 nodos y 518.390 edges.
++
++## Correcci├│n posterior a revisi├│n ÔÇö generaci├│n de suscripci├│n
++
++La identidad `conversationId + historyKey` no distingu├¡a dos suscripciones
++sucesivas de la misma conversaci├│n. En StrictMode, una resuscripci├│n same-key o
++una secuencia A ÔåÆ B ÔåÆ A pod├¡a aceptar un callback tard├¡o de la primera
++generaci├│n de A.
++
++Cada setup de `subscribeToMessages()` asigna ahora un `subscriptionId`
++monot├│nico. El ID se propaga por el snapshot y por todas las acciones del
++reducer (`started`, `loaded`, `failed`). Solo la generaci├│n vigente puede
++completar o fallar el historial; las anteriores conservan el estado por
++identidad de objeto y no producen emisiones. El `switch` mantiene comprobaci├│n
++exhaustiva con `never`.
++
++### Evidencia TDD de generaci├│n
++
++- RED ÔÇö 2 fallos reproducidos:
++  - callback tard├¡o de una suscripci├│n same-key reemplazaba la generaci├│n nueva;
++  - al volver A ÔåÆ B ÔåÆ A, la primera generaci├│n de A volv├¡a a ser aceptada.
++- GREEN ÔÇö `conversationMessageHistory.test.ts`: 3/3 aprobadas.
++- Pruebas enfocadas generaci├│n/ventana: 12/12 aprobadas en 2 archivos.
++- Suite CRM completa: 126/126 aprobadas en 16 archivos.
++- Type-check: aprobado (`tsc -b --noEmit`).
++- Lint enfocado y diagn├│sticos IDE: sin errores.
++- Graphify AST actualizado: 65.830 nodos y 704.420 edges.
+diff --git a/src/components/whatsapp/ChatArea.tsx b/src/components/whatsapp/ChatArea.tsx
+index 44f5511..d9fbd20 100644
+--- a/src/components/whatsapp/ChatArea.tsx
++++ b/src/components/whatsapp/ChatArea.tsx
+@@ -216,25 +216,27 @@ const ChatArea: React.FC<ChatAreaProps> = ({
+   onTagsChanged,
+   onManageTags,
+   onConversationPermanentlyDeleted,
+   snippets,
+   myUid,
+   myDisplayName,
+   peerPresences = [],
+   onLoadedConversationInbound,
+ }) => {
+   const theme = useTheme();
++  const messageSubscriptionIdRef = useRef(0);
+   const [messageHistory, dispatchMessageHistory] = useReducer(
+     conversationMessageHistoryReducer,
+     createConversationMessageHistoryState(
+       conversation.id,
+       conversation.phone || conversation.id,
++      0,
+     ),
+   );
+   const [suggestionDraft, setSuggestionDraft] = useState('');
+   const [suggestionLoading, setSuggestionLoading] = useState(false);
+   const [suggestionHint, setSuggestionHint] = useState<string | null>(null);
+   const [aiContextDialogOpen, setAiContextDialogOpen] = useState(false);
+   const [aiExtraContext, setAiExtraContext] = useState('');
+   const [bookingContext, setBookingContext] = useState<BookingContextData | null>(null);
+   const [sessionWindow, setSessionWindow] = useState<MetaSessionWindow | null>(null);
+   const [bookingDrawerOpen, setBookingDrawerOpen] = useState(false);
+@@ -289,44 +291,49 @@ const ChatArea: React.FC<ChatAreaProps> = ({
+     if (typeof window === 'undefined') return false;
+     return window.localStorage.getItem(voiceTranscriptionStorageKey) === 'true';
+   });
+   const [stickers, setStickers] = useState<WhatsAppSticker[]>([]);
+   const [stickerFolders, setStickerFolders] = useState<WhatsAppStickerFolder[]>([]);
+   const [stickersLoading, setStickersLoading] = useState(false);
+ 
+   useEffect(() => {
+     const conversationId = conversation.id;
+     const historyKey = stableKey;
++    const subscriptionId = messageSubscriptionIdRef.current + 1;
++    messageSubscriptionIdRef.current = subscriptionId;
+     dispatchMessageHistory({
+       type: 'started',
+       conversationId,
+       historyKey,
++      subscriptionId,
+     });
+     setSelectionMode(false);
+     setSelectedIds(new Set());
+ 
+     const unsub = subscribeToMessages(
+       historyKey,
+       (msgs) => {
+         dispatchMessageHistory({
+           type: 'loaded',
+           conversationId,
+           historyKey,
++          subscriptionId,
+           messages: msgs,
+         });
+       },
+       (error) => {
+         console.error('Error en listener de mensajes:', error);
+         dispatchMessageHistory({
+           type: 'failed',
+           conversationId,
+           historyKey,
++          subscriptionId,
+         });
+       },
+     );
+ 
+     return () => unsub();
+   }, [conversation.id, stableKey]);
+ 
+   useEffect(() => {
+     setSuggestionDraft('');
+     setSuggestionHint(null);
+diff --git a/src/utils/conversationMessageHistory.test.ts b/src/utils/conversationMessageHistory.test.ts
+index 61ce893..5e8ab89 100644
+--- a/src/utils/conversationMessageHistory.test.ts
++++ b/src/utils/conversationMessageHistory.test.ts
+@@ -16,25 +16,30 @@ function message(
+     id,
+     direction,
+     senderType: direction === 'inbound' ? 'user' : 'agent',
+     status: direction === 'inbound' ? 'received' : 'sent',
+     createdAt: new Date(createdAt),
+   };
+ }
+ 
+ describe('conversation message history switching', () => {
+   it('never emits conversation A history as conversation B during A ÔåÆ B switching', () => {
+-    let state = createConversationMessageHistoryState('conversation-a', 'stable-a');
++    let state = createConversationMessageHistoryState(
++      'conversation-a',
++      'stable-a',
++      1,
++    );
+     state = conversationMessageHistoryReducer(state, {
+       type: 'loaded',
+       conversationId: 'conversation-a',
+       historyKey: 'stable-a',
++      subscriptionId: 1,
+       messages: [
+         message('a-inbound', 'inbound', '2026-08-05T10:00:00.000Z'),
+         message('a-outbound', 'outbound', '2026-08-05T10:30:00.000Z'),
+       ],
+     });
+ 
+     expect(
+       selectLoadedConversationInbound(state, 'conversation-a', 'stable-a')
+         ?.lastInboundAt?.toISOString(),
+     ).toBe('2026-08-05T10:00:00.000Z');
+@@ -43,51 +48,190 @@ describe('conversation message history switching', () => {
+       selectLoadedConversationInbound(state, 'conversation-b', 'stable-b'),
+     ).toBeNull();
+     expect(
+       selectConversationMessages(state, 'conversation-b', 'stable-b'),
+     ).toEqual([]);
+ 
+     state = conversationMessageHistoryReducer(state, {
+       type: 'started',
+       conversationId: 'conversation-b',
+       historyKey: 'stable-b',
++      subscriptionId: 2,
+     });
+ 
+     expect(
+       selectLoadedConversationInbound(state, 'conversation-b', 'stable-b'),
+     ).toBeNull();
+ 
+     const waitingForB = state;
+     state = conversationMessageHistoryReducer(state, {
+       type: 'loaded',
+       conversationId: 'conversation-a',
+       historyKey: 'stable-a',
++      subscriptionId: 1,
+       messages: [
+         message('late-a-inbound', 'inbound', '2026-08-05T11:00:00.000Z'),
+       ],
+     });
+ 
+     expect(state).toBe(waitingForB);
+     expect(
+       selectLoadedConversationInbound(state, 'conversation-b', 'stable-b'),
+     ).toBeNull();
+ 
+     state = conversationMessageHistoryReducer(state, {
+       type: 'loaded',
+       conversationId: 'conversation-b',
+       historyKey: 'stable-b',
++      subscriptionId: 2,
+       messages: [
+         message('b-inbound', 'inbound', '2026-08-05T12:00:00.000Z'),
+       ],
+     });
+ 
+     const loadedB = selectLoadedConversationInbound(
+       state,
+       'conversation-b',
+       'stable-b',
+     );
+     expect(loadedB?.conversationId).toBe('conversation-b');
+     expect(loadedB?.lastInboundAt?.toISOString()).toBe(
+       '2026-08-05T12:00:00.000Z',
+     );
+   });
++
++  it('ignores a late callback from an older same-key subscription', () => {
++    let state = createConversationMessageHistoryState(
++      'conversation-a',
++      'stable-a',
++      1,
++    );
++    state = conversationMessageHistoryReducer(state, {
++      type: 'loaded',
++      conversationId: 'conversation-a',
++      historyKey: 'stable-a',
++      subscriptionId: 1,
++      messages: [
++        message('first-generation', 'inbound', '2026-08-05T10:00:00.000Z'),
++      ],
++    });
++    state = conversationMessageHistoryReducer(state, {
++      type: 'started',
++      conversationId: 'conversation-a',
++      historyKey: 'stable-a',
++      subscriptionId: 2,
++    });
++
++    const waitingForSecondGeneration = state;
++    state = conversationMessageHistoryReducer(state, {
++      type: 'loaded',
++      conversationId: 'conversation-a',
++      historyKey: 'stable-a',
++      subscriptionId: 1,
++      messages: [
++        message('late-first-generation', 'inbound', '2026-08-05T11:00:00.000Z'),
++      ],
++    });
++
++    expect(state).toBe(waitingForSecondGeneration);
++    expect(
++      selectLoadedConversationInbound(state, 'conversation-a', 'stable-a'),
++    ).toBeNull();
++
++    state = conversationMessageHistoryReducer(state, {
++      type: 'loaded',
++      conversationId: 'conversation-a',
++      historyKey: 'stable-a',
++      subscriptionId: 2,
++      messages: [
++        message('second-generation', 'inbound', '2026-08-05T12:00:00.000Z'),
++      ],
++    });
++
++    expect(
++      selectLoadedConversationInbound(state, 'conversation-a', 'stable-a')
++        ?.lastInboundAt?.toISOString(),
++    ).toBe('2026-08-05T12:00:00.000Z');
++  });
++
++  it('rejects callbacks from both prior generations after A ÔåÆ B ÔåÆ A', () => {
++    let state = createConversationMessageHistoryState(
++      'conversation-a',
++      'stable-a',
++      1,
++    );
++    state = conversationMessageHistoryReducer(state, {
++      type: 'loaded',
++      conversationId: 'conversation-a',
++      historyKey: 'stable-a',
++      subscriptionId: 1,
++      messages: [
++        message('a-first', 'inbound', '2026-08-05T10:00:00.000Z'),
++      ],
++    });
++    state = conversationMessageHistoryReducer(state, {
++      type: 'started',
++      conversationId: 'conversation-b',
++      historyKey: 'stable-b',
++      subscriptionId: 2,
++    });
++    state = conversationMessageHistoryReducer(state, {
++      type: 'loaded',
++      conversationId: 'conversation-b',
++      historyKey: 'stable-b',
++      subscriptionId: 2,
++      messages: [
++        message('b-current', 'inbound', '2026-08-05T11:00:00.000Z'),
++      ],
++    });
++    state = conversationMessageHistoryReducer(state, {
++      type: 'started',
++      conversationId: 'conversation-a',
++      historyKey: 'stable-a',
++      subscriptionId: 3,
++    });
++
++    const waitingForReturnedA = state;
++    for (const staleAction of [
++      {
++        type: 'loaded' as const,
++        conversationId: 'conversation-a',
++        historyKey: 'stable-a',
++        subscriptionId: 1,
++        messages: [
++          message('late-a-first', 'inbound', '2026-08-05T12:00:00.000Z'),
++        ],
++      },
++      {
++        type: 'loaded' as const,
++        conversationId: 'conversation-b',
++        historyKey: 'stable-b',
++        subscriptionId: 2,
++        messages: [
++          message('late-b', 'inbound', '2026-08-05T12:30:00.000Z'),
++        ],
++      },
++    ]) {
++      state = conversationMessageHistoryReducer(state, staleAction);
++    }
++
++    expect(state).toBe(waitingForReturnedA);
++    expect(
++      selectLoadedConversationInbound(state, 'conversation-a', 'stable-a'),
++    ).toBeNull();
++
++    state = conversationMessageHistoryReducer(state, {
++      type: 'loaded',
++      conversationId: 'conversation-a',
++      historyKey: 'stable-a',
++      subscriptionId: 3,
++      messages: [
++        message('a-returned', 'inbound', '2026-08-05T13:00:00.000Z'),
++      ],
++    });
++
++    expect(
++      selectLoadedConversationInbound(state, 'conversation-a', 'stable-a')
++        ?.lastInboundAt?.toISOString(),
++    ).toBe('2026-08-05T13:00:00.000Z');
++  });
+ });
+diff --git a/src/utils/conversationMessageHistory.ts b/src/utils/conversationMessageHistory.ts
+index 7eb3640..1edc4ab 100644
+--- a/src/utils/conversationMessageHistory.ts
++++ b/src/utils/conversationMessageHistory.ts
+@@ -2,81 +2,93 @@ import type { WhatsAppMessage } from '@/services/whatsappService';
+ import {
+   getLoadedConversationInbound,
+   type LoadedConversationInbound,
+ } from './whatsappTemplateSuggestions';
+ 
+ type ConversationMessageHistoryStatus = 'loading' | 'loaded' | 'error';
+ 
+ export interface ConversationMessageHistoryState {
+   conversationId: string;
+   historyKey: string;
++  subscriptionId: number;
+   messages: WhatsAppMessage[];
+   status: ConversationMessageHistoryStatus;
+ }
+ 
+ export type ConversationMessageHistoryAction =
+   | {
+       type: 'started';
+       conversationId: string;
+       historyKey: string;
++      subscriptionId: number;
+     }
+   | {
+       type: 'loaded';
+       conversationId: string;
+       historyKey: string;
++      subscriptionId: number;
+       messages: WhatsAppMessage[];
+     }
+   | {
+       type: 'failed';
+       conversationId: string;
+       historyKey: string;
++      subscriptionId: number;
+     };
+ 
+ const EMPTY_MESSAGES: WhatsAppMessage[] = [];
+ 
+ export function createConversationMessageHistoryState(
+   conversationId: string,
+   historyKey: string,
++  subscriptionId: number,
+ ): ConversationMessageHistoryState {
+   return {
+     conversationId,
+     historyKey,
++    subscriptionId,
+     messages: EMPTY_MESSAGES,
+     status: 'loading',
+   };
+ }
+ 
+ function actionMatchesCurrentHistory(
+   state: ConversationMessageHistoryState,
+-  action: Pick<ConversationMessageHistoryAction, 'conversationId' | 'historyKey'>,
++  action: Pick<
++    ConversationMessageHistoryAction,
++    'conversationId' | 'historyKey' | 'subscriptionId'
++  >,
+ ): boolean {
+   return (
+     state.conversationId === action.conversationId &&
+-    state.historyKey === action.historyKey
++    state.historyKey === action.historyKey &&
++    state.subscriptionId === action.subscriptionId
+   );
+ }
+ 
+ export function conversationMessageHistoryReducer(
+   state: ConversationMessageHistoryState,
+   action: ConversationMessageHistoryAction,
+ ): ConversationMessageHistoryState {
+   switch (action.type) {
+     case 'started':
+       return createConversationMessageHistoryState(
+         action.conversationId,
+         action.historyKey,
++        action.subscriptionId,
+       );
+     case 'loaded':
+       if (!actionMatchesCurrentHistory(state, action)) return state;
+       return {
+         conversationId: action.conversationId,
+         historyKey: action.historyKey,
++        subscriptionId: action.subscriptionId,
+         messages: action.messages,
+         status: 'loaded',
+       };
+     case 'failed':
+       if (!actionMatchesCurrentHistory(state, action)) return state;
+       return {
+         ...state,
+         status: 'error',
+       };
+     default: {

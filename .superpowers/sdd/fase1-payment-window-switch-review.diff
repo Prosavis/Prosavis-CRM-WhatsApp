@@ -1,0 +1,510 @@
+﻿commit 401a42fe64bf16ad848f05fd470c39525795d54a
+Author:     Nicol├ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+AuthorDate: Thu Aug 6 09:55:35 2026 -0500
+Commit:     Nicol├ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+CommitDate: Thu Aug 6 09:55:35 2026 -0500
+
+    fix: isolate loaded conversation history
+    
+    Co-authored-by: Cursor <cursoragent@cursor.com>
+
+diff --git a/.superpowers/sdd/fase1-payment-window-close-report.md b/.superpowers/sdd/fase1-payment-window-close-report.md
+index f76a193..796dca2 100644
+--- a/.superpowers/sdd/fase1-payment-window-close-report.md
++++ b/.superpowers/sdd/fase1-payment-window-close-report.md
+@@ -27,10 +27,43 @@ Implementaci├│n de los tres hallazgos del brief completada, sin push ni deploy.
+ - Suite CRM completa: 123/123 aprobadas en 15 archivos.
+ - Type-check: aprobado (`tsc -b --noEmit`).
+ - Lint enfocado de frontend y pruebas modificadas: aprobado.
+ - Diagn├│sticos IDE de todos los archivos modificados: sin errores.
+ - Graphify AST actualizado desde la ra├¡z de la suite con `py -m graphify update . --no-cluster`: 65.727 nodos y 332.449 edges.
+ 
+ ## Salvedades
+ 
+ - Al incluir el archivo backend modificado en el lint enfocado, ESLint reporta dos errores preexistentes `no-useless-assignment` en las l├¡neas 227ÔÇô228 de `inboxAiContextFormat.ts`. El mismo comando sobre la versi├│n `HEAD` falla con exactamente esos dos errores; no se corrigieron para no ampliar el alcance.
+ - Se detectaron cambios concurrentes ajenos a Fase 1B en `.superpowers/sdd/progress.md`, briefs/diffs V5 y `deno.lock`. Se excluyeron del commit de esta tarea.
++
++## Correcci├│n posterior a revisi├│n ÔÇö switching A ÔåÆ B
++
++La revisi├│n detect├│ que `ChatArea` manten├¡a `conversation.id`, `messages` y
++`loading` en fuentes independientes. Al cambiar de A a B, React pod├¡a renderizar
++B con los mensajes todav├¡a retenidos de A antes de ejecutar el efecto que los
++limpiaba. Adem├ís, el fetch inicial de `subscribeToMessages()` pod├¡a resolver
++despu├®s del unsubscribe.
++
++La correcci├│n reemplaza esos estados independientes por un snapshot/reducer
++identificado conjuntamente por `conversationId` y `historyKey`. La UI y la
++emisi├│n de `LoadedConversationInbound` solo consumen un snapshot `loaded` cuya
++identidad coincide con la conversaci├│n activa. Las respuestas tard├¡as de una
++suscripci├│n anterior se ignoran en el reducer.
++
++### Evidencia TDD adicional
++
++- RED ÔÇö `conversationMessageHistory.test.ts` no pod├¡a cargar el seam de estado
++  todav├¡a inexistente.
++- GREEN ÔÇö la prueba A ÔåÆ B verifica:
++  - que el snapshot cargado de A no se expone durante el render transitorio de B;
++  - que B no emite inbound mientras espera su propio historial;
++  - que un callback tard├¡o de A no reemplaza el estado de B;
++  - que B emite ├║nicamente su propio inbound despu├®s de cargar.
++
++### Verificaci├│n adicional
++
++- Pruebas enfocadas switching/ventana: 10/10 aprobadas en 2 archivos.
++- Suite CRM completa: 124/124 aprobadas en 16 archivos.
++- Type-check: aprobado (`tsc -b --noEmit`).
++- Lint enfocado de la correcci├│n: aprobado.
++- Diagn├│sticos IDE de los archivos modificados: sin errores.
++- Graphify AST actualizado: 65.759 nodos y 518.390 edges.
+diff --git a/src/components/whatsapp/ChatArea.tsx b/src/components/whatsapp/ChatArea.tsx
+index a56db18..44f5511 100644
+--- a/src/components/whatsapp/ChatArea.tsx
++++ b/src/components/whatsapp/ChatArea.tsx
+@@ -1,11 +1,18 @@
+-import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
++import React, {
++  useCallback,
++  useEffect,
++  useMemo,
++  useReducer,
++  useRef,
++  useState,
++} from 'react';
+ import {
+   Box,
+   Typography,
+   IconButton,
+   CircularProgress,
+   Chip,
+   Tooltip,
+   Divider,
+   Dialog,
+   DialogTitle,
+@@ -75,24 +82,28 @@ import {
+   type WhatsAppSticker,
+   type WhatsAppStickerFolder,
+ } from '@/services/whatsappService';
+ import VisibilityIcon from '@mui/icons-material/Visibility';
+ import EditIcon from '@mui/icons-material/Edit';
+ import BookingAssistantDrawer from './BookingAssistantDrawer';
+ import type { ForwardWhatsAppResult } from '@/services/forwardWhatsAppMessage';
+ import { isForwardableMessage } from '@/services/forwardWhatsAppMessage';
+ import { ContactAvatar } from '@/components/common/ContactAvatar';
+ import { pickContactPhotoUrl } from '@/utils/contactAvatar';
++import type { LoadedConversationInbound } from '@/utils/whatsappTemplateSuggestions';
+ import {
+-  getLoadedConversationInbound,
+-  type LoadedConversationInbound,
+-} from '@/utils/whatsappTemplateSuggestions';
++  conversationMessageHistoryReducer,
++  createConversationMessageHistoryState,
++  isConversationMessageHistoryLoading,
++  selectConversationMessages,
++  selectLoadedConversationInbound,
++} from '@/utils/conversationMessageHistory';
+ import { coloredChipSx } from '@/utils/coloredChipStyles';
+ import { prepareWhatsAppSticker } from '@/utils/prepareWhatsAppSticker';
+ import { summarizePeerPresences } from '@/utils/whatsappAdminPresence';
+ import type { WhatsAppTagFolder } from '@/types/whatsapp';
+ import TagListGrouped from './TagListGrouped';
+ import type { MetaSessionWindow } from '../../../supabase/functions/_shared/metaSessionWindow';
+ 
+ interface ChatAreaProps {
+   conversation: WhatsAppConversation;
+   phoneNumberId?: string;
+@@ -205,22 +216,27 @@ const ChatArea: React.FC<ChatAreaProps> = ({
+   onTagsChanged,
+   onManageTags,
+   onConversationPermanentlyDeleted,
+   snippets,
+   myUid,
+   myDisplayName,
+   peerPresences = [],
+   onLoadedConversationInbound,
+ }) => {
+   const theme = useTheme();
+-  const [messages, setMessages] = useState<WhatsAppMessage[]>([]);
+-  const [loading, setLoading] = useState(true);
++  const [messageHistory, dispatchMessageHistory] = useReducer(
++    conversationMessageHistoryReducer,
++    createConversationMessageHistoryState(
++      conversation.id,
++      conversation.phone || conversation.id,
++    ),
++  );
+   const [suggestionDraft, setSuggestionDraft] = useState('');
+   const [suggestionLoading, setSuggestionLoading] = useState(false);
+   const [suggestionHint, setSuggestionHint] = useState<string | null>(null);
+   const [aiContextDialogOpen, setAiContextDialogOpen] = useState(false);
+   const [aiExtraContext, setAiExtraContext] = useState('');
+   const [bookingContext, setBookingContext] = useState<BookingContextData | null>(null);
+   const [sessionWindow, setSessionWindow] = useState<MetaSessionWindow | null>(null);
+   const [bookingDrawerOpen, setBookingDrawerOpen] = useState(false);
+   const [bookingContextLoading, setBookingContextLoading] = useState(false);
+   const [wompiCheckoutUrl, setWompiCheckoutUrl] = useState<string | null>(null);
+@@ -247,49 +263,76 @@ const ChatArea: React.FC<ChatAreaProps> = ({
+   const [blockOnlyLoading, setBlockOnlyLoading] = useState(false);
+ 
+   const [replyToMessage, setReplyToMessage] = useState<WhatsAppMessage | null>(null);
+   const [pendingReactions, setPendingReactions] = useState<Record<string, { emoji: string; actorKey: string }>>({});
+   const reactionTimersRef = useRef<Record<string, number>>({});
+ 
+   const messagesEndRef = useRef<HTMLDivElement>(null);
+   const scrollContainerRef = useRef<HTMLDivElement>(null);
+ 
+   const stableKey = conversation.phone || conversation.id;
++  const messages = useMemo(
++    () =>
++      selectConversationMessages(
++        messageHistory,
++        conversation.id,
++        stableKey,
++      ),
++    [conversation.id, messageHistory, stableKey],
++  );
++  const loading = isConversationMessageHistoryLoading(
++    messageHistory,
++    conversation.id,
++    stableKey,
++  );
+   const voiceTranscriptionStorageKey = `wa-include-voice-transcriptions:${phoneNumberId || 'default'}:${myUid || 'admin'}`;
+   const [includeVoiceTranscriptions, setIncludeVoiceTranscriptions] = useState(() => {
+     if (typeof window === 'undefined') return false;
+     return window.localStorage.getItem(voiceTranscriptionStorageKey) === 'true';
+   });
+   const [stickers, setStickers] = useState<WhatsAppSticker[]>([]);
+   const [stickerFolders, setStickerFolders] = useState<WhatsAppStickerFolder[]>([]);
+   const [stickersLoading, setStickersLoading] = useState(false);
+ 
+   useEffect(() => {
+-    setLoading(true);
+-    setMessages([]);
++    const conversationId = conversation.id;
++    const historyKey = stableKey;
++    dispatchMessageHistory({
++      type: 'started',
++      conversationId,
++      historyKey,
++    });
+     setSelectionMode(false);
+     setSelectedIds(new Set());
+ 
+     const unsub = subscribeToMessages(
+-      stableKey,
++      historyKey,
+       (msgs) => {
+-        setMessages(msgs);
+-        setLoading(false);
++        dispatchMessageHistory({
++          type: 'loaded',
++          conversationId,
++          historyKey,
++          messages: msgs,
++        });
+       },
+       (error) => {
+         console.error('Error en listener de mensajes:', error);
+-        setLoading(false);
++        dispatchMessageHistory({
++          type: 'failed',
++          conversationId,
++          historyKey,
++        });
+       },
+     );
+ 
+     return () => unsub();
+-  }, [stableKey]);
++  }, [conversation.id, stableKey]);
+ 
+   useEffect(() => {
+     setSuggestionDraft('');
+     setSuggestionHint(null);
+     setBookingContext(null);
+     setSessionWindow(null);
+     setBookingDrawerOpen(false);
+     setWompiCheckoutUrl(null);
+     setWompiPaymentReference(null);
+     setWompiAmountCOP(null);
+@@ -923,29 +966,34 @@ const ChatArea: React.FC<ChatAreaProps> = ({
+         setSnack({ open: true, message: msgText, severity: 'error' });
+       }
+     }, 500);
+   }, [myUid, phoneNumberId, stableKey]);
+ 
+   const visibleMessages = useMemo(
+     () => messages.filter((message) => !message.reactionTo),
+     [messages],
+   );
+   const loadedConversationInbound = useMemo(
+-    () => getLoadedConversationInbound(conversation.id, visibleMessages),
+-    [conversation.id, visibleMessages],
++    () =>
++      selectLoadedConversationInbound(
++        messageHistory,
++        conversation.id,
++        stableKey,
++      ),
++    [conversation.id, messageHistory, stableKey],
+   );
+-  const lastInboundAt = loadedConversationInbound.lastInboundAt;
++  const lastInboundAt = loadedConversationInbound?.lastInboundAt ?? null;
+   useEffect(() => {
+-    if (!loading) {
++    if (loadedConversationInbound) {
+       onLoadedConversationInbound?.(loadedConversationInbound);
+     }
+-  }, [loadedConversationInbound, loading, onLoadedConversationInbound]);
++  }, [loadedConversationInbound, onLoadedConversationInbound]);
+   const pendingInboundAudioCount = useMemo(
+     () =>
+       visibleMessages.filter(
+         (message) =>
+           message.direction === 'inbound' &&
+           message.mediaType === 'audio' &&
+           message.voiceTranscriptionStatus !== 'completed',
+       ).length,
+     [visibleMessages],
+   );
+diff --git a/src/utils/conversationMessageHistory.test.ts b/src/utils/conversationMessageHistory.test.ts
+new file mode 100644
+index 0000000..61ce893
+--- /dev/null
++++ b/src/utils/conversationMessageHistory.test.ts
+@@ -0,0 +1,93 @@
++import { describe, expect, it } from 'vitest';
++import type { WhatsAppMessage } from '@/services/whatsappService';
++import {
++  conversationMessageHistoryReducer,
++  createConversationMessageHistoryState,
++  selectConversationMessages,
++  selectLoadedConversationInbound,
++} from './conversationMessageHistory';
++
++function message(
++  id: string,
++  direction: WhatsAppMessage['direction'],
++  createdAt: string,
++): WhatsAppMessage {
++  return {
++    id,
++    direction,
++    senderType: direction === 'inbound' ? 'user' : 'agent',
++    status: direction === 'inbound' ? 'received' : 'sent',
++    createdAt: new Date(createdAt),
++  };
++}
++
++describe('conversation message history switching', () => {
++  it('never emits conversation A history as conversation B during A ÔåÆ B switching', () => {
++    let state = createConversationMessageHistoryState('conversation-a', 'stable-a');
++    state = conversationMessageHistoryReducer(state, {
++      type: 'loaded',
++      conversationId: 'conversation-a',
++      historyKey: 'stable-a',
++      messages: [
++        message('a-inbound', 'inbound', '2026-08-05T10:00:00.000Z'),
++        message('a-outbound', 'outbound', '2026-08-05T10:30:00.000Z'),
++      ],
++    });
++
++    expect(
++      selectLoadedConversationInbound(state, 'conversation-a', 'stable-a')
++        ?.lastInboundAt?.toISOString(),
++    ).toBe('2026-08-05T10:00:00.000Z');
++
++    expect(
++      selectLoadedConversationInbound(state, 'conversation-b', 'stable-b'),
++    ).toBeNull();
++    expect(
++      selectConversationMessages(state, 'conversation-b', 'stable-b'),
++    ).toEqual([]);
++
++    state = conversationMessageHistoryReducer(state, {
++      type: 'started',
++      conversationId: 'conversation-b',
++      historyKey: 'stable-b',
++    });
++
++    expect(
++      selectLoadedConversationInbound(state, 'conversation-b', 'stable-b'),
++    ).toBeNull();
++
++    const waitingForB = state;
++    state = conversationMessageHistoryReducer(state, {
++      type: 'loaded',
++      conversationId: 'conversation-a',
++      historyKey: 'stable-a',
++      messages: [
++        message('late-a-inbound', 'inbound', '2026-08-05T11:00:00.000Z'),
++      ],
++    });
++
++    expect(state).toBe(waitingForB);
++    expect(
++      selectLoadedConversationInbound(state, 'conversation-b', 'stable-b'),
++    ).toBeNull();
++
++    state = conversationMessageHistoryReducer(state, {
++      type: 'loaded',
++      conversationId: 'conversation-b',
++      historyKey: 'stable-b',
++      messages: [
++        message('b-inbound', 'inbound', '2026-08-05T12:00:00.000Z'),
++      ],
++    });
++
++    const loadedB = selectLoadedConversationInbound(
++      state,
++      'conversation-b',
++      'stable-b',
++    );
++    expect(loadedB?.conversationId).toBe('conversation-b');
++    expect(loadedB?.lastInboundAt?.toISOString()).toBe(
++      '2026-08-05T12:00:00.000Z',
++    );
++  });
++});
+diff --git a/src/utils/conversationMessageHistory.ts b/src/utils/conversationMessageHistory.ts
+new file mode 100644
+index 0000000..7eb3640
+--- /dev/null
++++ b/src/utils/conversationMessageHistory.ts
+@@ -0,0 +1,137 @@
++import type { WhatsAppMessage } from '@/services/whatsappService';
++import {
++  getLoadedConversationInbound,
++  type LoadedConversationInbound,
++} from './whatsappTemplateSuggestions';
++
++type ConversationMessageHistoryStatus = 'loading' | 'loaded' | 'error';
++
++export interface ConversationMessageHistoryState {
++  conversationId: string;
++  historyKey: string;
++  messages: WhatsAppMessage[];
++  status: ConversationMessageHistoryStatus;
++}
++
++export type ConversationMessageHistoryAction =
++  | {
++      type: 'started';
++      conversationId: string;
++      historyKey: string;
++    }
++  | {
++      type: 'loaded';
++      conversationId: string;
++      historyKey: string;
++      messages: WhatsAppMessage[];
++    }
++  | {
++      type: 'failed';
++      conversationId: string;
++      historyKey: string;
++    };
++
++const EMPTY_MESSAGES: WhatsAppMessage[] = [];
++
++export function createConversationMessageHistoryState(
++  conversationId: string,
++  historyKey: string,
++): ConversationMessageHistoryState {
++  return {
++    conversationId,
++    historyKey,
++    messages: EMPTY_MESSAGES,
++    status: 'loading',
++  };
++}
++
++function actionMatchesCurrentHistory(
++  state: ConversationMessageHistoryState,
++  action: Pick<ConversationMessageHistoryAction, 'conversationId' | 'historyKey'>,
++): boolean {
++  return (
++    state.conversationId === action.conversationId &&
++    state.historyKey === action.historyKey
++  );
++}
++
++export function conversationMessageHistoryReducer(
++  state: ConversationMessageHistoryState,
++  action: ConversationMessageHistoryAction,
++): ConversationMessageHistoryState {
++  switch (action.type) {
++    case 'started':
++      return createConversationMessageHistoryState(
++        action.conversationId,
++        action.historyKey,
++      );
++    case 'loaded':
++      if (!actionMatchesCurrentHistory(state, action)) return state;
++      return {
++        conversationId: action.conversationId,
++        historyKey: action.historyKey,
++        messages: action.messages,
++        status: 'loaded',
++      };
++    case 'failed':
++      if (!actionMatchesCurrentHistory(state, action)) return state;
++      return {
++        ...state,
++        status: 'error',
++      };
++    default: {
++      const exhaustiveAction: never = action;
++      return exhaustiveAction;
++    }
++  }
++}
++
++function stateMatchesActiveHistory(
++  state: ConversationMessageHistoryState,
++  conversationId: string,
++  historyKey: string,
++): boolean {
++  return (
++    state.conversationId === conversationId &&
++    state.historyKey === historyKey
++  );
++}
++
++export function selectConversationMessages(
++  state: ConversationMessageHistoryState,
++  conversationId: string,
++  historyKey: string,
++): WhatsAppMessage[] {
++  return stateMatchesActiveHistory(state, conversationId, historyKey)
++    ? state.messages
++    : EMPTY_MESSAGES;
++}
++
++export function isConversationMessageHistoryLoading(
++  state: ConversationMessageHistoryState,
++  conversationId: string,
++  historyKey: string,
++): boolean {
++  return (
++    !stateMatchesActiveHistory(state, conversationId, historyKey) ||
++    state.status === 'loading'
++  );
++}
++
++export function selectLoadedConversationInbound(
++  state: ConversationMessageHistoryState,
++  conversationId: string,
++  historyKey: string,
++): LoadedConversationInbound | null {
++  if (
++    !stateMatchesActiveHistory(state, conversationId, historyKey) ||
++    state.status !== 'loaded'
++  ) {
++    return null;
++  }
++
++  return getLoadedConversationInbound(
++    state.conversationId,
++    state.messages.filter((message) => !message.reactionTo),
++  );
++}
