@@ -71,8 +71,8 @@ export interface InboxAiActionGrounding {
 }
 
 const ACTION_COPY_SCHEMA = {
-  label: { type: 'string', minLength: 1, maxLength: 120 },
-  reason: { type: 'string', minLength: 1, maxLength: 500 },
+  label: { type: 'string' },
+  reason: { type: 'string' },
 };
 
 export const INBOX_AI_SUGGESTION_JSON_SCHEMA: Record<string, unknown> = {
@@ -80,7 +80,7 @@ export const INBOX_AI_SUGGESTION_JSON_SCHEMA: Record<string, unknown> = {
   additionalProperties: false,
   required: ['suggestion', 'proposedActions'],
   properties: {
-    suggestion: { type: 'string', minLength: 1 },
+    suggestion: { type: 'string' },
     proposedActions: {
       type: 'array',
       maxItems: 5,
@@ -208,6 +208,30 @@ function cleanText(value: unknown): string {
 
 function cleanActionText(value: unknown, maxChars: number): string {
   return cleanText(value).slice(0, maxChars);
+}
+
+function canonicalDedupeText(value: string): string {
+  return value.normalize('NFKC').toLocaleLowerCase('es');
+}
+
+function canonicalizeDedupeValue(value: unknown): unknown {
+  if (typeof value === 'string') return canonicalDedupeText(value);
+  if (Array.isArray(value)) return value.map(canonicalizeDedupeValue);
+  if (!isRecord(value)) return value;
+
+  return Object.entries(value)
+    .map(([key, entryValue]) => [
+      canonicalDedupeText(key),
+      canonicalizeDedupeValue(entryValue),
+    ])
+    .sort(([left], [right]) => String(left).localeCompare(String(right)));
+}
+
+function actionEquivalenceKey(action: InboxAiProposedAction): string {
+  const payload = action.type === 'apply_tag' || action.type === 'send_template'
+    ? canonicalizeDedupeValue(action.payload)
+    : action.payload;
+  return JSON.stringify({ type: action.type, payload });
 }
 
 function isHttpUrl(value: string): boolean {
@@ -419,10 +443,7 @@ export function normalizeInboxAiSuggestionOutput(
               ? buildTemplateAction(candidate)
               : null;
     if (!action) continue;
-    const equivalenceKey = JSON.stringify({
-      type: action.type,
-      payload: action.payload,
-    });
+    const equivalenceKey = actionEquivalenceKey(action);
     if (seen.has(equivalenceKey)) continue;
     seen.add(equivalenceKey);
     proposedActions.push(action);

@@ -4,6 +4,10 @@ import {
   generateInboxAiSuggestion,
   normalizeInboxAiSuggestionOutput,
 } from '../../supabase/functions/_shared/inboxAiActions';
+import {
+  createGeneratedInboxAiSuggestionResponse,
+  createLastOutboundInboxAiSuggestionResponse,
+} from '../../supabase/functions/_shared/inboxAiSuggestionResponse';
 import type { NormalizedBookingContext } from '../../supabase/functions/_shared/bookingContext';
 
 const slot = '2026-08-10T14:00:00.000Z';
@@ -72,8 +76,11 @@ describe('normalizeInboxAiSuggestionOutput', () => {
       requiresConfirmation: true,
       payload: { tagName: 'Interés 0' },
     });
-    expect(result.proposedActions.every((action) =>
-      action.id.length > 0 && !action.id.startsWith('gemini-')
+    const ids = result.proposedActions.map((action) => action.id);
+    expect(ids).toHaveLength(new Set(ids).size);
+    expect(ids.every((id) =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+        .test(id)
     )).toBe(true);
   });
 
@@ -195,23 +202,36 @@ describe('normalizeInboxAiSuggestionOutput', () => {
           type: 'apply_tag',
           label: 'Etiquetar',
           reason: 'Hay interés',
-          payload: { tagName: ' Interesado ', tagId: 'model-owned-id' },
+          payload: { tagName: ' Interés ', tagId: 'model-owned-id' },
         },
         {
           type: 'apply_tag',
           label: 'Etiqueta duplicada',
           reason: 'Misma acción',
-          payload: { tagName: 'Interesado' },
+          payload: { tagName: 'INTERÉS' },
         },
         {
           type: 'send_template',
           label: ' Enviar   plantilla ',
           reason: ' Ventana   cerrada ',
           payload: {
-            templateName: ' seguimiento_cliente ',
+            templateName: ' Confirmación_Cliente ',
             languageCode: ' es_CO ',
             variables: {
-              ' nombre ': ' Ana ',
+              ' Nombre ': ' Ána ',
+              invalid: 123,
+            },
+          },
+        },
+        {
+          type: 'send_template',
+          label: 'Plantilla duplicada',
+          reason: 'Misma plantilla',
+          payload: {
+            templateName: 'CONFIRMACIÓN_CLIENTE',
+            languageCode: 'ES_co',
+            variables: {
+              NOMBRE: 'ÁNA',
               invalid: 123,
             },
           },
@@ -221,7 +241,7 @@ describe('normalizeInboxAiSuggestionOutput', () => {
           label: 'Sin idioma',
           reason: 'Payload incompleto',
           payload: {
-            templateName: 'seguimiento_cliente',
+            templateName: 'confirmación_cliente',
             variables: {},
           },
         },
@@ -237,7 +257,7 @@ describe('normalizeInboxAiSuggestionOutput', () => {
     expect(result.proposedActions).toHaveLength(2);
     expect(result.proposedActions[0]).toMatchObject({
       type: 'apply_tag',
-      payload: { tagName: 'Interesado' },
+      payload: { tagName: 'Interés' },
     });
     expect(result.proposedActions[0]?.payload).not.toHaveProperty('tagId');
     expect(result.proposedActions[1]).toMatchObject({
@@ -245,9 +265,9 @@ describe('normalizeInboxAiSuggestionOutput', () => {
       label: 'Enviar plantilla',
       reason: 'Ventana cerrada',
       payload: {
-        templateName: 'seguimiento_cliente',
+        templateName: 'Confirmación_Cliente',
         languageCode: 'es_CO',
-        variables: { nombre: 'Ana' },
+        variables: { Nombre: 'Ána' },
       },
     });
   });
@@ -295,10 +315,21 @@ describe('generateInboxAiSuggestion', () => {
       'additionalProperties',
       'items',
       'anyOf',
+      'oneOf',
       'enum',
-      'minLength',
-      'maxLength',
+      '$id',
+      '$defs',
+      '$ref',
+      '$anchor',
+      'format',
+      'title',
+      'description',
+      'prefixItems',
+      'minItems',
       'maxItems',
+      'minimum',
+      'maximum',
+      'propertyOrdering',
     ]);
 
     const visitSchema = (schema: unknown, path = '$'): void => {
@@ -309,7 +340,7 @@ describe('generateInboxAiSuggestion', () => {
         schema as Record<string, unknown>,
       )) {
         expect(supportedKeywords.has(keyword), `${path}.${keyword}`).toBe(true);
-        if (keyword === 'properties') {
+        if (keyword === 'properties' || keyword === '$defs') {
           for (const [propertyName, propertySchema] of Object.entries(
             value as Record<string, unknown>,
           )) {
@@ -320,9 +351,13 @@ describe('generateInboxAiSuggestion', () => {
           (keyword === 'additionalProperties' && typeof value === 'object')
         ) {
           visitSchema(value, `${path}.${keyword}`);
-        } else if (keyword === 'anyOf') {
+        } else if (
+          keyword === 'anyOf' ||
+          keyword === 'oneOf' ||
+          keyword === 'prefixItems'
+        ) {
           for (const [index, option] of (value as unknown[]).entries()) {
-            visitSchema(option, `${path}.anyOf[${index}]`);
+            visitSchema(option, `${path}.${keyword}[${index}]`);
           }
         }
       }
@@ -393,5 +428,95 @@ describe('generateInboxAiSuggestion', () => {
     expect(body.contents[0]?.parts[0]?.text).not.toContain(
       'INSTRUCCIÓN DEL INBOX',
     );
+  });
+});
+
+describe('suggest-whatsapp-agent-reply response wiring', () => {
+  const responseContext = {
+    historyMeta: {
+      loaded: 2,
+      truncated: false,
+      newestAt: '2026-08-06T15:00:00.000Z',
+      oldestAt: '2026-08-06T14:00:00.000Z',
+    },
+    conversationTags: ['Interés'],
+    sessionWindow: {
+      status: 'open' as const,
+      lastInboundAt: '2026-08-06T15:00:00.000Z',
+      expiresAt: '2026-08-07T15:00:00.000Z',
+      requiresTemplate: false,
+    },
+  };
+
+  it('returns no proposed actions when the last message is outbound', async () => {
+    const response = createLastOutboundInboxAiSuggestionResponse(responseContext);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      suggestion: null,
+      proposedActions: [],
+      lastMessageIsOutbound: true,
+      historyMeta: responseContext.historyMeta,
+      conversationTags: responseContext.conversationTags,
+      sessionWindow: responseContext.sessionWindow,
+    });
+  });
+
+  it('returns normalized proposed actions from the generation path', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      candidates: [{
+        content: {
+          parts: [{
+            text: JSON.stringify({
+              suggestion: '  Respuesta generada  ',
+              proposedActions: [
+                {
+                  id: 'model-owned-id',
+                  type: 'apply_tag',
+                  label: ' Etiquetar ',
+                  reason: ' Hay interés ',
+                  requiresConfirmation: false,
+                  payload: { tagName: ' Interés ' },
+                },
+                {
+                  type: 'apply_tag',
+                  label: 'Duplicada',
+                  reason: 'Misma etiqueta',
+                  payload: { tagName: 'INTERÉS' },
+                },
+              ],
+            }),
+          }],
+        },
+        finishReason: 'STOP',
+      }],
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await createGeneratedInboxAiSuggestionResponse({
+      apiKey: 'test-api-key',
+      systemInstruction: 'INSTRUCCIÓN DEL INBOX',
+      contextPrompt: 'Contexto grounded de prueba',
+      grounding,
+      responseContext,
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.suggestion).toBe('Respuesta generada');
+    expect(body.lastMessageIsOutbound).toBe(false);
+    expect(body.proposedActions).toHaveLength(1);
+    expect(body.proposedActions[0]).toMatchObject({
+      type: 'apply_tag',
+      label: 'Etiquetar',
+      reason: 'Hay interés',
+      requiresConfirmation: true,
+      payload: { tagName: 'Interés' },
+    });
+    expect(body.proposedActions[0].id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+    expect(body.proposedActions[0].id).not.toBe('model-owned-id');
   });
 });

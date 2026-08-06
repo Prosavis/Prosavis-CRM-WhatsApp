@@ -42,3 +42,32 @@ Estado: `DONE_WITH_CONCERNS`
 - `npm run lint` global sigue fallando por `7` errores y `6` warnings preexistentes en archivos no modificados por Fase 5A (`appointmentPhoneResolver.ts`, `clientSegments.ts`, `reminderDashboardBuilder.ts`, `on-whatsapp-webhook/index.ts` y otros warnings). El lint enfocado de Fase 5A está limpio.
 - Graphify terminó con código `0`, pero advirtió que `47` fuentes no produjeron nodos y que `71` archivos SQL no se indexaron por faltar `tree_sitter_sql`; también conservó nodos fail-closed por cambios del corpus.
 - No se ejecutaron acciones propuestas, deploys ni push.
+
+## Gate correctivo posterior — hallazgos bloqueantes y Minors
+
+### Correcciones
+
+- El schema enviado como `responseJsonSchema` ya no emite `minLength` ni `maxLength`; los límites de `label` y `reason` permanecen en la normalización de código.
+- El gate recursivo usa exactamente el allowlist documentado para Gemini y falla ante cualquier keyword fuera de ese subset.
+- Se extrajo el cableado HTTP compartido de respuesta. El endpoint real usa ese seam tanto para el camino de último outbound (`proposedActions: []`) como para generación, que entrega las acciones ya normalizadas.
+- La prueba del cliente ejecuta `suggestWhatsAppAgentReply`, simula la respuesta real de `supabase.functions.invoke` y comprueba que `proposedActions` se mapea al resultado público.
+- El dedupe de tags y plantillas usa una clave canónica NFKC y case-insensitive, incluyendo variables de plantilla, sin modificar la primera representación aceptada.
+- Los IDs generados se validan como UUID v4 y se comprueba su unicidad.
+
+### Evidencia RED → GREEN
+
+- Baseline antes del gate correctivo: `11/11` pruebas enfocadas pasaban, confirmando que la cobertura anterior no detectaba los hallazgos.
+- Primer RED: el test del cableado HTTP falló porque el seam compartido todavía no existía.
+- Segundo RED: `3` regresiones fallaron de forma específica por `minLength`, dedupe Unicode/case-sensitive y propagación de dos acciones equivalentes en el camino de generación.
+- GREEN enfocado: `14/14` pruebas pasan en `2` archivos.
+- Suite Vitest completa: `184/184` pruebas pasan en `22` archivos.
+- `npm run type-check`: pasa.
+- ESLint enfocado a los `5` archivos de código/test del fix: pasa sin hallazgos.
+- Diagnósticos IDE de los archivos modificados: sin errores.
+- `git diff --check`: pasa.
+- `graphify update .`: código `0`; `2.966` nodos, `5.280` edges y `214` comunidades.
+
+### Preocupaciones vigentes
+
+- Graphify continúa sin indexar `71` archivos SQL porque falta `tree_sitter_sql`; también reportó `linked-project.json` sin nodos y recomendó refrescar labels porque cambió el conjunto de comunidades.
+- No se hizo deploy ni push.

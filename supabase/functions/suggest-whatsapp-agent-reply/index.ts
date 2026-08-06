@@ -5,7 +5,10 @@ import {
   getGeminiApiKey,
   geminiGenerateJson,
 } from '../_shared/geminiClient.ts';
-import { generateInboxAiSuggestion } from '../_shared/inboxAiActions.ts';
+import {
+  createGeneratedInboxAiSuggestionResponse,
+  createLastOutboundInboxAiSuggestionResponse,
+} from '../_shared/inboxAiSuggestionResponse.ts';
 import { resolveBookingPricingCheckout } from '../_shared/pricingCatalog.ts';
 import {
   appendRealAvailabilityContext,
@@ -56,15 +59,7 @@ Deno.serve(async (req) => {
     }
 
     if (ctx.lastTurnRole === 'bot' && !forceGenerate) {
-      return jsonResponse({
-        suggestion: null,
-        proposedActions: [],
-        lastMessageIsOutbound: true,
-        hint: 'El último mensaje es saliente. Usa forceGenerate para redactar igualmente.',
-        historyMeta: ctx.historyMeta,
-        conversationTags: ctx.conversationTags,
-        sessionWindow: ctx.sessionWindow,
-      });
+      return createLastOutboundInboxAiSuggestionResponse(ctx);
     }
 
     console.log(
@@ -118,7 +113,7 @@ Deno.serve(async (req) => {
     );
 
     // ─── Generar sugerencia de respuesta ───
-    const suggestionOutput = await generateInboxAiSuggestion({
+    return await createGeneratedInboxAiSuggestionResponse({
       apiKey,
       systemInstruction: INBOX_AI_SYSTEM_INSTRUCTION,
       contextPrompt:
@@ -133,19 +128,7 @@ Deno.serve(async (req) => {
         wompiPaymentReference,
         wompiAmountCOP,
       },
-    });
-
-    return jsonResponse({
-      suggestion: suggestionOutput.suggestion,
-      proposedActions: suggestionOutput.proposedActions,
-      lastMessageIsOutbound: false,
-      bookingContext,
-      historyMeta: ctx.historyMeta,
-      conversationTags: ctx.conversationTags,
-      sessionWindow: ctx.sessionWindow,
-      ...(wompiCheckoutUrl ? { wompiCheckoutUrl } : {}),
-      ...(wompiPaymentReference ? { wompiPaymentReference } : {}),
-      ...(wompiAmountCOP ? { wompiAmountCOP } : {}),
+      responseContext: ctx,
     });
   } catch (error) {
     if (error instanceof Response) return error;
