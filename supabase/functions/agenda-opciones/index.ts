@@ -445,9 +445,10 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 function parseRecoverySummaryRequest(
   url: URL,
-): { serviceId: string; date: string } {
+): { serviceId: string; date: string; appointmentId?: string } {
   const serviceId = url.searchParams.get("serviceId")?.trim() ?? "";
   const date = url.searchParams.get("date")?.trim() ?? "";
+  const appointmentId = url.searchParams.get("appointmentId")?.trim() ?? "";
   if (!SERVICE_ID_PATTERN.test(serviceId)) {
     throw new Error("serviceId inválido.");
   }
@@ -460,7 +461,17 @@ function parseRecoverySummaryRequest(
   ) {
     throw new Error("date inválida.");
   }
-  return { serviceId, date };
+  if (
+    appointmentId &&
+    (appointmentId.length > 160 || appointmentId.includes("/"))
+  ) {
+    throw new Error("appointmentId inválido.");
+  }
+  return {
+    serviceId,
+    date,
+    ...(appointmentId ? { appointmentId } : {}),
+  };
 }
 
 function parseAddons(value: unknown): AgendaRecoveryAddonInput[] {
@@ -598,6 +609,86 @@ export async function serveRecoveryAgendaOptions(
     candidates.find((candidate) => candidate.suggested_client_name?.trim())
       ?.suggested_client_name ?? null;
   const dateLabel = formatDateLabel(query.date);
+  let decisionId: string | undefined;
+  let suggestedOptionId: string | undefined;
+
+  if (query.appointmentId && alternatives.length > 0) {
+    const decisionCandidates = alternatives.flatMap((alternative) => {
+      const scheduledStartMinute = bogotaMinuteOfDay(alternative.windowStart);
+      if (scheduledStartMinute === null) return [];
+      return [{
+        optionId: alternative.id,
+        mode: alternative.kind === "pair" ? "composite" : "single",
+        scheduledStartMinute,
+        hardBlocked: !alternative.saleAllowed,
+        complianceFlags: alternative.flags,
+        crew: alternative.cleanerIds.map((cleanerId) => ({
+          cleanerId,
+          minutes: alternative.availableMinutes,
+        })),
+        addons: alternative.addons,
+      }];
+    });
+    const requestContext = {
+      appointment_id: query.appointmentId,
+      date: query.date,
+      source: "recovery_panel",
+    };
+    const existingDecision = await context.supabase
+      .from("assignment_decisions")
+      .select("id,suggested_option_id")
+      .eq("service_id", query.serviceId)
+      .contains("request_context", requestContext)
+      .in("saga_status", ["proposed", "failed"])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existingDecision.error) {
+      return strictJsonResponse(
+        request,
+        { error: "No fue posible preparar la decisión de rescate." },
+        500,
+      );
+    }
+    if (existingDecision.data) {
+      decisionId = existingDecision.data.id;
+      suggestedOptionId = existingDecision.data.suggested_option_id ??
+        undefined;
+    } else if (decisionCandidates.length > 0) {
+      suggestedOptionId = alternatives.find((alternative) =>
+        alternative.saleAllowed
+      )?.id;
+      const requestHash = await sha256({
+        requestContext,
+        candidates: decisionCandidates,
+      });
+      const insertedDecision = await context.supabase
+        .from("assignment_decisions")
+        .insert({
+          service_id: query.serviceId,
+          request_id: crypto.randomUUID(),
+          request_hash: requestHash,
+          request_context: requestContext,
+          candidates: decisionCandidates,
+          suggested_option_id: suggestedOptionId ?? null,
+          spec_version: "v5",
+          engine_weights: {},
+          feature_vector_stamp: { source: "recovery-panel-v5" },
+          automation_level: 1,
+          saga_status: "proposed",
+        })
+        .select("id")
+        .single();
+      if (insertedDecision.error || !insertedDecision.data) {
+        return strictJsonResponse(
+          request,
+          { error: "No fue posible preparar la decisión de rescate." },
+          500,
+        );
+      }
+      decisionId = insertedDecision.data.id;
+    }
+  }
 
   return strictJsonResponse(request, {
     data: {
@@ -609,6 +700,9 @@ export async function serveRecoveryAgendaOptions(
         0,
       ),
       candidateCount: candidates.length,
+      ...(decisionId ? { decisionId } : {}),
+      ...(query.appointmentId ? { appointmentId: query.appointmentId } : {}),
+      ...(suggestedOptionId ? { suggestedOptionId } : {}),
       alternatives: alternatives.map((alternative) => ({
         ...alternative,
         whatsappScript: formatRecoveryWhatsAppScript(
