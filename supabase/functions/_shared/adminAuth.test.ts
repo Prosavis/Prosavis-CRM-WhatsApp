@@ -186,24 +186,42 @@ Deno.test("active Firestore admin document returns Firebase context", async () =
 });
 
 Deno.test("V5 guard denies Firestore admin document without active flags", async () => {
-  const requireAdmin = createAdminGuard(
-    dependencies({
-      verifyFirebaseToken: () => Promise.resolve({ uid: "strict-admin" }),
-      getFirebaseAdminDoc: () => Promise.resolve({ role: "admin" }),
-    }),
-  );
-  const token = unsignedToken({
-    iss: "https://securetoken.google.com/prosavis",
-    sub: "strict-admin",
-  });
+  const cases = [
+    {
+      document: { role: "admin" },
+      origin: "https://userconsole.prosavis.com",
+      expectedOrigin: "https://userconsole.prosavis.com",
+    },
+    {
+      document: { isAdmin: true },
+      origin: "https://attacker.example",
+      expectedOrigin: null,
+    },
+  ];
 
-  const response = await thrownResponse(() => requireAdmin(authRequest(token)));
+  for (const [index, testCase] of cases.entries()) {
+    const uid = `strict-admin-${index}`;
+    const requireAdmin = createAdminGuard(
+      dependencies({
+        verifyFirebaseToken: () => Promise.resolve({ uid }),
+        getFirebaseAdminDoc: () => Promise.resolve(testCase.document),
+      }),
+    );
+    const token = unsignedToken({
+      iss: "https://securetoken.google.com/prosavis",
+      sub: uid,
+    });
 
-  assertEquals(response.status, 403);
-  assertEquals(
-    response.headers.get("Access-Control-Allow-Origin"),
-    "https://userconsole.prosavis.com",
-  );
+    const response = await thrownResponse(() =>
+      requireAdmin(authRequest(token, testCase.origin))
+    );
+
+    assertEquals(response.status, 403);
+    assertEquals(
+      response.headers.get("Access-Control-Allow-Origin"),
+      testCase.expectedOrigin,
+    );
+  }
 });
 
 Deno.test("legacy facade allows Firestore admin document without active flags", async () => {
