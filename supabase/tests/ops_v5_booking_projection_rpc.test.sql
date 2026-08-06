@@ -124,6 +124,100 @@ select is(
   'service_role receives explicit CRUD grants on every projection table'
 );
 
+insert into projection_results (test_case, result)
+select
+  'legacy_inserted',
+  public.apply_ops_booking_projection(
+    '{
+      "service_id": "svc-legacy",
+      "appointment_id": "appointment-legacy",
+      "source_revision": 0,
+      "source_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+      "source_updated_at": null,
+      "status": "PENDING",
+      "fulfillment": "single",
+      "crew_size": 1
+    }'::jsonb,
+    '[]'::jsonb,
+    '[{
+      "addon_id": "legacy-addon",
+      "minutes": 10,
+      "price_cop": 5000,
+      "sold_at": "checkout"
+    }]'::jsonb,
+    '[{
+      "event": "creado",
+      "payload": {"legacy": true},
+      "actor": "system"
+    }]'::jsonb
+  );
+
+select is(
+  (select result ->> 'reason' from projection_results where test_case = 'legacy_inserted'),
+  'inserted',
+  'legacy revision zero with null source_updated_at is inserted'
+);
+select results_eq(
+  $$
+    select source_revision, source_updated_at
+    from public.bookings
+    where service_id = 'svc-legacy'
+      and appointment_id = 'appointment-legacy'
+  $$,
+  $$values (0::bigint, null::timestamptz)$$,
+  'legacy projection preserves revision zero and nullable source_updated_at'
+);
+
+insert into projection_results (test_case, result)
+select
+  'legacy_same_revision',
+  public.apply_ops_booking_projection(
+    '{
+      "service_id": "svc-legacy",
+      "appointment_id": "appointment-legacy",
+      "source_revision": 0,
+      "source_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+      "source_updated_at": null,
+      "status": "PENDING",
+      "fulfillment": "single",
+      "crew_size": 1
+    }'::jsonb,
+    '[]'::jsonb,
+    '[{
+      "addon_id": "legacy-addon",
+      "minutes": 10,
+      "price_cop": 5000,
+      "sold_at": "checkout"
+    }]'::jsonb,
+    '[{
+      "event": "creado",
+      "payload": {"legacy": true},
+      "actor": "system"
+    }]'::jsonb
+  );
+
+select is(
+  (select result ->> 'reason' from projection_results where test_case = 'legacy_same_revision'),
+  'same_revision',
+  'identical legacy retry is a same-revision no-op'
+);
+select is(
+  (select result ->> 'applied' from projection_results where test_case = 'legacy_same_revision'),
+  'false',
+  'identical legacy retry reports applied false'
+);
+select results_eq(
+  $$
+    select
+      (select count(*) from public.bookings where service_id = 'svc-legacy'),
+      (select count(*) from public.booking_crew where service_id = 'svc-legacy'),
+      (select count(*) from public.booking_addons where service_id = 'svc-legacy'),
+      (select count(*) from public.booking_events where service_id = 'svc-legacy')
+  $$,
+  $$values (1::bigint, 0::bigint, 1::bigint, 1::bigint)$$,
+  'identical legacy retry does not duplicate booking or children'
+);
+
 insert into public.crm_team_members
   (service_id, id, user_id, name, email)
 values

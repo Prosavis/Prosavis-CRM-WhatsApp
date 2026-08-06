@@ -56,10 +56,10 @@ begin
       message = 'source_hash must be a 64-character hexadecimal SHA-256';
   end if;
 
-  if pg_catalog.jsonb_typeof(p_booking -> 'source_updated_at') is distinct from 'string' then
+  if pg_catalog.jsonb_typeof(p_booking -> 'source_updated_at') not in ('null', 'string') then
     raise exception using
       errcode = '22023',
-      message = 'source_updated_at must be a timestamp string';
+      message = 'source_updated_at must be null or a timestamp string';
   end if;
 
   if pg_catalog.jsonb_typeof(p_crew) is distinct from 'array'
