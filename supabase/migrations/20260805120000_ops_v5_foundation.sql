@@ -43,6 +43,7 @@ create table public.bookings (
   source_created_at timestamptz,
   source_updated_at timestamptz,
   prepay_verified_at timestamptz,
+  payment_recorded_at timestamptz,
   status text not null default 'PENDING',
   tier text,
   required_cleaner_minutes integer not null default 0,
