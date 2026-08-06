@@ -22,6 +22,7 @@ export function windowsContainingDuration(
   windows: MinuteWindow[],
   clientWindow: MinuteWindow,
   durationMinutes: number,
+  travelBuffers: { previousMinutes?: number; nextMinutes?: number } = {},
 ): MinuteWindow[] {
   if (
     !validMinuteWindow(clientWindow) ||
@@ -31,18 +32,33 @@ export function windowsContainingDuration(
     return [];
   }
 
+  const previousMinutes = Number.isInteger(travelBuffers.previousMinutes)
+    ? Math.max(0, travelBuffers.previousMinutes as number)
+    : 0;
+  const nextMinutes = Number.isInteger(travelBuffers.nextMinutes)
+    ? Math.max(0, travelBuffers.nextMinutes as number)
+    : 0;
+
   return windows
     .filter(validMinuteWindow)
-    .map((window) => ({
-      startMinute: Math.max(window.startMinute, clientWindow.startMinute),
-      endMinute: Math.min(window.endMinute, clientWindow.endMinute),
-    }))
-    .filter((window) =>
-      window.endMinute - window.startMinute >= durationMinutes
-    )
-    .sort((a, b) =>
-      a.startMinute - b.startMinute || a.endMinute - b.endMinute
-    );
+    .flatMap((window) => {
+      const earliestServiceStart = Math.max(
+        window.startMinute + previousMinutes,
+        clientWindow.startMinute,
+      );
+      const latestServiceEnd = Math.min(
+        window.endMinute - nextMinutes,
+        clientWindow.endMinute,
+      );
+      if (latestServiceEnd - earliestServiceStart < durationMinutes) {
+        return [];
+      }
+      return [{
+        startMinute: earliestServiceStart,
+        endMinute: latestServiceEnd,
+      }];
+    })
+    .sort((a, b) => a.startMinute - b.startMinute || a.endMinute - b.endMinute);
 }
 
 export function applyHardFilters(

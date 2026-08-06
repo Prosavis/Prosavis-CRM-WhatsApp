@@ -41,8 +41,8 @@ export function buildPairRescueCandidates(
             cleanerIds: [a.cleaner.cleanerId, b.cleaner.cleanerId],
             startMinute,
             endMinute: startMinute + memberMinutes,
-            residualMinutes:
-              aWindow.endMinute - aWindow.startMinute - memberMinutes +
+            residualMinutes: aWindow.endMinute - aWindow.startMinute -
+              memberMinutes +
               (bWindow.endMinute - bWindow.startMinute - memberMinutes),
           });
         }

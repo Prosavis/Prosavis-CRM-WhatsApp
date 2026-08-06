@@ -111,9 +111,16 @@ Deno.test("missing commercial cost inputs block instead of inventing values", ()
 });
 
 Deno.test("two overlapping four-hour cleaners rescue T8 when no single exists", () => {
+  const bufferedWindow = [{
+    startMinute: 7 * 60 + 30,
+    endMinute: 12 * 60 + 30,
+  }];
   const result = buildAgendaOptions({
     ...BASE_INPUT,
-    cleaners: [cleaner("ana", 12 * 60), cleaner("bea", 12 * 60)],
+    cleaners: [
+      cleaner("ana", 12 * 60 + 30, { availableWindows: bufferedWindow }),
+      cleaner("bea", 12 * 60 + 30, { availableWindows: bufferedWindow }),
+    ],
   });
 
   assertEquals(result.options.length, 1);
@@ -129,12 +136,20 @@ Deno.test("two overlapping four-hour cleaners rescue T8 when no single exists", 
 });
 
 Deno.test("a viable single is sorted first and pair rescue is not recommended", () => {
+  const singleWindow = [{
+    startMinute: 7 * 60 + 30,
+    endMinute: 16 * 60 + 30,
+  }];
+  const pairWindow = [{
+    startMinute: 7 * 60 + 30,
+    endMinute: 12 * 60 + 30,
+  }];
   const result = buildAgendaOptions({
     ...BASE_INPUT,
     cleaners: [
-      cleaner("ana", 16 * 60),
-      cleaner("bea", 12 * 60),
-      cleaner("carla", 12 * 60),
+      cleaner("ana", 16 * 60 + 30, { availableWindows: singleWindow }),
+      cleaner("bea", 12 * 60 + 30, { availableWindows: pairWindow }),
+      cleaner("carla", 12 * 60 + 30, { availableWindows: pairWindow }),
     ],
   });
 
@@ -212,4 +227,63 @@ Deno.test("same input creates deterministic ordering and feature stamps", () => 
     costConfigVersion: "labor-test-v1",
     travelConfigVersion: "travel-test-v1",
   });
+});
+
+Deno.test("an exact service gap is rejected when travel does not fit", () => {
+  const result = buildAgendaOptions({
+    ...BASE_INPUT,
+    cleaners: [cleaner("ana", 16 * 60)],
+  });
+
+  assertEquals(result.options, []);
+  assertEquals(result.suggestedOptionId, null);
+  assert(result.globalFlags.includes("insufficient_window_including_travel"));
+});
+
+Deno.test("travel buffers shift service inside the cleaner availability", () => {
+  const result = buildAgendaOptions({
+    ...BASE_INPUT,
+    cleaners: [
+      cleaner("ana", 16 * 60 + 30, {
+        availableWindows: [{
+          startMinute: 7 * 60 + 30,
+          endMinute: 16 * 60 + 30,
+        }],
+        roundingSlackMinutes: 30,
+      }),
+    ],
+  });
+
+  assertEquals(result.options.length, 1);
+  assertEquals(result.options[0].scheduledStartMinute, 8 * 60);
+  assertEquals(result.options[0].elapsedMinutes, 480);
+});
+
+Deno.test("incomplete productive vector stays visible but is not recommended", () => {
+  const result = buildAgendaOptions({
+    ...BASE_INPUT,
+    request: {
+      ...BASE_INPUT.request,
+      requiredMinutes: 120,
+      compositeMemberMinutes: undefined,
+      clientWindow: { startMinute: 8 * 60, endMinute: 12 * 60 },
+    },
+    cleaners: [
+      cleaner("ana", 13 * 60, {
+        rating: undefined,
+        clientAffinity: undefined,
+        income30dCOP: undefined,
+      }),
+    ],
+  });
+
+  assertEquals(result.options.length, 1);
+  assertEquals(result.options[0].score, null);
+  assertEquals(result.options[0].recommended, false);
+  assert(
+    result.options[0].complianceFlags.includes(
+      "incomplete_productivity_vector",
+    ),
+  );
+  assertEquals(result.suggestedOptionId, null);
 });

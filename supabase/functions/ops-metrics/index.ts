@@ -122,16 +122,16 @@ Deno.serve(async (request) => {
   }
 
   const payload = buildOpsMetricsPayload(
-    (current.data ?? []) as OpsRollupRow[],
-    (previous.data ?? []) as OpsRollupRow[],
+    (current.data ?? []) as unknown as OpsRollupRow[],
+    (previous.data ?? []) as unknown as OpsRollupRow[],
   );
   return strictJsonResponse(request, {
     data: {
       range,
       ...payload,
       cleaners: buildCleanerCapacityPayload(
-        (cleanerFacts.data ?? []) as CleanerDayFactRow[],
-        (members.data ?? []) as OpsTeamMemberRow[],
+        (cleanerFacts.data ?? []) as unknown as CleanerDayFactRow[],
+        (members.data ?? []) as unknown as OpsTeamMemberRow[],
       ),
     },
   });

@@ -99,16 +99,27 @@ function integerField(
   return value;
 }
 
-function optionalNonNegativeNumber(
+function optionalNonNegativeInteger(
   record: Record<string, unknown>,
   field: string,
 ): number | undefined {
   const value = record[field];
   if (value === undefined || value === null) return undefined;
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < 0
+  ) {
     throw new Error(`${field}_invalid`);
   }
   return value;
+}
+
+function validDate(value: string): boolean {
+  if (!DATE_PATTERN.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) &&
+    parsed.toISOString().slice(0, 10) === value;
 }
 
 export function minuteOfDay(value: string): number {
@@ -142,10 +153,7 @@ export function parseAgendaOptionsRequest(
   const requestId = stringField(body, "requestId");
   if (!UUID_PATTERN.test(requestId)) throw new Error("requestId_invalid");
   const operationalDate = stringField(body, "date");
-  if (
-    !DATE_PATTERN.test(operationalDate) ||
-    Number.isNaN(Date.parse(`${operationalDate}T00:00:00Z`))
-  ) {
+  if (!validDate(operationalDate)) {
     throw new Error("date_invalid");
   }
   const windowStart = stringField(body, "windowStart");
@@ -176,8 +184,8 @@ export function parseAgendaOptionsRequest(
       clientWindow: { startMinute, endMinute },
       serviceType: optionalStringField(body, "serviceType"),
       requiresAlturas: body.requiresAlturas,
-      grossRevenueCOP: optionalNonNegativeNumber(body, "grossRevenueCOP"),
-      otherMarginalCostCOP: optionalNonNegativeNumber(
+      grossRevenueCOP: optionalNonNegativeInteger(body, "grossRevenueCOP"),
+      otherMarginalCostCOP: optionalNonNegativeInteger(
         body,
         "otherMarginalCostCOP",
       ),
@@ -192,7 +200,9 @@ export function parseAgendaLostRequest(body: unknown): AgendaLostApiRequest {
   const requestId = stringField(body, "requestId");
   if (!UUID_PATTERN.test(requestId)) throw new Error("requestId_invalid");
   const requestedDate = stringField(body, "requestedDate");
-  if (!DATE_PATTERN.test(requestedDate)) throw new Error("requestedDate_invalid");
+  if (!validDate(requestedDate)) {
+    throw new Error("requestedDate_invalid");
+  }
   const windowStart = stringField(body, "windowStart");
   const windowEnd = stringField(body, "windowEnd");
   if (minuteOfDay(windowStart) >= minuteOfDay(windowEnd)) {

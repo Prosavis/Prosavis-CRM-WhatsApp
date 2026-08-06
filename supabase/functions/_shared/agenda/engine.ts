@@ -1,4 +1,7 @@
-import { buildFeatureVectorStamp, deterministicOptionId } from "./featureVector.ts";
+import {
+  buildFeatureVectorStamp,
+  deterministicOptionId,
+} from "./featureVector.ts";
 import { applyHardFilters, windowsContainingDuration } from "./hardFilters.ts";
 import { calculateMarginalCost } from "./marginalCost.ts";
 import {
@@ -28,6 +31,64 @@ function uniqueSorted(values: string[]): string[] {
   return [...new Set(values)].sort();
 }
 
+function travelForCleaner(
+  input: AgendaEngineInput,
+  cleaner: CleanerAgendaSnapshot,
+) {
+  const previous = getTravelMinutes(
+    {
+      origin: cleaner.location,
+      destination: input.request.destination,
+      departureHour: input.request.departureHour,
+      matrix: input.travelMatrix,
+    },
+    input.travelConfig,
+  );
+  const next = cleaner.nextLocation
+    ? getTravelMinutes(
+      {
+        origin: input.request.destination,
+        destination: cleaner.nextLocation,
+        departureHour: input.request.departureHour,
+        matrix: input.travelMatrix,
+      },
+      input.travelConfig,
+    )
+    : null;
+  const totalMinutes = previous.minutes === null ||
+      (next && next.minutes === null)
+    ? null
+    : previous.minutes + (next?.minutes ?? 0);
+
+  return {
+    previousMinutes: previous.minutes,
+    nextMinutes: next ? next.minutes : 0,
+    totalMinutes,
+    flags: [...previous.flags, ...(next?.flags ?? [])],
+  };
+}
+
+function serviceWindowsForCleaner(
+  input: AgendaEngineInput,
+  cleaner: CleanerAgendaSnapshot,
+  durationMinutes: number,
+): MinuteWindow[] {
+  const travel = travelForCleaner(input, cleaner);
+  if (travel.previousMinutes === null || travel.nextMinutes === null) {
+    return [];
+  }
+
+  return windowsContainingDuration(
+    cleaner.availableWindows,
+    input.request.clientWindow,
+    durationMinutes,
+    {
+      previousMinutes: travel.previousMinutes,
+      nextMinutes: travel.nextMinutes,
+    },
+  );
+}
+
 function optionFromCrew(params: {
   input: AgendaEngineInput;
   cleaners: CleanerAgendaSnapshot[];
@@ -45,40 +106,13 @@ function optionFromCrew(params: {
       },
       params.input.costConfig,
     );
-    const previousTravel = getTravelMinutes(
-      {
-        origin: cleaner.location,
-        destination: params.input.request.destination,
-        departureHour: params.input.request.departureHour,
-        matrix: params.input.travelMatrix,
-      },
-      params.input.travelConfig,
-    );
-    const nextTravel = cleaner.nextLocation
-      ? getTravelMinutes(
-        {
-          origin: params.input.request.destination,
-          destination: cleaner.nextLocation,
-          departureHour: params.input.request.departureHour,
-          matrix: params.input.travelMatrix,
-        },
-        params.input.travelConfig,
-      )
-      : null;
-    const travelFlags = [
-      ...previousTravel.flags,
-      ...(nextTravel?.flags ?? []),
-    ];
-    const travelMinutes = previousTravel.minutes === null ||
-        (nextTravel && nextTravel.minutes === null)
-      ? null
-      : previousTravel.minutes + (nextTravel?.minutes ?? 0);
+    const travel = travelForCleaner(params.input, cleaner);
 
     return {
       cleaner,
       cost,
-      travelMinutes,
-      flags: travelFlags,
+      travelMinutes: travel.totalMinutes,
+      flags: travel.flags,
     };
   });
 
@@ -115,16 +149,15 @@ function optionFromCrew(params: {
   ) {
     complianceFlags.push("missing_or_invalid_other_marginal_cost_cop");
   }
-  const marginEstimateCOP =
-    marginalCostTotalCOP !== null &&
+  const marginEstimateCOP = marginalCostTotalCOP !== null &&
       grossRevenue !== undefined &&
       Number.isFinite(grossRevenue) &&
       grossRevenue >= 0 &&
       otherMarginalCost !== undefined &&
       Number.isFinite(otherMarginalCost) &&
       otherMarginalCost >= 0
-      ? Math.round(grossRevenue - marginalCostTotalCOP - otherMarginalCost)
-      : null;
+    ? Math.round(grossRevenue - marginalCostTotalCOP - otherMarginalCost)
+    : null;
 
   const featureVector: AgendaFeatureVector = {
     marginalCostCOP: marginalCostTotalCOP,
@@ -227,17 +260,23 @@ export function buildAgendaOptions(
   );
   const eligible = evaluated
     .filter(({ hardFilter }) => hardFilter.eligible)
-    .sort((a, b) =>
-      a.cleaner.cleanerId.localeCompare(b.cleaner.cleanerId)
-    );
+    .sort((a, b) => a.cleaner.cleanerId.localeCompare(b.cleaner.cleanerId));
 
   const singleOptions = eligible.flatMap(({ cleaner }) => {
-    const windows = windowsContainingDuration(
+    const unbufferedWindows = windowsContainingDuration(
       cleaner.availableWindows,
       input.request.clientWindow,
       input.request.requiredMinutes,
     );
+    const windows = serviceWindowsForCleaner(
+      input,
+      cleaner,
+      input.request.requiredMinutes,
+    );
     const bestWindow = windows[0];
+    if (!bestWindow && unbufferedWindows.length > 0) {
+      globalFlags.push("insufficient_window_including_travel");
+    }
     if (!bestWindow) return [];
     return [
       optionFromCrew({
@@ -245,8 +284,7 @@ export function buildAgendaOptions(
         cleaners: [cleaner],
         minutesEach: input.request.requiredMinutes,
         startMinute: bestWindow.startMinute,
-        residualMinutes:
-          bestWindow.endMinute - bestWindow.startMinute -
+        residualMinutes: bestWindow.endMinute - bestWindow.startMinute -
           input.request.requiredMinutes,
         mode: "single",
         recommended: true,
@@ -265,9 +303,9 @@ export function buildAgendaOptions(
   ) {
     const pairEligible: PairEligibleCleaner[] = eligible.map(({ cleaner }) => ({
       cleaner,
-      windows: windowsContainingDuration(
-        cleaner.availableWindows,
-        input.request.clientWindow,
+      windows: serviceWindowsForCleaner(
+        input,
+        cleaner,
         compositeMinutes,
       ),
     })).filter(({ windows }) => windows.length > 0);

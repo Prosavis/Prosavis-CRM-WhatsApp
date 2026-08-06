@@ -104,12 +104,21 @@ export function scoreAgendaOptions(
     }
   }
 
+  const productiveKeys: FeatureKey[] = [
+    "rating",
+    "clientAffinity",
+    "incomeEquity",
+  ];
+
   const scored = options.map((option) => {
-    if (option.hardBlocked) return { ...option, score: null };
+    if (option.hardBlocked) {
+      return { ...option, score: null, recommended: false };
+    }
 
     let weightedScore = 0;
     let appliedWeight = 0;
     const optionFlags = [...option.complianceFlags];
+    let incompleteProductivity = false;
     for (const key of FEATURE_KEYS) {
       const weight = weights[key];
       if (weight === 0) continue;
@@ -117,6 +126,7 @@ export function scoreAgendaOptions(
       const featureBounds = bounds.get(key);
       if (value === null || !featureBounds) {
         optionFlags.push(`missing_scoring_${key}`);
+        if (productiveKeys.includes(key)) incompleteProductivity = true;
         continue;
       }
       weightedScore += weight * normalize(
@@ -128,11 +138,22 @@ export function scoreAgendaOptions(
       appliedWeight += weight;
     }
 
+    if (incompleteProductivity) {
+      optionFlags.push("incomplete_productivity_vector");
+      return {
+        ...option,
+        score: null,
+        recommended: false,
+        complianceFlags: [...new Set(optionFlags)].sort(),
+      };
+    }
+
     return {
       ...option,
       score: appliedWeight > 0
         ? Math.round(weightedScore / appliedWeight * 10000) / 100
         : null,
+      recommended: option.recommended && appliedWeight > 0,
       complianceFlags: [...new Set(optionFlags)].sort(),
     };
   });

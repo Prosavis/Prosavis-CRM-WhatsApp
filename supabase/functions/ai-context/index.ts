@@ -42,7 +42,7 @@ class QueryDeadlineError extends Error {
 }
 
 function withDeadline<T>(promise: Promise<T>): Promise<T> {
-  let timeoutId: number | undefined;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(
       () => reject(new QueryDeadlineError()),
@@ -174,13 +174,16 @@ Deno.serve(async (request) => {
 
   const holidayRows = (holidayCalendars.data ?? []).flatMap((calendar) =>
     Array.isArray(calendar.ops_holidays) ? calendar.ops_holidays : [],
-  ) as OpsAiContextHolidayRow[];
+  ) as unknown as OpsAiContextHolidayRow[];
   const payload = buildOpsAiContextPayload({
     serviceId: query.serviceId,
     targetDate: query.targetDate,
-    policy: (policy.data?.[0] ?? null) as OpsAiContextPolicyRow | null,
-    forecast: (forecast.data?.[0] ?? null) as OpsAiContextForecastRow | null,
-    hiringTriggers: (hiring.data ?? []) as OpsAiContextHiringTriggerRow[],
+    policy: (policy.data?.[0] ??
+      null) as unknown as OpsAiContextPolicyRow | null,
+    forecast: (forecast.data?.[0] ??
+      null) as unknown as OpsAiContextForecastRow | null,
+    hiringTriggers: (hiring.data ??
+      []) as unknown as OpsAiContextHiringTriggerRow[],
     holidays: holidayRows,
     outcomeCount: outcomes.count ?? 0,
   });

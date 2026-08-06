@@ -1,8 +1,5 @@
 import { assertEquals, assertThrows } from "jsr:@std/assert";
-import {
-  parseAgendaLostRequest,
-  parseAgendaOptionsRequest,
-} from "./api.ts";
+import { parseAgendaLostRequest, parseAgendaOptionsRequest } from "./api.ts";
 
 Deno.test("agenda options parser seals runtime version and normalizes window", () => {
   const parsed = parseAgendaOptionsRequest(
@@ -76,6 +73,45 @@ Deno.test("lost request parser validates exhaustive reasons", () => {
       windowStart: "08:00",
       windowEnd: "16:00",
       reason: "invented",
+      compositeOffered: false,
+    })
+  );
+});
+
+Deno.test("agenda parsers reject calendar-invalid dates and fractional COP", () => {
+  const validOptions = {
+    serviceId: "service-1",
+    requestId: "10000000-0000-4000-8000-000000000003",
+    tier: "T2",
+    date: "2026-02-28",
+    windowStart: "08:00",
+    windowEnd: "10:00",
+    requiredMinutes: 120,
+    requiresAlturas: false,
+    destination: { comuna: "Centro" },
+  };
+
+  assertThrows(() =>
+    parseAgendaOptionsRequest(
+      { ...validOptions, date: "2026-02-30" },
+      { specVersion: "5.0.0", automationLevel: 1 },
+    )
+  );
+  assertThrows(() =>
+    parseAgendaOptionsRequest(
+      { ...validOptions, grossRevenueCOP: 1000.5 },
+      { specVersion: "5.0.0", automationLevel: 1 },
+    )
+  );
+  assertThrows(() =>
+    parseAgendaLostRequest({
+      serviceId: "service-1",
+      requestId: "10000000-0000-4000-8000-000000000004",
+      requestedTier: "T2",
+      requestedDate: "2026-02-30",
+      windowStart: "08:00",
+      windowEnd: "10:00",
+      reason: "sin_capacidad",
       compositeOffered: false,
     })
   );

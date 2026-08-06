@@ -1,13 +1,13 @@
 import { requireAdmin } from "../_shared/adminAuth.ts";
 import {
-  buildAgendaRecoveryAlternatives,
-  formatRecoveryWhatsAppScript,
   type AgendaRecoveryAddonInput,
   type AgendaRecoveryWindowInput,
+  buildAgendaRecoveryAlternatives,
+  formatRecoveryWhatsAppScript,
 } from "../_shared/agendaRecovery.ts";
 import {
-  parseAgendaOptionsRequest,
   type AgendaOptionsApiRequest,
+  parseAgendaOptionsRequest,
 } from "../_shared/agenda/api.ts";
 import { buildAgendaOptions } from "../_shared/agenda/engine.ts";
 import { loadAgendaRuntimeConfig } from "../_shared/agenda/runtimeConfig.ts";
@@ -198,15 +198,13 @@ function buildCleanerSnapshots(params: {
 function matrixEntries(rows: MatrixRow[]): TravelMatrixEntry[] {
   return rows.flatMap((row) => {
     const minutesEstimate = optionalNumber(row.minutes_estimate);
-    return minutesEstimate === undefined
-      ? []
-      : [{
-        originComuna: row.origin_comuna,
-        destinationComuna: row.destination_comuna,
-        hourBucket: row.hour_bucket,
-        minutesEstimate,
-        sampleCount: row.sample_count,
-      }];
+    return minutesEstimate === undefined ? [] : [{
+      originComuna: row.origin_comuna,
+      destinationComuna: row.destination_comuna,
+      hourBucket: row.hour_bucket,
+      minutesEstimate,
+      sampleCount: row.sample_count,
+    }];
   });
 }
 
@@ -258,8 +256,7 @@ Deno.serve(async (request) => {
     date: parsed.request.operationalDate,
     window: parsed.request.clientWindow,
     required_minutes: parsed.request.requiredMinutes,
-    composite_member_minutes:
-      parsed.request.compositeMemberMinutes ?? null,
+    composite_member_minutes: parsed.request.compositeMemberMinutes ?? null,
     service_type: parsed.request.serviceType ?? null,
     requires_alturas: parsed.request.requiresAlturas,
     destination: parsed.request.destination,
@@ -458,7 +455,9 @@ function parseRecoverySummaryRequest(
     throw new Error("date debe usar formato YYYY-MM-DD.");
   }
   const parsed = new Date(`${date}T12:00:00Z`);
-  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) {
+  if (
+    Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date
+  ) {
     throw new Error("date inválida.");
   }
   return { serviceId, date };
@@ -569,7 +568,9 @@ export async function serveRecoveryAgendaOptions(
   }
 
   const members = new Map(
-    ((memberResult.data ?? []) as unknown as RecoveryMemberRow[]).map((member) => [
+    ((memberResult.data ?? []) as unknown as RecoveryMemberRow[]).map((
+      member,
+    ) => [
       member.id,
       member,
     ]),
