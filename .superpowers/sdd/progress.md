@@ -12,3 +12,6 @@
 - Fase 3 availability: complete (commits 8a94973, df5cda4; 507 tests and build passed; task review Spec PASS / Quality APPROVED; deploy Firestore index before or with Function).
 - Fase 4 memory: complete (commits cb21116, d8ebd18; 171 tests, type-check and lint passed; task review Spec PASS / Quality APPROVED; migration runtime pending Docker/Podman).
 - Fase 5A proposed-actions contract: complete (commits 86c72ff, 0cbea64, 0c1d702; 184 tests, type-check and lint passed; task review Spec PASS / Quality APPROVED).
+- Fase 5B UI + appointment bridges: NOT started (only brief `fase5b1-appointment-bridges-brief.md`; no chips UI, no execute path, no `crmCreateAppointment` / `crmRescheduleAppointmentHttp`).
+- Fase 5C telemetry + transparency panel: NOT started (no `whatsapp_ai_suggestion_log`, no "Contexto usado" UI).
+- Docs/deploys/secrets/migrations apply: deferred until 5B+5C approved.
