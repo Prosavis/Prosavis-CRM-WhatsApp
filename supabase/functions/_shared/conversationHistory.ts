@@ -53,11 +53,13 @@ export async function getConversationHistoryWithMeta(
     .eq('conversation_stable_key', stableKey)
     .eq('hidden_from_panel', false)
     .order('created_at', { ascending: false })
-    .limit(limit);
+    .limit(limit + 1);
 
   if (error) throw error;
 
-  const rowsNewestFirst = data ?? [];
+  const fetchedRows = data ?? [];
+  const sourceTruncated = fetchedRows.length > limit;
+  const rowsNewestFirst = fetchedRows.slice(0, limit);
   const rowsChronological = [...rowsNewestFirst].reverse();
 
   const turns: ConversationTurn[] = [];
@@ -88,7 +90,7 @@ export async function getConversationHistoryWithMeta(
     turns,
     meta: {
       loaded: turns.length,
-      truncated: false,
+      truncated: sourceTruncated,
       ...(oldestAt ? { oldestAt } : {}),
       ...(newestAt ? { newestAt } : {}),
     },

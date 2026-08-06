@@ -62,7 +62,7 @@ export interface InboxAiMemoryGenerationParams {
   prompt: string;
   temperature: number;
   maxOutputTokens: number;
-  responseSchema: Record<string, unknown>;
+  responseJsonSchema: Record<string, unknown>;
   logScope: string;
   logResponsePreview: boolean;
 }
@@ -81,8 +81,9 @@ function normalizeStringArray(value: unknown): string[] {
   for (const entry of value) {
     if (typeof entry !== 'string') continue;
     const trimmed = entry.trim();
-    if (!trimmed || seen.has(trimmed)) continue;
-    seen.add(trimmed);
+    const dedupeKey = trimmed.toLocaleLowerCase('es');
+    if (!trimmed || seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
     normalized.push(trimmed);
   }
   return normalized;
@@ -133,7 +134,7 @@ export function shouldRefreshInboxAiMemory(params: {
   historyTruncated: boolean;
 }): boolean {
   return (
-    params.historyTruncated ||
+    (params.historyTruncated && params.newVisibleMessageCount > 0) ||
     params.newVisibleMessageCount >= INBOX_AI_MEMORY_REFRESH_MESSAGE_THRESHOLD
   );
 }
@@ -235,20 +236,22 @@ export async function loadOrRefreshInboxAiMemory(params: {
     return null;
   }
 
-  let totalVisibleMessageCount: number;
+  let totalVisibleMessageCount: number | null = null;
   let newVisibleMessageCount: number;
   try {
-    totalVisibleMessageCount = await countVisibleMessages(
-      params.supabase,
-      params.stableKey,
-    );
-    newVisibleMessageCount = previous?.lastSummarizedMessageAt
-      ? await countVisibleMessages(
+    if (previous?.lastSummarizedMessageAt) {
+      newVisibleMessageCount = await countVisibleMessages(
         params.supabase,
         params.stableKey,
         previous.lastSummarizedMessageAt,
-      )
-      : totalVisibleMessageCount;
+      );
+    } else {
+      totalVisibleMessageCount = await countVisibleMessages(
+        params.supabase,
+        params.stableKey,
+      );
+      newVisibleMessageCount = totalVisibleMessageCount;
+    }
   } catch (error) {
     warnMemory('message-count-failed', error);
     return previous;
@@ -260,6 +263,18 @@ export async function loadOrRefreshInboxAiMemory(params: {
     historyTruncated: params.historyMeta.truncated,
   })) {
     return previous;
+  }
+
+  if (totalVisibleMessageCount == null) {
+    try {
+      totalVisibleMessageCount = await countVisibleMessages(
+        params.supabase,
+        params.stableKey,
+      );
+    } catch (error) {
+      warnMemory('message-count-failed', error);
+      return previous;
+    }
   }
 
   const apiKey = dependencies.getApiKey();
@@ -277,7 +292,7 @@ export async function loadOrRefreshInboxAiMemory(params: {
       prompt: buildMemoryPrompt(previous, params.transcript),
       temperature: 0,
       maxOutputTokens: 2_048,
-      responseSchema: INBOX_AI_MEMORY_RESPONSE_SCHEMA,
+      responseJsonSchema: INBOX_AI_MEMORY_RESPONSE_SCHEMA,
       logScope: 'inbox-ai-memory',
       logResponsePreview: false,
     });

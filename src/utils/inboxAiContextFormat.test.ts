@@ -303,6 +303,7 @@ describe('formatInboxAiContextBlock', () => {
   });
 
   it('clips every section independently and keeps the complete block within its ceiling', () => {
+    expect(INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET).toBe(78_000);
     const huge = 'x'.repeat(100_000);
     const latestTranscriptMarker = 'ÚLTIMO MENSAJE';
     const block = formatInboxAiContextBlock({

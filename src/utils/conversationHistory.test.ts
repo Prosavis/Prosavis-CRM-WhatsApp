@@ -4,9 +4,67 @@ import {
   applyTranscriptCharBudget,
   buildMergedTurns,
   buildTranscriptWithBudget,
+  getConversationHistoryWithMeta,
   mergedTurnsToTranscript,
   type ConversationTurn,
 } from '../../supabase/functions/_shared/conversationHistory';
+
+describe('getConversationHistoryWithMeta', () => {
+  it('probes limit plus one and returns only the newest limited window as truncated', async () => {
+    const rows = [
+      {
+        direction: 'outbound',
+        message_body: 'más reciente',
+        created_at: '2026-08-06T12:03:00.000Z',
+      },
+      {
+        direction: 'inbound',
+        message_body: 'reciente',
+        created_at: '2026-08-06T12:02:00.000Z',
+      },
+      {
+        direction: 'outbound',
+        message_body: 'anterior',
+        created_at: '2026-08-06T12:01:00.000Z',
+      },
+      {
+        direction: 'inbound',
+        message_body: 'fuera de ventana',
+        created_at: '2026-08-06T12:00:00.000Z',
+      },
+    ];
+    let requestedLimit: number | null = null;
+    const query = {
+      select: () => query,
+      eq: () => query,
+      order: () => query,
+      limit(value: number) {
+        requestedLimit = value;
+        return Promise.resolve({ data: rows.slice(0, value), error: null });
+      },
+    };
+    const supabase = { from: () => query };
+
+    const result = await getConversationHistoryWithMeta(
+      supabase,
+      '573001112233',
+      3,
+    );
+
+    expect(requestedLimit).toBe(4);
+    expect(result.turns.map((turn) => turn.text)).toEqual([
+      'anterior',
+      'reciente',
+      'más reciente',
+    ]);
+    expect(result.meta).toMatchObject({
+      loaded: 3,
+      truncated: true,
+      oldestAt: '2026-08-06T12:01:00.000Z',
+      newestAt: '2026-08-06T12:03:00.000Z',
+    });
+  });
+});
 
 describe('buildMergedTurns', () => {
   it('drops leading outbound until first inbound', () => {

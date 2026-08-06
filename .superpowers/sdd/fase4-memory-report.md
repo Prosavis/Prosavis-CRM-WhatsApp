@@ -8,7 +8,7 @@ Rama: `master`
 Se implementó memoria incremental fail-open para el Inbox IA:
 
 - tabla interna `public.whatsapp_conversation_ai_memory`;
-- carga, conteo exacto de mensajes visibles y refresco perezoso cada 20 mensajes o ante historial truncado;
+- carga, conteo exacto de mensajes visibles y refresco perezoso cada 20 mensajes o ante historial truncado con progreso;
 - una llamada estructurada a Gemini con `GEMINI_MODEL_INBOX_MEMORY` y fallback `gemini-3.6-flash`;
 - normalización de resumen, preferencias, objeciones y acuerdos;
 - upsert con marcador, conteo total, modelo y fecha de actualización;
@@ -22,10 +22,13 @@ No se aplicaron migraciones remotas, no se desplegaron funciones, no se mutaron 
 
 - `supabase/migrations/20260806165834_whatsapp_conversation_ai_memory.sql`
 - `supabase/functions/_shared/inboxAiMemory.ts`
+- `supabase/functions/_shared/conversationHistory.ts`
 - `supabase/functions/_shared/inboxAiContext.ts`
 - `supabase/functions/_shared/inboxAiContextFormat.ts`
 - `supabase/functions/_shared/geminiClient.ts`
 - `src/utils/inboxAiMemory.test.ts`
+- `src/utils/conversationHistory.test.ts`
+- `src/utils/geminiClient.test.ts`
 - `src/utils/inboxAiContextFormat.test.ts`
 - `.superpowers/sdd/fase4-memory-report.md`
 
@@ -68,19 +71,61 @@ No se aplicaron migraciones remotas, no se desplegaron funciones, no se mutaron 
 - GREEN: mismo comando.
   - `8 passed`.
 
+## Correcciones posteriores a revisión
+
+### Deduplicación case-insensitive
+
+- RED: `npm test -- --run src/utils/inboxAiMemory.test.ts`
+  - `1 failed`: `Tardes/tardes`, `Precio/PRECIO` y acuerdos con distinto casing permanecían duplicados.
+- GREEN: mismo comando.
+  - `8 passed`; conserva la primera representación y deduplica por clave lowercase.
+
+### Truncado con progreso y conteos perezosos
+
+- RED: mismo comando.
+  - `1 failed`: un segundo request truncado sin mensajes nuevos volvía a llamar Gemini y persistía memoria vacía.
+- GREEN: mismo comando.
+  - `9 passed`; truncado solo refresca con `newVisibleMessageCount > 0`.
+- Con memoria se cuenta primero desde `last_summarized_message_at`; el total solo se consulta si habrá refresco.
+- Sin memoria se realiza un único conteo total.
+- Se añadieron regresiones de fail-open para fallo de conteo y fallo de upsert.
+
+### Detección real de historial truncado
+
+- RED: `npm test -- --run src/utils/conversationHistory.test.ts`
+  - `1 failed`: la consulta pidió `3` en vez de `4` para un límite de `3`.
+- GREEN: mismo comando.
+  - `11 passed`; consulta `limit + 1`, descarta el elemento sonda y devuelve los mensajes limitados más recientes con `truncated: true`.
+
+### Transporte JSON Schema de Gemini
+
+- RED: `npm test -- --run src/utils/geminiClient.test.ts`
+  - `1 failed`: el body HTTP real no contenía `generationConfig.responseJsonSchema`.
+- GREEN: `npm test -- --run src/utils/geminiClient.test.ts src/utils/inboxAiMemory.test.ts`
+  - `2 files passed`, `10 tests passed`.
+- Se validó el `RequestInit.body` producido en el límite externo mediante mock de `fetch`.
+- Memoria envía el esquema estricto por `responseJsonSchema`; el body no incluye `responseSchema`.
+- Compatibilidad: `responseSchema` sigue disponible y se conserva en el body para callers existentes como `directoryAnalyze`.
+
+El brief inicial pedía un `responseSchema` estricto. La evidencia oficial vigente indica que ese campo usa el tipo OpenAPI `Schema`, está deprecado y no admite `additionalProperties`; `responseJsonSchema` sí acepta JSON Schema y permite `additionalProperties: false`. Por ello la implementación usa `responseJsonSchema` exclusivamente para memoria, manteniendo `responseSchema` como ruta legacy para no romper callers existentes.
+
+### Presupuesto total
+
+- Se añadió aserción literal `INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET === 78_000`.
+
 ## Verificación final
 
 - Tests enfocados:
-  - `npm test -- --run src/utils/inboxAiMemory.test.ts src/utils/inboxAiContextFormat.test.ts`
-  - `2 files passed`, `29 tests passed`.
+  - `npm test -- --run src/utils/inboxAiMemory.test.ts src/utils/conversationHistory.test.ts src/utils/geminiClient.test.ts src/utils/inboxAiContextFormat.test.ts`
+  - `4 files passed`, `46 tests passed`.
 - Suite completa:
   - `npm test`
-  - `20 files passed`, `164 tests passed`.
+  - `21 files passed`, `171 tests passed`.
 - Tipos:
   - `npm run type-check`
   - exit code `0`.
 - Lint enfocado:
-  - `npx eslint supabase/functions/_shared/inboxAiMemory.ts supabase/functions/_shared/inboxAiContext.ts supabase/functions/_shared/inboxAiContextFormat.ts supabase/functions/_shared/geminiClient.ts src/utils/inboxAiMemory.test.ts src/utils/inboxAiContextFormat.test.ts`
+  - `npx eslint supabase/functions/_shared/inboxAiMemory.ts supabase/functions/_shared/conversationHistory.ts supabase/functions/_shared/geminiClient.ts src/utils/inboxAiMemory.test.ts src/utils/conversationHistory.test.ts src/utils/geminiClient.test.ts src/utils/inboxAiContextFormat.test.ts`
   - exit code `0`.
 - Diagnósticos IDE de los archivos editados:
   - sin errores.
@@ -89,7 +134,7 @@ No se aplicaron migraciones remotas, no se desplegaron funciones, no se mutaron 
   - exit code `0`; solo avisos de conversión LF/CRLF en Windows.
 - Grafo:
   - `graphify update .` desde la raíz `GitHub/`
-  - exit code `0`; grafo actualizado a `59.083` nodos y `169.350` edges.
+  - exit code `0`; grafo actualizado a `59.091` nodos y `169.360` edges.
 
 ## Migración y seguridad
 

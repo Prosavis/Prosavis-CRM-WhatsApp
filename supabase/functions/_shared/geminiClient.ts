@@ -88,6 +88,7 @@ interface GeminiGenerateContentRequest {
     stopSequences?: string[];
     responseMimeType?: string;
     responseSchema?: Record<string, unknown>;
+    responseJsonSchema?: Record<string, unknown>;
   };
 }
 
@@ -112,6 +113,7 @@ async function geminiRequest(params: {
   maxOutputTokens?: number;
   responseMimeType?: string;
   responseSchema?: Record<string, unknown>;
+  responseJsonSchema?: Record<string, unknown>;
 }): Promise<GeminiGenerateContentResponse> {
   const url = `${GEMINI_BASE_URL}/models/${params.model}:generateContent`;
 
@@ -135,6 +137,10 @@ async function geminiRequest(params: {
 
   if (params.responseSchema) {
     body.generationConfig!.responseSchema = params.responseSchema;
+  }
+
+  if (params.responseJsonSchema) {
+    body.generationConfig!.responseJsonSchema = params.responseJsonSchema;
   }
 
   const response = await fetch(url, {
@@ -259,6 +265,7 @@ export async function geminiGenerateJson<T>(params: {
   temperature?: number;
   maxOutputTokens?: number;
   responseSchema?: Record<string, unknown>;
+  responseJsonSchema?: Record<string, unknown>;
   logScope?: string;
   logResponsePreview?: boolean;
 }): Promise<T> {
@@ -274,6 +281,7 @@ export async function geminiGenerateJsonWithMeta<T>(params: {
   temperature?: number;
   maxOutputTokens?: number;
   responseSchema?: Record<string, unknown>;
+  responseJsonSchema?: Record<string, unknown>;
   logScope?: string;
   logResponsePreview?: boolean;
 }): Promise<GeminiJsonResult<T>> {
@@ -286,7 +294,7 @@ export async function geminiGenerateJsonWithMeta<T>(params: {
     model,
     promptChars,
     maxOutputTokens: params.maxOutputTokens ?? 8192,
-    hasSchema: !!params.responseSchema,
+    hasSchema: !!(params.responseSchema || params.responseJsonSchema),
   });
 
   const started = Date.now();
@@ -298,6 +306,7 @@ export async function geminiGenerateJsonWithMeta<T>(params: {
     maxOutputTokens: params.maxOutputTokens ?? 8192,
     responseMimeType: 'application/json',
     responseSchema: params.responseSchema,
+    responseJsonSchema: params.responseJsonSchema,
   });
 
   const finishReason = data.candidates?.[0]?.finishReason;

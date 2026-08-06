@@ -114,9 +114,9 @@ describe('normalizeInboxAiMemoryJson', () => {
   it('keeps only unique, non-empty strings from Gemini JSON', () => {
     expect(normalizeInboxAiMemoryJson({
       summary: '  Cliente recurrente  ',
-      preferences: [' Tardes ', '', 'Tardes', 7, null],
-      objections: ['Precio', ' Precio ', false],
-      agreements: ['Confirmar el viernes', 'Confirmar el viernes'],
+      preferences: [' Tardes ', '', 'tardes', 7, null],
+      objections: ['Precio', ' PRECIO ', false],
+      agreements: ['Confirmar el viernes', 'confirmar el viernes'],
     })).toEqual({
       summary: 'Cliente recurrente',
       preferences: ['Tardes'],
@@ -160,6 +160,11 @@ describe('shouldRefreshInboxAiMemory', () => {
       newVisibleMessageCount: 0,
       historyTruncated: false,
     })).toBe(false);
+    expect(shouldRefreshInboxAiMemory({
+      hasMemory: true,
+      newVisibleMessageCount: 0,
+      historyTruncated: true,
+    })).toBe(false);
   });
 });
 
@@ -195,6 +200,69 @@ describe('loadOrRefreshInboxAiMemory', () => {
       method: 'gt',
       args: ['created_at', priorMemory.lastSummarizedMessageAt],
     });
+    expect(supabase.calls.filter((call) =>
+      call.table === 'whatsapp_message_log' && call.method === 'select'
+    )).toHaveLength(1);
+  });
+
+  it('uses one total count when no prior memory exists', async () => {
+    const supabase = createMemorySupabaseDouble({
+      memory: null,
+      totalVisible: 19,
+    });
+    const generateJson = vi.fn();
+
+    await expect(loadOrRefreshInboxAiMemory({
+      supabase: supabase.client,
+      stableKey: priorMemory.stableKey,
+      transcript: 'Cliente: Hola',
+      historyMeta: { loaded: 19, truncated: false },
+      dependencies: {
+        getApiKey: () => 'test-key',
+        resolveModel: () => 'memory-model',
+        generateJson,
+      },
+    })).resolves.toBeNull();
+
+    expect(supabase.calls.filter((call) =>
+      call.table === 'whatsapp_message_log' && call.method === 'select'
+    )).toHaveLength(1);
+    expect(supabase.calls.some((call) =>
+      call.table === 'whatsapp_message_log' && call.method === 'gt'
+    )).toBe(false);
+    expect(generateJson).not.toHaveBeenCalled();
+  });
+
+  it('does not refresh truncated history again when no visible message progressed', async () => {
+    const supabase = createMemorySupabaseDouble({
+      memory: priorMemoryRow,
+      totalVisible: 20,
+      newVisible: 0,
+    });
+    const generateJson = vi.fn();
+
+    await expect(loadOrRefreshInboxAiMemory({
+      supabase: supabase.client,
+      stableKey: priorMemory.stableKey,
+      transcript: 'Cliente: mismo historial truncado',
+      historyMeta: {
+        loaded: 20,
+        truncated: true,
+        newestAt: priorMemory.lastSummarizedMessageAt ?? undefined,
+      },
+      dependencies: {
+        getApiKey: () => 'test-key',
+        resolveModel: () => 'memory-model',
+        generateJson,
+      },
+    })).resolves.toEqual(priorMemory);
+
+    const countSelects = supabase.calls.filter((call) =>
+      call.table === 'whatsapp_message_log' && call.method === 'select'
+    );
+    expect(countSelects).toHaveLength(1);
+    expect(generateJson).not.toHaveBeenCalled();
+    expect(supabase.upserts).toHaveLength(0);
   });
 
   it('fails open and preserves prior memory when Gemini fails', async () => {
@@ -231,6 +299,35 @@ describe('loadOrRefreshInboxAiMemory', () => {
     expect(warnings.join(' ')).not.toContain(priorMemory.stableKey);
     expect(warnings.join(' ')).not.toContain('dato privado');
     expect(supabase.upserts).toHaveLength(0);
+    warn.mockRestore();
+  });
+
+  it('fails open and warns when the new-message count fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const supabase = createMemorySupabaseDouble({
+      memory: priorMemoryRow,
+      countError: new Error('count unavailable'),
+    });
+    const generateJson = vi.fn();
+
+    await expect(loadOrRefreshInboxAiMemory({
+      supabase: supabase.client,
+      stableKey: priorMemory.stableKey,
+      transcript: 'Cliente: dato privado',
+      historyMeta: { loaded: 20, truncated: true },
+      dependencies: {
+        getApiKey: () => 'test-key',
+        resolveModel: () => 'memory-model',
+        generateJson,
+      },
+    })).resolves.toEqual(priorMemory);
+
+    expect(generateJson).not.toHaveBeenCalled();
+    expect(warn.mock.calls.some(([value]) => {
+      const parsed = JSON.parse(String(value)) as Record<string, unknown>;
+      return parsed.scope === 'inbox-ai-memory' &&
+        parsed.event === 'message-count-failed';
+    })).toBe(true);
     warn.mockRestore();
   });
 
@@ -299,12 +396,53 @@ describe('loadOrRefreshInboxAiMemory', () => {
       model: 'memory-model',
       logScope: 'inbox-ai-memory',
       logResponsePreview: false,
-      responseSchema: expect.objectContaining({
+      responseJsonSchema: expect.objectContaining({
         type: 'object',
         required: ['summary', 'preferences', 'objections', 'agreements'],
         additionalProperties: false,
       }),
     }));
+  });
+
+  it('fails open and warns when the refreshed memory upsert fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const supabase = createMemorySupabaseDouble({
+      memory: priorMemoryRow,
+      totalVisible: 40,
+      newVisible: 20,
+      upsertError: new Error('upsert unavailable'),
+    });
+    const generateJson = vi.fn().mockResolvedValue({
+      summary: 'Nuevo resumen',
+      preferences: [],
+      objections: [],
+      agreements: [],
+    });
+
+    await expect(loadOrRefreshInboxAiMemory({
+      supabase: supabase.client,
+      stableKey: priorMemory.stableKey,
+      transcript: 'Cliente: dato privado',
+      historyMeta: {
+        loaded: 20,
+        truncated: false,
+        newestAt: '2026-08-05T12:00:00.000Z',
+      },
+      dependencies: {
+        getApiKey: () => 'test-key',
+        resolveModel: () => 'memory-model',
+        generateJson,
+      },
+    })).resolves.toEqual(priorMemory);
+
+    expect(generateJson).toHaveBeenCalledTimes(1);
+    expect(supabase.upserts).toHaveLength(1);
+    expect(warn.mock.calls.some(([value]) => {
+      const parsed = JSON.parse(String(value)) as Record<string, unknown>;
+      return parsed.scope === 'inbox-ai-memory' &&
+        parsed.event === 'memory-upsert-failed';
+    })).toBe(true);
+    warn.mockRestore();
   });
 
   it('returns null when the initial read fails and no memory is available', async () => {
