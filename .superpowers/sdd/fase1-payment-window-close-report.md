@@ -34,3 +34,36 @@ Implementación de los tres hallazgos del brief completada, sin push ni deploy.
 
 - Al incluir el archivo backend modificado en el lint enfocado, ESLint reporta dos errores preexistentes `no-useless-assignment` en las líneas 227–228 de `inboxAiContextFormat.ts`. El mismo comando sobre la versión `HEAD` falla con exactamente esos dos errores; no se corrigieron para no ampliar el alcance.
 - Se detectaron cambios concurrentes ajenos a Fase 1B en `.superpowers/sdd/progress.md`, briefs/diffs V5 y `deno.lock`. Se excluyeron del commit de esta tarea.
+
+## Corrección posterior a revisión — switching A → B
+
+La revisión detectó que `ChatArea` mantenía `conversation.id`, `messages` y
+`loading` en fuentes independientes. Al cambiar de A a B, React podía renderizar
+B con los mensajes todavía retenidos de A antes de ejecutar el efecto que los
+limpiaba. Además, el fetch inicial de `subscribeToMessages()` podía resolver
+después del unsubscribe.
+
+La corrección reemplaza esos estados independientes por un snapshot/reducer
+identificado conjuntamente por `conversationId` y `historyKey`. La UI y la
+emisión de `LoadedConversationInbound` solo consumen un snapshot `loaded` cuya
+identidad coincide con la conversación activa. Las respuestas tardías de una
+suscripción anterior se ignoran en el reducer.
+
+### Evidencia TDD adicional
+
+- RED — `conversationMessageHistory.test.ts` no podía cargar el seam de estado
+  todavía inexistente.
+- GREEN — la prueba A → B verifica:
+  - que el snapshot cargado de A no se expone durante el render transitorio de B;
+  - que B no emite inbound mientras espera su propio historial;
+  - que un callback tardío de A no reemplaza el estado de B;
+  - que B emite únicamente su propio inbound después de cargar.
+
+### Verificación adicional
+
+- Pruebas enfocadas switching/ventana: 10/10 aprobadas en 2 archivos.
+- Suite CRM completa: 124/124 aprobadas en 16 archivos.
+- Type-check: aprobado (`tsc -b --noEmit`).
+- Lint enfocado de la corrección: aprobado.
+- Diagnósticos IDE de los archivos modificados: sin errores.
+- Graphify AST actualizado: 65.759 nodos y 518.390 edges.

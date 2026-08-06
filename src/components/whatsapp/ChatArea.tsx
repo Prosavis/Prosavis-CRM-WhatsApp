@@ -1,4 +1,11 @@
-import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from 'react';
 import {
   Box,
   Typography,
@@ -82,10 +89,14 @@ import type { ForwardWhatsAppResult } from '@/services/forwardWhatsAppMessage';
 import { isForwardableMessage } from '@/services/forwardWhatsAppMessage';
 import { ContactAvatar } from '@/components/common/ContactAvatar';
 import { pickContactPhotoUrl } from '@/utils/contactAvatar';
+import type { LoadedConversationInbound } from '@/utils/whatsappTemplateSuggestions';
 import {
-  getLoadedConversationInbound,
-  type LoadedConversationInbound,
-} from '@/utils/whatsappTemplateSuggestions';
+  conversationMessageHistoryReducer,
+  createConversationMessageHistoryState,
+  isConversationMessageHistoryLoading,
+  selectConversationMessages,
+  selectLoadedConversationInbound,
+} from '@/utils/conversationMessageHistory';
 import { coloredChipSx } from '@/utils/coloredChipStyles';
 import { prepareWhatsAppSticker } from '@/utils/prepareWhatsAppSticker';
 import { summarizePeerPresences } from '@/utils/whatsappAdminPresence';
@@ -212,8 +223,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   onLoadedConversationInbound,
 }) => {
   const theme = useTheme();
-  const [messages, setMessages] = useState<WhatsAppMessage[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [messageHistory, dispatchMessageHistory] = useReducer(
+    conversationMessageHistoryReducer,
+    createConversationMessageHistoryState(
+      conversation.id,
+      conversation.phone || conversation.id,
+    ),
+  );
   const [suggestionDraft, setSuggestionDraft] = useState('');
   const [suggestionLoading, setSuggestionLoading] = useState(false);
   const [suggestionHint, setSuggestionHint] = useState<string | null>(null);
@@ -254,6 +270,20 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const stableKey = conversation.phone || conversation.id;
+  const messages = useMemo(
+    () =>
+      selectConversationMessages(
+        messageHistory,
+        conversation.id,
+        stableKey,
+      ),
+    [conversation.id, messageHistory, stableKey],
+  );
+  const loading = isConversationMessageHistoryLoading(
+    messageHistory,
+    conversation.id,
+    stableKey,
+  );
   const voiceTranscriptionStorageKey = `wa-include-voice-transcriptions:${phoneNumberId || 'default'}:${myUid || 'admin'}`;
   const [includeVoiceTranscriptions, setIncludeVoiceTranscriptions] = useState(() => {
     if (typeof window === 'undefined') return false;
@@ -264,25 +294,38 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [stickersLoading, setStickersLoading] = useState(false);
 
   useEffect(() => {
-    setLoading(true);
-    setMessages([]);
+    const conversationId = conversation.id;
+    const historyKey = stableKey;
+    dispatchMessageHistory({
+      type: 'started',
+      conversationId,
+      historyKey,
+    });
     setSelectionMode(false);
     setSelectedIds(new Set());
 
     const unsub = subscribeToMessages(
-      stableKey,
+      historyKey,
       (msgs) => {
-        setMessages(msgs);
-        setLoading(false);
+        dispatchMessageHistory({
+          type: 'loaded',
+          conversationId,
+          historyKey,
+          messages: msgs,
+        });
       },
       (error) => {
         console.error('Error en listener de mensajes:', error);
-        setLoading(false);
+        dispatchMessageHistory({
+          type: 'failed',
+          conversationId,
+          historyKey,
+        });
       },
     );
 
     return () => unsub();
-  }, [stableKey]);
+  }, [conversation.id, stableKey]);
 
   useEffect(() => {
     setSuggestionDraft('');
@@ -930,15 +973,20 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     [messages],
   );
   const loadedConversationInbound = useMemo(
-    () => getLoadedConversationInbound(conversation.id, visibleMessages),
-    [conversation.id, visibleMessages],
+    () =>
+      selectLoadedConversationInbound(
+        messageHistory,
+        conversation.id,
+        stableKey,
+      ),
+    [conversation.id, messageHistory, stableKey],
   );
-  const lastInboundAt = loadedConversationInbound.lastInboundAt;
+  const lastInboundAt = loadedConversationInbound?.lastInboundAt ?? null;
   useEffect(() => {
-    if (!loading) {
+    if (loadedConversationInbound) {
       onLoadedConversationInbound?.(loadedConversationInbound);
     }
-  }, [loadedConversationInbound, loading, onLoadedConversationInbound]);
+  }, [loadedConversationInbound, onLoadedConversationInbound]);
   const pendingInboundAudioCount = useMemo(
     () =>
       visibleMessages.filter(
