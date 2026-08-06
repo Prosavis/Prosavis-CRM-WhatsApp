@@ -1,0 +1,1664 @@
+﻿commit 65ec4d20caebc50f6065fdc6e8d3c3ccf80760fd
+Author:     Nicol├ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+AuthorDate: Thu Aug 6 10:20:28 2026 -0500
+Commit:     Nicol├ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+CommitDate: Thu Aug 6 10:20:28 2026 -0500
+
+    feat: add operational inbox AI context
+    
+    Co-authored-by: Cursor <cursoragent@cursor.com>
+
+diff --git a/.superpowers/sdd/fase2-contexto-report.md b/.superpowers/sdd/fase2-contexto-report.md
+new file mode 100644
+index 0000000..2d9fbc7
+--- /dev/null
++++ b/.superpowers/sdd/fase2-contexto-report.md
+@@ -0,0 +1,67 @@
++# Fase 2 ÔÇö Reporte de implementaci├│n
++
++## Estado
++
++Implementaci├│n completada localmente en `master`, sin push ni deploy.
++
++## Alcance implementado
++
++- `loadConversationTags` fue reemplazado por un contexto operacional tipado que carga tags activos, notas administrativas, responsable, ├║ltima intenci├│n y estado de automatizaci├│n inbound.
++- El directorio ahora carga y formatea `source`, `service_id`, `classification`, `payment_status` y `opt_out`.
++- Las respuestas oficiales se consultan ├║nicamente desde Edge Functions:
++  - snippets activos y fijados, ordenados por `sort_order` y `shortcut`;
++  - FAQs activas con pregunta, respuesta, categor├¡a y palabras clave;
++  - filtros, l├¡mites expl├¡citos y clipping por entrada;
++  - degradaci├│n independiente a listas vac├¡as con warnings JSON estructurados.
++- Se a├▒adieron las secciones exactas:
++  - `=== Contexto operativo de conversaci├│n ===`
++  - `=== Clasificaci├│n CRM ===`
++  - `=== Respuestas oficiales de la casa ===`
++- Se exportan `SECTION_CHAR_BUDGETS` y `INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET`.
++- El transcript conserva su presupuesto de 60.000 caracteres y los mensajes m├ís recientes. Cada secci├│n se recorta de forma independiente, conserva el heading y marca la truncaci├│n. El bloque completo tiene techo de 78.000 caracteres.
++- La instrucci├│n de sistema prioriza la redacci├│n oficial antes de improvisar.
++- No se a├▒adi├│ acceso Supabase desde el frontend ni se expuso `service_role`.
++
++## TDD y verificaci├│n
++
++Se verificaron ciclos red/green para:
++
++- mapeo de contexto operacional y tags activos;
++- mapeo de clasificaci├│n del directorio;
++- filtros y l├¡mites de snippets/FAQs;
++- clipping por entrada;
++- degradaci├│n ante errores de consulta;
++- formato de las tres secciones nuevas;
++- presupuesto independiente por secci├│n;
++- bloque de hasta 78.000 caracteres con transcript de 60.000;
++- conservaci├│n del final del transcript;
++- preferencia de respuestas oficiales en la instrucci├│n de sistema.
++
++Resultados:
++
++- Pruebas enfocadas: 25/25.
++- Suite CRM completa: 134/134 en 17 archivos.
++- Type-check: exitoso.
++- ESLint enfocado: 0 errores.
++- Diagn├│sticos del IDE en archivos modificados: 0 errores.
++- `git diff --check`: exitoso.
++
++## Archivos de tarea
++
++- `supabase/functions/_shared/inboxAiContext.ts`
++- `supabase/functions/_shared/inboxAiKnowledge.ts`
++- `supabase/functions/_shared/inboxAiContextFormat.ts`
++- `src/utils/inboxAiContextLoad.test.ts`
++- `src/utils/inboxAiContextFormat.test.ts`
++- `.superpowers/sdd/fase2-contexto-report.md`
++
++## Seguridad y concurrencia
++
++- Todas las consultas nuevas permanecen server-side dentro de `supabase/functions/_shared`.
++- No hay claves, secretos ni acceso privilegiado a├▒adido al bundle React.
++- El WIP V5 concurrente y su lockfile no fueron modificados ni incluidos en el alcance de esta tarea.
++
++## Preocupaciones
++
++- La actualizaci├│n posterior del grafo no pudo ejecutarse: el comando local `graphify update .` termina con `ModuleNotFoundError: No module named 'graphify'`. La exploraci├│n previa s├¡ se realiz├│ con Graphify MCP. Se requiere reparar la instalaci├│n local del CLI para regenerar `graphify-out`.
++- No se validaron consultas contra Supabase remoto porque la tarea proh├¡be deploy y no requiere mutaciones de esquema. Los contratos de consulta se cubrieron con dobles de Supabase en tests.
+diff --git a/src/utils/inboxAiContextFormat.test.ts b/src/utils/inboxAiContextFormat.test.ts
+index a2a6d39..25eb14a 100644
+--- a/src/utils/inboxAiContextFormat.test.ts
++++ b/src/utils/inboxAiContextFormat.test.ts
+@@ -1,13 +1,15 @@
+ import { describe, expect, it } from 'vitest';
+ import {
++  INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET,
+   INBOX_AI_SYSTEM_INSTRUCTION,
++  SECTION_CHAR_BUDGETS,
+   buildPropertyLocationSummary,
+   formatBogotaDateTime,
+   formatInboxAiContextBlock,
+   groundBookingClientInfo,
+   groundBookingPayment,
+   mapInboxAiAppointmentPayment,
+   normalizeAddressKey,
+ } from '../../supabase/functions/_shared/inboxAiContextFormat';
+ 
+ describe('normalizeAddressKey / buildPropertyLocationSummary', () => {
+@@ -196,35 +198,178 @@ describe('formatInboxAiContextBlock', () => {
+         lastInboundAt: null,
+         expiresAt: null,
+         requiresTemplate: true,
+       },
+       nowIso: '2026-08-05T12:00:00.000Z',
+     });
+ 
+     expect(block).not.toContain('valor: COP 0');
+     expect(block).not.toContain('valor: COP -88.000');
+   });
++
++  it('formats operational conversation, CRM classification and official house answers', () => {
++    const block = formatInboxAiContextBlock({
++      phone: '573009998877',
++      transcript: 'Cliente: Necesito informaci├│n',
++      historyMeta: { loaded: 1, truncated: false },
++      conversationContext: {
++        tags: ['Bogot├í'],
++        adminNotes: 'Cliente prefiere contacto por WhatsApp',
++        assignedTo: 'agent-7',
++        lastIntent: 'pricing',
++        automatedInboundDisabled: true,
++      },
++      directory: {
++        id: 'directory-1',
++        fullName: 'Ana',
++        source: 'whatsapp',
++        serviceId: 'cleaning',
++        classification: 'client',
++        paymentStatus: 'pending',
++        optOut: true,
++        isReturningClient: true,
++      },
++      officialAnswers: {
++        snippets: [{
++          shortcut: '/precio',
++          label: 'Precio base',
++          body: 'Nuestro apoyo m├¡nimo es de dos horas.',
++        }],
++        faqs: [{
++          question: '┬┐D├│nde tienen cobertura?',
++          answer: 'Tenemos cobertura en Bogot├í y Medell├¡n.',
++          category: 'cobertura',
++          keywords: ['ciudades', 'zonas'],
++        }],
++      },
++      appointments: [],
++      sessionWindow: {
++        status: 'open',
++        lastInboundAt: null,
++        expiresAt: null,
++        requiresTemplate: false,
++      },
++      nowIso: '2026-08-05T12:00:00.000Z',
++    });
++
++    expect(block).toContain('=== Contexto operativo de conversaci├│n ===');
++    expect(block).toContain('Notas administrativas: Cliente prefiere contacto por WhatsApp');
++    expect(block).toContain('Automatizaci├│n inbound deshabilitada: s├¡');
++    expect(block).toContain('=== Clasificaci├│n CRM ===');
++    expect(block).toContain('Fuente: whatsapp');
++    expect(block).toContain('Servicio: cleaning');
++    expect(block).toContain('Clasificaci├│n: client');
++    expect(block).toContain('Opt-out: s├¡');
++    expect(block).toContain('=== Respuestas oficiales de la casa ===');
++    expect(block).toContain('/precio | Precio base');
++    expect(block).toContain('┬┐D├│nde tienen cobertura?');
++    expect(block).toMatch(/reutiliza.+redacci├│n oficial.+antes de improvisar/i);
++  });
++
++  it('clips every section independently and keeps the complete block within its ceiling', () => {
++    const huge = 'x'.repeat(100_000);
++    const latestTranscriptMarker = '├ÜLTIMO MENSAJE';
++    const block = formatInboxAiContextBlock({
++      phone: '573009998877',
++      transcript:
++        `${'h'.repeat(60_000 - latestTranscriptMarker.length)}${latestTranscriptMarker}`,
++      historyMeta: {
++        loaded: 150,
++        truncated: true,
++        oldestAt: '2026-01-01T00:00:00.000Z',
++        newestAt: '2026-08-05T12:00:00.000Z',
++      },
++      conversationContext: {
++        tags: Array.from({ length: 100 }, (_, index) => `tag-${index}-${huge}`),
++        adminNotes: huge,
++        assignedTo: huge,
++        lastIntent: huge,
++        automatedInboundDisabled: false,
++      },
++      directory: {
++        fullName: huge,
++        notesSummary: huge,
++        source: huge,
++        serviceId: huge,
++        classification: huge,
++        paymentStatus: huge,
++        tags: Array.from({ length: 100 }, (_, index) => `dir-${index}-${huge}`),
++        optOut: false,
++        isReturningClient: true,
++      },
++      officialAnswers: {
++        snippets: Array.from({ length: 30 }, (_, index) => ({
++          shortcut: `/s${index}`,
++          label: huge,
++          body: huge,
++        })),
++        faqs: Array.from({ length: 30 }, () => ({
++          question: huge,
++          answer: huge,
++          category: huge,
++          keywords: [huge],
++        })),
++      },
++      appointments: Array.from({ length: 10 }, (_, index) => ({
++        id: String(index),
++        scheduledDate: `2026-08-${String(index + 10).padStart(2, '0')}T14:00:00.000Z`,
++        serviceName: huge,
++        address: huge,
++        clientName: huge,
++        providerName: huge,
++      })),
++      sessionWindow: {
++        status: 'open',
++        lastInboundAt: null,
++        expiresAt: null,
++        requiresTemplate: false,
++      },
++      nowIso: '2026-08-05T12:00:00.000Z',
++    });
++
++    const headings = Object.keys(SECTION_CHAR_BUDGETS);
++    for (const [index, heading] of headings.entries()) {
++      const start = block.indexOf(heading);
++      expect(start, heading).toBeGreaterThanOrEqual(0);
++      const nextStarts = headings
++        .slice(index + 1)
++        .map((nextHeading) => block.indexOf(nextHeading, start + heading.length))
++        .filter((position) => position >= 0);
++      const end = nextStarts.length ? Math.min(...nextStarts) : block.length;
++      expect(block.slice(start, end).trimEnd().length, heading)
++        .toBeLessThanOrEqual(SECTION_CHAR_BUDGETS[heading]);
++    }
++    expect(block).toContain('[Secci├│n truncada por presupuesto]');
++    expect(block).toContain('├ÜLTIMO MENSAJE');
++    expect(block.length).toBeLessThanOrEqual(INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET);
++  });
+ });
+ 
+ describe('INBOX_AI_SYSTEM_INSTRUCTION', () => {
+   it('requires early arrival when house will be empty', () => {
+     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/SEGURIDAD Y ACCESO/);
+     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/1 hora antes/);
+     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/NUNCA propongas llegar exactamente/);
+   });
+ 
+   it('requires grounded prices, payments, availability and Meta templates', () => {
+     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/precios.+cat├ílogo oficial/i);
+     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/pago.+datos autoritativos/i);
+     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/nunca inventes.+horarios disponibles/i);
+     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/ventana.+cerrada.+plantilla/i);
+   });
++
++  it('prefers official house answers before improvising', () => {
++    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(
++      /respuestas oficiales de la casa.+antes de improvisar/i,
++    );
++  });
+ });
+ 
+ describe('groundBookingClientInfo', () => {
+   it('grounds address from preferred / single property', () => {
+     const grounded = groundBookingClientInfo(
+       {
+         stage: 'collecting',
+         clientInfo: {
+           name: 'Inventado',
+           phone: '000',
+diff --git a/src/utils/inboxAiContextLoad.test.ts b/src/utils/inboxAiContextLoad.test.ts
+new file mode 100644
+index 0000000..1856352
+--- /dev/null
++++ b/src/utils/inboxAiContextLoad.test.ts
+@@ -0,0 +1,294 @@
++import { describe, expect, it, vi } from 'vitest';
++import {
++  OFFICIAL_ANSWERS_QUERY_LIMITS,
++  loadConversationContext,
++  loadDirectoryByPhone,
++  loadOfficialAnswers,
++} from '../../supabase/functions/_shared/inboxAiKnowledge';
++
++type Row = Record<string, unknown>;
++type QueryCall = { table: string; method: string; args: unknown[] };
++
++function createSupabaseDouble(
++  tableRows: Record<string, Row[]>,
++  tableErrors: Record<string, Error> = {},
++) {
++  const calls: QueryCall[] = [];
++
++  return {
++    calls,
++    client: {
++      from(table: string) {
++        let rows = [...(tableRows[table] ?? [])];
++        let limit: number | null = null;
++        const query = {
++          select(...args: unknown[]) {
++            calls.push({ table, method: 'select', args });
++            return query;
++          },
++          eq(column: string, value: unknown) {
++            calls.push({ table, method: 'eq', args: [column, value] });
++            rows = rows.filter((row) => row[column] === value);
++            return query;
++          },
++          in(column: string, values: unknown[]) {
++            calls.push({ table, method: 'in', args: [column, values] });
++            rows = rows.filter((row) => values.includes(row[column]));
++            return query;
++          },
++          order(column: string, options: { ascending: boolean }) {
++            calls.push({ table, method: 'order', args: [column, options] });
++            rows.sort((left, right) => {
++              const a = String(left[column] ?? '');
++              const b = String(right[column] ?? '');
++              return options.ascending ? a.localeCompare(b) : b.localeCompare(a);
++            });
++            return query;
++          },
++          limit(value: number) {
++            calls.push({ table, method: 'limit', args: [value] });
++            limit = value;
++            return query;
++          },
++          maybeSingle() {
++            calls.push({ table, method: 'maybeSingle', args: [] });
++            const error = tableErrors[table] ?? null;
++            return Promise.resolve({ data: error ? null : rows[0] ?? null, error });
++          },
++          then(
++            resolve: (value: { data: Row[] | null; error: Error | null }) => unknown,
++          ) {
++            const error = tableErrors[table] ?? null;
++            return Promise.resolve({
++              data: error ? null : rows.slice(0, limit ?? rows.length),
++              error,
++            }).then(resolve);
++          },
++        };
++        return query;
++      },
++    },
++  };
++}
++
++describe('loadConversationContext', () => {
++  it('maps operational fields and resolves only active tag names in conversation order', async () => {
++    const { client, calls } = createSupabaseDouble({
++      whatsapp_conversations: [{
++        stable_key: '573001112233',
++        tag_ids: ['tag-2', 'tag-1', 'archived'],
++        admin_notes: '  Llamar despu├®s de las 4  ',
++        assigned_to: 'agent-9',
++        last_intent: 'booking',
++        automated_inbound_disabled: true,
++      }],
++      whatsapp_chat_tags: [
++        { id: 'tag-1', name: 'Favorito', archived: false },
++        { id: 'tag-2', name: 'Bogot├í', archived: false },
++        { id: 'archived', name: 'No debe aparecer', archived: true },
++      ],
++    });
++
++    const result = await loadConversationContext(client, '573001112233');
++
++    expect(result).toEqual({
++      tags: ['Bogot├í', 'Favorito'],
++      adminNotes: 'Llamar despu├®s de las 4',
++      assignedTo: 'agent-9',
++      lastIntent: 'booking',
++      automatedInboundDisabled: true,
++    });
++    expect(calls).toContainEqual({
++      table: 'whatsapp_conversations',
++      method: 'select',
++      args: ['tag_ids, admin_notes, assigned_to, last_intent, automated_inbound_disabled'],
++    });
++    expect(calls).toContainEqual({
++      table: 'whatsapp_chat_tags',
++      method: 'eq',
++      args: ['archived', false],
++    });
++    expect(calls.some((call) =>
++      call.table === 'whatsapp_chat_tags' && call.method === 'limit'
++    )).toBe(true);
++  });
++});
++
++describe('loadOfficialAnswers', () => {
++  it('loads only pinned active snippets and active FAQs with deterministic limits and order', async () => {
++    const { client, calls } = createSupabaseDouble({
++      whatsapp_snippets: [
++        {
++          shortcut: '/zeta',
++          label: 'Zeta',
++          body: 'Respuesta zeta',
++          is_active: true,
++          is_pinned: true,
++          sort_order: 2,
++        },
++        {
++          shortcut: '/alpha',
++          label: 'Alpha',
++          body: 'Respuesta alpha',
++          is_active: true,
++          is_pinned: true,
++          sort_order: 1,
++        },
++        {
++          shortcut: '/inactive',
++          label: 'No',
++          body: 'No debe aparecer',
++          is_active: false,
++          is_pinned: true,
++          sort_order: 0,
++        },
++        {
++          shortcut: '/unpinned',
++          label: 'No',
++          body: 'No debe aparecer',
++          is_active: true,
++          is_pinned: false,
++          sort_order: 0,
++        },
++      ],
++      crm_faqs: [
++        {
++          question: '┬┐Cu├íl es la cobertura?',
++          answer: 'Bogot├í y Medell├¡n.',
++          category: 'cobertura',
++          keywords: ['ciudades'],
++          is_active: true,
++        },
++        {
++          question: 'FAQ inactiva',
++          answer: 'No debe aparecer',
++          category: null,
++          keywords: [],
++          is_active: false,
++        },
++      ],
++    });
++
++    const result = await loadOfficialAnswers(client);
++
++    expect(result.snippets.map((entry) => entry.shortcut)).toEqual(['/alpha', '/zeta']);
++    expect(result.faqs).toEqual([{
++      question: '┬┐Cu├íl es la cobertura?',
++      answer: 'Bogot├í y Medell├¡n.',
++      category: 'cobertura',
++      keywords: ['ciudades'],
++    }]);
++    expect(calls).toContainEqual({
++      table: 'whatsapp_snippets',
++      method: 'limit',
++      args: [OFFICIAL_ANSWERS_QUERY_LIMITS.snippets],
++    });
++    expect(calls).toContainEqual({
++      table: 'crm_faqs',
++      method: 'limit',
++      args: [OFFICIAL_ANSWERS_QUERY_LIMITS.faqs],
++    });
++    expect(calls.filter((call) =>
++      call.table === 'whatsapp_snippets' && call.method === 'order'
++    ).map((call) => call.args[0])).toEqual(['sort_order', 'shortcut']);
++  });
++
++  it('clips oversized entries before returning them', async () => {
++    const { client } = createSupabaseDouble({
++      whatsapp_snippets: [{
++        shortcut: `/${'s'.repeat(300)}`,
++        label: 'L'.repeat(500),
++        body: 'B'.repeat(5_000),
++        is_active: true,
++        is_pinned: true,
++        sort_order: 0,
++      }],
++      crm_faqs: [{
++        question: 'Q'.repeat(2_000),
++        answer: 'A'.repeat(8_000),
++        category: 'C'.repeat(500),
++        keywords: ['K'.repeat(500)],
++        is_active: true,
++      }],
++    });
++
++    const result = await loadOfficialAnswers(client);
++
++    expect(result.snippets[0]?.shortcut).toMatch(/ÔÇª$/);
++    expect(result.snippets[0]?.label).toMatch(/ÔÇª$/);
++    expect(result.snippets[0]?.body).toMatch(/ÔÇª$/);
++    expect(result.faqs[0]?.question).toMatch(/ÔÇª$/);
++    expect(result.faqs[0]?.answer).toMatch(/ÔÇª$/);
++    expect(result.faqs[0]?.category).toMatch(/ÔÇª$/);
++    expect(result.faqs[0]?.keywords[0]).toMatch(/ÔÇª$/);
++  });
++
++  it('degrades query failures to empty lists and structured warnings', async () => {
++    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
++    const { client } = createSupabaseDouble(
++      {},
++      {
++        whatsapp_snippets: new Error('snippets unavailable'),
++        crm_faqs: new Error('faqs unavailable'),
++      },
++    );
++
++    await expect(loadOfficialAnswers(client)).resolves.toEqual({
++      snippets: [],
++      faqs: [],
++    });
++    const warnings = warn.mock.calls.map(([value]) => JSON.parse(String(value)));
++    expect(warnings).toEqual(expect.arrayContaining([
++      expect.objectContaining({
++        scope: 'inbox-ai-context',
++        event: 'official-snippets-query-failed',
++      }),
++      expect.objectContaining({
++        scope: 'inbox-ai-context',
++        event: 'official-faqs-query-failed',
++      }),
++    ]));
++    warn.mockRestore();
++  });
++});
++
++describe('loadDirectoryByPhone', () => {
++  it('maps operational classification fields from the bounded phone lookup', async () => {
++    const { client, calls } = createSupabaseDouble({
++      crm_directory: [{
++        id: 'directory-1',
++        phone: '+573001112233',
++        full_name: 'Ana P├®rez',
++        display_name: 'Ana',
++        source: 'whatsapp',
++        service_id: 'cleaning',
++        classification: 'client',
++        payment_status: 'pending',
++        opt_out: true,
++        notes: 'Prefiere la tarde',
++        internal_notes: 'VIP',
++        tags: ['Bogot├í'],
++        metadata: { city: 'Bogot├í' },
++        updated_at: '2026-08-06T10:00:00.000Z',
++      }],
++    });
++
++    const result = await loadDirectoryByPhone(client, '+573001112233');
++
++    expect(result).toMatchObject({
++      id: 'directory-1',
++      fullName: 'Ana',
++      source: 'whatsapp',
++      serviceId: 'cleaning',
++      classification: 'client',
++      paymentStatus: 'pending',
++      optOut: true,
++      notesSummary: 'Prefiere la tarde | VIP',
++    });
++    expect(calls).toContainEqual({
++      table: 'crm_directory',
++      method: 'limit',
++      args: [5],
++    });
++  });
++});
+diff --git a/supabase/functions/_shared/inboxAiContext.ts b/supabase/functions/_shared/inboxAiContext.ts
+index 6840434..94689d4 100644
+--- a/supabase/functions/_shared/inboxAiContext.ts
++++ b/supabase/functions/_shared/inboxAiContext.ts
+@@ -5,67 +5,79 @@
+  */
+ 
+ import {
+   DEFAULT_HISTORY_LIMIT,
+   DEFAULT_TRANSCRIPT_CHAR_BUDGET,
+   buildTranscriptWithBudget,
+   getConversationHistoryWithMeta,
+   type ConversationHistoryMeta,
+ } from './conversationHistory.ts';
+ import {
+-  directoryPhoneKey,
+   directoryPhoneLookupVariants,
+   normalizeDirectoryPhoneE164,
+ } from './directoryPhone.ts';
+ import { runFirestoreQuery } from './firebaseAdminRest.ts';
+ import { scheduledDateToIso } from './clientSegments.ts';
+ import { normalizePhone } from './whatsappIdentity.ts';
+ import {
++  INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET,
+   INBOX_AI_SYSTEM_INSTRUCTION,
++  SECTION_CHAR_BUDGETS,
+   buildPropertyLocationSummary,
+   formatInboxAiContextBlock,
+   groundBookingClientInfo,
+   groundBookingPayment,
+   mapInboxAiAppointmentPayment,
+   type InboxAiAppointment,
+   type InboxAiDirectory,
+   type InboxAiPropertySummary,
+ } from './inboxAiContextFormat.ts';
++import {
++  loadConversationContext,
++  loadDirectoryByPhone,
++  loadOfficialAnswers,
++  type InboxAiConversationContext,
++  type InboxAiOfficialAnswers,
++} from './inboxAiKnowledge.ts';
+ import {
+   buildMetaSessionWindow,
+   type MetaSessionWindow,
+ } from './metaSessionWindow.ts';
+ 
+ export {
++  INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET,
+   INBOX_AI_SYSTEM_INSTRUCTION,
++  SECTION_CHAR_BUDGETS,
+   buildPropertyLocationSummary,
+   formatInboxAiContextBlock,
+   groundBookingClientInfo,
+   groundBookingPayment,
+ };
+ export type { InboxAiAppointment, InboxAiDirectory, InboxAiPropertySummary };
++export type { InboxAiConversationContext, InboxAiOfficialAnswers };
+ export type { MetaSessionWindow };
+ 
+ type SupabaseClient = any;
+ 
+-const NOTES_SUMMARY_MAX = 400;
+ const UPCOMING_APPTS = 5;
+ const PAST_APPTS = 5;
+ const APPT_QUERY_LIMIT = 40;
+ const APPT_LOOKBACK_MONTHS = 18;
+ 
+ export interface InboxAiContext {
+   phone: string;
+   transcript: string;
+   historyMeta: ConversationHistoryMeta;
++  conversationContext: InboxAiConversationContext;
+   conversationTags: string[];
+   directory: InboxAiDirectory | null;
++  officialAnswers: InboxAiOfficialAnswers;
+   appointments: InboxAiAppointment[];
+   /** Total de citas en lookback (antes del slice de listado). */
+   appointmentCount: number;
+   propertySummary: InboxAiPropertySummary;
+   sessionWindow: MetaSessionWindow;
+   formattedBlock: string;
+   /** Rol del ├║ltimo turn tras merge (el presupuesto recorta desde lo antiguo). */
+   lastTurnRole: 'user' | 'bot' | null;
+ }
+ 
+@@ -77,27 +89,20 @@ function asTrimmedString(value: unknown): string | null {
+ 
+ function asFiniteNumber(value: unknown): number | null {
+   if (typeof value === 'number' && Number.isFinite(value)) return value;
+   if (typeof value === 'string' && value.trim()) {
+     const n = Number(value);
+     return Number.isFinite(n) ? n : null;
+   }
+   return null;
+ }
+ 
+-function clipNotes(value: string | null | undefined, max = NOTES_SUMMARY_MAX): string | null {
+-  if (!value) return null;
+-  const text = value.trim();
+-  if (!text) return null;
+-  return text.length <= max ? text : `${text.slice(0, max)}ÔÇª`;
+-}
+-
+ function resolveAddressLine(data: Record<string, unknown>): string | null {
+   const serviceAddress = data.serviceAddress;
+   if (serviceAddress && typeof serviceAddress === 'object') {
+     const line = asTrimmedString((serviceAddress as Record<string, unknown>).addressLine);
+     if (line) return line;
+   }
+   const location = data.location;
+   if (location && typeof location === 'object') {
+     const addr = asTrimmedString((location as Record<string, unknown>).address);
+     if (addr) return addr;
+@@ -106,111 +111,20 @@ function resolveAddressLine(data: Record<string, unknown>): string | null {
+ }
+ 
+ function resolveAddressReference(data: Record<string, unknown>): string | null {
+   const serviceAddress = data.serviceAddress;
+   if (serviceAddress && typeof serviceAddress === 'object') {
+     return asTrimmedString((serviceAddress as Record<string, unknown>).reference);
+   }
+   return null;
+ }
+ 
+-function cityFromDirectoryRow(row: Record<string, unknown>): string | null {
+-  const meta = row.metadata;
+-  if (meta && typeof meta === 'object') {
+-    return asTrimmedString((meta as Record<string, unknown>).city);
+-  }
+-  return null;
+-}
+-
+-async function loadConversationTags(
+-  supabase: SupabaseClient,
+-  stableKey: string,
+-): Promise<string[]> {
+-  const { data: conv, error: convError } = await supabase
+-    .from('whatsapp_conversations')
+-    .select('tag_ids')
+-    .eq('stable_key', stableKey)
+-    .maybeSingle();
+-  if (convError) throw convError;
+-
+-  const tagIds: string[] = Array.isArray(conv?.tag_ids) ? conv.tag_ids : [];
+-  if (!tagIds.length) return [];
+-
+-  const { data: tags, error: tagsError } = await supabase
+-    .from('whatsapp_chat_tags')
+-    .select('id, name, archived')
+-    .in('id', tagIds)
+-    .eq('archived', false);
+-  if (tagsError) throw tagsError;
+-
+-  const byId = new Map<string, string>();
+-  for (const row of tags ?? []) {
+-    if (row?.id && typeof row.name === 'string' && row.name.trim()) {
+-      byId.set(String(row.id), row.name.trim());
+-    }
+-  }
+-  return tagIds.map((id) => byId.get(id)).filter((n): n is string => Boolean(n));
+-}
+-
+-async function loadDirectoryByPhone(
+-  supabase: SupabaseClient,
+-  phone: string,
+-): Promise<InboxAiDirectory | null> {
+-  const e164 = normalizeDirectoryPhoneE164(phone) ?? phone;
+-  const variants = directoryPhoneLookupVariants(e164);
+-  const lookupPhones = variants.length > 0 ? variants : [phone];
+-
+-  const { data: rows, error } = await supabase
+-    .from('crm_directory')
+-    .select(
+-      'id, full_name, display_name, phone, email, address, preferred_service_address_line, notes, internal_notes, tags, app_user_id, payment_status, metadata',
+-    )
+-    .in('phone', lookupPhones)
+-    .order('updated_at', { ascending: false })
+-    .limit(5);
+-
+-  if (error) throw error;
+-
+-  const targetKey = directoryPhoneKey(phone);
+-  const row =
+-    (rows ?? []).find((r: Record<string, unknown>) => {
+-      const key = directoryPhoneKey(asTrimmedString(r.phone));
+-      return targetKey && key && key === targetKey;
+-    }) ?? (rows ?? [])[0] ?? null;
+-
+-  if (!row) return null;
+-
+-  const tags = Array.isArray(row.tags)
+-    ? row.tags.filter((t: unknown): t is string => typeof t === 'string' && t.trim().length > 0)
+-    : [];
+-  const notes = clipNotes(
+-    [asTrimmedString(row.notes), asTrimmedString(row.internal_notes)]
+-      .filter(Boolean)
+-      .join(' | ') || null,
+-  );
+-  const appUserId = asTrimmedString(row.app_user_id);
+-
+-  return {
+-    id: String(row.id),
+-    fullName: asTrimmedString(row.display_name) ?? asTrimmedString(row.full_name),
+-    email: asTrimmedString(row.email),
+-    address: asTrimmedString(row.address),
+-    preferredServiceAddress: asTrimmedString(row.preferred_service_address_line),
+-    city: cityFromDirectoryRow(row as Record<string, unknown>),
+-    tags,
+-    appUserId,
+-    notesSummary: notes,
+-    paymentStatus: asTrimmedString(row.payment_status),
+-    isReturningClient: Boolean(appUserId),
+-  };
+-}
+-
+ function resolveProviderName(data: Record<string, unknown>): string | null {
+   const rawNames = Array.isArray(data.assignedTeamMemberNames)
+     ? data.assignedTeamMemberNames
+     : [];
+   const assignedNames = rawNames
+     .map((name) => (typeof name === 'string' ? name.trim() : ''))
+     .filter((name) => name.length > 0);
+   if (assignedNames.length === 1) return assignedNames[0];
+   if (assignedNames.length > 1) {
+     return `${assignedNames.slice(0, -1).join(', ')} y ${assignedNames[assignedNames.length - 1]}`;
+@@ -384,99 +298,109 @@ export async function buildInboxAiContext(
+     history.meta,
+     charBudget,
+   );
+   if (!transcript.trim() || !merged.length) {
+     throw new Error('No hay mensajes del cliente en el historial.');
+   }
+   const lastTurnRole = merged[merged.length - 1]?.role ?? null;
+   const nowIso = new Date().toISOString();
+   const sessionWindow = buildMetaSessionWindow(completeMerged, nowIso);
+ 
+-  let conversationTags: string[] = [];
++  let conversationContext: InboxAiConversationContext = {
++    tags: [],
++    adminNotes: null,
++    assignedTo: null,
++    lastIntent: null,
++    automatedInboundDisabled: false,
++  };
+   try {
+-    conversationTags = await loadConversationTags(supabase, stableKey);
++    conversationContext = await loadConversationContext(supabase, stableKey);
+   } catch (err) {
+     console.warn(
+       JSON.stringify({
+         scope: 'inbox-ai-context',
+-        event: 'conversation-tags-failed',
++        event: 'conversation-context-failed',
+         error: String((err as Error)?.message ?? err),
+       }),
+     );
+   }
++  const conversationTags = conversationContext.tags;
+ 
+   let directory: InboxAiDirectory | null = null;
+   try {
+     directory = await loadDirectoryByPhone(supabase, phone);
+   } catch (err) {
+     console.warn(
+       JSON.stringify({
+         scope: 'inbox-ai-context',
+         event: 'directory-lookup-failed',
+         error: String((err as Error)?.message ?? err),
+       }),
+     );
+   }
+ 
++  const officialAnswers = await loadOfficialAnswers(supabase);
++
+   let appointments: InboxAiAppointment[] = [];
+   let allAppointments: InboxAiAppointment[] = [];
+   let appointmentCount = 0;
+   try {
+     const loaded = await loadAppointmentsForContact({
+       phone,
+       directoryId: directory?.id,
+       appUserId: directory?.appUserId,
+     });
+     appointments = loaded.appointments;
+     allAppointments = loaded.allAppointments;
+     appointmentCount = loaded.totalCount;
+   } catch (err) {
+     console.warn(
+       JSON.stringify({
+         scope: 'inbox-ai-context',
+         event: 'appointments-load-failed',
+         error: String((err as Error)?.message ?? err),
+       }),
+     );
+-    appointments = [];
+-    allAppointments = [];
+-    appointmentCount = 0;
+   }
+ 
+   if (directory && appointmentCount > 0) {
+     directory = { ...directory, isReturningClient: true };
+   }
+ 
+   const propertySummary = buildPropertyLocationSummary({
+     appointments: allAppointments,
+     preferredDirectoryAddress:
+       directory?.preferredServiceAddress ?? directory?.address ?? null,
+   });
+ 
+   const formattedBlock = formatInboxAiContextBlock({
+     phone,
+     transcript,
+     historyMeta,
+     conversationTags,
++    conversationContext,
+     directory,
++    officialAnswers,
+     appointments,
+     appointmentCount,
+     allAppointmentsForProperties: allAppointments,
+     propertySummary,
+     sessionWindow,
+     nowIso,
+   });
+ 
+   return {
+     phone,
+     transcript,
+     historyMeta,
++    conversationContext,
+     conversationTags,
+     directory,
++    officialAnswers,
+     appointments,
+     appointmentCount,
+     propertySummary,
+     sessionWindow,
+     formattedBlock,
+     lastTurnRole,
+   };
+ }
+diff --git a/supabase/functions/_shared/inboxAiContextFormat.ts b/supabase/functions/_shared/inboxAiContextFormat.ts
+index 9e586c9..0621c06 100644
+--- a/supabase/functions/_shared/inboxAiContextFormat.ts
++++ b/supabase/functions/_shared/inboxAiContextFormat.ts
+@@ -1,36 +1,69 @@
+ /**
+  * Formato puro del bloque de contexto AI del inbox (sin Deno/Firebase).
+  * Testeable con Vitest.
+  */
+ 
+-import type { ConversationHistoryMeta } from './conversationHistory.ts';
++import {
++  DEFAULT_TRANSCRIPT_CHAR_BUDGET,
++  type ConversationHistoryMeta,
++} from './conversationHistory.ts';
++import type {
++  InboxAiConversationContext,
++  InboxAiOfficialAnswers,
++} from './inboxAiKnowledge.ts';
+ import type { MetaSessionWindow } from './metaSessionWindow.ts';
+ import { formatPricingCatalogBlock } from './pricingCatalog.ts';
+ 
+ const UPCOMING_APPTS = 5;
+ const PAST_APPTS = 5;
+ const BOGOTA_TZ = 'America/Bogota';
+ const MAX_PROPERTIES_IN_SUMMARY = 8;
++const SECTION_TRUNCATION_MARKER = '[Secci├│n truncada por presupuesto]';
++
++export const INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET = 78_000;
++
++/**
++ * Incluye heading y contenido de cada secci├│n. La suma (77.000) deja margen
++ * para separadores sin desplazar el transcript reciente de 60.000 caracteres.
++ */
++export const SECTION_CHAR_BUDGETS: Readonly<Record<string, number>> = Object.freeze({
++  '=== Momento actual ===': 700,
++  '=== Canal / ventana WhatsApp ===': 350,
++  '=== Perfil directorio ===': 1_200,
++  '=== Contexto operativo de conversaci├│n ===': 1_000,
++  '=== Clasificaci├│n CRM ===': 900,
++  '=== Resumen de agendamientos / apoyos ===': 350,
++  '=== Propiedades / ubicaciones de apoyos ===': 1_400,
++  '=== Tags ===': 600,
++  '=== Cat├ílogo oficial de precios (fuente de verdad) ===': 2_500,
++  '=== Respuestas oficiales de la casa ===': 4_500,
++  '=== Citas / apoyos (Firestore, fuente de verdad) ===': 3_000,
++  '=== Historial WhatsApp ===': 60_500,
++});
+ 
+ export interface InboxAiDirectory {
+   id?: string;
+   fullName?: string | null;
+   email?: string | null;
+   address?: string | null;
+   /** Direcci├│n preferida de servicio en directorio (si existe). */
+   preferredServiceAddress?: string | null;
+   city?: string | null;
+   tags?: string[];
+   appUserId?: string | null;
+   notesSummary?: string | null;
++  source?: string | null;
++  serviceId?: string | null;
++  classification?: string | null;
+   paymentStatus?: string | null;
++  optOut?: boolean;
+   isReturningClient: boolean;
+ }
+ 
+ export interface InboxAiAppointment {
+   id: string;
+   scheduledDate: string;
+   status?: string | null;
+   serviceName?: string | null;
+   address?: string | null;
+   /** Referencia de ubicaci├│n (apto, torre, etc.). */
+@@ -88,22 +121,24 @@ export interface InboxAiPropertySummary {
+   patternLabel: string;
+   properties: InboxAiPropertyEntry[];
+   preferredDirectoryAddress?: string | null;
+   appointmentsWithoutAddress: number;
+ }
+ 
+ export interface InboxAiContextSlice {
+   phone: string;
+   transcript: string;
+   historyMeta: ConversationHistoryMeta;
+-  conversationTags: string[];
++  conversationTags?: string[];
++  conversationContext?: InboxAiConversationContext;
+   directory: InboxAiDirectory | null;
++  officialAnswers?: InboxAiOfficialAnswers;
+   appointments: InboxAiAppointment[];
+   /** Total de citas encontradas en la ventana de lookback (no solo las listadas). */
+   appointmentCount?: number;
+   propertySummary?: InboxAiPropertySummary | null;
+   sessionWindow: MetaSessionWindow;
+ }
+ 
+ /** Fecha/hora legible en zona Colombia (America/Bogota). */
+ export function formatBogotaDateTime(iso: string): string {
+   const d = new Date(iso);
+@@ -217,22 +252,22 @@ export function buildPropertyLocationSummary(params: {
+     .slice(0, MAX_PROPERTIES_IN_SUMMARY)
+     .map((g) => ({
+       address: g.address,
+       reference: g.reference,
+       appointmentCount: g.count,
+       firstDate: g.firstDate,
+       lastDate: g.lastDate,
+     }));
+ 
+   const uniquePropertyCount = groups.size;
+-  let pattern: PropertyPattern = 'none';
+-  let patternLabel = 'Sin direcciones de apoyo registradas.';
++  let pattern: PropertyPattern;
++  let patternLabel: string;
+   if (uniquePropertyCount === 0 && withoutAddress === 0) {
+     pattern = 'none';
+     patternLabel = 'Sin apoyos/citas con direcci├│n en la ventana.';
+   } else if (uniquePropertyCount === 0 && withoutAddress > 0) {
+     pattern = 'unknown';
+     patternLabel = `${withoutAddress} apoyo(s) sin direcci├│n registrada (ubicaci├│n desconocida).`;
+   } else if (uniquePropertyCount === 1) {
+     pattern = 'single';
+     patternLabel =
+       `Siempre en la misma propiedad (${properties[0]?.address ?? 'ÔÇö'}; ${properties[0]?.appointmentCount ?? 0} apoyo(s)).`;
+@@ -297,164 +332,243 @@ function formatPropertySummaryBlock(summary: InboxAiPropertySummary): string[] {
+         `- ${p.address} | ${p.appointmentCount} apoyo(s) | desde ${first} hasta ${last}`,
+       );
+     }
+   }
+   lines.push(
+     'Al agendar o confirmar, pregunta si el apoyo es en la misma propiedad habitual o en otra ubicaci├│n.',
+   );
+   return lines;
+ }
+ 
++function clipSection(section: string, heading: string): string {
++  const budget = SECTION_CHAR_BUDGETS[heading];
++  if (!budget || section.length <= budget) return section;
++  const suffix = `\n${SECTION_TRUNCATION_MARKER}`;
++  return `${section.slice(0, Math.max(heading.length, budget - suffix.length)).trimEnd()}${suffix}`;
++}
++
++function buildSection(heading: string, lines: string[]): string {
++  return clipSection([heading, ...lines].join('\n'), heading);
++}
++
++function clipTranscriptToLatest(transcript: string): string {
++  if (transcript.length <= DEFAULT_TRANSCRIPT_CHAR_BUDGET) return transcript;
++  const marker = '[Historial recortado desde lo m├ís antiguo]';
++  const remaining = DEFAULT_TRANSCRIPT_CHAR_BUDGET - marker.length - 1;
++  return `${marker}\n${transcript.slice(-Math.max(0, remaining))}`;
++}
++
++function formatOfficialAnswers(answers?: InboxAiOfficialAnswers): string[] {
++  const lines = [
++    'Reutiliza la redacci├│n oficial de la casa antes de improvisar una respuesta nueva.',
++  ];
++  if (!answers?.snippets.length && !answers?.faqs.length) {
++    lines.push('Sin respuestas oficiales activas disponibles.');
++    return lines;
++  }
++  if (answers.snippets.length) {
++    lines.push('Snippets fijados:');
++    for (const snippet of answers.snippets) {
++      lines.push(`- ${snippet.shortcut} | ${snippet.label}: ${snippet.body}`);
++    }
++  }
++  if (answers.faqs.length) {
++    lines.push('Preguntas frecuentes activas:');
++    for (const faq of answers.faqs) {
++      const metadata = [
++        faq.category ? `categor├¡a: ${faq.category}` : null,
++        faq.keywords.length ? `keywords: ${faq.keywords.join(', ')}` : null,
++      ].filter(Boolean);
++      lines.push(
++        `- ${faq.question}: ${faq.answer}${metadata.length ? ` (${metadata.join(' | ')})` : ''}`,
++      );
++    }
++  }
++  return lines;
++}
++
+ /** Formatea el bloque de contexto CRM (puro, testeable). */
+ export function formatInboxAiContextBlock(params: {
+   phone: string;
+   transcript: string;
+   historyMeta: ConversationHistoryMeta;
+-  conversationTags: string[];
++  conversationTags?: string[];
++  conversationContext?: InboxAiConversationContext;
+   directory: InboxAiDirectory | null;
++  officialAnswers?: InboxAiOfficialAnswers;
+   appointments: InboxAiAppointment[];
+   appointmentCount?: number;
+   /** Citas completas de lookback para resumen de propiedades (si no, usa appointments). */
+   allAppointmentsForProperties?: InboxAiAppointment[];
+   propertySummary?: InboxAiPropertySummary | null;
+   sessionWindow: MetaSessionWindow;
+   nowIso?: string;
+ }): string {
+   const nowIso = params.nowIso ?? new Date().toISOString();
+   const now = new Date(nowIso).getTime();
+-  const lines: string[] = [];
+-
+-  lines.push('=== Momento actual ===');
+-  lines.push(`Fecha/hora actual (Colombia): ${formatBogotaDateTime(nowIso)} (${nowIso})`);
+-  lines.push('Usa esta fecha como referencia temporal al interpretar "hoy", "ma├▒ana", "ayer" y el historial.');
+-  lines.push(
++  const conversationTags =
++    params.conversationContext?.tags ?? params.conversationTags ?? [];
++  const directory = params.directory;
++  const conversation = params.conversationContext;
++  const sections: string[] = [];
++
++  sections.push(buildSection('=== Momento actual ===', [
++    `Fecha/hora actual (Colombia): ${formatBogotaDateTime(nowIso)} (${nowIso})`,
++    'Usa esta fecha como referencia temporal al interpretar "hoy", "ma├▒ana", "ayer" y el historial.',
+     'Pol├¡tica operativa: si el cliente indica que a cierta hora no habr├í nadie / se va la persona, ' +
+       'prop├│n llegada ~1 h antes para recepci├│n segura del personal (nunca esa hora exacta).',
+-  );
+-
+-  lines.push('');
+-  lines.push('=== Canal / ventana WhatsApp ===');
+-  lines.push(`Estado: ${params.sessionWindow.status}`);
+-  lines.push(`├Ültimo mensaje inbound: ${params.sessionWindow.lastInboundAt ?? 'desconocido'}`);
+-  lines.push(`Expira: ${params.sessionWindow.expiresAt ?? 'desconocido'}`);
+-  lines.push(`Requiere plantilla: ${params.sessionWindow.requiresTemplate ? 's├¡' : 'no'}`);
+-
+-  lines.push('');
+-  lines.push('=== Perfil directorio ===');
+-  if (params.directory) {
+-    const d = params.directory;
+-    lines.push(`Nombre: ${d.fullName ?? 'ÔÇö'}`);
+-    lines.push(`Tel├®fono: ${params.phone}`);
+-    if (d.email) lines.push(`Email: ${d.email}`);
+-    if (d.city) lines.push(`Ciudad: ${d.city}`);
+-    if (d.address) lines.push(`Direcci├│n de contacto: ${d.address}`);
+-    if (d.preferredServiceAddress) {
+-      lines.push(`Direcci├│n preferida de servicio: ${d.preferredServiceAddress}`);
++  ]));
++
++  sections.push(buildSection('=== Canal / ventana WhatsApp ===', [
++    `Estado: ${params.sessionWindow.status}`,
++    `├Ültimo mensaje inbound: ${params.sessionWindow.lastInboundAt ?? 'desconocido'}`,
++    `Expira: ${params.sessionWindow.expiresAt ?? 'desconocido'}`,
++    `Requiere plantilla: ${params.sessionWindow.requiresTemplate ? 's├¡' : 'no'}`,
++  ]));
++
++  const directoryLines: string[] = [];
++  if (directory) {
++    directoryLines.push(`Nombre: ${directory.fullName ?? 'ÔÇö'}`);
++    directoryLines.push(`Tel├®fono: ${params.phone}`);
++    if (directory.email) directoryLines.push(`Email: ${directory.email}`);
++    if (directory.city) directoryLines.push(`Ciudad: ${directory.city}`);
++    if (directory.address) directoryLines.push(`Direcci├│n de contacto: ${directory.address}`);
++    if (directory.preferredServiceAddress) {
++      directoryLines.push(
++        `Direcci├│n preferida de servicio: ${directory.preferredServiceAddress}`,
++      );
+     }
+-    lines.push(`Cliente recurrente (CRM): ${d.isReturningClient ? 's├¡' : 'no'}`);
+-    if (d.paymentStatus) {
+-      lines.push(`Estado de pago (directorio): ${d.paymentStatus}`);
++    directoryLines.push(
++      `Cliente recurrente (CRM): ${directory.isReturningClient ? 's├¡' : 'no'}`,
++    );
++    if (directory.paymentStatus) {
++      directoryLines.push(`Estado de pago (directorio): ${directory.paymentStatus}`);
+     }
+-    if (d.appUserId) lines.push(`app_user_id: ${d.appUserId}`);
+-    if (d.notesSummary) lines.push(`Notas: ${d.notesSummary}`);
++    if (directory.appUserId) directoryLines.push(`app_user_id: ${directory.appUserId}`);
++    if (directory.notesSummary) directoryLines.push(`Notas: ${directory.notesSummary}`);
+   } else {
+-    lines.push(`Sin entrada en crm_directory. Tel├®fono: ${params.phone}`);
++    directoryLines.push(`Sin entrada en crm_directory. Tel├®fono: ${params.phone}`);
+   }
++  sections.push(buildSection('=== Perfil directorio ===', directoryLines));
++
++  sections.push(buildSection('=== Contexto operativo de conversaci├│n ===', [
++    `Notas administrativas: ${conversation?.adminNotes ?? 'ÔÇö'}`,
++    `Asignado a: ${conversation?.assignedTo ?? 'sin asignar'}`,
++    `├Ültima intenci├│n: ${conversation?.lastIntent ?? 'desconocida'}`,
++    `Automatizaci├│n inbound deshabilitada: ${
++      conversation?.automatedInboundDisabled ? 's├¡' : 'no'
++    }`,
++  ]));
++
++  sections.push(buildSection('=== Clasificaci├│n CRM ===', [
++    `Fuente: ${directory?.source ?? 'ÔÇö'}`,
++    `Servicio: ${directory?.serviceId ?? 'ÔÇö'}`,
++    `Clasificaci├│n: ${directory?.classification ?? 'ÔÇö'}`,
++    `Estado de pago: ${directory?.paymentStatus ?? 'ÔÇö'}`,
++    `Opt-out: ${directory?.optOut ? 's├¡' : 'no'}`,
++  ]));
+ 
+-  const totalAppts =
++  const totalAppointments =
+     typeof params.appointmentCount === 'number'
+       ? params.appointmentCount
+       : params.appointments.length;
+   const pastCount = params.appointments.filter(
+-    (a) => new Date(a.scheduledDate).getTime() < now,
++    (appointment) => new Date(appointment.scheduledDate).getTime() < now,
+   ).length;
+   const upcomingCount = params.appointments.filter(
+-    (a) => new Date(a.scheduledDate).getTime() >= now,
++    (appointment) => new Date(appointment.scheduledDate).getTime() >= now,
+   ).length;
+-
+-  lines.push('');
+-  lines.push('=== Resumen de agendamientos / apoyos ===');
+-  lines.push(`Total apoyos/citas encontrados (ventana CRM): ${totalAppts}`);
+-  lines.push(`En listado contextual: ${upcomingCount} pr├│ximos, ${pastCount} pasados recientes`);
++  sections.push(buildSection('=== Resumen de agendamientos / apoyos ===', [
++    `Total apoyos/citas encontrados (ventana CRM): ${totalAppointments}`,
++    `En listado contextual: ${upcomingCount} pr├│ximos, ${pastCount} pasados recientes`,
++  ]));
+ 
+   const propertySummary =
+     params.propertySummary ??
+     buildPropertyLocationSummary({
+       appointments: params.allAppointmentsForProperties ?? params.appointments,
+       preferredDirectoryAddress:
+-        params.directory?.preferredServiceAddress ?? params.directory?.address ?? null,
++        directory?.preferredServiceAddress ?? directory?.address ?? null,
+     });
++  const propertyLines = formatPropertySummaryBlock(propertySummary);
++  const propertyHeading = propertyLines.shift()!;
++  sections.push(buildSection(propertyHeading, propertyLines));
+ 
+-  lines.push('');
+-  lines.push(...formatPropertySummaryBlock(propertySummary));
++  const directoryTags = directory?.tags ?? [];
++  sections.push(buildSection('=== Tags ===', [
++    `Conversaci├│n: ${conversationTags.length ? conversationTags.join(', ') : '(ninguno)'}`,
++    `Directorio: ${directoryTags.length ? directoryTags.join(', ') : '(ninguno)'}`,
++  ]));
+ 
+-  lines.push('');
+-  lines.push('=== Tags ===');
+-  lines.push(
+-    `Conversaci├│n: ${
+-      params.conversationTags.length ? params.conversationTags.join(', ') : '(ninguno)'
+-    }`,
+-  );
+-  const dirTags = params.directory?.tags ?? [];
+-  lines.push(`Directorio: ${dirTags.length ? dirTags.join(', ') : '(ninguno)'}`);
++  const pricingLines = formatPricingCatalogBlock().split('\n');
++  const pricingHeading = pricingLines.shift()!;
++  sections.push(buildSection(pricingHeading, pricingLines));
+ 
+-  lines.push('');
+-  lines.push(formatPricingCatalogBlock());
++  sections.push(buildSection(
++    '=== Respuestas oficiales de la casa ===',
++    formatOfficialAnswers(params.officialAnswers),
++  ));
+ 
+   const upcoming = params.appointments
+-    .filter((a) => new Date(a.scheduledDate).getTime() >= now)
+-    .sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate))
++    .filter((appointment) => new Date(appointment.scheduledDate).getTime() >= now)
++    .sort((left, right) => left.scheduledDate.localeCompare(right.scheduledDate))
+     .slice(0, UPCOMING_APPTS);
+   const past = params.appointments
+-    .filter((a) => new Date(a.scheduledDate).getTime() < now)
+-    .sort((a, b) => b.scheduledDate.localeCompare(a.scheduledDate))
++    .filter((appointment) => new Date(appointment.scheduledDate).getTime() < now)
++    .sort((left, right) => right.scheduledDate.localeCompare(left.scheduledDate))
+     .slice(0, PAST_APPTS);
+-
+-  lines.push('');
+-  lines.push('=== Citas / apoyos (Firestore, fuente de verdad) ===');
+-  lines.push(
++  const appointmentLines = [
+     'Cada apoyo incluye fecha/hora (Colombia), estado, servicio, cliente, auxiliar, direcci├│n y pago cuando existen.',
+-  );
++  ];
+   if (!upcoming.length && !past.length) {
+-    lines.push('Sin citas/apoyos encontrados para este contacto.');
++    appointmentLines.push('Sin citas/apoyos encontrados para este contacto.');
+   } else {
+     if (upcoming.length) {
+-      lines.push('Pr├│ximos:');
+-      for (const a of upcoming) lines.push(formatAppointmentLine(a));
++      appointmentLines.push('Pr├│ximos:');
++      appointmentLines.push(...upcoming.map(formatAppointmentLine));
+     }
+     if (past.length) {
+-      lines.push('Pasados recientes:');
+-      for (const a of past) lines.push(formatAppointmentLine(a));
++      appointmentLines.push('Pasados recientes:');
++      appointmentLines.push(...past.map(formatAppointmentLine));
+     }
+   }
++  sections.push(buildSection(
++    '=== Citas / apoyos (Firestore, fuente de verdad) ===',
++    appointmentLines,
++  ));
+ 
+-  lines.push('');
+-  lines.push('=== Historial WhatsApp ===');
+-  lines.push(
++  const historyLines = [
+     'Los mensajes incluyen fecha/hora cuando est├í disponible. Relaci├│nalos con la fecha actual de arriba.',
+-  );
++  ];
+   if (params.historyMeta.truncated) {
+-    lines.push(
++    historyLines.push(
+       `(Ventana truncada: ${params.historyMeta.loaded} turns; se priorizan mensajes recientes` +
+         `${params.historyMeta.oldestAt ? `; desde ${formatBogotaDateTime(params.historyMeta.oldestAt)}` : ''}` +
+         `${params.historyMeta.newestAt ? `; hasta ${formatBogotaDateTime(params.historyMeta.newestAt)}` : ''})`,
+     );
+   } else {
+-    lines.push(
++    historyLines.push(
+       `(${params.historyMeta.loaded} turns` +
+         `${params.historyMeta.oldestAt ? `; desde ${formatBogotaDateTime(params.historyMeta.oldestAt)}` : ''}` +
+         `${params.historyMeta.newestAt ? `; hasta ${formatBogotaDateTime(params.historyMeta.newestAt)}` : ''})`,
+     );
+   }
+-  lines.push(params.transcript);
++  historyLines.push(clipTranscriptToLatest(params.transcript));
++  sections.push(buildSection('=== Historial WhatsApp ===', historyLines));
+ 
+-  return lines.join('\n');
++  const block = sections.join('\n\n');
++  if (block.length > INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET) {
++    throw new Error(
++      `Inbox AI context exceeded ${INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET} characters.`,
++    );
++  }
++  return block;
+ }
+ 
+ /** Mezcla datos CRM reales sobre clientInfo del booking JSON inferido. */
+ export function groundBookingClientInfo<
+   T extends {
+     clientInfo?: {
+       name?: string | null;
+       phone?: string | null;
+       email?: string | null;
+       address?: string | null;
+@@ -635,20 +749,22 @@ export function groundBookingPayment<
+       Number.isFinite(appointment.totalAmount) &&
+       appointment.totalAmount > 0
+         ? appointment.totalAmount
+         : null,
+   };
+ }
+ 
+ export const INBOX_AI_SYSTEM_INSTRUCTION =
+   'Eres un agente de ventas de Prosavis (limpieza residencial y empresas en Colombia). ' +
+   'Responde en espa├▒ol, cordial y concreto. ' +
++  'Prefiere las respuestas oficiales de la casa y reutiliza su redacci├│n antes de improvisar; ' +
++  'si ninguna respuesta oficial aplica, responde con el resto del contexto verificado. ' +
+   'Usa el perfil CRM, tags, apoyos/citas Firestore y sus direcciones como fuente de verdad; no inventes citas, tags, precios, direcciones ni datos del cliente. ' +
+   'Ten en cuenta la fecha/hora actual (Colombia) y las fechas de los mensajes y apoyos para contextualizar "hoy", "ma├▒ana", retrasos y seguimiento. ' +
+   'Si el cliente tiene apoyos previos, tr├ítarlo como cliente con historial (no como lead fr├¡o). ' +
+   'Respeta el patr├│n de propiedades: si siempre ha sido la misma direcci├│n, as├║mela como habitual; ' +
+   'si ha tenido varias ubicaciones, pregunta en cu├íl quiere el pr├│ximo apoyo. ' +
+   'SEGURIDAD Y ACCESO A LA PROPIEDAD (prioridad alta): ' +
+   'Si el cliente indica que a cierta hora se va / no habr├í nadie en la casa / nadie puede recibir, ' +
+   'NUNCA propongas llegar exactamente a esa hora. Ofrece llegar con antelaci├│n (t├¡picamente 1 hora antes, ' +
+   'p. ej. si se van a las 8:00 ÔåÆ propone 7:00) para que alguien reciba al personal, entregar llaves/acceso ' +
+   'y garantizar limpieza correcta y seguridad. Explica brevemente que priorizamos seguridad y confianza. ' +
+diff --git a/supabase/functions/_shared/inboxAiKnowledge.ts b/supabase/functions/_shared/inboxAiKnowledge.ts
+new file mode 100644
+index 0000000..5aeee66
+--- /dev/null
++++ b/supabase/functions/_shared/inboxAiKnowledge.ts
+@@ -0,0 +1,264 @@
++// deno-lint-ignore-file no-explicit-any
++/** Carga server-side de conocimiento operativo para el AI del Inbox. */
++
++import {
++  directoryPhoneKey,
++  directoryPhoneLookupVariants,
++  normalizeDirectoryPhoneE164,
++} from './directoryPhone.ts';
++import type { InboxAiDirectory } from './inboxAiContextFormat.ts';
++
++type SupabaseClient = any;
++
++const CONVERSATION_TAG_QUERY_LIMIT = 50;
++const DIRECTORY_QUERY_LIMIT = 5;
++const DIRECTORY_NOTES_MAX = 400;
++const SNIPPET_SHORTCUT_MAX = 80;
++const SNIPPET_LABEL_MAX = 160;
++const SNIPPET_BODY_MAX = 900;
++const FAQ_QUESTION_MAX = 300;
++const FAQ_ANSWER_MAX = 1_200;
++const FAQ_CATEGORY_MAX = 100;
++const FAQ_KEYWORD_MAX = 80;
++const FAQ_KEYWORDS_MAX = 12;
++
++export const OFFICIAL_ANSWERS_QUERY_LIMITS = {
++  snippets: 20,
++  faqs: 20,
++} as const;
++
++export interface InboxAiConversationContext {
++  tags: string[];
++  adminNotes: string | null;
++  assignedTo: string | null;
++  lastIntent: string | null;
++  automatedInboundDisabled: boolean;
++}
++
++export interface InboxAiOfficialSnippet {
++  shortcut: string;
++  label: string;
++  body: string;
++}
++
++export interface InboxAiOfficialFaq {
++  question: string;
++  answer: string;
++  category: string | null;
++  keywords: string[];
++}
++
++export interface InboxAiOfficialAnswers {
++  snippets: InboxAiOfficialSnippet[];
++  faqs: InboxAiOfficialFaq[];
++}
++
++function asTrimmedString(value: unknown): string | null {
++  if (typeof value !== 'string') return null;
++  const trimmed = value.trim();
++  return trimmed || null;
++}
++
++function clipEntry(value: unknown, maxChars: number): string | null {
++  const text = asTrimmedString(value);
++  if (!text) return null;
++  if (text.length <= maxChars) return text;
++  return `${text.slice(0, Math.max(0, maxChars - 1)).trimEnd()}ÔÇª`;
++}
++
++function structuredWarning(event: string, error: unknown): void {
++  console.warn(
++    JSON.stringify({
++      scope: 'inbox-ai-context',
++      event,
++      error: String((error as Error)?.message ?? error),
++    }),
++  );
++}
++
++function cityFromDirectoryRow(row: Record<string, unknown>): string | null {
++  const metadata = row.metadata;
++  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null;
++  return asTrimmedString((metadata as Record<string, unknown>).city);
++}
++
++function clipDirectoryNotes(row: Record<string, unknown>): string | null {
++  const notes = [
++    asTrimmedString(row.notes),
++    asTrimmedString(row.internal_notes),
++  ].filter((value): value is string => Boolean(value)).join(' | ');
++  return clipEntry(notes, DIRECTORY_NOTES_MAX);
++}
++
++export async function loadConversationContext(
++  supabase: SupabaseClient,
++  stableKey: string,
++): Promise<InboxAiConversationContext> {
++  const { data: conversation, error: conversationError } = await supabase
++    .from('whatsapp_conversations')
++    .select('tag_ids, admin_notes, assigned_to, last_intent, automated_inbound_disabled')
++    .eq('stable_key', stableKey)
++    .limit(1)
++    .maybeSingle();
++  if (conversationError) throw conversationError;
++
++  const tagIds: string[] = Array.isArray(conversation?.tag_ids)
++    ? conversation.tag_ids.filter((id: unknown): id is string =>
++      typeof id === 'string' && id.length > 0
++    ).slice(0, CONVERSATION_TAG_QUERY_LIMIT)
++    : [];
++  const tags: string[] = [];
++
++  if (tagIds.length > 0) {
++    const { data: tagRows, error: tagsError } = await supabase
++      .from('whatsapp_chat_tags')
++      .select('id, name, archived')
++      .in('id', tagIds)
++      .eq('archived', false)
++      .limit(CONVERSATION_TAG_QUERY_LIMIT);
++    if (tagsError) throw tagsError;
++
++    const namesById = new Map<string, string>();
++    for (const row of tagRows ?? []) {
++      const id = asTrimmedString(row?.id);
++      const name = asTrimmedString(row?.name);
++      if (id && name) namesById.set(id, name);
++    }
++    tags.push(...tagIds.map((id) => namesById.get(id)).filter(
++      (name): name is string => Boolean(name),
++    ));
++  }
++
++  return {
++    tags,
++    adminNotes: asTrimmedString(conversation?.admin_notes),
++    assignedTo: asTrimmedString(conversation?.assigned_to),
++    lastIntent: asTrimmedString(conversation?.last_intent),
++    automatedInboundDisabled: conversation?.automated_inbound_disabled === true,
++  };
++}
++
++export async function loadDirectoryByPhone(
++  supabase: SupabaseClient,
++  phone: string,
++): Promise<InboxAiDirectory | null> {
++  const e164 = normalizeDirectoryPhoneE164(phone) ?? phone;
++  const variants = directoryPhoneLookupVariants(e164);
++  const lookupPhones = variants.length > 0 ? variants : [phone];
++
++  const { data: rows, error } = await supabase
++    .from('crm_directory')
++    .select(
++      'id, full_name, display_name, phone, email, address, preferred_service_address_line, notes, internal_notes, tags, app_user_id, source, service_id, classification, payment_status, opt_out, metadata',
++    )
++    .in('phone', lookupPhones)
++    .order('updated_at', { ascending: false })
++    .limit(DIRECTORY_QUERY_LIMIT);
++  if (error) throw error;
++
++  const targetKey = directoryPhoneKey(phone);
++  const row = (rows ?? []).find((candidate: Record<string, unknown>) => {
++    const key = directoryPhoneKey(asTrimmedString(candidate.phone));
++    return Boolean(targetKey && key && key === targetKey);
++  }) ?? (rows ?? [])[0] ?? null;
++  if (!row) return null;
++
++  const tags = Array.isArray(row.tags)
++    ? row.tags
++      .map((tag: unknown) => asTrimmedString(tag))
++      .filter((tag: string | null): tag is string => Boolean(tag))
++    : [];
++  const appUserId = asTrimmedString(row.app_user_id);
++
++  return {
++    id: String(row.id),
++    fullName: asTrimmedString(row.display_name) ?? asTrimmedString(row.full_name),
++    email: asTrimmedString(row.email),
++    address: asTrimmedString(row.address),
++    preferredServiceAddress: asTrimmedString(row.preferred_service_address_line),
++    city: cityFromDirectoryRow(row),
++    tags,
++    appUserId,
++    notesSummary: clipDirectoryNotes(row),
++    source: asTrimmedString(row.source),
++    serviceId: asTrimmedString(row.service_id),
++    classification: asTrimmedString(row.classification),
++    paymentStatus: asTrimmedString(row.payment_status),
++    optOut: row.opt_out === true,
++    isReturningClient: Boolean(appUserId),
++  };
++}
++
++async function loadOfficialSnippets(
++  supabase: SupabaseClient,
++): Promise<InboxAiOfficialSnippet[]> {
++  try {
++    const { data, error } = await supabase
++      .from('whatsapp_snippets')
++      .select('shortcut, label, body')
++      .eq('is_active', true)
++      .eq('is_pinned', true)
++      .order('sort_order', { ascending: true })
++      .order('shortcut', { ascending: true })
++      .limit(OFFICIAL_ANSWERS_QUERY_LIMITS.snippets);
++    if (error) throw error;
++
++    return (data ?? []).flatMap((row: Record<string, unknown>) => {
++      const shortcut = clipEntry(row.shortcut, SNIPPET_SHORTCUT_MAX);
++      const body = clipEntry(row.body, SNIPPET_BODY_MAX);
++      if (!shortcut || !body) return [];
++      return [{
++        shortcut,
++        label: clipEntry(row.label, SNIPPET_LABEL_MAX) ?? shortcut,
++        body,
++      }];
++    });
++  } catch (error) {
++    structuredWarning('official-snippets-query-failed', error);
++    return [];
++  }
++}
++
++async function loadOfficialFaqs(
++  supabase: SupabaseClient,
++): Promise<InboxAiOfficialFaq[]> {
++  try {
++    const { data, error } = await supabase
++      .from('crm_faqs')
++      .select('question, answer, category, keywords')
++      .eq('is_active', true)
++      .limit(OFFICIAL_ANSWERS_QUERY_LIMITS.faqs);
++    if (error) throw error;
++
++    return (data ?? []).flatMap((row: Record<string, unknown>) => {
++      const question = clipEntry(row.question, FAQ_QUESTION_MAX);
++      const answer = clipEntry(row.answer, FAQ_ANSWER_MAX);
++      if (!question || !answer) return [];
++      const keywords = Array.isArray(row.keywords)
++        ? row.keywords
++          .slice(0, FAQ_KEYWORDS_MAX)
++          .map((keyword) => clipEntry(keyword, FAQ_KEYWORD_MAX))
++          .filter((keyword): keyword is string => Boolean(keyword))
++        : [];
++      return [{
++        question,
++        answer,
++        category: clipEntry(row.category, FAQ_CATEGORY_MAX),
++        keywords,
++      }];
++    });
++  } catch (error) {
++    structuredWarning('official-faqs-query-failed', error);
++    return [];
++  }
++}
++
++export async function loadOfficialAnswers(
++  supabase: SupabaseClient,
++): Promise<InboxAiOfficialAnswers> {
++  const [snippets, faqs] = await Promise.all([
++    loadOfficialSnippets(supabase),
++    loadOfficialFaqs(supabase),
++  ]);
++  return { snippets, faqs };
++}

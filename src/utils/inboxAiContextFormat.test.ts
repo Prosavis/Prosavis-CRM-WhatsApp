@@ -363,6 +363,12 @@ describe('INBOX_AI_SYSTEM_INSTRUCTION', () => {
     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/precios.+catálogo oficial/i);
     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/pago.+datos autoritativos/i);
     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/nunca inventes.+horarios disponibles/i);
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toContain(
+      '=== Disponibilidad real (próximos días) ===',
+    );
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(
+      /prefiere.+hora real.+llegada anticipada/i,
+    );
     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/ventana.+cerrada.+plantilla/i);
   });
 

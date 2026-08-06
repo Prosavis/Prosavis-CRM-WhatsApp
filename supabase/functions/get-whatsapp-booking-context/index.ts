@@ -7,6 +7,10 @@ import {
 } from '../_shared/geminiClient.ts';
 import { resolveBookingPricingCheckout } from '../_shared/pricingCatalog.ts';
 import {
+  loadRealAvailability,
+  overwriteBookingAvailability,
+} from '../_shared/availability.ts';
+import {
   buildInboxAiContext,
   groundBookingClientInfo,
   groundBookingPayment,
@@ -56,7 +60,14 @@ Deno.serve(async (req) => {
       wompiPaymentReference,
       wompiAmountCOP,
     } = resolveBookingPricingCheckout(groundedPaymentContext, ctx.phone);
-    const bookingContext = groundBookingClientInfo(pricedBookingContext, ctx);
+    const groundedBookingContext = groundBookingClientInfo(pricedBookingContext, ctx);
+    const availableSlots = await loadRealAvailability(
+      groundedBookingContext.collectedData.duration,
+    );
+    const bookingContext = overwriteBookingAvailability(
+      groundedBookingContext,
+      availableSlots,
+    );
 
     return jsonResponse({
       bookingContext,

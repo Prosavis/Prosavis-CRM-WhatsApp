@@ -153,3 +153,67 @@ Diagnósticos IDE de migración y pgTAP: sin errores.
 La compilación PL/pgSQL y la ejecución pgTAP continúan sin evidencia runtime
 hasta que el stack local PostgreSQL pueda iniciar. No se usó producción como
 sustituto.
+
+## Follow-up — compatibilidad con citas legacy
+
+Commit funcional task-scoped: `d64cb9c`
+(`fix(db): accept legacy null projection timestamp`), compuesto únicamente por
+la migración RPC y su prueba pgTAP.
+
+El RPC conserva `source_updated_at` como clave obligatoria, pero ahora acepta
+JSON `null` o un timestamp string. `source_revision` continúa siendo un entero
+no negativo y `source_hash` conserva la validación SHA-256 hexadecimal.
+
+La regresión pgTAP proyecta una cita legacy con revisión `0` y
+`source_updated_at: null`, repite exactamente el payload y comprueba:
+
+- primera respuesta `inserted`;
+- persistencia de revisión `0` y `source_updated_at IS NULL`;
+- retry `same_revision` con `applied=false`;
+- un booking, cero crew, un addon y un event después del retry.
+
+### Red
+
+```text
+npx supabase test db --local
+Connecting to local database...
+LegacyDbConnectError: failed to connect to postgres:
+dial error (connect ECONNREFUSED 127.0.0.1:54322)
+Suggestion: Make sure Docker is running, then run: supabase start
+Exit code: 1
+```
+
+### Checks posteriores
+
+```text
+npx supabase db reset --local
+LegacyDbBootstrapError: failed to inspect service
+Exit code: 1
+```
+
+```text
+npx supabase test db --local
+Connecting to local database...
+LegacyDbConnectError: failed to connect to postgres:
+dial error (connect ECONNREFUSED 127.0.0.1:54322)
+Suggestion: Make sure Docker is running, then run: supabase start
+Exit code: 1
+```
+
+```text
+npx supabase db lint --local --level error
+Connecting to local database...
+LegacyDbConnectError: failed to connect to postgres:
+dial error (connect ECONNREFUSED 127.0.0.1:54322)
+Suggestion: Make sure Docker is running, then run: supabase start
+Exit code: 1
+```
+
+```text
+git diff --cached --check
+Exit code: 0
+Sin salida.
+```
+
+Diagnósticos IDE de migración y pgTAP: sin errores. No se ejecutó ninguna
+mutación remota.

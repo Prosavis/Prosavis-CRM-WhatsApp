@@ -1,0 +1,442 @@
+﻿commit ebdbf3f05d6dc6ae0e389a2f2ed1bddf1d060386
+Author:     Nicol├ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+AuthorDate: Thu Aug 6 10:29:02 2026 -0500
+Commit:     Nicol├ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+CommitDate: Thu Aug 6 10:29:02 2026 -0500
+
+    fix: preserve complete inbox AI context
+    
+    Co-authored-by: Cursor <cursoragent@cursor.com>
+
+diff --git a/.superpowers/sdd/fase2-contexto-report.md b/.superpowers/sdd/fase2-contexto-report.md
+index 2d9fbc7..108327a 100644
+--- a/.superpowers/sdd/fase2-contexto-report.md
++++ b/.superpowers/sdd/fase2-contexto-report.md
+@@ -1,53 +1,57 @@
+ # Fase 2 ÔÇö Reporte de implementaci├│n
+ 
+ ## Estado
+ 
+ Implementaci├│n completada localmente en `master`, sin push ni deploy.
+ 
+ ## Alcance implementado
+ 
+-- `loadConversationTags` fue reemplazado por un contexto operacional tipado que carga tags activos, notas administrativas, responsable, ├║ltima intenci├│n y estado de automatizaci├│n inbound.
++- `loadConversationTags` fue reemplazado por un contexto operacional tipado que carga todos los tags activos, notas administrativas, responsable, ├║ltima intenci├│n y estado de automatizaci├│n inbound.
++- Los `tag_ids` no se recortan durante la carga. Los nombres se resuelven en lotes de 100 para limitar el tama├▒o de cada URL sin usar un l├¡mite de filas que descarte tags; el presupuesto se aplica ├║nicamente al formatear el prompt.
+ - El directorio ahora carga y formatea `source`, `service_id`, `classification`, `payment_status` y `opt_out`.
+ - Las respuestas oficiales se consultan ├║nicamente desde Edge Functions:
+   - snippets activos y fijados, ordenados por `sort_order` y `shortcut`;
+   - FAQs activas con pregunta, respuesta, categor├¡a y palabras clave;
+   - filtros, l├¡mites expl├¡citos y clipping por entrada;
+   - degradaci├│n independiente a listas vac├¡as con warnings JSON estructurados.
+ - Se a├▒adieron las secciones exactas:
+   - `=== Contexto operativo de conversaci├│n ===`
+   - `=== Clasificaci├│n CRM ===`
+   - `=== Respuestas oficiales de la casa ===`
+ - Se exportan `SECTION_CHAR_BUDGETS` y `INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET`.
++- Los headings internos forman una uni├│n exhaustiva derivada de `SECTION_CHAR_BUDGETS`. Un heading desconocido falla temprano mediante `getSectionCharBudget`; ya no existe fallback silencioso sin presupuesto.
+ - El transcript conserva su presupuesto de 60.000 caracteres y los mensajes m├ís recientes. Cada secci├│n se recorta de forma independiente, conserva el heading y marca la truncaci├│n. El bloque completo tiene techo de 78.000 caracteres.
+ - La instrucci├│n de sistema prioriza la redacci├│n oficial antes de improvisar.
+ - No se a├▒adi├│ acceso Supabase desde el frontend ni se expuso `service_role`.
+ 
+ ## TDD y verificaci├│n
+ 
+ Se verificaron ciclos red/green para:
+ 
+ - mapeo de contexto operacional y tags activos;
++- conservaci├│n ordenada de 125 tags mediante batching, sin `.limit(50)`;
+ - mapeo de clasificaci├│n del directorio;
+ - filtros y l├¡mites de snippets/FAQs;
+ - clipping por entrada;
+ - degradaci├│n ante errores de consulta;
+ - formato de las tres secciones nuevas;
+ - presupuesto independiente por secci├│n;
++- rechazo temprano de headings sin budget;
+ - bloque de hasta 78.000 caracteres con transcript de 60.000;
+ - conservaci├│n del final del transcript;
+ - preferencia de respuestas oficiales en la instrucci├│n de sistema.
+ 
+ Resultados:
+ 
+-- Pruebas enfocadas: 25/25.
+-- Suite CRM completa: 134/134 en 17 archivos.
++- Pruebas enfocadas: 27/27.
++- Suite CRM completa: 136/136 en 17 archivos.
+ - Type-check: exitoso.
+ - ESLint enfocado: 0 errores.
+ - Diagn├│sticos del IDE en archivos modificados: 0 errores.
+ - `git diff --check`: exitoso.
+ 
+ ## Archivos de tarea
+ 
+ - `supabase/functions/_shared/inboxAiContext.ts`
+ - `supabase/functions/_shared/inboxAiKnowledge.ts`
+ - `supabase/functions/_shared/inboxAiContextFormat.ts`
+diff --git a/src/utils/inboxAiContextFormat.test.ts b/src/utils/inboxAiContextFormat.test.ts
+index 25eb14a..1efec85 100644
+--- a/src/utils/inboxAiContextFormat.test.ts
++++ b/src/utils/inboxAiContextFormat.test.ts
+@@ -1,22 +1,24 @@
+ import { describe, expect, it } from 'vitest';
+ import {
+   INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET,
+   INBOX_AI_SYSTEM_INSTRUCTION,
+   SECTION_CHAR_BUDGETS,
+   buildPropertyLocationSummary,
+   formatBogotaDateTime,
+   formatInboxAiContextBlock,
++  getSectionCharBudget,
+   groundBookingClientInfo,
+   groundBookingPayment,
+   mapInboxAiAppointmentPayment,
+   normalizeAddressKey,
++  type InboxAiSectionHeading,
+ } from '../../supabase/functions/_shared/inboxAiContextFormat';
+ 
+ describe('normalizeAddressKey / buildPropertyLocationSummary', () => {
+   it('treats minor address variants as the same property', () => {
+     const a = normalizeAddressKey('Calle 1 #2-3 Apto 401');
+     const b = normalizeAddressKey('calle 1 2 3, apartamento 401');
+     expect(a).toBeTruthy();
+     expect(a).toBe(b);
+   });
+ 
+@@ -60,20 +62,26 @@ describe('normalizeAddressKey / buildPropertyLocationSummary', () => {
+         },
+       ],
+     });
+     expect(summary.pattern).toBe('multiple');
+     expect(summary.uniquePropertyCount).toBe(2);
+     expect(summary.patternLabel).toContain('2 propiedades');
+   });
+ });
+ 
+ describe('formatInboxAiContextBlock', () => {
++  it('rejects an unbudgeted section heading instead of formatting it silently', () => {
++    expect(() => getSectionCharBudget('=== Secci├│n sin presupuesto ===')).toThrow(
++      /heading sin presupuesto/i,
++    );
++  });
++
+   it('includes property summary, addresses, appointment count and current time', () => {
+     const block = formatInboxAiContextBlock({
+       phone: '573001112233',
+       transcript: '[01/08/2026, 05:00] Cliente: Hola\n[01/08/2026, 06:00] Agente: Buenas',
+       historyMeta: {
+         loaded: 2,
+         truncated: false,
+         oldestAt: '2026-08-01T10:00:00Z',
+         newestAt: '2026-08-01T11:00:00Z',
+       },
+@@ -319,21 +327,21 @@ describe('formatInboxAiContextBlock', () => {
+       })),
+       sessionWindow: {
+         status: 'open',
+         lastInboundAt: null,
+         expiresAt: null,
+         requiresTemplate: false,
+       },
+       nowIso: '2026-08-05T12:00:00.000Z',
+     });
+ 
+-    const headings = Object.keys(SECTION_CHAR_BUDGETS);
++    const headings = Object.keys(SECTION_CHAR_BUDGETS) as InboxAiSectionHeading[];
+     for (const [index, heading] of headings.entries()) {
+       const start = block.indexOf(heading);
+       expect(start, heading).toBeGreaterThanOrEqual(0);
+       const nextStarts = headings
+         .slice(index + 1)
+         .map((nextHeading) => block.indexOf(nextHeading, start + heading.length))
+         .filter((position) => position >= 0);
+       const end = nextStarts.length ? Math.min(...nextStarts) : block.length;
+       expect(block.slice(start, end).trimEnd().length, heading)
+         .toBeLessThanOrEqual(SECTION_CHAR_BUDGETS[heading]);
+diff --git a/src/utils/inboxAiContextLoad.test.ts b/src/utils/inboxAiContextLoad.test.ts
+index 1856352..a3d33db 100644
+--- a/src/utils/inboxAiContextLoad.test.ts
++++ b/src/utils/inboxAiContextLoad.test.ts
+@@ -103,21 +103,50 @@ describe('loadConversationContext', () => {
+       method: 'select',
+       args: ['tag_ids, admin_notes, assigned_to, last_intent, automated_inbound_disabled'],
+     });
+     expect(calls).toContainEqual({
+       table: 'whatsapp_chat_tags',
+       method: 'eq',
+       args: ['archived', false],
+     });
+     expect(calls.some((call) =>
+       call.table === 'whatsapp_chat_tags' && call.method === 'limit'
+-    )).toBe(true);
++    )).toBe(false);
++  });
++
++  it('preserves every active tag when a conversation has more than 50 tag IDs', async () => {
++    const tagIds = Array.from({ length: 125 }, (_, index) => `tag-${index}`);
++    const { client, calls } = createSupabaseDouble({
++      whatsapp_conversations: [{
++        stable_key: '573001112233',
++        tag_ids: tagIds,
++      }],
++      whatsapp_chat_tags: tagIds.map((id, index) => ({
++        id,
++        name: `Tag ${index}`,
++        archived: false,
++      })),
++    });
++
++    const result = await loadConversationContext(client, '573001112233');
++
++    expect(result.tags).toHaveLength(125);
++    expect(result.tags[0]).toBe('Tag 0');
++    expect(result.tags[124]).toBe('Tag 124');
++    expect(calls.some((call) =>
++      call.table === 'whatsapp_chat_tags' && call.method === 'limit'
++    )).toBe(false);
++    const batches = calls.filter((call) =>
++      call.table === 'whatsapp_chat_tags' && call.method === 'in'
++    );
++    expect(batches).toHaveLength(2);
++    expect(batches.flatMap((call) => call.args[1] as string[])).toEqual(tagIds);
+   });
+ });
+ 
+ describe('loadOfficialAnswers', () => {
+   it('loads only pinned active snippets and active FAQs with deterministic limits and order', async () => {
+     const { client, calls } = createSupabaseDouble({
+       whatsapp_snippets: [
+         {
+           shortcut: '/zeta',
+           label: 'Zeta',
+diff --git a/supabase/functions/_shared/inboxAiContextFormat.ts b/supabase/functions/_shared/inboxAiContextFormat.ts
+index 0621c06..8714514 100644
+--- a/supabase/functions/_shared/inboxAiContextFormat.ts
++++ b/supabase/functions/_shared/inboxAiContextFormat.ts
+@@ -19,34 +19,36 @@ const PAST_APPTS = 5;
+ const BOGOTA_TZ = 'America/Bogota';
+ const MAX_PROPERTIES_IN_SUMMARY = 8;
+ const SECTION_TRUNCATION_MARKER = '[Secci├│n truncada por presupuesto]';
+ 
+ export const INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET = 78_000;
+ 
+ /**
+  * Incluye heading y contenido de cada secci├│n. La suma (77.000) deja margen
+  * para separadores sin desplazar el transcript reciente de 60.000 caracteres.
+  */
+-export const SECTION_CHAR_BUDGETS: Readonly<Record<string, number>> = Object.freeze({
++export const SECTION_CHAR_BUDGETS = Object.freeze({
+   '=== Momento actual ===': 700,
+   '=== Canal / ventana WhatsApp ===': 350,
+   '=== Perfil directorio ===': 1_200,
+   '=== Contexto operativo de conversaci├│n ===': 1_000,
+   '=== Clasificaci├│n CRM ===': 900,
+   '=== Resumen de agendamientos / apoyos ===': 350,
+   '=== Propiedades / ubicaciones de apoyos ===': 1_400,
+   '=== Tags ===': 600,
+   '=== Cat├ílogo oficial de precios (fuente de verdad) ===': 2_500,
+   '=== Respuestas oficiales de la casa ===': 4_500,
+   '=== Citas / apoyos (Firestore, fuente de verdad) ===': 3_000,
+   '=== Historial WhatsApp ===': 60_500,
+-});
++} as const);
++
++export type InboxAiSectionHeading = keyof typeof SECTION_CHAR_BUDGETS;
+ 
+ export interface InboxAiDirectory {
+   id?: string;
+   fullName?: string | null;
+   email?: string | null;
+   address?: string | null;
+   /** Direcci├│n preferida de servicio en directorio (si existe). */
+   preferredServiceAddress?: string | null;
+   city?: string | null;
+   tags?: string[];
+@@ -307,21 +309,20 @@ function formatAppointmentLine(a: InboxAiAppointment): string {
+   ) {
+     parts.push(`valor: COP ${String(a.totalAmount).replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`);
+   }
+   if (a.paymentMethod) parts.push(`m├®todo: ${a.paymentMethod}`);
+   if (a.wompiReference) parts.push(`referencia Wompi: ${a.wompiReference}`);
+   return `- ${parts.join(' | ')}`;
+ }
+ 
+ function formatPropertySummaryBlock(summary: InboxAiPropertySummary): string[] {
+   const lines: string[] = [];
+-  lines.push('=== Propiedades / ubicaciones de apoyos ===');
+   lines.push(summary.patternLabel);
+   lines.push(`Propiedades ├║nicas: ${summary.uniquePropertyCount}`);
+   if (summary.appointmentsWithoutAddress > 0) {
+     lines.push(`Apoyos sin direcci├│n: ${summary.appointmentsWithoutAddress}`);
+   }
+   if (summary.preferredDirectoryAddress) {
+     lines.push(`Direcci├│n preferida (directorio): ${summary.preferredDirectoryAddress}`);
+   }
+   if (summary.properties.length) {
+     lines.push('Historial por propiedad (conteo de apoyos + rango de fechas):');
+@@ -332,28 +333,35 @@ function formatPropertySummaryBlock(summary: InboxAiPropertySummary): string[] {
+         `- ${p.address} | ${p.appointmentCount} apoyo(s) | desde ${first} hasta ${last}`,
+       );
+     }
+   }
+   lines.push(
+     'Al agendar o confirmar, pregunta si el apoyo es en la misma propiedad habitual o en otra ubicaci├│n.',
+   );
+   return lines;
+ }
+ 
+-function clipSection(section: string, heading: string): string {
+-  const budget = SECTION_CHAR_BUDGETS[heading];
+-  if (!budget || section.length <= budget) return section;
++export function getSectionCharBudget(heading: string): number {
++  if (!Object.prototype.hasOwnProperty.call(SECTION_CHAR_BUDGETS, heading)) {
++    throw new Error(`Heading sin presupuesto de caracteres: ${heading}`);
++  }
++  return SECTION_CHAR_BUDGETS[heading as InboxAiSectionHeading];
++}
++
++function clipSection(section: string, heading: InboxAiSectionHeading): string {
++  const budget = getSectionCharBudget(heading);
++  if (section.length <= budget) return section;
+   const suffix = `\n${SECTION_TRUNCATION_MARKER}`;
+   return `${section.slice(0, Math.max(heading.length, budget - suffix.length)).trimEnd()}${suffix}`;
+ }
+ 
+-function buildSection(heading: string, lines: string[]): string {
++function buildSection(heading: InboxAiSectionHeading, lines: string[]): string {
+   return clipSection([heading, ...lines].join('\n'), heading);
+ }
+ 
+ function clipTranscriptToLatest(transcript: string): string {
+   if (transcript.length <= DEFAULT_TRANSCRIPT_CHAR_BUDGET) return transcript;
+   const marker = '[Historial recortado desde lo m├ís antiguo]';
+   const remaining = DEFAULT_TRANSCRIPT_CHAR_BUDGET - marker.length - 1;
+   return `${marker}\n${transcript.slice(-Math.max(0, remaining))}`;
+ }
+ 
+@@ -483,32 +491,37 @@ export function formatInboxAiContextBlock(params: {
+   ]));
+ 
+   const propertySummary =
+     params.propertySummary ??
+     buildPropertyLocationSummary({
+       appointments: params.allAppointmentsForProperties ?? params.appointments,
+       preferredDirectoryAddress:
+         directory?.preferredServiceAddress ?? directory?.address ?? null,
+     });
+   const propertyLines = formatPropertySummaryBlock(propertySummary);
+-  const propertyHeading = propertyLines.shift()!;
+-  sections.push(buildSection(propertyHeading, propertyLines));
++  sections.push(buildSection(
++    '=== Propiedades / ubicaciones de apoyos ===',
++    propertyLines,
++  ));
+ 
+   const directoryTags = directory?.tags ?? [];
+   sections.push(buildSection('=== Tags ===', [
+     `Conversaci├│n: ${conversationTags.length ? conversationTags.join(', ') : '(ninguno)'}`,
+     `Directorio: ${directoryTags.length ? directoryTags.join(', ') : '(ninguno)'}`,
+   ]));
+ 
+   const pricingLines = formatPricingCatalogBlock().split('\n');
+-  const pricingHeading = pricingLines.shift()!;
+-  sections.push(buildSection(pricingHeading, pricingLines));
++  pricingLines.shift();
++  sections.push(buildSection(
++    '=== Cat├ílogo oficial de precios (fuente de verdad) ===',
++    pricingLines,
++  ));
+ 
+   sections.push(buildSection(
+     '=== Respuestas oficiales de la casa ===',
+     formatOfficialAnswers(params.officialAnswers),
+   ));
+ 
+   const upcoming = params.appointments
+     .filter((appointment) => new Date(appointment.scheduledDate).getTime() >= now)
+     .sort((left, right) => left.scheduledDate.localeCompare(right.scheduledDate))
+     .slice(0, UPCOMING_APPTS);
+diff --git a/supabase/functions/_shared/inboxAiKnowledge.ts b/supabase/functions/_shared/inboxAiKnowledge.ts
+index 5aeee66..4f0466f 100644
+--- a/supabase/functions/_shared/inboxAiKnowledge.ts
++++ b/supabase/functions/_shared/inboxAiKnowledge.ts
+@@ -3,21 +3,21 @@
+ 
+ import {
+   directoryPhoneKey,
+   directoryPhoneLookupVariants,
+   normalizeDirectoryPhoneE164,
+ } from './directoryPhone.ts';
+ import type { InboxAiDirectory } from './inboxAiContextFormat.ts';
+ 
+ type SupabaseClient = any;
+ 
+-const CONVERSATION_TAG_QUERY_LIMIT = 50;
++const CONVERSATION_TAG_QUERY_BATCH_SIZE = 100;
+ const DIRECTORY_QUERY_LIMIT = 5;
+ const DIRECTORY_NOTES_MAX = 400;
+ const SNIPPET_SHORTCUT_MAX = 80;
+ const SNIPPET_LABEL_MAX = 160;
+ const SNIPPET_BODY_MAX = 900;
+ const FAQ_QUESTION_MAX = 300;
+ const FAQ_ANSWER_MAX = 1_200;
+ const FAQ_CATEGORY_MAX = 100;
+ const FAQ_KEYWORD_MAX = 80;
+ const FAQ_KEYWORDS_MAX = 12;
+@@ -98,38 +98,44 @@ export async function loadConversationContext(
+     .from('whatsapp_conversations')
+     .select('tag_ids, admin_notes, assigned_to, last_intent, automated_inbound_disabled')
+     .eq('stable_key', stableKey)
+     .limit(1)
+     .maybeSingle();
+   if (conversationError) throw conversationError;
+ 
+   const tagIds: string[] = Array.isArray(conversation?.tag_ids)
+     ? conversation.tag_ids.filter((id: unknown): id is string =>
+       typeof id === 'string' && id.length > 0
+-    ).slice(0, CONVERSATION_TAG_QUERY_LIMIT)
++    )
+     : [];
+   const tags: string[] = [];
+ 
+   if (tagIds.length > 0) {
+-    const { data: tagRows, error: tagsError } = await supabase
+-      .from('whatsapp_chat_tags')
+-      .select('id, name, archived')
+-      .in('id', tagIds)
+-      .eq('archived', false)
+-      .limit(CONVERSATION_TAG_QUERY_LIMIT);
+-    if (tagsError) throw tagsError;
+-
+     const namesById = new Map<string, string>();
+-    for (const row of tagRows ?? []) {
+-      const id = asTrimmedString(row?.id);
+-      const name = asTrimmedString(row?.name);
+-      if (id && name) namesById.set(id, name);
++    for (
++      let start = 0;
++      start < tagIds.length;
++      start += CONVERSATION_TAG_QUERY_BATCH_SIZE
++    ) {
++      const batch = tagIds.slice(start, start + CONVERSATION_TAG_QUERY_BATCH_SIZE);
++      const { data: tagRows, error: tagsError } = await supabase
++        .from('whatsapp_chat_tags')
++        .select('id, name, archived')
++        .in('id', batch)
++        .eq('archived', false);
++      if (tagsError) throw tagsError;
++
++      for (const row of tagRows ?? []) {
++        const id = asTrimmedString(row?.id);
++        const name = asTrimmedString(row?.name);
++        if (id && name) namesById.set(id, name);
++      }
+     }
+     tags.push(...tagIds.map((id) => namesById.get(id)).filter(
+       (name): name is string => Boolean(name),
+     ));
+   }
+ 
+   return {
+     tags,
+     adminNotes: asTrimmedString(conversation?.admin_notes),
+     assignedTo: asTrimmedString(conversation?.assigned_to),

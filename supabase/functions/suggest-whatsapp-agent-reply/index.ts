@@ -8,6 +8,11 @@ import {
 } from '../_shared/geminiClient.ts';
 import { resolveBookingPricingCheckout } from '../_shared/pricingCatalog.ts';
 import {
+  appendRealAvailabilityContext,
+  loadRealAvailability,
+  overwriteBookingAvailability,
+} from '../_shared/availability.ts';
+import {
   INBOX_AI_SYSTEM_INSTRUCTION,
   buildInboxAiContext,
   groundBookingClientInfo,
@@ -98,7 +103,18 @@ Deno.serve(async (req) => {
       wompiPaymentReference,
       wompiAmountCOP,
     } = resolveBookingPricingCheckout(groundedPaymentContext, ctx.phone);
-    const bookingContext = groundBookingClientInfo(pricedBookingContext, ctx);
+    const groundedBookingContext = groundBookingClientInfo(pricedBookingContext, ctx);
+    const availableSlots = await loadRealAvailability(
+      groundedBookingContext.collectedData.duration,
+    );
+    const bookingContext = overwriteBookingAvailability(
+      groundedBookingContext,
+      availableSlots,
+    );
+    const groundedContext = appendRealAvailabilityContext(
+      ctx.formattedBlock,
+      availableSlots,
+    );
 
     // ─── Generar sugerencia de respuesta ───
     const suggestion = await geminiGenerateText({
@@ -106,7 +122,7 @@ Deno.serve(async (req) => {
       systemInstruction: INBOX_AI_SYSTEM_INSTRUCTION,
       userText:
         `${extraContext ? `Contexto extra del agente:\n${extraContext}\n\n` : ''}` +
-        `${ctx.formattedBlock}\n\n` +
+        `${groundedContext}\n\n` +
         `Contexto booking (inferido + CRM):\n${JSON.stringify(bookingContext)}` +
         (wompiCheckoutUrl ? `\nLink Wompi: ${wompiCheckoutUrl}` : ''),
       temperature: 0.4,

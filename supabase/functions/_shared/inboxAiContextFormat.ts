@@ -786,6 +786,8 @@ export const INBOX_AI_SYSTEM_INSTRUCTION =
   'Usa precios únicamente desde el catálogo oficial incluido en el contexto. ' +
   'Nunca afirmes un pago sin datos autoritativos de CRM/Firestore. ' +
   'Nunca inventes horarios disponibles; usa solo disponibilidad confirmada por una fuente real. ' +
+  'Ofrece únicamente horarios incluidos en "=== Disponibilidad real (próximos días) ===" y, ' +
+  'si existe entre ellos, prefiere la hora real que respeta la llegada anticipada antes de que la casa quede sola. ' +
   'Cuando la ventana Meta esté cerrada, propone una plantilla aprobada en vez de texto libre. ' +
   'Si hay link de pago, menciónalo al final. ' +
   'Adapta el tono a los tags (p. ej. Empresas vs residencial). ' +
