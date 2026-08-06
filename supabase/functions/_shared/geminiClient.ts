@@ -13,14 +13,21 @@ export const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
 export const GEMINI_TIMEOUT_MS = 75000;
 export const MAX_INLINE_AUDIO_BYTES = 180 * 1024; // 180 KB — inline; mayor usa asset
 
+function readRuntimeEnv(name: string): string | undefined {
+  const runtime = globalThis as typeof globalThis & {
+    Deno?: { env?: { get?: (key: string) => string | undefined } };
+  };
+  return runtime.Deno?.env?.get?.(name);
+}
+
 /** Lee la API Key de Gemini desde variables de entorno. */
 export function getGeminiApiKey(): string | null {
-  return Deno.env.get('GEMINI_API_KEY')?.trim() || null;
+  return readRuntimeEnv('GEMINI_API_KEY')?.trim() || null;
 }
 
 /** Resuelve el modelo desde env o usa el default. */
 export function resolveGeminiModel(envKey: string, fallback: string): string {
-  return Deno.env.get(envKey)?.trim() || fallback;
+  return readRuntimeEnv(envKey)?.trim() || fallback;
 }
 
 /**
@@ -33,7 +40,8 @@ export function resolveDirectoryAnalysisModel(): {
   configured: string | null;
   overridden: boolean;
 } {
-  const configured = Deno.env.get('GEMINI_MODEL_DIRECTORY_ANALYSIS')?.trim() || null;
+  const configured =
+    readRuntimeEnv('GEMINI_MODEL_DIRECTORY_ANALYSIS')?.trim() || null;
   const isPro = configured != null && /\bpro\b/i.test(configured);
   if (!configured || isPro) {
     return {
@@ -251,6 +259,8 @@ export async function geminiGenerateJson<T>(params: {
   temperature?: number;
   maxOutputTokens?: number;
   responseSchema?: Record<string, unknown>;
+  logScope?: string;
+  logResponsePreview?: boolean;
 }): Promise<T> {
   const result = await geminiGenerateJsonWithMeta<T>(params);
   return result.data;
@@ -265,6 +275,7 @@ export async function geminiGenerateJsonWithMeta<T>(params: {
   maxOutputTokens?: number;
   responseSchema?: Record<string, unknown>;
   logScope?: string;
+  logResponsePreview?: boolean;
 }): Promise<GeminiJsonResult<T>> {
   const model = params.model ??
     resolveGeminiModel('GEMINI_MODEL_JSON', DEFAULT_GEMINI_MODEL);
@@ -341,7 +352,7 @@ export async function geminiGenerateJsonWithMeta<T>(params: {
       finishReason,
       elapsedMs,
       responseChars: raw.length,
-      preview: raw.slice(0, 120),
+      ...(params.logResponsePreview === false ? {} : { preview: raw.slice(0, 120) }),
     });
     if (finishReason === 'MAX_TOKENS') {
       throw new GeminiMaxTokensError(message);

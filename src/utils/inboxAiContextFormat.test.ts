@@ -85,6 +85,17 @@ describe('formatInboxAiContextBlock', () => {
         oldestAt: '2026-08-01T10:00:00Z',
         newestAt: '2026-08-01T11:00:00Z',
       },
+      memory: {
+        stableKey: '573001112233',
+        summary: 'Cliente recurrente que prefiere horario de tarde.',
+        preferences: ['Horario de tarde'],
+        objections: ['Cuida el presupuesto'],
+        agreements: ['Confirmar disponibilidad el viernes'],
+        lastSummarizedMessageAt: '2026-08-01T11:00:00.000Z',
+        messageCount: 42,
+        model: 'gemini-3.6-flash',
+        updatedAt: '2026-08-01T11:01:00.000Z',
+      },
       conversationTags: ['Bogotá', 'Favoritos'],
       directory: {
         fullName: 'Ana Pérez',
@@ -142,6 +153,19 @@ describe('formatInboxAiContextBlock', () => {
     expect(block).toContain('Dirección preferida (directorio): Calle 10 #20-30');
     expect(block).toContain('Estado de pago (directorio): paid');
     expect(block).toContain('=== Canal / ventana WhatsApp ===');
+    expect(block).toContain('=== Memoria del cliente ===');
+    expect(block).toContain('Resumen: Cliente recurrente que prefiere horario de tarde.');
+    expect(block).toContain('Preferencias: Horario de tarde');
+    expect(block).toContain('Objeciones: Cuida el presupuesto');
+    expect(block).toContain('Acuerdos: Confirmar disponibilidad el viernes');
+    expect(block).toContain('Marcador: 2026-08-01T11:00:00.000Z');
+    expect(block).toContain('Modelo: gemini-3.6-flash');
+    expect(block.indexOf('=== Canal / ventana WhatsApp ===')).toBeLessThan(
+      block.indexOf('=== Memoria del cliente ==='),
+    );
+    expect(block.indexOf('=== Memoria del cliente ===')).toBeLessThan(
+      block.indexOf('=== Perfil directorio ==='),
+    );
     expect(block).toContain('Estado: open');
     expect(block).toContain('Requiere plantilla: no');
     expect(block).toContain('dirección: Calle 10 #20-30 (Apto 201)');
@@ -161,6 +185,7 @@ describe('formatInboxAiContextBlock', () => {
       phone: '573009998877',
       transcript: 'Cliente: info',
       historyMeta: { loaded: 1, truncated: true },
+      memory: null,
       conversationTags: [],
       directory: null,
       appointments: [],
@@ -178,6 +203,8 @@ describe('formatInboxAiContextBlock', () => {
     expect(block).toContain('Total apoyos/citas encontrados (ventana CRM): 0');
     expect(block).toContain('=== Propiedades / ubicaciones de apoyos ===');
     expect(block).toContain('=== Canal / ventana WhatsApp ===');
+    expect(block).toContain('=== Memoria del cliente ===');
+    expect(block).toContain('Sin memoria persistida todavía.');
     expect(block).toContain('Estado: unknown');
     expect(block).toContain('Ventana truncada');
   });
@@ -187,6 +214,7 @@ describe('formatInboxAiContextBlock', () => {
       phone: '573009998877',
       transcript: 'Cliente: info',
       historyMeta: { loaded: 1, truncated: false },
+      memory: null,
       conversationTags: [],
       directory: null,
       appointments: [
@@ -219,6 +247,7 @@ describe('formatInboxAiContextBlock', () => {
       phone: '573009998877',
       transcript: 'Cliente: Necesito información',
       historyMeta: { loaded: 1, truncated: false },
+      memory: null,
       conversationContext: {
         tags: ['Bogotá'],
         adminNotes: 'Cliente prefiere contacto por WhatsApp',
@@ -286,6 +315,17 @@ describe('formatInboxAiContextBlock', () => {
         oldestAt: '2026-01-01T00:00:00.000Z',
         newestAt: '2026-08-05T12:00:00.000Z',
       },
+      memory: {
+        stableKey: '573009998877',
+        summary: huge,
+        preferences: [huge],
+        objections: [huge],
+        agreements: [huge],
+        lastSummarizedMessageAt: '2026-08-05T12:00:00.000Z',
+        messageCount: 150,
+        model: 'gemini-3.6-flash',
+        updatedAt: '2026-08-05T12:01:00.000Z',
+      },
       conversationContext: {
         tags: Array.from({ length: 100 }, (_, index) => `tag-${index}-${huge}`),
         adminNotes: huge,
@@ -349,6 +389,8 @@ describe('formatInboxAiContextBlock', () => {
     expect(block).toContain('[Sección truncada por presupuesto]');
     expect(block).toContain('ÚLTIMO MENSAJE');
     expect(block.length).toBeLessThanOrEqual(INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET);
+    expect(SECTION_CHAR_BUDGETS['=== Memoria del cliente ===']).toBe(3_000);
+    expect(SECTION_CHAR_BUDGETS['=== Historial WhatsApp ===']).toBe(57_500);
   });
 });
 

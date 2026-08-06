@@ -39,6 +39,10 @@ import {
   type InboxAiOfficialAnswers,
 } from './inboxAiKnowledge.ts';
 import {
+  loadOrRefreshInboxAiMemory,
+  type InboxAiMemory,
+} from './inboxAiMemory.ts';
+import {
   buildMetaSessionWindow,
   type MetaSessionWindow,
 } from './metaSessionWindow.ts';
@@ -54,6 +58,7 @@ export {
 };
 export type { InboxAiAppointment, InboxAiDirectory, InboxAiPropertySummary };
 export type { InboxAiConversationContext, InboxAiOfficialAnswers };
+export type { InboxAiMemory };
 export type { MetaSessionWindow };
 
 type SupabaseClient = any;
@@ -67,6 +72,7 @@ export interface InboxAiContext {
   phone: string;
   transcript: string;
   historyMeta: ConversationHistoryMeta;
+  memory: InboxAiMemory | null;
   conversationContext: InboxAiConversationContext;
   conversationTags: string[];
   directory: InboxAiDirectory | null;
@@ -304,6 +310,12 @@ export async function buildInboxAiContext(
   const lastTurnRole = merged[merged.length - 1]?.role ?? null;
   const nowIso = new Date().toISOString();
   const sessionWindow = buildMetaSessionWindow(completeMerged, nowIso);
+  const memory = await loadOrRefreshInboxAiMemory({
+    supabase,
+    stableKey,
+    transcript,
+    historyMeta,
+  });
 
   let conversationContext: InboxAiConversationContext = {
     tags: [],
@@ -376,6 +388,7 @@ export async function buildInboxAiContext(
     phone,
     transcript,
     historyMeta,
+    memory,
     conversationTags,
     conversationContext,
     directory,
@@ -392,6 +405,7 @@ export async function buildInboxAiContext(
     phone,
     transcript,
     historyMeta,
+    memory,
     conversationContext,
     conversationTags,
     directory,

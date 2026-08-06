@@ -11,6 +11,7 @@ import type {
   InboxAiConversationContext,
   InboxAiOfficialAnswers,
 } from './inboxAiKnowledge.ts';
+import type { InboxAiMemory } from './inboxAiMemory.ts';
 import type { MetaSessionWindow } from './metaSessionWindow.ts';
 import { formatPricingCatalogBlock } from './pricingCatalog.ts';
 
@@ -24,11 +25,12 @@ export const INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET = 78_000;
 
 /**
  * Incluye heading y contenido de cada sección. La suma (77.000) deja margen
- * para separadores sin desplazar el transcript reciente de 60.000 caracteres.
+ * para separadores conservando el final reciente del transcript.
  */
 export const SECTION_CHAR_BUDGETS = Object.freeze({
   '=== Momento actual ===': 700,
   '=== Canal / ventana WhatsApp ===': 350,
+  '=== Memoria del cliente ===': 3_000,
   '=== Perfil directorio ===': 1_200,
   '=== Contexto operativo de conversación ===': 1_000,
   '=== Clasificación CRM ===': 900,
@@ -38,7 +40,7 @@ export const SECTION_CHAR_BUDGETS = Object.freeze({
   '=== Catálogo oficial de precios (fuente de verdad) ===': 2_500,
   '=== Respuestas oficiales de la casa ===': 4_500,
   '=== Citas / apoyos (Firestore, fuente de verdad) ===': 3_000,
-  '=== Historial WhatsApp ===': 60_500,
+  '=== Historial WhatsApp ===': 57_500,
 } as const);
 
 export type InboxAiSectionHeading = keyof typeof SECTION_CHAR_BUDGETS;
@@ -130,6 +132,7 @@ export interface InboxAiContextSlice {
   phone: string;
   transcript: string;
   historyMeta: ConversationHistoryMeta;
+  memory: InboxAiMemory | null;
   conversationTags?: string[];
   conversationContext?: InboxAiConversationContext;
   directory: InboxAiDirectory | null;
@@ -358,11 +361,41 @@ function buildSection(heading: InboxAiSectionHeading, lines: string[]): string {
   return clipSection([heading, ...lines].join('\n'), heading);
 }
 
-function clipTranscriptToLatest(transcript: string): string {
-  if (transcript.length <= DEFAULT_TRANSCRIPT_CHAR_BUDGET) return transcript;
+function clipTranscriptToLatest(
+  transcript: string,
+  maxChars = DEFAULT_TRANSCRIPT_CHAR_BUDGET,
+): string {
+  if (transcript.length <= maxChars) return transcript;
   const marker = '[Historial recortado desde lo más antiguo]';
-  const remaining = DEFAULT_TRANSCRIPT_CHAR_BUDGET - marker.length - 1;
+  const remaining = maxChars - marker.length - 1;
   return `${marker}\n${transcript.slice(-Math.max(0, remaining))}`;
+}
+
+function clipMemoryValue(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
+}
+
+function formatMemoryLines(memory: InboxAiMemory | null): string[] {
+  if (!memory) return ['Sin memoria persistida todavía.'];
+  const list = (values: string[]) => values.length ? values.join('; ') : '(ninguna)';
+  return [
+    `Resumen: ${clipMemoryValue(memory.summary || '(vacío)', 900)}`,
+    `Preferencias: ${clipMemoryValue(list(memory.preferences), 450)}`,
+    `Objeciones: ${clipMemoryValue(list(memory.objections), 450)}`,
+    `Acuerdos: ${clipMemoryValue(list(memory.agreements), 450)}`,
+    `Marcador: ${memory.lastSummarizedMessageAt ?? 'sin marcador'}`,
+    `Mensajes resumidos: ${memory.messageCount}`,
+    `Modelo: ${memory.model ?? 'desconocido'}`,
+  ];
+}
+
+function buildHistorySection(lines: string[], transcript: string): string {
+  const heading: InboxAiSectionHeading = '=== Historial WhatsApp ===';
+  const prefix = [heading, ...lines].join('\n');
+  const budget = getSectionCharBudget(heading);
+  const transcriptBudget = Math.max(0, budget - prefix.length - 1);
+  return `${prefix}\n${clipTranscriptToLatest(transcript, transcriptBudget)}`;
 }
 
 function formatOfficialAnswers(answers?: InboxAiOfficialAnswers): string[] {
@@ -399,6 +432,7 @@ export function formatInboxAiContextBlock(params: {
   phone: string;
   transcript: string;
   historyMeta: ConversationHistoryMeta;
+  memory: InboxAiMemory | null;
   conversationTags?: string[];
   conversationContext?: InboxAiConversationContext;
   directory: InboxAiDirectory | null;
@@ -432,6 +466,11 @@ export function formatInboxAiContextBlock(params: {
     `Expira: ${params.sessionWindow.expiresAt ?? 'desconocido'}`,
     `Requiere plantilla: ${params.sessionWindow.requiresTemplate ? 'sí' : 'no'}`,
   ]));
+
+  sections.push(buildSection(
+    '=== Memoria del cliente ===',
+    formatMemoryLines(params.memory),
+  ));
 
   const directoryLines: string[] = [];
   if (directory) {
@@ -565,8 +604,7 @@ export function formatInboxAiContextBlock(params: {
         `${params.historyMeta.newestAt ? `; hasta ${formatBogotaDateTime(params.historyMeta.newestAt)}` : ''})`,
     );
   }
-  historyLines.push(clipTranscriptToLatest(params.transcript));
-  sections.push(buildSection('=== Historial WhatsApp ===', historyLines));
+  sections.push(buildHistorySection(historyLines, params.transcript));
 
   const block = sections.join('\n\n');
   if (block.length > INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET) {
