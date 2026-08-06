@@ -9,6 +9,7 @@ type ConversationMessageHistoryStatus = 'loading' | 'loaded' | 'error';
 export interface ConversationMessageHistoryState {
   conversationId: string;
   historyKey: string;
+  subscriptionId: number;
   messages: WhatsAppMessage[];
   status: ConversationMessageHistoryStatus;
 }
@@ -18,17 +19,20 @@ export type ConversationMessageHistoryAction =
       type: 'started';
       conversationId: string;
       historyKey: string;
+      subscriptionId: number;
     }
   | {
       type: 'loaded';
       conversationId: string;
       historyKey: string;
+      subscriptionId: number;
       messages: WhatsAppMessage[];
     }
   | {
       type: 'failed';
       conversationId: string;
       historyKey: string;
+      subscriptionId: number;
     };
 
 const EMPTY_MESSAGES: WhatsAppMessage[] = [];
@@ -36,10 +40,12 @@ const EMPTY_MESSAGES: WhatsAppMessage[] = [];
 export function createConversationMessageHistoryState(
   conversationId: string,
   historyKey: string,
+  subscriptionId: number,
 ): ConversationMessageHistoryState {
   return {
     conversationId,
     historyKey,
+    subscriptionId,
     messages: EMPTY_MESSAGES,
     status: 'loading',
   };
@@ -47,11 +53,15 @@ export function createConversationMessageHistoryState(
 
 function actionMatchesCurrentHistory(
   state: ConversationMessageHistoryState,
-  action: Pick<ConversationMessageHistoryAction, 'conversationId' | 'historyKey'>,
+  action: Pick<
+    ConversationMessageHistoryAction,
+    'conversationId' | 'historyKey' | 'subscriptionId'
+  >,
 ): boolean {
   return (
     state.conversationId === action.conversationId &&
-    state.historyKey === action.historyKey
+    state.historyKey === action.historyKey &&
+    state.subscriptionId === action.subscriptionId
   );
 }
 
@@ -64,12 +74,14 @@ export function conversationMessageHistoryReducer(
       return createConversationMessageHistoryState(
         action.conversationId,
         action.historyKey,
+        action.subscriptionId,
       );
     case 'loaded':
       if (!actionMatchesCurrentHistory(state, action)) return state;
       return {
         conversationId: action.conversationId,
         historyKey: action.historyKey,
+        subscriptionId: action.subscriptionId,
         messages: action.messages,
         status: 'loaded',
       };

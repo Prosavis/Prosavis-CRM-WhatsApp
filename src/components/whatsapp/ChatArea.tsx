@@ -223,11 +223,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   onLoadedConversationInbound,
 }) => {
   const theme = useTheme();
+  const messageSubscriptionIdRef = useRef(0);
   const [messageHistory, dispatchMessageHistory] = useReducer(
     conversationMessageHistoryReducer,
     createConversationMessageHistoryState(
       conversation.id,
       conversation.phone || conversation.id,
+      0,
     ),
   );
   const [suggestionDraft, setSuggestionDraft] = useState('');
@@ -296,10 +298,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   useEffect(() => {
     const conversationId = conversation.id;
     const historyKey = stableKey;
+    const subscriptionId = messageSubscriptionIdRef.current + 1;
+    messageSubscriptionIdRef.current = subscriptionId;
     dispatchMessageHistory({
       type: 'started',
       conversationId,
       historyKey,
+      subscriptionId,
     });
     setSelectionMode(false);
     setSelectedIds(new Set());
@@ -311,6 +316,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           type: 'loaded',
           conversationId,
           historyKey,
+          subscriptionId,
           messages: msgs,
         });
       },
@@ -320,6 +326,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           type: 'failed',
           conversationId,
           historyKey,
+          subscriptionId,
         });
       },
     );

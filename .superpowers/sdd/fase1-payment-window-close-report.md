@@ -67,3 +67,29 @@ suscripción anterior se ignoran en el reducer.
 - Lint enfocado de la corrección: aprobado.
 - Diagnósticos IDE de los archivos modificados: sin errores.
 - Graphify AST actualizado: 65.759 nodos y 518.390 edges.
+
+## Corrección posterior a revisión — generación de suscripción
+
+La identidad `conversationId + historyKey` no distinguía dos suscripciones
+sucesivas de la misma conversación. En StrictMode, una resuscripción same-key o
+una secuencia A → B → A podía aceptar un callback tardío de la primera
+generación de A.
+
+Cada setup de `subscribeToMessages()` asigna ahora un `subscriptionId`
+monotónico. El ID se propaga por el snapshot y por todas las acciones del
+reducer (`started`, `loaded`, `failed`). Solo la generación vigente puede
+completar o fallar el historial; las anteriores conservan el estado por
+identidad de objeto y no producen emisiones. El `switch` mantiene comprobación
+exhaustiva con `never`.
+
+### Evidencia TDD de generación
+
+- RED — 2 fallos reproducidos:
+  - callback tardío de una suscripción same-key reemplazaba la generación nueva;
+  - al volver A → B → A, la primera generación de A volvía a ser aceptada.
+- GREEN — `conversationMessageHistory.test.ts`: 3/3 aprobadas.
+- Pruebas enfocadas generación/ventana: 12/12 aprobadas en 2 archivos.
+- Suite CRM completa: 126/126 aprobadas en 16 archivos.
+- Type-check: aprobado (`tsc -b --noEmit`).
+- Lint enfocado y diagnósticos IDE: sin errores.
+- Graphify AST actualizado: 65.830 nodos y 704.420 edges.
