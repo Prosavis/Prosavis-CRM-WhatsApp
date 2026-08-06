@@ -131,6 +131,7 @@ insert into public.ops_decision_outcomes (
   decision_id,
   decision_type,
   outcome,
+  override_reason,
   decided_by
 )
 values
@@ -139,6 +140,7 @@ values
     'decision-1',
     'assignment',
     'accepted',
+    null,
     'admin-test'
   ),
   (
@@ -146,6 +148,7 @@ values
     'decision-2',
     'assignment',
     'overridden',
+    'cliente_prefirio_otra_franja',
     'admin-test'
   );
 
