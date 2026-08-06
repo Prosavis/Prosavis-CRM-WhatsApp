@@ -12,7 +12,6 @@ import {
   type ConversationHistoryMeta,
 } from './conversationHistory.ts';
 import {
-  directoryPhoneKey,
   directoryPhoneLookupVariants,
   normalizeDirectoryPhoneE164,
 } from './directoryPhone.ts';
@@ -20,7 +19,9 @@ import { runFirestoreQuery } from './firebaseAdminRest.ts';
 import { scheduledDateToIso } from './clientSegments.ts';
 import { normalizePhone } from './whatsappIdentity.ts';
 import {
+  INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET,
   INBOX_AI_SYSTEM_INSTRUCTION,
+  SECTION_CHAR_BUDGETS,
   buildPropertyLocationSummary,
   formatInboxAiContextBlock,
   groundBookingClientInfo,
@@ -31,23 +32,32 @@ import {
   type InboxAiPropertySummary,
 } from './inboxAiContextFormat.ts';
 import {
+  loadConversationContext,
+  loadDirectoryByPhone,
+  loadOfficialAnswers,
+  type InboxAiConversationContext,
+  type InboxAiOfficialAnswers,
+} from './inboxAiKnowledge.ts';
+import {
   buildMetaSessionWindow,
   type MetaSessionWindow,
 } from './metaSessionWindow.ts';
 
 export {
+  INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET,
   INBOX_AI_SYSTEM_INSTRUCTION,
+  SECTION_CHAR_BUDGETS,
   buildPropertyLocationSummary,
   formatInboxAiContextBlock,
   groundBookingClientInfo,
   groundBookingPayment,
 };
 export type { InboxAiAppointment, InboxAiDirectory, InboxAiPropertySummary };
+export type { InboxAiConversationContext, InboxAiOfficialAnswers };
 export type { MetaSessionWindow };
 
 type SupabaseClient = any;
 
-const NOTES_SUMMARY_MAX = 400;
 const UPCOMING_APPTS = 5;
 const PAST_APPTS = 5;
 const APPT_QUERY_LIMIT = 40;
@@ -57,8 +67,10 @@ export interface InboxAiContext {
   phone: string;
   transcript: string;
   historyMeta: ConversationHistoryMeta;
+  conversationContext: InboxAiConversationContext;
   conversationTags: string[];
   directory: InboxAiDirectory | null;
+  officialAnswers: InboxAiOfficialAnswers;
   appointments: InboxAiAppointment[];
   /** Total de citas en lookback (antes del slice de listado). */
   appointmentCount: number;
@@ -84,13 +96,6 @@ function asFiniteNumber(value: unknown): number | null {
   return null;
 }
 
-function clipNotes(value: string | null | undefined, max = NOTES_SUMMARY_MAX): string | null {
-  if (!value) return null;
-  const text = value.trim();
-  if (!text) return null;
-  return text.length <= max ? text : `${text.slice(0, max)}…`;
-}
-
 function resolveAddressLine(data: Record<string, unknown>): string | null {
   const serviceAddress = data.serviceAddress;
   if (serviceAddress && typeof serviceAddress === 'object') {
@@ -111,97 +116,6 @@ function resolveAddressReference(data: Record<string, unknown>): string | null {
     return asTrimmedString((serviceAddress as Record<string, unknown>).reference);
   }
   return null;
-}
-
-function cityFromDirectoryRow(row: Record<string, unknown>): string | null {
-  const meta = row.metadata;
-  if (meta && typeof meta === 'object') {
-    return asTrimmedString((meta as Record<string, unknown>).city);
-  }
-  return null;
-}
-
-async function loadConversationTags(
-  supabase: SupabaseClient,
-  stableKey: string,
-): Promise<string[]> {
-  const { data: conv, error: convError } = await supabase
-    .from('whatsapp_conversations')
-    .select('tag_ids')
-    .eq('stable_key', stableKey)
-    .maybeSingle();
-  if (convError) throw convError;
-
-  const tagIds: string[] = Array.isArray(conv?.tag_ids) ? conv.tag_ids : [];
-  if (!tagIds.length) return [];
-
-  const { data: tags, error: tagsError } = await supabase
-    .from('whatsapp_chat_tags')
-    .select('id, name, archived')
-    .in('id', tagIds)
-    .eq('archived', false);
-  if (tagsError) throw tagsError;
-
-  const byId = new Map<string, string>();
-  for (const row of tags ?? []) {
-    if (row?.id && typeof row.name === 'string' && row.name.trim()) {
-      byId.set(String(row.id), row.name.trim());
-    }
-  }
-  return tagIds.map((id) => byId.get(id)).filter((n): n is string => Boolean(n));
-}
-
-async function loadDirectoryByPhone(
-  supabase: SupabaseClient,
-  phone: string,
-): Promise<InboxAiDirectory | null> {
-  const e164 = normalizeDirectoryPhoneE164(phone) ?? phone;
-  const variants = directoryPhoneLookupVariants(e164);
-  const lookupPhones = variants.length > 0 ? variants : [phone];
-
-  const { data: rows, error } = await supabase
-    .from('crm_directory')
-    .select(
-      'id, full_name, display_name, phone, email, address, preferred_service_address_line, notes, internal_notes, tags, app_user_id, payment_status, metadata',
-    )
-    .in('phone', lookupPhones)
-    .order('updated_at', { ascending: false })
-    .limit(5);
-
-  if (error) throw error;
-
-  const targetKey = directoryPhoneKey(phone);
-  const row =
-    (rows ?? []).find((r: Record<string, unknown>) => {
-      const key = directoryPhoneKey(asTrimmedString(r.phone));
-      return targetKey && key && key === targetKey;
-    }) ?? (rows ?? [])[0] ?? null;
-
-  if (!row) return null;
-
-  const tags = Array.isArray(row.tags)
-    ? row.tags.filter((t: unknown): t is string => typeof t === 'string' && t.trim().length > 0)
-    : [];
-  const notes = clipNotes(
-    [asTrimmedString(row.notes), asTrimmedString(row.internal_notes)]
-      .filter(Boolean)
-      .join(' | ') || null,
-  );
-  const appUserId = asTrimmedString(row.app_user_id);
-
-  return {
-    id: String(row.id),
-    fullName: asTrimmedString(row.display_name) ?? asTrimmedString(row.full_name),
-    email: asTrimmedString(row.email),
-    address: asTrimmedString(row.address),
-    preferredServiceAddress: asTrimmedString(row.preferred_service_address_line),
-    city: cityFromDirectoryRow(row as Record<string, unknown>),
-    tags,
-    appUserId,
-    notesSummary: notes,
-    paymentStatus: asTrimmedString(row.payment_status),
-    isReturningClient: Boolean(appUserId),
-  };
 }
 
 function resolveProviderName(data: Record<string, unknown>): string | null {
@@ -391,18 +305,25 @@ export async function buildInboxAiContext(
   const nowIso = new Date().toISOString();
   const sessionWindow = buildMetaSessionWindow(completeMerged, nowIso);
 
-  let conversationTags: string[] = [];
+  let conversationContext: InboxAiConversationContext = {
+    tags: [],
+    adminNotes: null,
+    assignedTo: null,
+    lastIntent: null,
+    automatedInboundDisabled: false,
+  };
   try {
-    conversationTags = await loadConversationTags(supabase, stableKey);
+    conversationContext = await loadConversationContext(supabase, stableKey);
   } catch (err) {
     console.warn(
       JSON.stringify({
         scope: 'inbox-ai-context',
-        event: 'conversation-tags-failed',
+        event: 'conversation-context-failed',
         error: String((err as Error)?.message ?? err),
       }),
     );
   }
+  const conversationTags = conversationContext.tags;
 
   let directory: InboxAiDirectory | null = null;
   try {
@@ -416,6 +337,8 @@ export async function buildInboxAiContext(
       }),
     );
   }
+
+  const officialAnswers = await loadOfficialAnswers(supabase);
 
   let appointments: InboxAiAppointment[] = [];
   let allAppointments: InboxAiAppointment[] = [];
@@ -437,9 +360,6 @@ export async function buildInboxAiContext(
         error: String((err as Error)?.message ?? err),
       }),
     );
-    appointments = [];
-    allAppointments = [];
-    appointmentCount = 0;
   }
 
   if (directory && appointmentCount > 0) {
@@ -457,7 +377,9 @@ export async function buildInboxAiContext(
     transcript,
     historyMeta,
     conversationTags,
+    conversationContext,
     directory,
+    officialAnswers,
     appointments,
     appointmentCount,
     allAppointmentsForProperties: allAppointments,
@@ -470,8 +392,10 @@ export async function buildInboxAiContext(
     phone,
     transcript,
     historyMeta,
+    conversationContext,
     conversationTags,
     directory,
+    officialAnswers,
     appointments,
     appointmentCount,
     propertySummary,

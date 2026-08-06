@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET,
   INBOX_AI_SYSTEM_INSTRUCTION,
+  SECTION_CHAR_BUDGETS,
   buildPropertyLocationSummary,
   formatBogotaDateTime,
   formatInboxAiContextBlock,
@@ -203,6 +205,143 @@ describe('formatInboxAiContextBlock', () => {
     expect(block).not.toContain('valor: COP 0');
     expect(block).not.toContain('valor: COP -88.000');
   });
+
+  it('formats operational conversation, CRM classification and official house answers', () => {
+    const block = formatInboxAiContextBlock({
+      phone: '573009998877',
+      transcript: 'Cliente: Necesito información',
+      historyMeta: { loaded: 1, truncated: false },
+      conversationContext: {
+        tags: ['Bogotá'],
+        adminNotes: 'Cliente prefiere contacto por WhatsApp',
+        assignedTo: 'agent-7',
+        lastIntent: 'pricing',
+        automatedInboundDisabled: true,
+      },
+      directory: {
+        id: 'directory-1',
+        fullName: 'Ana',
+        source: 'whatsapp',
+        serviceId: 'cleaning',
+        classification: 'client',
+        paymentStatus: 'pending',
+        optOut: true,
+        isReturningClient: true,
+      },
+      officialAnswers: {
+        snippets: [{
+          shortcut: '/precio',
+          label: 'Precio base',
+          body: 'Nuestro apoyo mínimo es de dos horas.',
+        }],
+        faqs: [{
+          question: '¿Dónde tienen cobertura?',
+          answer: 'Tenemos cobertura en Bogotá y Medellín.',
+          category: 'cobertura',
+          keywords: ['ciudades', 'zonas'],
+        }],
+      },
+      appointments: [],
+      sessionWindow: {
+        status: 'open',
+        lastInboundAt: null,
+        expiresAt: null,
+        requiresTemplate: false,
+      },
+      nowIso: '2026-08-05T12:00:00.000Z',
+    });
+
+    expect(block).toContain('=== Contexto operativo de conversación ===');
+    expect(block).toContain('Notas administrativas: Cliente prefiere contacto por WhatsApp');
+    expect(block).toContain('Automatización inbound deshabilitada: sí');
+    expect(block).toContain('=== Clasificación CRM ===');
+    expect(block).toContain('Fuente: whatsapp');
+    expect(block).toContain('Servicio: cleaning');
+    expect(block).toContain('Clasificación: client');
+    expect(block).toContain('Opt-out: sí');
+    expect(block).toContain('=== Respuestas oficiales de la casa ===');
+    expect(block).toContain('/precio | Precio base');
+    expect(block).toContain('¿Dónde tienen cobertura?');
+    expect(block).toMatch(/reutiliza.+redacción oficial.+antes de improvisar/i);
+  });
+
+  it('clips every section independently and keeps the complete block within its ceiling', () => {
+    const huge = 'x'.repeat(100_000);
+    const latestTranscriptMarker = 'ÚLTIMO MENSAJE';
+    const block = formatInboxAiContextBlock({
+      phone: '573009998877',
+      transcript:
+        `${'h'.repeat(60_000 - latestTranscriptMarker.length)}${latestTranscriptMarker}`,
+      historyMeta: {
+        loaded: 150,
+        truncated: true,
+        oldestAt: '2026-01-01T00:00:00.000Z',
+        newestAt: '2026-08-05T12:00:00.000Z',
+      },
+      conversationContext: {
+        tags: Array.from({ length: 100 }, (_, index) => `tag-${index}-${huge}`),
+        adminNotes: huge,
+        assignedTo: huge,
+        lastIntent: huge,
+        automatedInboundDisabled: false,
+      },
+      directory: {
+        fullName: huge,
+        notesSummary: huge,
+        source: huge,
+        serviceId: huge,
+        classification: huge,
+        paymentStatus: huge,
+        tags: Array.from({ length: 100 }, (_, index) => `dir-${index}-${huge}`),
+        optOut: false,
+        isReturningClient: true,
+      },
+      officialAnswers: {
+        snippets: Array.from({ length: 30 }, (_, index) => ({
+          shortcut: `/s${index}`,
+          label: huge,
+          body: huge,
+        })),
+        faqs: Array.from({ length: 30 }, () => ({
+          question: huge,
+          answer: huge,
+          category: huge,
+          keywords: [huge],
+        })),
+      },
+      appointments: Array.from({ length: 10 }, (_, index) => ({
+        id: String(index),
+        scheduledDate: `2026-08-${String(index + 10).padStart(2, '0')}T14:00:00.000Z`,
+        serviceName: huge,
+        address: huge,
+        clientName: huge,
+        providerName: huge,
+      })),
+      sessionWindow: {
+        status: 'open',
+        lastInboundAt: null,
+        expiresAt: null,
+        requiresTemplate: false,
+      },
+      nowIso: '2026-08-05T12:00:00.000Z',
+    });
+
+    const headings = Object.keys(SECTION_CHAR_BUDGETS);
+    for (const [index, heading] of headings.entries()) {
+      const start = block.indexOf(heading);
+      expect(start, heading).toBeGreaterThanOrEqual(0);
+      const nextStarts = headings
+        .slice(index + 1)
+        .map((nextHeading) => block.indexOf(nextHeading, start + heading.length))
+        .filter((position) => position >= 0);
+      const end = nextStarts.length ? Math.min(...nextStarts) : block.length;
+      expect(block.slice(start, end).trimEnd().length, heading)
+        .toBeLessThanOrEqual(SECTION_CHAR_BUDGETS[heading]);
+    }
+    expect(block).toContain('[Sección truncada por presupuesto]');
+    expect(block).toContain('ÚLTIMO MENSAJE');
+    expect(block.length).toBeLessThanOrEqual(INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET);
+  });
 });
 
 describe('INBOX_AI_SYSTEM_INSTRUCTION', () => {
@@ -217,6 +356,12 @@ describe('INBOX_AI_SYSTEM_INSTRUCTION', () => {
     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/pago.+datos autoritativos/i);
     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/nunca inventes.+horarios disponibles/i);
     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/ventana.+cerrada.+plantilla/i);
+  });
+
+  it('prefers official house answers before improvising', () => {
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(
+      /respuestas oficiales de la casa.+antes de improvisar/i,
+    );
   });
 });
 

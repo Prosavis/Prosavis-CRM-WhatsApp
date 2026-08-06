@@ -3,7 +3,14 @@
  * Testeable con Vitest.
  */
 
-import type { ConversationHistoryMeta } from './conversationHistory.ts';
+import {
+  DEFAULT_TRANSCRIPT_CHAR_BUDGET,
+  type ConversationHistoryMeta,
+} from './conversationHistory.ts';
+import type {
+  InboxAiConversationContext,
+  InboxAiOfficialAnswers,
+} from './inboxAiKnowledge.ts';
 import type { MetaSessionWindow } from './metaSessionWindow.ts';
 import { formatPricingCatalogBlock } from './pricingCatalog.ts';
 
@@ -11,6 +18,28 @@ const UPCOMING_APPTS = 5;
 const PAST_APPTS = 5;
 const BOGOTA_TZ = 'America/Bogota';
 const MAX_PROPERTIES_IN_SUMMARY = 8;
+const SECTION_TRUNCATION_MARKER = '[Sección truncada por presupuesto]';
+
+export const INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET = 78_000;
+
+/**
+ * Incluye heading y contenido de cada sección. La suma (77.000) deja margen
+ * para separadores sin desplazar el transcript reciente de 60.000 caracteres.
+ */
+export const SECTION_CHAR_BUDGETS: Readonly<Record<string, number>> = Object.freeze({
+  '=== Momento actual ===': 700,
+  '=== Canal / ventana WhatsApp ===': 350,
+  '=== Perfil directorio ===': 1_200,
+  '=== Contexto operativo de conversación ===': 1_000,
+  '=== Clasificación CRM ===': 900,
+  '=== Resumen de agendamientos / apoyos ===': 350,
+  '=== Propiedades / ubicaciones de apoyos ===': 1_400,
+  '=== Tags ===': 600,
+  '=== Catálogo oficial de precios (fuente de verdad) ===': 2_500,
+  '=== Respuestas oficiales de la casa ===': 4_500,
+  '=== Citas / apoyos (Firestore, fuente de verdad) ===': 3_000,
+  '=== Historial WhatsApp ===': 60_500,
+});
 
 export interface InboxAiDirectory {
   id?: string;
@@ -23,7 +52,11 @@ export interface InboxAiDirectory {
   tags?: string[];
   appUserId?: string | null;
   notesSummary?: string | null;
+  source?: string | null;
+  serviceId?: string | null;
+  classification?: string | null;
   paymentStatus?: string | null;
+  optOut?: boolean;
   isReturningClient: boolean;
 }
 
@@ -95,8 +128,10 @@ export interface InboxAiContextSlice {
   phone: string;
   transcript: string;
   historyMeta: ConversationHistoryMeta;
-  conversationTags: string[];
+  conversationTags?: string[];
+  conversationContext?: InboxAiConversationContext;
   directory: InboxAiDirectory | null;
+  officialAnswers?: InboxAiOfficialAnswers;
   appointments: InboxAiAppointment[];
   /** Total de citas encontradas en la ventana de lookback (no solo las listadas). */
   appointmentCount?: number;
@@ -224,8 +259,8 @@ export function buildPropertyLocationSummary(params: {
     }));
 
   const uniquePropertyCount = groups.size;
-  let pattern: PropertyPattern = 'none';
-  let patternLabel = 'Sin direcciones de apoyo registradas.';
+  let pattern: PropertyPattern;
+  let patternLabel: string;
   if (uniquePropertyCount === 0 && withoutAddress === 0) {
     pattern = 'none';
     patternLabel = 'Sin apoyos/citas con dirección en la ventana.';
@@ -304,13 +339,62 @@ function formatPropertySummaryBlock(summary: InboxAiPropertySummary): string[] {
   return lines;
 }
 
+function clipSection(section: string, heading: string): string {
+  const budget = SECTION_CHAR_BUDGETS[heading];
+  if (!budget || section.length <= budget) return section;
+  const suffix = `\n${SECTION_TRUNCATION_MARKER}`;
+  return `${section.slice(0, Math.max(heading.length, budget - suffix.length)).trimEnd()}${suffix}`;
+}
+
+function buildSection(heading: string, lines: string[]): string {
+  return clipSection([heading, ...lines].join('\n'), heading);
+}
+
+function clipTranscriptToLatest(transcript: string): string {
+  if (transcript.length <= DEFAULT_TRANSCRIPT_CHAR_BUDGET) return transcript;
+  const marker = '[Historial recortado desde lo más antiguo]';
+  const remaining = DEFAULT_TRANSCRIPT_CHAR_BUDGET - marker.length - 1;
+  return `${marker}\n${transcript.slice(-Math.max(0, remaining))}`;
+}
+
+function formatOfficialAnswers(answers?: InboxAiOfficialAnswers): string[] {
+  const lines = [
+    'Reutiliza la redacción oficial de la casa antes de improvisar una respuesta nueva.',
+  ];
+  if (!answers?.snippets.length && !answers?.faqs.length) {
+    lines.push('Sin respuestas oficiales activas disponibles.');
+    return lines;
+  }
+  if (answers.snippets.length) {
+    lines.push('Snippets fijados:');
+    for (const snippet of answers.snippets) {
+      lines.push(`- ${snippet.shortcut} | ${snippet.label}: ${snippet.body}`);
+    }
+  }
+  if (answers.faqs.length) {
+    lines.push('Preguntas frecuentes activas:');
+    for (const faq of answers.faqs) {
+      const metadata = [
+        faq.category ? `categoría: ${faq.category}` : null,
+        faq.keywords.length ? `keywords: ${faq.keywords.join(', ')}` : null,
+      ].filter(Boolean);
+      lines.push(
+        `- ${faq.question}: ${faq.answer}${metadata.length ? ` (${metadata.join(' | ')})` : ''}`,
+      );
+    }
+  }
+  return lines;
+}
+
 /** Formatea el bloque de contexto CRM (puro, testeable). */
 export function formatInboxAiContextBlock(params: {
   phone: string;
   transcript: string;
   historyMeta: ConversationHistoryMeta;
-  conversationTags: string[];
+  conversationTags?: string[];
+  conversationContext?: InboxAiConversationContext;
   directory: InboxAiDirectory | null;
+  officialAnswers?: InboxAiOfficialAnswers;
   appointments: InboxAiAppointment[];
   appointmentCount?: number;
   /** Citas completas de lookback para resumen de propiedades (si no, usa appointments). */
@@ -321,133 +405,163 @@ export function formatInboxAiContextBlock(params: {
 }): string {
   const nowIso = params.nowIso ?? new Date().toISOString();
   const now = new Date(nowIso).getTime();
-  const lines: string[] = [];
+  const conversationTags =
+    params.conversationContext?.tags ?? params.conversationTags ?? [];
+  const directory = params.directory;
+  const conversation = params.conversationContext;
+  const sections: string[] = [];
 
-  lines.push('=== Momento actual ===');
-  lines.push(`Fecha/hora actual (Colombia): ${formatBogotaDateTime(nowIso)} (${nowIso})`);
-  lines.push('Usa esta fecha como referencia temporal al interpretar "hoy", "mañana", "ayer" y el historial.');
-  lines.push(
+  sections.push(buildSection('=== Momento actual ===', [
+    `Fecha/hora actual (Colombia): ${formatBogotaDateTime(nowIso)} (${nowIso})`,
+    'Usa esta fecha como referencia temporal al interpretar "hoy", "mañana", "ayer" y el historial.',
     'Política operativa: si el cliente indica que a cierta hora no habrá nadie / se va la persona, ' +
       'propón llegada ~1 h antes para recepción segura del personal (nunca esa hora exacta).',
-  );
+  ]));
 
-  lines.push('');
-  lines.push('=== Canal / ventana WhatsApp ===');
-  lines.push(`Estado: ${params.sessionWindow.status}`);
-  lines.push(`Último mensaje inbound: ${params.sessionWindow.lastInboundAt ?? 'desconocido'}`);
-  lines.push(`Expira: ${params.sessionWindow.expiresAt ?? 'desconocido'}`);
-  lines.push(`Requiere plantilla: ${params.sessionWindow.requiresTemplate ? 'sí' : 'no'}`);
+  sections.push(buildSection('=== Canal / ventana WhatsApp ===', [
+    `Estado: ${params.sessionWindow.status}`,
+    `Último mensaje inbound: ${params.sessionWindow.lastInboundAt ?? 'desconocido'}`,
+    `Expira: ${params.sessionWindow.expiresAt ?? 'desconocido'}`,
+    `Requiere plantilla: ${params.sessionWindow.requiresTemplate ? 'sí' : 'no'}`,
+  ]));
 
-  lines.push('');
-  lines.push('=== Perfil directorio ===');
-  if (params.directory) {
-    const d = params.directory;
-    lines.push(`Nombre: ${d.fullName ?? '—'}`);
-    lines.push(`Teléfono: ${params.phone}`);
-    if (d.email) lines.push(`Email: ${d.email}`);
-    if (d.city) lines.push(`Ciudad: ${d.city}`);
-    if (d.address) lines.push(`Dirección de contacto: ${d.address}`);
-    if (d.preferredServiceAddress) {
-      lines.push(`Dirección preferida de servicio: ${d.preferredServiceAddress}`);
+  const directoryLines: string[] = [];
+  if (directory) {
+    directoryLines.push(`Nombre: ${directory.fullName ?? '—'}`);
+    directoryLines.push(`Teléfono: ${params.phone}`);
+    if (directory.email) directoryLines.push(`Email: ${directory.email}`);
+    if (directory.city) directoryLines.push(`Ciudad: ${directory.city}`);
+    if (directory.address) directoryLines.push(`Dirección de contacto: ${directory.address}`);
+    if (directory.preferredServiceAddress) {
+      directoryLines.push(
+        `Dirección preferida de servicio: ${directory.preferredServiceAddress}`,
+      );
     }
-    lines.push(`Cliente recurrente (CRM): ${d.isReturningClient ? 'sí' : 'no'}`);
-    if (d.paymentStatus) {
-      lines.push(`Estado de pago (directorio): ${d.paymentStatus}`);
+    directoryLines.push(
+      `Cliente recurrente (CRM): ${directory.isReturningClient ? 'sí' : 'no'}`,
+    );
+    if (directory.paymentStatus) {
+      directoryLines.push(`Estado de pago (directorio): ${directory.paymentStatus}`);
     }
-    if (d.appUserId) lines.push(`app_user_id: ${d.appUserId}`);
-    if (d.notesSummary) lines.push(`Notas: ${d.notesSummary}`);
+    if (directory.appUserId) directoryLines.push(`app_user_id: ${directory.appUserId}`);
+    if (directory.notesSummary) directoryLines.push(`Notas: ${directory.notesSummary}`);
   } else {
-    lines.push(`Sin entrada en crm_directory. Teléfono: ${params.phone}`);
+    directoryLines.push(`Sin entrada en crm_directory. Teléfono: ${params.phone}`);
   }
+  sections.push(buildSection('=== Perfil directorio ===', directoryLines));
 
-  const totalAppts =
+  sections.push(buildSection('=== Contexto operativo de conversación ===', [
+    `Notas administrativas: ${conversation?.adminNotes ?? '—'}`,
+    `Asignado a: ${conversation?.assignedTo ?? 'sin asignar'}`,
+    `Última intención: ${conversation?.lastIntent ?? 'desconocida'}`,
+    `Automatización inbound deshabilitada: ${
+      conversation?.automatedInboundDisabled ? 'sí' : 'no'
+    }`,
+  ]));
+
+  sections.push(buildSection('=== Clasificación CRM ===', [
+    `Fuente: ${directory?.source ?? '—'}`,
+    `Servicio: ${directory?.serviceId ?? '—'}`,
+    `Clasificación: ${directory?.classification ?? '—'}`,
+    `Estado de pago: ${directory?.paymentStatus ?? '—'}`,
+    `Opt-out: ${directory?.optOut ? 'sí' : 'no'}`,
+  ]));
+
+  const totalAppointments =
     typeof params.appointmentCount === 'number'
       ? params.appointmentCount
       : params.appointments.length;
   const pastCount = params.appointments.filter(
-    (a) => new Date(a.scheduledDate).getTime() < now,
+    (appointment) => new Date(appointment.scheduledDate).getTime() < now,
   ).length;
   const upcomingCount = params.appointments.filter(
-    (a) => new Date(a.scheduledDate).getTime() >= now,
+    (appointment) => new Date(appointment.scheduledDate).getTime() >= now,
   ).length;
-
-  lines.push('');
-  lines.push('=== Resumen de agendamientos / apoyos ===');
-  lines.push(`Total apoyos/citas encontrados (ventana CRM): ${totalAppts}`);
-  lines.push(`En listado contextual: ${upcomingCount} próximos, ${pastCount} pasados recientes`);
+  sections.push(buildSection('=== Resumen de agendamientos / apoyos ===', [
+    `Total apoyos/citas encontrados (ventana CRM): ${totalAppointments}`,
+    `En listado contextual: ${upcomingCount} próximos, ${pastCount} pasados recientes`,
+  ]));
 
   const propertySummary =
     params.propertySummary ??
     buildPropertyLocationSummary({
       appointments: params.allAppointmentsForProperties ?? params.appointments,
       preferredDirectoryAddress:
-        params.directory?.preferredServiceAddress ?? params.directory?.address ?? null,
+        directory?.preferredServiceAddress ?? directory?.address ?? null,
     });
+  const propertyLines = formatPropertySummaryBlock(propertySummary);
+  const propertyHeading = propertyLines.shift()!;
+  sections.push(buildSection(propertyHeading, propertyLines));
 
-  lines.push('');
-  lines.push(...formatPropertySummaryBlock(propertySummary));
+  const directoryTags = directory?.tags ?? [];
+  sections.push(buildSection('=== Tags ===', [
+    `Conversación: ${conversationTags.length ? conversationTags.join(', ') : '(ninguno)'}`,
+    `Directorio: ${directoryTags.length ? directoryTags.join(', ') : '(ninguno)'}`,
+  ]));
 
-  lines.push('');
-  lines.push('=== Tags ===');
-  lines.push(
-    `Conversación: ${
-      params.conversationTags.length ? params.conversationTags.join(', ') : '(ninguno)'
-    }`,
-  );
-  const dirTags = params.directory?.tags ?? [];
-  lines.push(`Directorio: ${dirTags.length ? dirTags.join(', ') : '(ninguno)'}`);
+  const pricingLines = formatPricingCatalogBlock().split('\n');
+  const pricingHeading = pricingLines.shift()!;
+  sections.push(buildSection(pricingHeading, pricingLines));
 
-  lines.push('');
-  lines.push(formatPricingCatalogBlock());
+  sections.push(buildSection(
+    '=== Respuestas oficiales de la casa ===',
+    formatOfficialAnswers(params.officialAnswers),
+  ));
 
   const upcoming = params.appointments
-    .filter((a) => new Date(a.scheduledDate).getTime() >= now)
-    .sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate))
+    .filter((appointment) => new Date(appointment.scheduledDate).getTime() >= now)
+    .sort((left, right) => left.scheduledDate.localeCompare(right.scheduledDate))
     .slice(0, UPCOMING_APPTS);
   const past = params.appointments
-    .filter((a) => new Date(a.scheduledDate).getTime() < now)
-    .sort((a, b) => b.scheduledDate.localeCompare(a.scheduledDate))
+    .filter((appointment) => new Date(appointment.scheduledDate).getTime() < now)
+    .sort((left, right) => right.scheduledDate.localeCompare(left.scheduledDate))
     .slice(0, PAST_APPTS);
-
-  lines.push('');
-  lines.push('=== Citas / apoyos (Firestore, fuente de verdad) ===');
-  lines.push(
+  const appointmentLines = [
     'Cada apoyo incluye fecha/hora (Colombia), estado, servicio, cliente, auxiliar, dirección y pago cuando existen.',
-  );
+  ];
   if (!upcoming.length && !past.length) {
-    lines.push('Sin citas/apoyos encontrados para este contacto.');
+    appointmentLines.push('Sin citas/apoyos encontrados para este contacto.');
   } else {
     if (upcoming.length) {
-      lines.push('Próximos:');
-      for (const a of upcoming) lines.push(formatAppointmentLine(a));
+      appointmentLines.push('Próximos:');
+      appointmentLines.push(...upcoming.map(formatAppointmentLine));
     }
     if (past.length) {
-      lines.push('Pasados recientes:');
-      for (const a of past) lines.push(formatAppointmentLine(a));
+      appointmentLines.push('Pasados recientes:');
+      appointmentLines.push(...past.map(formatAppointmentLine));
     }
   }
+  sections.push(buildSection(
+    '=== Citas / apoyos (Firestore, fuente de verdad) ===',
+    appointmentLines,
+  ));
 
-  lines.push('');
-  lines.push('=== Historial WhatsApp ===');
-  lines.push(
+  const historyLines = [
     'Los mensajes incluyen fecha/hora cuando está disponible. Relaciónalos con la fecha actual de arriba.',
-  );
+  ];
   if (params.historyMeta.truncated) {
-    lines.push(
+    historyLines.push(
       `(Ventana truncada: ${params.historyMeta.loaded} turns; se priorizan mensajes recientes` +
         `${params.historyMeta.oldestAt ? `; desde ${formatBogotaDateTime(params.historyMeta.oldestAt)}` : ''}` +
         `${params.historyMeta.newestAt ? `; hasta ${formatBogotaDateTime(params.historyMeta.newestAt)}` : ''})`,
     );
   } else {
-    lines.push(
+    historyLines.push(
       `(${params.historyMeta.loaded} turns` +
         `${params.historyMeta.oldestAt ? `; desde ${formatBogotaDateTime(params.historyMeta.oldestAt)}` : ''}` +
         `${params.historyMeta.newestAt ? `; hasta ${formatBogotaDateTime(params.historyMeta.newestAt)}` : ''})`,
     );
   }
-  lines.push(params.transcript);
+  historyLines.push(clipTranscriptToLatest(params.transcript));
+  sections.push(buildSection('=== Historial WhatsApp ===', historyLines));
 
-  return lines.join('\n');
+  const block = sections.join('\n\n');
+  if (block.length > INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET) {
+    throw new Error(
+      `Inbox AI context exceeded ${INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET} characters.`,
+    );
+  }
+  return block;
 }
 
 /** Mezcla datos CRM reales sobre clientInfo del booking JSON inferido. */
@@ -642,6 +756,8 @@ export function groundBookingPayment<
 export const INBOX_AI_SYSTEM_INSTRUCTION =
   'Eres un agente de ventas de Prosavis (limpieza residencial y empresas en Colombia). ' +
   'Responde en español, cordial y concreto. ' +
+  'Prefiere las respuestas oficiales de la casa y reutiliza su redacción antes de improvisar; ' +
+  'si ninguna respuesta oficial aplica, responde con el resto del contexto verificado. ' +
   'Usa el perfil CRM, tags, apoyos/citas Firestore y sus direcciones como fuente de verdad; no inventes citas, tags, precios, direcciones ni datos del cliente. ' +
   'Ten en cuenta la fecha/hora actual (Colombia) y las fechas de los mensajes y apoyos para contextualizar "hoy", "mañana", retrasos y seguimiento. ' +
   'Si el cliente tiene apoyos previos, trátarlo como cliente con historial (no como lead frío). ' +
