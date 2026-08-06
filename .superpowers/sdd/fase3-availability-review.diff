@@ -1,0 +1,1016 @@
+﻿commit ccd5b8929ca44840ecefeb8a245d86b006299996
+Author:     Nicol├ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+AuthorDate: Thu Aug 6 10:55:08 2026 -0500
+Commit:     Nicol├ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+CommitDate: Thu Aug 6 10:55:08 2026 -0500
+
+    Add V5 booking projection, CRM bridge, and sync fixes
+    
+    Implemented V5 booking projection core (mapper + RPC wrappers) with tests: functions/src/integrations/supabase/opsBookingProjection.{ts, test.ts}. Added CRM bridge endpoint and tests: functions/src/calendar/crmGetAvailableSlots.{ts, test.ts}. Hardened directory sync to prefer/merge WhatsApp rows by phone, remove ghost APP_USER rows, and support ÔÇ£Auxiliares desactivadasÔÇØ tag; updated related tests and helpers. Small adjustments: expanded valid durations, exported crmGetAvailableSlots, and pass phoneNumber when removing team members.
+
+diff --git a/functions/src/calendar/crmGetAvailableSlots.test.ts b/functions/src/calendar/crmGetAvailableSlots.test.ts
+new file mode 100644
+index 0000000..e04a8c6
+--- /dev/null
++++ b/functions/src/calendar/crmGetAvailableSlots.test.ts
+@@ -0,0 +1,114 @@
++import { HttpsError } from 'firebase-functions/v2/https';
++import { PROSAVIS_LIMPIEZA_SERVICE_ID } from '../constants/pricing';
++import {
++  handleCrmGetAvailableSlots,
++  validateCrmAvailabilityRequest,
++} from './crmGetAvailableSlots';
++
++const VALID_BODY = {
++  startDate: '2026-08-06',
++  endDate: '2026-08-12',
++  duration: 240,
++};
++
++describe('validateCrmAvailabilityRequest', () => {
++  test('accepts the seven-day inclusive horizon and every official duration', () => {
++    for (const duration of [120, 180, 240, 360, 480]) {
++      expect(validateCrmAvailabilityRequest({
++        ...VALID_BODY,
++        duration,
++      })).toEqual({
++        ...VALID_BODY,
++        duration,
++      });
++    }
++  });
++
++  test.each([
++    [{ ...VALID_BODY, startDate: '2026-8-06' }, 'startDate'],
++    [{ ...VALID_BODY, startDate: '2026-02-30' }, 'startDate'],
++    [{ ...VALID_BODY, endDate: '2026-08-05' }, 'endDate'],
++    [{ ...VALID_BODY, endDate: '2026-08-13' }, '7 d├¡as'],
++    [{ ...VALID_BODY, duration: 60 }, 'duration'],
++    [{ ...VALID_BODY, serviceId: 'attacker-service' }, 'serviceId'],
++    [{ ...VALID_BODY, providerId: 'attacker-provider' }, 'providerId'],
++  ])('rejects invalid or caller-controlled request %#', (body, message) => {
++    expect(() => validateCrmAvailabilityRequest(body)).toThrow(message);
++  });
++});
++
++describe('handleCrmGetAvailableSlots', () => {
++  test('requires POST and the bridge secret', async () => {
++    const getAvailableSlots = jest.fn();
++
++    await expect(handleCrmGetAvailableSlots(
++      { method: 'GET', secretHeader: 'bridge-secret', body: VALID_BODY },
++      { expectedSecret: 'bridge-secret', getAvailableSlots },
++    )).resolves.toMatchObject({ status: 405 });
++
++    await expect(handleCrmGetAvailableSlots(
++      { method: 'POST', secretHeader: 'wrong-secret', body: VALID_BODY },
++      { expectedSecret: 'bridge-secret', getAvailableSlots },
++    )).resolves.toEqual({
++      status: 401,
++      body: { error: 'unauthorized' },
++    });
++
++    expect(getAvailableSlots).not.toHaveBeenCalled();
++  });
++
++  test('fixes the service and entire-team mode, then returns only real ISO slots', async () => {
++    const getAvailableSlots = jest.fn().mockResolvedValue({
++      slots: [
++        { dateTime: '2026-08-06T12:00:00.000Z', isAvailable: true },
++        { dateTime: 'invalid', isAvailable: true },
++        { dateTime: '2026-08-06T13:00:00.000Z', isAvailable: false },
++        { dateTime: '2026-08-06T14:00:00.000Z', isAvailable: true },
++      ],
++    });
++
++    const result = await handleCrmGetAvailableSlots(
++      { method: 'POST', secretHeader: 'bridge-secret', body: VALID_BODY },
++      { expectedSecret: 'bridge-secret', getAvailableSlots },
++    );
++
++    expect(getAvailableSlots).toHaveBeenCalledWith({
++      serviceId: PROSAVIS_LIMPIEZA_SERVICE_ID,
++      startDate: VALID_BODY.startDate,
++      endDate: VALID_BODY.endDate,
++      duration: VALID_BODY.duration,
++      checkEntireTeam: true,
++    });
++    expect(result).toEqual({
++      status: 200,
++      body: {
++        slots: [
++          '2026-08-06T12:00:00.000Z',
++          '2026-08-06T14:00:00.000Z',
++        ],
++      },
++    });
++  });
++
++  test('maps known client errors to 4xx and hides internal failures', async () => {
++    const notFound = jest.fn().mockRejectedValue(
++      new HttpsError('not-found', 'Servicio no encontrado'),
++    );
++    await expect(handleCrmGetAvailableSlots(
++      { method: 'POST', secretHeader: 'bridge-secret', body: VALID_BODY },
++      { expectedSecret: 'bridge-secret', getAvailableSlots: notFound },
++    )).resolves.toEqual({
++      status: 404,
++      body: { error: 'Servicio no encontrado' },
++    });
++
++    const failure = jest.fn().mockRejectedValue(new Error('sensitive failure'));
++    await expect(handleCrmGetAvailableSlots(
++      { method: 'POST', secretHeader: 'bridge-secret', body: VALID_BODY },
++      { expectedSecret: 'bridge-secret', getAvailableSlots: failure },
++    )).resolves.toEqual({
++      status: 500,
++      body: { error: 'internal' },
++    });
++  });
++});
+diff --git a/functions/src/calendar/crmGetAvailableSlots.ts b/functions/src/calendar/crmGetAvailableSlots.ts
+new file mode 100644
+index 0000000..b62dff7
+--- /dev/null
++++ b/functions/src/calendar/crmGetAvailableSlots.ts
+@@ -0,0 +1,197 @@
++import { createHash, timingSafeEqual } from 'crypto';
++import { logger } from 'firebase-functions/v2';
++import { HttpsError, onRequest } from 'firebase-functions/v2/https';
++import { defineSecret } from 'firebase-functions/params';
++import { PROSAVIS_LIMPIEZA_SERVICE_ID } from '../constants/pricing';
++import { GetAvailableSlotsParams } from '../types/calendar';
++import { getAvailableSlotsInternal } from './getAvailableSlots';
++
++const firebaseCrmBridgeSecret = defineSecret('FIREBASE_CRM_BRIDGE_SECRET');
++const OFFICIAL_DURATIONS = new Set([120, 180, 240, 360, 480]);
++const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
++const DAY_MS = 24 * 60 * 60 * 1000;
++
++export interface CrmAvailabilityRequest {
++  startDate: string;
++  endDate: string;
++  duration: number;
++}
++
++export interface CrmAvailabilityResponse {
++  slots: string[];
++}
++
++interface BridgeRequest {
++  method: string;
++  secretHeader?: string;
++  body: unknown;
++}
++
++interface InternalAvailabilityResult {
++  slots: Array<{
++    dateTime: string;
++    isAvailable: boolean;
++    appointmentId?: string;
++  }>;
++}
++
++interface BridgeDependencies {
++  expectedSecret: string;
++  getAvailableSlots: (
++    params: GetAvailableSlotsParams
++  ) => Promise<InternalAvailabilityResult>;
++}
++
++type BridgeResult =
++  | { status: 200; body: CrmAvailabilityResponse }
++  | { status: number; body: { error: string } };
++
++class CrmAvailabilityValidationError extends Error {}
++
++function isRecord(value: unknown): value is Record<string, unknown> {
++  return typeof value === 'object' && value !== null && !Array.isArray(value);
++}
++
++function parseDateKey(value: unknown, field: 'startDate' | 'endDate'): string {
++  if (typeof value !== 'string' || !DATE_ONLY_PATTERN.test(value)) {
++    throw new CrmAvailabilityValidationError(`${field} debe ser YYYY-MM-DD`);
++  }
++  const timestamp = Date.parse(`${value}T00:00:00.000Z`);
++  if (
++    !Number.isFinite(timestamp) ||
++    new Date(timestamp).toISOString().slice(0, 10) !== value
++  ) {
++    throw new CrmAvailabilityValidationError(`${field} no es una fecha v├ílida`);
++  }
++  return value;
++}
++
++export function validateCrmAvailabilityRequest(
++  body: unknown
++): CrmAvailabilityRequest {
++  if (!isRecord(body)) {
++    throw new CrmAvailabilityValidationError('body debe ser un objeto');
++  }
++  if (Object.prototype.hasOwnProperty.call(body, 'serviceId')) {
++    throw new CrmAvailabilityValidationError('serviceId no es seleccionable');
++  }
++  if (Object.prototype.hasOwnProperty.call(body, 'providerId')) {
++    throw new CrmAvailabilityValidationError('providerId no es seleccionable');
++  }
++
++  const startDate = parseDateKey(body.startDate, 'startDate');
++  const endDate = parseDateKey(body.endDate, 'endDate');
++  const duration = body.duration;
++  if (
++    typeof duration !== 'number' ||
++    !Number.isInteger(duration) ||
++    !OFFICIAL_DURATIONS.has(duration)
++  ) {
++    throw new CrmAvailabilityValidationError('duration no es oficial');
++  }
++
++  const startMs = Date.parse(`${startDate}T00:00:00.000Z`);
++  const endMs = Date.parse(`${endDate}T00:00:00.000Z`);
++  if (endMs < startMs) {
++    throw new CrmAvailabilityValidationError('endDate debe ser igual o posterior a startDate');
++  }
++  if ((endMs - startMs) / DAY_MS + 1 > 7) {
++    throw new CrmAvailabilityValidationError('El rango m├íximo es de 7 d├¡as');
++  }
++
++  return { startDate, endDate, duration };
++}
++
++function secretsMatch(provided: string | undefined, expected: string): boolean {
++  if (!provided || !expected) return false;
++  const providedDigest = createHash('sha256').update(provided).digest();
++  const expectedDigest = createHash('sha256').update(expected).digest();
++  return timingSafeEqual(providedDigest, expectedDigest);
++}
++
++function clientErrorStatus(error: HttpsError): number | null {
++  const statusByCode: Partial<Record<HttpsError['code'], number>> = {
++    'invalid-argument': 400,
++    unauthenticated: 401,
++    'permission-denied': 403,
++    'not-found': 404,
++    'failed-precondition': 409,
++    'resource-exhausted': 429,
++  };
++  return statusByCode[error.code] ?? null;
++}
++
++function isIsoDateTime(value: string): boolean {
++  const parsed = new Date(value);
++  return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
++}
++
++export async function handleCrmGetAvailableSlots(
++  request: BridgeRequest,
++  dependencies: BridgeDependencies
++): Promise<BridgeResult> {
++  if (request.method.toUpperCase() !== 'POST') {
++    return { status: 405, body: { error: 'method_not_allowed' } };
++  }
++  if (!secretsMatch(request.secretHeader, dependencies.expectedSecret)) {
++    return { status: 401, body: { error: 'unauthorized' } };
++  }
++
++  let params: CrmAvailabilityRequest;
++  try {
++    params = validateCrmAvailabilityRequest(request.body);
++  } catch (error) {
++    if (error instanceof CrmAvailabilityValidationError) {
++      return { status: 400, body: { error: error.message } };
++    }
++    return { status: 400, body: { error: 'invalid_request' } };
++  }
++
++  try {
++    const result = await dependencies.getAvailableSlots({
++      serviceId: PROSAVIS_LIMPIEZA_SERVICE_ID,
++      startDate: params.startDate,
++      endDate: params.endDate,
++      duration: params.duration,
++      checkEntireTeam: true,
++    });
++    const slots = result.slots
++      .filter((slot) => slot.isAvailable && isIsoDateTime(slot.dateTime))
++      .map((slot) => slot.dateTime);
++    return { status: 200, body: { slots } };
++  } catch (error) {
++    if (error instanceof HttpsError) {
++      const status = clientErrorStatus(error);
++      if (status !== null) {
++        return { status, body: { error: error.message } };
++      }
++    }
++    logger.error('[crmGetAvailableSlots] Internal failure', { error });
++    return { status: 500, body: { error: 'internal' } };
++  }
++}
++
++export const crmGetAvailableSlots = onRequest(
++  {
++    region: 'us-central1',
++    secrets: [firebaseCrmBridgeSecret],
++    cors: false,
++  },
++  async (req, res) => {
++    const result = await handleCrmGetAvailableSlots(
++      {
++        method: req.method,
++        secretHeader: req.get('x-crm-secret') ?? undefined,
++        body: req.body,
++      },
++      {
++        expectedSecret: firebaseCrmBridgeSecret.value(),
++        getAvailableSlots: getAvailableSlotsInternal,
++      }
++    );
++    if (result.status === 405) {
++      res.set('Allow', 'POST');
++    }
++    res.status(result.status).json(result.body);
++  }
++);
+diff --git a/functions/src/calendar/getAvailableSlots.ts b/functions/src/calendar/getAvailableSlots.ts
+index a51f03b..32c032e 100644
+--- a/functions/src/calendar/getAvailableSlots.ts
++++ b/functions/src/calendar/getAvailableSlots.ts
+@@ -457,21 +457,21 @@ async function getSlotsForSingleProvider(
+     params.startDate,
+     params.endDate,
+     params.duration,
+     serviceIdTrimmed
+   );
+ }
+ 
+ const CRM_BUFFER_MINUTES = 60;
+ /** Intervalo fijo de 30 minutos para slots (09:00, 09:30, 10:00, etc.) en todos los casos */
+ const SLOT_INCREMENT_MINUTES = 30;
+-const VALID_DURATIONS = [240, 360, 480];
++const VALID_DURATIONS = [120, 180, 240, 360, 480];
+ 
+ const AFTER_HOURS_BUFFER_MINUTES = 720;
+ const AFTER_HOURS_START_HOUR = 18;
+ const AFTER_HOURS_END_HOUR = 6;
+ 
+ function calculateAvailableSlots(
+   availability: Availability,
+   settings: CalendarSettings,
+   existingAppointments: Appointment[],
+   startDateStr: string,
+diff --git a/functions/src/index.ts b/functions/src/index.ts
+index 93fe0df..76a3be5 100644
+--- a/functions/src/index.ts
++++ b/functions/src/index.ts
+@@ -112,20 +112,21 @@ export {
+   completeAuthRequest,
+   createAuthRequest,
+   rejectAuthRequest,
+ } from './auth/authRequest';
+ 
+ // =============================================================================
+ // ├░┼©ÔÇ£ÔÇª CALENDAR - Sistema de agendamiento y citas
+ // =============================================================================
+ export { createAppointment } from './calendar/createAppointment';
+ export { createRecurringAppointments } from './calendar/createRecurringAppointments';
++export { crmGetAvailableSlots } from './calendar/crmGetAvailableSlots';
+ export { crmRescheduleAppointment } from './calendar/crmRescheduleAppointment';
+ export { deleteAppointment } from './calendar/deleteAppointment';
+ export { getAvailableProfessionals } from './calendar/getAvailableProfessionals';
+ export { getAvailableSlots } from './calendar/getAvailableSlots';
+ export { setMemberAvailability } from './calendar/setMemberAvailability';
+ export {
+   triggerAppointmentCompletionReminder,
+   triggerAppointmentEnRouteReminder,
+   triggerAppointmentReviewRequest,
+ } from './calendar/http/triggerAppointmentReminders';
+commit 3c880df23cd7a02c48ab6e481903560e4b82e882
+Author:     Nicol├ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+AuthorDate: Thu Aug 6 10:54:46 2026 -0500
+Commit:     Nicol├ís Ceballos Brito <nicolasceballosbrito@gmail.com>
+CommitDate: Thu Aug 6 10:54:46 2026 -0500
+
+    Inbox AI: operational context + real availability
+    
+    Adds a grounded, operational Inbox AI context (section budgets, full conversational context, batched tag lookup, directory fields and official answers) with stricter heading budgeting and tests. Introduces Firebase bridge helpers (firebaseHttp) and availability module to load, normalize and append real availability; booking contexts are overwritten with real slots. Integrates availability into suggestion and booking-context flows and updates system instruction to prefer official answers and real slots. Also includes V5 booking projection RPC migration and pgTAP tests. Many unit tests and SDD docs added/updated.
+
+diff --git a/src/utils/availability.test.ts b/src/utils/availability.test.ts
+new file mode 100644
+index 0000000..1e61b4e
+--- /dev/null
++++ b/src/utils/availability.test.ts
+@@ -0,0 +1,124 @@
++import { describe, expect, it, vi } from 'vitest';
++import {
++  appendRealAvailabilityContext,
++  getBogotaAvailabilityHorizon,
++  loadRealAvailability,
++  normalizeAvailabilitySlots,
++  overwriteBookingAvailability,
++  resolveOfficialDuration,
++} from '../../supabase/functions/_shared/availability';
++import { INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET } from '../../supabase/functions/_shared/inboxAiContextFormat';
++
++describe('getBogotaAvailabilityHorizon', () => {
++  it('uses Bogot├í date keys and a seven-day inclusive horizon', () => {
++    expect(getBogotaAvailabilityHorizon(
++      new Date('2026-08-07T03:30:00.000Z'),
++    )).toEqual({
++      startDate: '2026-08-06',
++      endDate: '2026-08-12',
++    });
++  });
++});
++
++describe('resolveOfficialDuration', () => {
++  it.each([120, 180, 240, 360, 480])(
++    'preserves official duration %i',
++    (duration) => {
++      expect(resolveOfficialDuration(duration)).toBe(duration);
++    },
++  );
++
++  it.each([null, undefined, 60, 150, '240'])(
++    'falls back to 240 minutes for %s',
++    (duration) => {
++      expect(resolveOfficialDuration(duration)).toBe(240);
++    },
++  );
++});
++
++describe('normalizeAvailabilitySlots', () => {
++  it('validates, canonicalizes, deduplicates and sorts ISO slots', () => {
++    expect(normalizeAvailabilitySlots({
++      slots: [
++        '2026-08-06T09:00:00-05:00',
++        'not-a-date',
++        '2026-08-06T13:00:00.000Z',
++        '2026-08-06T14:00:00.000Z',
++        123,
++      ],
++    })).toEqual([
++      '2026-08-06T13:00:00.000Z',
++      '2026-08-06T14:00:00.000Z',
++    ]);
++  });
++
++  it('degrades malformed payloads to an empty list', () => {
++    expect(normalizeAvailabilitySlots(null)).toEqual([]);
++    expect(normalizeAvailabilitySlots({ slots: 'not-an-array' })).toEqual([]);
++  });
++});
++
++describe('loadRealAvailability', () => {
++  it('requests the Bogot├í horizon with the fallback duration', async () => {
++    const request = vi.fn().mockResolvedValue({
++      slots: ['2026-08-06T12:00:00.000Z'],
++    });
++
++    await expect(loadRealAvailability(150, {
++      now: new Date('2026-08-06T12:00:00.000Z'),
++      request,
++    })).resolves.toEqual(['2026-08-06T12:00:00.000Z']);
++    expect(request).toHaveBeenCalledWith({
++      startDate: '2026-08-06',
++      endDate: '2026-08-12',
++      duration: 240,
++    });
++  });
++
++  it('degrades timeout and bridge failures to [] with a structured warning', async () => {
++    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
++    const request = vi.fn().mockRejectedValue(new Error('aborted'));
++
++    await expect(loadRealAvailability(240, { request })).resolves.toEqual([]);
++    expect(JSON.parse(String(warn.mock.calls[0]?.[0]))).toMatchObject({
++      scope: 'booking-availability',
++      event: 'firebase-availability-degraded',
++      error: 'aborted',
++    });
++  });
++});
++
++describe('booking availability grounding', () => {
++  it('overwrites model-provided slots unconditionally', () => {
++    expect(overwriteBookingAvailability(
++      {
++        stage: 'availability',
++        availableSlots: ['invented-slot'],
++      },
++      [],
++    )).toEqual({
++      stage: 'availability',
++      availableSlots: [],
++    });
++  });
++
++  it('adds the exact real-availability section within the 78,000-character ceiling', () => {
++    const latest = '├ÜLTIMO MENSAJE';
++    const base = [
++      '=== Perfil directorio ===',
++      'Cliente real',
++      '',
++      '=== Historial WhatsApp ===',
++      `${'x'.repeat(INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET)}${latest}`,
++    ].join('\n');
++
++    const context = appendRealAvailabilityContext(base, [
++      '2026-08-06T12:00:00.000Z',
++    ]);
++
++    expect(context).toContain('=== Disponibilidad real (pr├│ximos d├¡as) ===');
++    expect(context).toContain('- 2026-08-06T12:00:00.000Z');
++    expect(context).toContain(latest);
++    expect(context.length).toBeLessThanOrEqual(INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET);
++  });
++});
+diff --git a/src/utils/firebaseHttp.test.ts b/src/utils/firebaseHttp.test.ts
+new file mode 100644
+index 0000000..238b307
+--- /dev/null
++++ b/src/utils/firebaseHttp.test.ts
+@@ -0,0 +1,72 @@
++import { afterEach, describe, expect, it, vi } from 'vitest';
++import {
++  DEFAULT_FIREBASE_CRM_BRIDGE_URL,
++  postFirebaseJson,
++} from '../../supabase/functions/_shared/firebaseHttp';
++
++const env = (name: string): string | undefined => ({
++  FIREBASE_CRM_BRIDGE_SECRET: 'server-secret',
++}[name]);
++
++afterEach(() => {
++  vi.useRealTimers();
++  vi.restoreAllMocks();
++});
++
++describe('postFirebaseJson', () => {
++  it('posts JSON to the canonical URL with the server-side secret header', async () => {
++    const fetchImpl = vi.fn().mockResolvedValue(new Response(
++      JSON.stringify({ slots: ['2026-08-06T12:00:00.000Z'] }),
++      { status: 200, headers: { 'Content-Type': 'application/json' } },
++    ));
++
++    await expect(postFirebaseJson(
++      { startDate: '2026-08-06', endDate: '2026-08-12', duration: 240 },
++      { env, fetchImpl },
++    )).resolves.toEqual({ slots: ['2026-08-06T12:00:00.000Z'] });
++
++    expect(fetchImpl).toHaveBeenCalledWith(
++      DEFAULT_FIREBASE_CRM_BRIDGE_URL,
++      expect.objectContaining({
++        method: 'POST',
++        headers: {
++          'Content-Type': 'application/json',
++          'x-crm-secret': 'server-secret',
++        },
++      }),
++    );
++  });
++
++  it('fails closed before fetch when the secret is missing', async () => {
++    const fetchImpl = vi.fn();
++
++    await expect(postFirebaseJson({}, {
++      env: () => undefined,
++      fetchImpl,
++    })).rejects.toThrow('Firebase CRM bridge is not configured');
++    expect(fetchImpl).not.toHaveBeenCalled();
++  });
++
++  it('aborts after at most four seconds even when a larger timeout is requested', async () => {
++    vi.useFakeTimers();
++    let signal: AbortSignal | undefined;
++    const fetchImpl = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
++      signal = init?.signal ?? undefined;
++      return new Promise<Response>((_resolve, reject) => {
++        signal?.addEventListener('abort', () => reject(new Error('aborted')));
++      });
++    });
++
++    const request = postFirebaseJson({}, {
++      env,
++      fetchImpl,
++      timeoutMs: 10_000,
++    });
++    const rejection = expect(request).rejects.toThrow('aborted');
++    await vi.advanceTimersByTimeAsync(3_999);
++    expect(signal?.aborted).toBe(false);
++    await vi.advanceTimersByTimeAsync(1);
++    await rejection;
++    expect(signal?.aborted).toBe(true);
++  });
++});
+diff --git a/src/utils/inboxAiContextFormat.test.ts b/src/utils/inboxAiContextFormat.test.ts
+index 1efec85..ca45557 100644
+--- a/src/utils/inboxAiContextFormat.test.ts
++++ b/src/utils/inboxAiContextFormat.test.ts
+@@ -356,20 +356,26 @@ describe('INBOX_AI_SYSTEM_INSTRUCTION', () => {
+   it('requires early arrival when house will be empty', () => {
+     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/SEGURIDAD Y ACCESO/);
+     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/1 hora antes/);
+     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/NUNCA propongas llegar exactamente/);
+   });
+ 
+   it('requires grounded prices, payments, availability and Meta templates', () => {
+     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/precios.+cat├ílogo oficial/i);
+     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/pago.+datos autoritativos/i);
+     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/nunca inventes.+horarios disponibles/i);
++    expect(INBOX_AI_SYSTEM_INSTRUCTION).toContain(
++      '=== Disponibilidad real (pr├│ximos d├¡as) ===',
++    );
++    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(
++      /prefiere.+hora real.+llegada anticipada/i,
++    );
+     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/ventana.+cerrada.+plantilla/i);
+   });
+ 
+   it('prefers official house answers before improvising', () => {
+     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(
+       /respuestas oficiales de la casa.+antes de improvisar/i,
+     );
+   });
+ });
+ 
+diff --git a/supabase/functions/_shared/availability.ts b/supabase/functions/_shared/availability.ts
+new file mode 100644
+index 0000000..aa400ef
+--- /dev/null
++++ b/supabase/functions/_shared/availability.ts
+@@ -0,0 +1,144 @@
++import { postFirebaseJson } from './firebaseHttp.ts';
++import { INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET } from './inboxAiContextFormat.ts';
++
++const BOGOTA_TIME_ZONE = 'America/Bogota';
++const OFFICIAL_DURATIONS = new Set([120, 180, 240, 360, 480]);
++const DEFAULT_DURATION_MINUTES = 240;
++const REAL_AVAILABILITY_HEADING =
++  '=== Disponibilidad real (pr├│ximos d├¡as) ===';
++const HISTORY_HEADING = '=== Historial WhatsApp ===';
++const HISTORY_CLIP_MARKER =
++  '\n[Historial recortado para disponibilidad real]\n';
++
++export interface FirebaseAvailabilityRequest {
++  startDate: string;
++  endDate: string;
++  duration: number;
++}
++
++export interface AvailabilityLoadOptions {
++  now?: Date;
++  request?: (body: FirebaseAvailabilityRequest) => Promise<unknown>;
++}
++
++function bogotaDateKey(date: Date): string {
++  const parts = new Intl.DateTimeFormat('en-CA', {
++    timeZone: BOGOTA_TIME_ZONE,
++    year: 'numeric',
++    month: '2-digit',
++    day: '2-digit',
++  }).formatToParts(date);
++  const value = (type: Intl.DateTimeFormatPartTypes) =>
++    parts.find((part) => part.type === type)?.value ?? '';
++  return `${value('year')}-${value('month')}-${value('day')}`;
++}
++
++function addDays(dateKey: string, days: number): string {
++  const date = new Date(`${dateKey}T00:00:00.000Z`);
++  date.setUTCDate(date.getUTCDate() + days);
++  return date.toISOString().slice(0, 10);
++}
++
++export function getBogotaAvailabilityHorizon(
++  now = new Date(),
++): { startDate: string; endDate: string } {
++  const startDate = bogotaDateKey(now);
++  return {
++    startDate,
++    endDate: addDays(startDate, 6),
++  };
++}
++
++export function resolveOfficialDuration(value: unknown): number {
++  return typeof value === 'number' &&
++      Number.isInteger(value) &&
++      OFFICIAL_DURATIONS.has(value)
++    ? value
++    : DEFAULT_DURATION_MINUTES;
++}
++
++function isRecord(value: unknown): value is Record<string, unknown> {
++  return typeof value === 'object' && value !== null && !Array.isArray(value);
++}
++
++function canonicalIsoDateTime(value: unknown): string | null {
++  if (typeof value !== 'string' || !value.includes('T')) return null;
++  const parsed = new Date(value);
++  return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
++}
++
++export function normalizeAvailabilitySlots(payload: unknown): string[] {
++  if (!isRecord(payload) || !Array.isArray(payload.slots)) return [];
++  const slots = new Set<string>();
++  for (const value of payload.slots) {
++    const canonical = canonicalIsoDateTime(value);
++    if (canonical) slots.add(canonical);
++  }
++  return [...slots].sort((left, right) => left.localeCompare(right));
++}
++
++export async function loadRealAvailability(
++  duration: unknown,
++  options: AvailabilityLoadOptions = {},
++): Promise<string[]> {
++  const request = options.request ?? postFirebaseJson;
++  const horizon = getBogotaAvailabilityHorizon(options.now);
++  try {
++    const payload = await request({
++      ...horizon,
++      duration: resolveOfficialDuration(duration),
++    });
++    return normalizeAvailabilitySlots(payload);
++  } catch (error) {
++    console.warn(JSON.stringify({
++      scope: 'booking-availability',
++      event: 'firebase-availability-degraded',
++      error: error instanceof Error ? error.message : String(error),
++    }));
++    return [];
++  }
++}
++
++export function overwriteBookingAvailability<T extends object>(
++  bookingContext: T,
++  slots: string[],
++): T & { availableSlots: string[] } {
++  return {
++    ...bookingContext,
++    availableSlots: [...slots],
++  };
++}
++
++function formatRealAvailabilitySection(slots: string[]): string {
++  const normalized = normalizeAvailabilitySlots({ slots });
++  return [
++    REAL_AVAILABILITY_HEADING,
++    ...(normalized.length
++      ? normalized.map((slot) => `- ${slot}`)
++      : ['- Sin horarios reales disponibles.']),
++  ].join('\n');
++}
++
++function clipBaseContext(baseContext: string, budget: number): string {
++  if (baseContext.length <= budget) return baseContext;
++  const historyStart = baseContext.indexOf(HISTORY_HEADING);
++  if (historyStart < 0) return baseContext.slice(0, budget);
++
++  const prefixEnd = historyStart + HISTORY_HEADING.length;
++  const prefix = baseContext.slice(0, prefixEnd);
++  const latestBudget = budget - prefix.length - HISTORY_CLIP_MARKER.length;
++  if (latestBudget <= 0) return baseContext.slice(0, budget);
++  return `${prefix}${HISTORY_CLIP_MARKER}${baseContext.slice(-latestBudget)}`;
++}
++
++export function appendRealAvailabilityContext(
++  baseContext: string,
++  slots: string[],
++  totalBudget = INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET,
++): string {
++  const section = formatRealAvailabilitySection(slots);
++  const separator = baseContext ? '\n\n' : '';
++  const baseBudget = Math.max(0, totalBudget - separator.length - section.length);
++  const clippedBase = clipBaseContext(baseContext, baseBudget);
++  return `${clippedBase}${clippedBase ? separator : ''}${section}`.slice(0, totalBudget);
++}
+diff --git a/supabase/functions/_shared/firebaseHttp.ts b/supabase/functions/_shared/firebaseHttp.ts
+new file mode 100644
+index 0000000..478c833
+--- /dev/null
++++ b/supabase/functions/_shared/firebaseHttp.ts
+@@ -0,0 +1,74 @@
++export const DEFAULT_FIREBASE_CRM_BRIDGE_URL =
++  'https://us-central1-prosavis.cloudfunctions.net/crmGetAvailableSlots';
++
++const MAX_TIMEOUT_MS = 4_000;
++
++type EnvReader = (name: string) => string | undefined;
++type FetchLike = (
++  input: string | URL | Request,
++  init?: RequestInit,
++) => Promise<Response>;
++
++interface EdgeRuntimeGlobal {
++  Deno?: {
++    env: {
++      get(name: string): string | undefined;
++    };
++  };
++}
++
++export interface FirebaseHttpOptions {
++  env?: EnvReader;
++  fetchImpl?: FetchLike;
++  timeoutMs?: number;
++}
++
++function readEdgeEnvironment(name: string): string | undefined {
++  const runtime = globalThis as typeof globalThis & EdgeRuntimeGlobal;
++  return runtime.Deno?.env.get(name)?.trim() || undefined;
++}
++
++function resolveTimeoutMs(requested: number | undefined): number {
++  if (typeof requested !== 'number' || !Number.isFinite(requested) || requested <= 0) {
++    return MAX_TIMEOUT_MS;
++  }
++  return Math.min(Math.floor(requested), MAX_TIMEOUT_MS);
++}
++
++export async function postFirebaseJson<T = unknown>(
++  body: unknown,
++  options: FirebaseHttpOptions = {},
++): Promise<T> {
++  const env = options.env ?? readEdgeEnvironment;
++  const secret = env('FIREBASE_CRM_BRIDGE_SECRET');
++  if (!secret) {
++    throw new Error('Firebase CRM bridge is not configured');
++  }
++  const url =
++    env('FIREBASE_CRM_BRIDGE_URL')?.trim() ||
++    DEFAULT_FIREBASE_CRM_BRIDGE_URL;
++  const fetchImpl = options.fetchImpl ?? fetch;
++  const controller = new AbortController();
++  const timeout = setTimeout(
++    () => controller.abort(),
++    resolveTimeoutMs(options.timeoutMs),
++  );
++
++  try {
++    const response = await fetchImpl(url, {
++      method: 'POST',
++      headers: {
++        'Content-Type': 'application/json',
++        'x-crm-secret': secret,
++      },
++      body: JSON.stringify(body),
++      signal: controller.signal,
++    });
++    if (!response.ok) {
++      throw new Error(`Firebase CRM bridge request failed (${response.status})`);
++    }
++    return await response.json() as T;
++  } finally {
++    clearTimeout(timeout);
++  }
++}
+diff --git a/supabase/functions/_shared/inboxAiContextFormat.ts b/supabase/functions/_shared/inboxAiContextFormat.ts
+index 8714514..9953245 100644
+--- a/supabase/functions/_shared/inboxAiContextFormat.ts
++++ b/supabase/functions/_shared/inboxAiContextFormat.ts
+@@ -779,15 +779,17 @@ export const INBOX_AI_SYSTEM_INSTRUCTION =
+   'SEGURIDAD Y ACCESO A LA PROPIEDAD (prioridad alta): ' +
+   'Si el cliente indica que a cierta hora se va / no habr├í nadie en la casa / nadie puede recibir, ' +
+   'NUNCA propongas llegar exactamente a esa hora. Ofrece llegar con antelaci├│n (t├¡picamente 1 hora antes, ' +
+   'p. ej. si se van a las 8:00 ÔåÆ propone 7:00) para que alguien reciba al personal, entregar llaves/acceso ' +
+   'y garantizar limpieza correcta y seguridad. Explica brevemente que priorizamos seguridad y confianza. ' +
+   'Si no queda claro qui├®n recibe, pregunta c├│mo nos abrir├ín o si prefieren llegada anticipada. ' +
+   'Al hablar de apoyos, usa fecha/hora, direcci├│n, cliente y auxiliar solo si aporta; no inventes auxiliares ni direcciones. ' +
+   'Usa precios ├║nicamente desde el cat├ílogo oficial incluido en el contexto. ' +
+   'Nunca afirmes un pago sin datos autoritativos de CRM/Firestore. ' +
+   'Nunca inventes horarios disponibles; usa solo disponibilidad confirmada por una fuente real. ' +
++  'Ofrece ├║nicamente horarios incluidos en "=== Disponibilidad real (pr├│ximos d├¡as) ===" y, ' +
++  'si existe entre ellos, prefiere la hora real que respeta la llegada anticipada antes de que la casa quede sola. ' +
+   'Cuando la ventana Meta est├® cerrada, propone una plantilla aprobada en vez de texto libre. ' +
+   'Si hay link de pago, menci├│nalo al final. ' +
+   'Adapta el tono a los tags (p. ej. Empresas vs residencial). ' +
+   'Si hay tags sensibles internos (Bloqueado, Decline, lista negra), no empujes venta agresiva y no reveles esos tags al cliente en el texto. ' +
+   'Si hay citas pr├│ximas, tenlas en cuenta al responder (no ofrezcas re-agendar ignor├índolas).';
+diff --git a/supabase/functions/get-whatsapp-booking-context/index.ts b/supabase/functions/get-whatsapp-booking-context/index.ts
+index faf077c..4bc35ca 100644
+--- a/supabase/functions/get-whatsapp-booking-context/index.ts
++++ b/supabase/functions/get-whatsapp-booking-context/index.ts
+@@ -1,18 +1,22 @@
+ import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
+ import { requireCrmAdmin } from '../_shared/supabase.ts';
+ import { formatError } from '../_shared/whatsappOutbound.ts';
+ import {
+   getGeminiApiKey,
+   geminiGenerateJson,
+ } from '../_shared/geminiClient.ts';
+ import { resolveBookingPricingCheckout } from '../_shared/pricingCatalog.ts';
++import {
++  loadRealAvailability,
++  overwriteBookingAvailability,
++} from '../_shared/availability.ts';
+ import {
+   buildInboxAiContext,
+   groundBookingClientInfo,
+   groundBookingPayment,
+ } from '../_shared/inboxAiContext.ts';
+ 
+ Deno.serve(async (req) => {
+   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+ 
+   try {
+@@ -49,21 +53,28 @@ Deno.serve(async (req) => {
+         `Tel├®fono: ${ctx.phone}\n\n${ctx.formattedBlock}`,
+     }).catch(() => ({}));
+ 
+     const groundedPaymentContext = groundBookingPayment(inferredBookingContext, ctx);
+     const {
+       bookingContext: pricedBookingContext,
+       wompiCheckoutUrl,
+       wompiPaymentReference,
+       wompiAmountCOP,
+     } = resolveBookingPricingCheckout(groundedPaymentContext, ctx.phone);
+-    const bookingContext = groundBookingClientInfo(pricedBookingContext, ctx);
++    const groundedBookingContext = groundBookingClientInfo(pricedBookingContext, ctx);
++    const availableSlots = await loadRealAvailability(
++      groundedBookingContext.collectedData.duration,
++    );
++    const bookingContext = overwriteBookingAvailability(
++      groundedBookingContext,
++      availableSlots,
++    );
+ 
+     return jsonResponse({
+       bookingContext,
+       historyMeta: ctx.historyMeta,
+       conversationTags: ctx.conversationTags,
+       sessionWindow: ctx.sessionWindow,
+       ...(wompiCheckoutUrl ? { wompiCheckoutUrl } : {}),
+       ...(wompiPaymentReference ? { wompiPaymentReference } : {}),
+       ...(wompiAmountCOP ? { wompiAmountCOP } : {}),
+     });
+diff --git a/supabase/functions/suggest-whatsapp-agent-reply/index.ts b/supabase/functions/suggest-whatsapp-agent-reply/index.ts
+index cdb1f97..8e03af8 100644
+--- a/supabase/functions/suggest-whatsapp-agent-reply/index.ts
++++ b/supabase/functions/suggest-whatsapp-agent-reply/index.ts
+@@ -1,19 +1,24 @@
+ import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
+ import { requireCrmAdmin } from '../_shared/supabase.ts';
+ import { formatError } from '../_shared/whatsappOutbound.ts';
+ import {
+   getGeminiApiKey,
+   geminiGenerateJson,
+   geminiGenerateText,
+ } from '../_shared/geminiClient.ts';
+ import { resolveBookingPricingCheckout } from '../_shared/pricingCatalog.ts';
++import {
++  appendRealAvailabilityContext,
++  loadRealAvailability,
++  overwriteBookingAvailability,
++} from '../_shared/availability.ts';
+ import {
+   INBOX_AI_SYSTEM_INSTRUCTION,
+   buildInboxAiContext,
+   groundBookingClientInfo,
+   groundBookingPayment,
+ } from '../_shared/inboxAiContext.ts';
+ 
+ const MAX_EXTRA_CONTEXT_CHARS = 2000;
+ 
+ function normalizeExtraContext(value: unknown): string {
+@@ -91,29 +96,40 @@ Deno.serve(async (req) => {
+         `Tel├®fono cliente: ${ctx.phone}\n\n${ctx.formattedBlock}`,
+     }).catch(() => ({}));
+ 
+     const groundedPaymentContext = groundBookingPayment(inferredBookingContext, ctx);
+     const {
+       bookingContext: pricedBookingContext,
+       wompiCheckoutUrl,
+       wompiPaymentReference,
+       wompiAmountCOP,
+     } = resolveBookingPricingCheckout(groundedPaymentContext, ctx.phone);
+-    const bookingContext = groundBookingClientInfo(pricedBookingContext, ctx);
++    const groundedBookingContext = groundBookingClientInfo(pricedBookingContext, ctx);
++    const availableSlots = await loadRealAvailability(
++      groundedBookingContext.collectedData.duration,
++    );
++    const bookingContext = overwriteBookingAvailability(
++      groundedBookingContext,
++      availableSlots,
++    );
++    const groundedContext = appendRealAvailabilityContext(
++      ctx.formattedBlock,
++      availableSlots,
++    );
+ 
+     // ÔöÇÔöÇÔöÇ Generar sugerencia de respuesta ÔöÇÔöÇÔöÇ
+     const suggestion = await geminiGenerateText({
+       apiKey,
+       systemInstruction: INBOX_AI_SYSTEM_INSTRUCTION,
+       userText:
+         `${extraContext ? `Contexto extra del agente:\n${extraContext}\n\n` : ''}` +
+-        `${ctx.formattedBlock}\n\n` +
++        `${groundedContext}\n\n` +
+         `Contexto booking (inferido + CRM):\n${JSON.stringify(bookingContext)}` +
+         (wompiCheckoutUrl ? `\nLink Wompi: ${wompiCheckoutUrl}` : ''),
+       temperature: 0.4,
+     });
+ 
+     return jsonResponse({
+       suggestion,
+       lastMessageIsOutbound: false,
+       bookingContext,
+       historyMeta: ctx.historyMeta,

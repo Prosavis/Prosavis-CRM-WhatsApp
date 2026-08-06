@@ -92,3 +92,86 @@ presente reporte queda como cambio Fase 3 separado.
 2. Falta verificación con runtime Deno/local Supabase por ausencia del CLI.
 3. Graphify requiere instalar `tree_sitter_sql` para cobertura AST de SQL,
    aunque la cobertura TypeScript de esta fase sí fue actualizada.
+
+## Corrección post-review
+
+### Causa raíz e hipótesis
+
+`getSlotsForSingleProvider` consultaba `appointments` únicamente por
+`providerId` y usaba la duración total del documento. La lógica canónica de
+`appointmentTeamAssignment.ts`, en cambio, consulta también
+`assignedTeamMemberIds array-contains`, deduplica por ID, incluye `EN_ROUTE`
+entre los estados bloqueantes y calcula la duración efectiva del miembro con
+`getAppointmentDurationForMember`.
+
+Hipótesis confirmada: al reutilizar esa semántica para disponibilidad, una
+auxiliar ocupada como coasignada deja de producir el slot en conflicto, sin
+bloquear horas posteriores con la duración total del equipo.
+
+### Archivos
+
+- `functions/src/calendar/appointmentTeamAssignment.ts`
+- `functions/src/calendar/getAvailableSlots.ts`
+- `functions/src/calendar/getAvailableSlots.test.ts`
+- `functions/src/types/calendar.ts`
+
+Se añadió el helper compartido
+`getAppointmentsForMemberWithEffectiveDuration`, usado tanto por conflictos
+canónicos como por disponibilidad. La prueba recorre la API pública
+`getAvailableSlotsInternal(checkEntireTeam: true)` con Firestore simulado y
+verifica una auxiliar secundaria con duración propia de 120 minutos. También
+se actualizó la documentación del contrato a
+`120 | 180 | 240 | 360 | 480`.
+
+### Evidencia RED
+
+```text
+npm test -- --runInBand src/calendar/getAvailableSlots.test.ts
+Test Suites: 1 failed, 1 total
+Tests:       1 failed, 1 total
+Expected not to contain: 2026-08-10T12:00:00.000Z
+Received: el slot ocupado por la auxiliar coasignada
+```
+
+### Evidencia GREEN y verificación
+
+```text
+npm test -- --runInBand src/calendar/getAvailableSlots.test.ts src/calendar/appointmentTeamAssignment.test.ts
+Test Suites: 2 passed, 2 total
+Tests:       39 passed, 39 total
+
+npm test -- --runInBand
+Test Suites: 65 passed, 65 total
+Tests:       507 passed, 507 total
+Snapshots:   1 passed, 1 total
+
+npm run build
+Exit 0
+
+graphify update .
+Exit 0 — 59.019 nodos, 169.249 edges, 1.402 comunidades
+```
+
+Los diagnósticos IDE de los cuatro archivos no reportaron errores y
+`git diff --check` terminó en exit 0.
+
+### Commit
+
+- Firebase: `8a94973` (`Fix co-assigned team availability`).
+- El commit contiene exclusivamente los cuatro archivos del fix.
+- Este proceso no ejecutó push. Durante el cierre, otro proceso concurrente
+  avanzó `origin/main` hasta `8a94973` y creó después el commit local ajeno
+  `d6895b7`; no se reescribió ni alteró esa actividad.
+
+### Preocupaciones restantes
+
+- No se modificó código del CRM. Por esa restricción, sigue pendiente el Minor
+  de emitir warning estructurado cuando `_shared/availability.ts` recibe un
+  payload con contrato inválido.
+- El recorrido de miembros del equipo sigue siendo secuencial; su
+  paralelización era un Minor de rendimiento y se evitó ampliar el alcance.
+- Graphify conservó sus warnings existentes: falta `tree_sitter_sql`, 47
+  fuentes no produjeron nodos y las etiquetas de comunidades requieren
+  refresco.
+- Aunque se solicitó un commit solamente local, `8a94973` apareció en
+  `origin/main` por actividad concurrente posterior al commit.
