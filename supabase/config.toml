@@ -91,6 +91,9 @@ verify_jwt = false
 [functions.suggest-whatsapp-agent-reply]
 verify_jwt = false
 
+[functions.close-whatsapp-ai-suggestion-log]
+verify_jwt = false
+
 [functions.execute-inbox-ai-action]
 verify_jwt = false
 

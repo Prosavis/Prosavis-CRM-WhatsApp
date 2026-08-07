@@ -35,7 +35,7 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
-    const { supabase } = await requireCrmAdmin(req);
+    const { supabase, user } = await requireCrmAdmin(req);
     const body = await req.json().catch(() => ({}));
     const stableKey = String(body.stableKey ?? '').trim();
     const forceGenerate = body.forceGenerate === true;
@@ -59,7 +59,12 @@ Deno.serve(async (req) => {
     }
 
     if (ctx.lastTurnRole === 'bot' && !forceGenerate) {
-      return createLastOutboundInboxAiSuggestionResponse(ctx);
+      return createLastOutboundInboxAiSuggestionResponse({
+        historyMeta: ctx.historyMeta,
+        conversationTags: ctx.conversationTags,
+        sessionWindow: ctx.sessionWindow,
+        propertySummary: ctx.propertySummary,
+      });
     }
 
     console.log(
@@ -128,7 +133,17 @@ Deno.serve(async (req) => {
         wompiPaymentReference,
         wompiAmountCOP,
       },
-      responseContext: ctx,
+      responseContext: {
+        historyMeta: ctx.historyMeta,
+        conversationTags: ctx.conversationTags,
+        sessionWindow: ctx.sessionWindow,
+        propertySummary: ctx.propertySummary,
+      },
+      suggestionLog: {
+        supabase,
+        stableKey,
+        createdBy: user?.id ?? null,
+      },
     });
   } catch (error) {
     if (error instanceof Response) return error;

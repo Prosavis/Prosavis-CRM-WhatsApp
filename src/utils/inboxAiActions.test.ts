@@ -446,6 +446,13 @@ describe('suggest-whatsapp-agent-reply response wiring', () => {
       expiresAt: '2026-08-07T15:00:00.000Z',
       requiresTemplate: false,
     },
+    propertySummary: {
+      uniquePropertyCount: 1,
+      pattern: 'single' as const,
+      patternLabel: 'Misma propiedad',
+      properties: [{ address: 'Calle 1', appointmentCount: 1 }],
+      appointmentsWithoutAddress: 0,
+    },
   };
 
   it('returns no proposed actions when the last message is outbound', async () => {
@@ -457,9 +464,11 @@ describe('suggest-whatsapp-agent-reply response wiring', () => {
       suggestion: null,
       proposedActions: [],
       lastMessageIsOutbound: true,
+      suggestionLogId: null,
       historyMeta: responseContext.historyMeta,
       conversationTags: responseContext.conversationTags,
       sessionWindow: responseContext.sessionWindow,
+      propertySummary: responseContext.propertySummary,
     });
   });
 
@@ -494,18 +503,35 @@ describe('suggest-whatsapp-agent-reply response wiring', () => {
     }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
+    const insert = vi.fn().mockReturnValue({
+      select: () => ({
+        single: () =>
+          Promise.resolve({ data: { id: 'suggestion-log-1' }, error: null }),
+      }),
+    });
+    const supabase = {
+      from: vi.fn(() => ({ insert })),
+    };
+
     const response = await createGeneratedInboxAiSuggestionResponse({
       apiKey: 'test-api-key',
       systemInstruction: 'INSTRUCCIÓN DEL INBOX',
       contextPrompt: 'Contexto grounded de prueba',
       grounding,
       responseContext,
+      suggestionLog: {
+        supabase,
+        stableKey: '573001112233',
+        createdBy: 'admin-1',
+      },
     });
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body.suggestion).toBe('Respuesta generada');
     expect(body.lastMessageIsOutbound).toBe(false);
+    expect(body.suggestionLogId).toBe('suggestion-log-1');
+    expect(body.propertySummary).toEqual(responseContext.propertySummary);
     expect(body.proposedActions).toHaveLength(1);
     expect(body.proposedActions[0]).toMatchObject({
       type: 'apply_tag',
@@ -518,5 +544,17 @@ describe('suggest-whatsapp-agent-reply response wiring', () => {
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     );
     expect(body.proposedActions[0].id).not.toBe('model-owned-id');
+    expect(supabase.from).toHaveBeenCalledWith('whatsapp_ai_suggestion_log');
+    expect(insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stable_key: '573001112233',
+        suggestion: 'Respuesta generada',
+        created_by: 'admin-1',
+        context_meta: expect.objectContaining({
+          proposedActionTypes: ['apply_tag'],
+          conversationTags: ['Interés'],
+        }),
+      }),
+    );
   });
 });
