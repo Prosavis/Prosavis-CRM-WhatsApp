@@ -1,7 +1,11 @@
 export const DEFAULT_FIREBASE_CRM_BRIDGE_URL =
   'https://us-central1-prosavis.cloudfunctions.net/crmGetAvailableSlots';
 
-const MAX_TIMEOUT_MS = 4_000;
+export const DEFAULT_FIREBASE_CRM_APPOINTMENT_ACTIONS_URL =
+  'https://us-central1-prosavis.cloudfunctions.net/crmAppointmentActions';
+
+const SLOT_MAX_TIMEOUT_MS = 4_000;
+const APPOINTMENT_MAX_TIMEOUT_MS = 8_000;
 
 type EnvReader = (name: string) => string | undefined;
 type FetchLike = (
@@ -23,35 +27,55 @@ export interface FirebaseHttpOptions {
   timeoutMs?: number;
 }
 
+export class FirebaseCrmBridgeHttpError extends Error {
+  readonly status: number;
+  readonly body: unknown;
+
+  constructor(status: number, body: unknown, message?: string) {
+    super(message ?? `Firebase CRM bridge request failed (${status})`);
+    this.name = 'FirebaseCrmBridgeHttpError';
+    this.status = status;
+    this.body = body;
+  }
+}
+
 function readEdgeEnvironment(name: string): string | undefined {
   const runtime = globalThis as typeof globalThis & EdgeRuntimeGlobal;
   return runtime.Deno?.env.get(name)?.trim() || undefined;
 }
 
-function resolveTimeoutMs(requested: number | undefined): number {
+function resolveTimeoutMs(
+  requested: number | undefined,
+  maxTimeoutMs: number,
+): number {
   if (typeof requested !== 'number' || !Number.isFinite(requested) || requested <= 0) {
-    return MAX_TIMEOUT_MS;
+    return maxTimeoutMs;
   }
-  return Math.min(Math.floor(requested), MAX_TIMEOUT_MS);
+  return Math.min(Math.floor(requested), maxTimeoutMs);
 }
 
-export async function postFirebaseJson<T = unknown>(
-  body: unknown,
-  options: FirebaseHttpOptions = {},
-): Promise<T> {
-  const env = options.env ?? readEdgeEnvironment;
+function requireBridgeSecret(env: EnvReader): string {
   const secret = env('FIREBASE_CRM_BRIDGE_SECRET');
   if (!secret) {
     throw new Error('Firebase CRM bridge is not configured');
   }
-  const url =
-    env('FIREBASE_CRM_BRIDGE_URL')?.trim() ||
-    DEFAULT_FIREBASE_CRM_BRIDGE_URL;
+  return secret;
+}
+
+async function postFirebaseBridgeJson<T>(
+  url: string,
+  body: unknown,
+  options: FirebaseHttpOptions,
+  maxTimeoutMs: number,
+  propagateHttpError: boolean,
+): Promise<T> {
+  const env = options.env ?? readEdgeEnvironment;
+  const secret = requireBridgeSecret(env);
   const fetchImpl = options.fetchImpl ?? fetch;
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(),
-    resolveTimeoutMs(options.timeoutMs),
+    resolveTimeoutMs(options.timeoutMs, maxTimeoutMs),
   );
 
   try {
@@ -64,11 +88,63 @@ export async function postFirebaseJson<T = unknown>(
       body: JSON.stringify(body),
       signal: controller.signal,
     });
+
+    const contentType = response.headers.get('content-type') ?? '';
+    const rawText = await response.text();
+    let parsed: unknown = rawText;
+    if (rawText && contentType.includes('application/json')) {
+      try {
+        parsed = JSON.parse(rawText);
+      } catch {
+        parsed = rawText;
+      }
+    } else if (!rawText) {
+      parsed = null;
+    }
+
     if (!response.ok) {
+      if (propagateHttpError) {
+        throw new FirebaseCrmBridgeHttpError(response.status, parsed);
+      }
       throw new Error(`Firebase CRM bridge request failed (${response.status})`);
     }
-    return await response.json() as T;
+
+    return parsed as T;
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export async function postFirebaseJson<T = unknown>(
+  body: unknown,
+  options: FirebaseHttpOptions = {},
+): Promise<T> {
+  const env = options.env ?? readEdgeEnvironment;
+  const url =
+    env('FIREBASE_CRM_BRIDGE_URL')?.trim() ||
+    DEFAULT_FIREBASE_CRM_BRIDGE_URL;
+  return postFirebaseBridgeJson<T>(
+    url,
+    body,
+    options,
+    SLOT_MAX_TIMEOUT_MS,
+    false,
+  );
+}
+
+export async function postCrmAppointmentAction<T = unknown>(
+  body: unknown,
+  options: FirebaseHttpOptions = {},
+): Promise<T> {
+  const env = options.env ?? readEdgeEnvironment;
+  const url =
+    env('FIREBASE_CRM_APPOINTMENT_ACTIONS_URL')?.trim() ||
+    DEFAULT_FIREBASE_CRM_APPOINTMENT_ACTIONS_URL;
+  return postFirebaseBridgeJson<T>(
+    url,
+    body,
+    options,
+    APPOINTMENT_MAX_TIMEOUT_MS,
+    true,
+  );
 }
