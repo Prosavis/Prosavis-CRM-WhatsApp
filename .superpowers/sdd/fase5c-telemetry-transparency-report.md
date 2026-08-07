@@ -68,7 +68,7 @@ edit_ratio = levenshtein(suggestion, sent_text) / max(len(suggestion), len(sent_
 | --- | --- |
 | `4349ab1` | feat(inbox-ai): add suggestion log telemetry migration and helpers |
 | `01b9fc2` | feat(inbox-ai): add Contexto usado panel and close-on-send |
-| _(docs)_ | docs(sdd): add Fase 5C telemetry transparency report |
+| `771e135` | docs(sdd): add Fase 5C telemetry transparency report |
 
 ## Fuera de alcance (respetado)
 
