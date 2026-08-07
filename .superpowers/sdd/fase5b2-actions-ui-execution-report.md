@@ -60,7 +60,13 @@ No se usó RTL (el repo no tiene `@testing-library/react`); cobertura UI vía he
 
 ## Commits locales
 
-Ver hashes en el mensaje de entrega del agente (solo archivos 5B2; no push/deploy/secrets).
+| Hash | Mensaje |
+| --- | --- |
+| `1e8fdf3` | feat(inbox-ai): add confirmed action execution edge and Firebase bridge |
+| `ce19ecd` | feat(inbox-ai): add proposed action chips with confirmation UX |
+| `6818cc9` | docs(sdd): add Fase 5B2 actions UI execution report |
+
+Solo archivos 5B2; no push/deploy/secrets. `fase5c-*` brief quedó sin commit.
 
 ## Fuera de alcance (respetado)
 
