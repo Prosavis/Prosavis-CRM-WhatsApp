@@ -60,6 +60,8 @@ $AllFunctions = @(
   'send-whatsapp-reaction',
   'send-whatsapp-template-message',
   'suggest-whatsapp-agent-reply',
+  'execute-inbox-ai-action',
+  'close-whatsapp-ai-suggestion-log',
   'sync-conversation-to-directory',
   'transcribe-whatsapp-inbound-audio',
   'update-app-user-profile',
@@ -76,7 +78,7 @@ Write-Host "Desplegando $($Targets.Count) Edge Function(s) a proyecto $ProjectRe
 
 foreach ($fn in $Targets) {
   Write-Host "  -> $fn"
-  npx supabase functions deploy $fn --project-ref $ProjectRef
+  npx supabase functions deploy $fn --project-ref $ProjectRef --use-api
   if ($LASTEXITCODE -ne 0) {
     throw "Fallo deploy de $fn (exit $LASTEXITCODE)"
   }
