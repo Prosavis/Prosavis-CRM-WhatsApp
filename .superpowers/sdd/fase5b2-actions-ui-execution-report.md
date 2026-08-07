@@ -78,7 +78,7 @@ No se usó RTL (el repo no tiene `@testing-library/react`); cobertura UI vía he
 | `ce19ecd` | feat(inbox-ai): add proposed action chips with confirmation UX |
 | `6818cc9` | docs(sdd): add Fase 5B2 actions UI execution report |
 | `d29d937` | docs(sdd): record Fase 5B2 local commit hashes in report |
-| _(gate)_ | fix(inbox-ai): wire stale assert and ignore in-flight UI effects |
+| `a9dfc26` | fix(inbox-ai): wire stale assert and ignore in-flight UI effects |
 
 Solo archivos 5B2; no push/deploy/secrets. `fase5c-*` brief quedó sin commit.
 
