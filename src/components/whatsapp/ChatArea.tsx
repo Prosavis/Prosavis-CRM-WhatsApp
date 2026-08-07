@@ -62,6 +62,7 @@ import {
   markAsRead,
   patchWhatsAppConversationAdmin,
   suggestWhatsAppAgentReply,
+  closeWhatsAppAiSuggestionLog,
   executeInboxAiAction,
   getWhatsAppBookingContext,
   deleteWhatsAppMessages,
@@ -80,6 +81,7 @@ import {
   type WhatsAppMediaBatchAttachment,
   type BookingContextData,
   type InboxAiProposedAction,
+  type InboxAiPropertySummary,
   type WhatsAppAdminPresence,
   type WhatsAppSticker,
   type WhatsAppStickerFolder,
@@ -88,16 +90,20 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import EditIcon from '@mui/icons-material/Edit';
 import BookingAssistantDrawer from './BookingAssistantDrawer';
 import ProposedActionChips from './ProposedActionChips';
+import UsedContextAccordion from './UsedContextAccordion';
 import {
   buildSuggestionFingerprint,
   canStartActionExecution,
   prepareConfirmedInboxAiActionFingerprints,
   shouldApplyInboxAiActionUiEffects,
 } from '../../../supabase/functions/_shared/inboxAiActionHelpers';
+import type { ConversationHistoryMeta } from '../../../supabase/functions/_shared/conversationHistory';
 import type { ForwardWhatsAppResult } from '@/services/forwardWhatsAppMessage';
 import { isForwardableMessage } from '@/services/forwardWhatsAppMessage';
 import { ContactAvatar } from '@/components/common/ContactAvatar';
 import { pickContactPhotoUrl } from '@/utils/contactAvatar';
+import { useMetaSessionWindow } from '@/hooks/useMetaSessionWindow';
+import { hasInboxAiUsedContext } from '@/utils/inboxAiUsedContext';
 import type { LoadedConversationInbound } from '@/utils/whatsappTemplateSuggestions';
 import {
   conversationMessageHistoryReducer,
@@ -247,6 +253,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [proposedActions, setProposedActions] = useState<InboxAiProposedAction[]>([]);
   const [suggestionFingerprint, setSuggestionFingerprint] = useState<string | null>(null);
   const suggestionFingerprintRef = useRef<string | null>(null);
+  const [suggestionLogId, setSuggestionLogId] = useState<string | null>(null);
+  const suggestionLogIdRef = useRef<string | null>(null);
+  const [usedHistoryMeta, setUsedHistoryMeta] = useState<ConversationHistoryMeta | null>(null);
+  const [usedConversationTags, setUsedConversationTags] = useState<string[]>([]);
+  const [usedPropertySummary, setUsedPropertySummary] = useState<InboxAiPropertySummary | null>(null);
   const [executingActionId, setExecutingActionId] = useState<string | null>(null);
   const [aiContextDialogOpen, setAiContextDialogOpen] = useState(false);
   const [aiExtraContext, setAiExtraContext] = useState('');
@@ -352,11 +363,20 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   }, [suggestionFingerprint]);
 
   useEffect(() => {
+    suggestionLogIdRef.current = suggestionLogId;
+  }, [suggestionLogId]);
+
+  useEffect(() => {
     setSuggestionDraft('');
     setSuggestionHint(null);
     setProposedActions([]);
     setSuggestionFingerprint(null);
     suggestionFingerprintRef.current = null;
+    setSuggestionLogId(null);
+    suggestionLogIdRef.current = null;
+    setUsedHistoryMeta(null);
+    setUsedConversationTags([]);
+    setUsedPropertySummary(null);
     setExecutingActionId(null);
     setBookingContext(null);
     setSessionWindow(null);
@@ -481,6 +501,24 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       const replyId = replyToMessage?.waMessageId;
       setReplyToMessage(null);
       await sendMessage(stableKey, text, phoneNumberId, replyId);
+
+      const openLogId = suggestionLogIdRef.current;
+      if (openLogId && text.trim()) {
+        try {
+          await closeWhatsAppAiSuggestionLog({
+            suggestionLogId: openLogId,
+            sentText: text,
+            actionTaken: 'send_text',
+          });
+        } catch (err) {
+          console.warn('No se pudo cerrar el log de sugerencia IA:', err);
+        } finally {
+          if (suggestionLogIdRef.current === openLogId) {
+            setSuggestionLogId(null);
+            suggestionLogIdRef.current = null;
+          }
+        }
+      }
     },
     [stableKey, phoneNumberId, replyToMessage],
   );
@@ -639,6 +677,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     setSuggestionHint(null);
     setProposedActions([]);
     setSuggestionFingerprint(null);
+    setSuggestionLogId(null);
+    suggestionLogIdRef.current = null;
     setExecutingActionId(null);
     try {
       const result = await suggestWhatsAppAgentReply(
@@ -648,6 +688,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         extraContext,
       );
       setSessionWindow(result.sessionWindow);
+      setUsedHistoryMeta(result.historyMeta ?? null);
+      setUsedConversationTags(result.conversationTags ?? []);
+      setUsedPropertySummary(result.propertySummary ?? null);
+      const nextLogId = result.suggestionLogId ?? null;
+      setSuggestionLogId(nextLogId);
+      suggestionLogIdRef.current = nextLogId;
       const nextActions = result.proposedActions ?? [];
       const nextSuggestion = result.suggestion ?? '';
       setProposedActions(nextActions);
@@ -1132,6 +1178,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     [conversation.id, messageHistory, stableKey],
   );
   const lastInboundAt = loadedConversationInbound?.lastInboundAt ?? null;
+  const liveSessionWindow = useMetaSessionWindow(sessionWindow, lastInboundAt);
   useEffect(() => {
     if (loadedConversationInbound) {
       onLoadedConversationInbound?.(loadedConversationInbound);
@@ -1478,8 +1525,24 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               </IconButton>
             </Box>
           )}
-          {proposedActions.length > 0 && (
+          {hasInboxAiUsedContext({
+            historyMeta: usedHistoryMeta,
+            conversationTags: usedConversationTags,
+            propertySummary: usedPropertySummary,
+            sessionWindow: liveSessionWindow,
+          }) && (
             <Box sx={{ px: 1.5, pt: 1, pb: 0.5 }}>
+              <UsedContextAccordion
+                historyMeta={usedHistoryMeta}
+                conversationTags={usedConversationTags}
+                propertySummary={usedPropertySummary}
+                sessionWindow={liveSessionWindow}
+                dense
+              />
+            </Box>
+          )}
+          {proposedActions.length > 0 && (
+            <Box sx={{ px: 1.5, pt: 0.5, pb: 0.5 }}>
               <ProposedActionChips
                 proposedActions={proposedActions}
                 executingActionId={executingActionId}
@@ -1536,6 +1599,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           lastInboundAt={lastInboundAt}
           lastMessageDirection={conversation.lastMessageDirection}
           sessionWindow={sessionWindow}
+          usedHistoryMeta={usedHistoryMeta}
+          usedConversationTags={usedConversationTags}
+          usedPropertySummary={usedPropertySummary}
           proposedActions={proposedActions}
           executingActionId={executingActionId}
           onConfirmAction={(action) => {

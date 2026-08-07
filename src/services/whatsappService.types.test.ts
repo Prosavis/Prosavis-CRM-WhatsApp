@@ -114,6 +114,14 @@ describe('Inbox AI response contracts', () => {
           newestAt: '2026-08-05T00:00:00.000Z',
         },
         conversationTags: ['VIP'],
+        propertySummary: {
+          uniquePropertyCount: 1,
+          pattern: 'single',
+          patternLabel: 'Misma propiedad',
+          properties: [],
+          appointmentsWithoutAddress: 0,
+        },
+        suggestionLogId: null,
       },
       error: null,
     });
@@ -121,6 +129,47 @@ describe('Inbox AI response contracts', () => {
     const result = await suggestWhatsAppAgentReply('stable-key-1');
     expect(result.historyMeta?.truncated).toBe(true);
     expect(result.conversationTags).toEqual(['VIP']);
+    expect(result.propertySummary?.pattern).toBe('single');
+    expect(result.suggestionLogId).toBeNull();
+  });
+
+  it('maps suggestionLogId from suggestion responses', async () => {
+    invokeMock.mockResolvedValueOnce({
+      data: {
+        suggestion: 'Hola',
+        proposedActions: [],
+        lastMessageIsOutbound: false,
+        sessionWindow,
+        suggestionLogId: 'log-abc',
+      },
+      error: null,
+    });
+
+    const result = await suggestWhatsAppAgentReply('stable-key-1');
+    expect(result.suggestionLogId).toBe('log-abc');
+  });
+
+  it('invokes close-whatsapp-ai-suggestion-log with sent text', async () => {
+    const { closeWhatsAppAiSuggestionLog } = await import('./whatsappService');
+    invokeMock.mockResolvedValueOnce({
+      data: { success: true, editRatio: 0.25 },
+      error: null,
+    });
+
+    const result = await closeWhatsAppAiSuggestionLog({
+      suggestionLogId: 'log-1',
+      sentText: 'Hola editado',
+      actionTaken: 'send_text',
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith('close-whatsapp-ai-suggestion-log', {
+      body: {
+        suggestionLogId: 'log-1',
+        sentText: 'Hola editado',
+        actionTaken: 'send_text',
+      },
+    });
+    expect(result).toEqual({ success: true, editRatio: 0.25 });
   });
 
   it('invokes execute-inbox-ai-action with fingerprint metadata', async () => {

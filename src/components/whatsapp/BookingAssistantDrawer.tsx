@@ -35,6 +35,7 @@ import {
 import MetaTemplateEditor from '@/components/whatsapp/templates/MetaTemplateEditor';
 import TemplateLibrary from '@/components/whatsapp/templates/TemplateLibrary';
 import ProposedActionChips from '@/components/whatsapp/ProposedActionChips';
+import UsedContextAccordion from '@/components/whatsapp/UsedContextAccordion';
 import {
   buildDisplayMessageBody,
   buildTemplateSendComponents,
@@ -44,10 +45,13 @@ import {
   selectWhatsAppTemplateSuggestion,
   type WhatsAppTemplateSuggestion,
 } from '@/utils/whatsappTemplateSuggestions';
+import type { ConversationHistoryMeta } from '../../../supabase/functions/_shared/conversationHistory';
+import type { InboxAiPropertySummary } from '../../../supabase/functions/_shared/inboxAiContextFormat';
 import {
   type MetaSessionWindow,
 } from '../../../supabase/functions/_shared/metaSessionWindow';
 import { useMetaSessionWindow } from '@/hooks/useMetaSessionWindow';
+import { hasInboxAiUsedContext } from '@/utils/inboxAiUsedContext';
 
 interface BookingAssistantDrawerProps {
   open: boolean;
@@ -69,6 +73,9 @@ interface BookingAssistantDrawerProps {
   lastInboundAt?: Date | null;
   lastMessageDirection?: 'inbound' | 'outbound';
   sessionWindow?: MetaSessionWindow | null;
+  usedHistoryMeta?: ConversationHistoryMeta | null;
+  usedConversationTags?: string[] | null;
+  usedPropertySummary?: InboxAiPropertySummary | null;
   proposedActions?: InboxAiProposedAction[];
   executingActionId?: string | null;
   onConfirmAction?: (action: InboxAiProposedAction) => void;
@@ -128,6 +135,9 @@ const BookingAssistantDrawer: React.FC<BookingAssistantDrawerProps> = ({
   lastInboundAt = null,
   lastMessageDirection,
   sessionWindow = null,
+  usedHistoryMeta = null,
+  usedConversationTags = null,
+  usedPropertySummary = null,
   proposedActions = [],
   executingActionId = null,
   onConfirmAction,
@@ -675,6 +685,22 @@ const BookingAssistantDrawer: React.FC<BookingAssistantDrawerProps> = ({
                 </Box>
               )}
             </>
+          )}
+
+          {hasInboxAiUsedContext({
+            historyMeta: usedHistoryMeta,
+            conversationTags: usedConversationTags,
+            propertySummary: usedPropertySummary,
+            sessionWindow: effectiveSessionWindow,
+          }) && (
+            <Box sx={{ mb: 2 }}>
+              <UsedContextAccordion
+                historyMeta={usedHistoryMeta}
+                conversationTags={usedConversationTags}
+                propertySummary={usedPropertySummary}
+                sessionWindow={effectiveSessionWindow}
+              />
+            </Box>
           )}
 
           {suggestion && (

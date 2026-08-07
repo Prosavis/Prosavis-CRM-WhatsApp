@@ -6,6 +6,7 @@ import type { NormalizedBookingContext } from '../../supabase/functions/_shared/
 import type { InboxAiProposedAction } from '../../supabase/functions/_shared/inboxAiActions';
 import type { ExecuteInboxAiActionResult } from '../../supabase/functions/_shared/inboxAiActionExecution';
 import type { ConversationHistoryMeta } from '../../supabase/functions/_shared/conversationHistory';
+import type { InboxAiPropertySummary } from '../../supabase/functions/_shared/inboxAiContextFormat';
 import {
   getMetaSessionWindow,
   type MetaSessionWindow,
@@ -15,7 +16,7 @@ import {
   type WhatsAppPresenceTrackPayload,
 } from '@/utils/whatsappAdminPresence';
 
-export type { InboxAiProposedAction, ExecuteInboxAiActionResult };
+export type { InboxAiProposedAction, ExecuteInboxAiActionResult, InboxAiPropertySummary };
 
 type ConversationRow = Database['public']['Tables']['whatsapp_conversations']['Row'];
 type MessageRow = Database['public']['Tables']['whatsapp_message_log']['Row'];
@@ -789,6 +790,8 @@ export interface SuggestReplyResult {
   wompiAmountCOP?: number;
   historyMeta?: ConversationHistoryMeta;
   conversationTags?: string[];
+  propertySummary?: InboxAiPropertySummary | null;
+  suggestionLogId?: string | null;
 }
 
 export async function suggestWhatsAppAgentReply(
@@ -804,6 +807,8 @@ export async function suggestWhatsAppAgentReply(
     wompiAmountCOP?: number;
     historyMeta?: ConversationHistoryMeta;
     conversationTags?: string[];
+    propertySummary?: InboxAiPropertySummary | null;
+    suggestionLogId?: string | null;
   }>('suggest-whatsapp-agent-reply', {
     stableKey,
     forceGenerate,
@@ -822,6 +827,27 @@ export async function suggestWhatsAppAgentReply(
     wompiAmountCOP: data.wompiAmountCOP,
     historyMeta: data.historyMeta,
     conversationTags: data.conversationTags,
+    propertySummary: data.propertySummary ?? null,
+    suggestionLogId: data.suggestionLogId ?? null,
+  };
+}
+
+export async function closeWhatsAppAiSuggestionLog(params: {
+  suggestionLogId: string;
+  sentText: string;
+  actionTaken?: string;
+}): Promise<{ success: boolean; editRatio: number }> {
+  const data = await invokeFn<{
+    success?: boolean;
+    editRatio?: number;
+  }>('close-whatsapp-ai-suggestion-log', {
+    suggestionLogId: params.suggestionLogId,
+    sentText: params.sentText,
+    ...(params.actionTaken ? { actionTaken: params.actionTaken } : {}),
+  });
+  return {
+    success: data.success === true,
+    editRatio: typeof data.editRatio === 'number' ? data.editRatio : 0,
   };
 }
 
