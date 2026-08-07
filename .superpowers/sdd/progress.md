@@ -14,5 +14,6 @@
 - Fase 5A proposed-actions contract: complete (commits 86c72ff, 0cbea64, 0c1d702; 184 tests, type-check and lint passed; task review Spec PASS / Quality APPROVED).
 - Fase 5B1 appointment bridges: complete (see `fase5b1-appointment-bridges-report.md`).
 - Fase 5B2 actions UI + execution: complete (APPROVED; commits through `bd5313f` / `a9dfc26`).
-- Fase 5C telemetry + transparency panel: complete locally (migration + log write/close + "Contexto usado" UI; see `fase5c-telemetry-transparency-report.md`; remote migration/deploy deferred).
-- Docs/deploys/secrets/migrations apply: deferred until ops closure after 5C approval.
+- Fase 5C telemetry + transparency panel: complete (APPROVED; commits 4349ab1..082f16f).
+- Ops closure: remote migrations memory+suggestion_log applied; Firebase `PROSAVIS_CRM_BRIDGE_SECRET` + Supabase `FIREBASE_CRM_BRIDGE_SECRET` set; deployed `crmGetAvailableSlots`/`crmAppointmentActions` + 4 Inbox AI Edges; Firestore indexes deployed; `CRM_INBOX_AI_CONTEXTO.md` updated; HTTP smoke 401 OK; inbox UI smoke still manual.
+- Inbox IA plan: COMPLETE pending human inbox smoke.
