@@ -214,4 +214,22 @@ describe('executeInboxAiAction', () => {
       message: expect.stringMatching(/conflicto|conflict/i),
     });
   });
+
+  it('rejects stale suggestionFingerprint before mutating (assert wired)', async () => {
+    const deps = createDeps();
+    await expect(executeInboxAiAction({
+      stableKey: '57-3001112233',
+      action: baseAction({
+        type: 'apply_tag',
+        payload: { tagName: 'VIP' },
+      }),
+      suggestionFingerprint: 'fp_old',
+      currentSuggestionFingerprint: 'fp_new',
+      deps,
+    })).rejects.toMatchObject({
+      status: 409,
+      code: 'stale_suggestion',
+    });
+    expect(deps.updateConversationTagIds).not.toHaveBeenCalled();
+  });
 });

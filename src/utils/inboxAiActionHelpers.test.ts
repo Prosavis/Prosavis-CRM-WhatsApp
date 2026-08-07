@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { InboxAiProposedAction } from '../../supabase/functions/_shared/inboxAiActions';
 import {
@@ -6,7 +8,9 @@ import {
   canStartActionExecution,
   mergeTagIds,
   normalizeTagNameForMatch,
+  prepareConfirmedInboxAiActionFingerprints,
   resolveGroundedWompiUrlForAmount,
+  shouldApplyInboxAiActionUiEffects,
 } from '../../supabase/functions/_shared/inboxAiActionHelpers';
 
 const tagAction = (
@@ -70,6 +74,75 @@ describe('assertSuggestionNotStale', () => {
 
   it('rejects mismatched fingerprints', () => {
     expect(() => assertSuggestionNotStale('fp_old', 'fp_new')).toThrow(/stale/i);
+  });
+});
+
+describe('prepareConfirmedInboxAiActionFingerprints', () => {
+  it('calls assertSuggestionNotStale and rejects stale pairs before execute', () => {
+    expect(() => prepareConfirmedInboxAiActionFingerprints({
+      capturedFingerprint: 'fp_old',
+      currentFingerprint: 'fp_new',
+    })).toThrow(/stale/i);
+  });
+
+  it('returns both fingerprints when the captured suggestion is still current', () => {
+    expect(prepareConfirmedInboxAiActionFingerprints({
+      capturedFingerprint: 'fp_abc',
+      currentFingerprint: 'fp_abc',
+    })).toEqual({
+      suggestionFingerprint: 'fp_abc',
+      currentSuggestionFingerprint: 'fp_abc',
+    });
+  });
+});
+
+describe('shouldApplyInboxAiActionUiEffects', () => {
+  it('applies UI effects only while the captured fingerprint is still current', () => {
+    expect(shouldApplyInboxAiActionUiEffects('fp_1', 'fp_1')).toBe(true);
+    expect(shouldApplyInboxAiActionUiEffects('fp_1', 'fp_2')).toBe(false);
+    expect(shouldApplyInboxAiActionUiEffects('fp_1', null)).toBe(false);
+    expect(shouldApplyInboxAiActionUiEffects(null, 'fp_2')).toBe(true);
+  });
+});
+
+describe('stale-assert wiring (source-sensitive)', () => {
+  it('wires assertSuggestionNotStale inside prepareConfirmedInboxAiActionFingerprints', () => {
+    const source = readFileSync(
+      resolve(
+        __dirname,
+        '../../supabase/functions/_shared/inboxAiActionHelpers.ts',
+      ),
+      'utf8',
+    );
+    const prepareBlock = source.slice(
+      source.indexOf('export function prepareConfirmedInboxAiActionFingerprints'),
+      source.indexOf('export function shouldApplyInboxAiActionUiEffects'),
+    );
+    expect(prepareBlock).toMatch(/assertSuggestionNotStale\s*\(/);
+  });
+
+  it('wires assertSuggestionNotStale inside executeInboxAiAction when fingerprint is present', () => {
+    const source = readFileSync(
+      resolve(
+        __dirname,
+        '../../supabase/functions/_shared/inboxAiActionExecution.ts',
+      ),
+      'utf8',
+    );
+    const executeStart = source.indexOf('export async function executeInboxAiAction');
+    expect(executeStart).toBeGreaterThanOrEqual(0);
+    const executeBlock = source.slice(executeStart, executeStart + 900);
+    expect(executeBlock).toMatch(/if\s*\(\s*suggestionFingerprint\s*\)/);
+    expect(executeBlock).toMatch(/assertSuggestionNotStale\s*\(/);
+  });
+
+  it('wires prepareConfirmed + shouldApply guards in ChatArea confirm handler', () => {
+    const source = readFileSync(
+      resolve(__dirname, '../components/whatsapp/ChatArea.tsx'),
+      'utf8',
+    );
+    expect(source).toMatch(/prepareConfirmedInboxAiActionFingerprints\s*\(/);
+    expect(source).toMatch(/shouldApplyInboxAiActionUiEffects\s*\(/);
   });
 });
 

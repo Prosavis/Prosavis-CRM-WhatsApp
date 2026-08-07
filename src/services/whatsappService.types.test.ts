@@ -149,6 +149,7 @@ describe('Inbox AI response contracts', () => {
 
     const result = await executeInboxAiAction('stable-key-1', action, {
       suggestionFingerprint: 'fp_abc',
+      currentSuggestionFingerprint: 'fp_abc',
       wabaId: 'waba-1',
     });
 
@@ -157,6 +158,7 @@ describe('Inbox AI response contracts', () => {
         stableKey: 'stable-key-1',
         action,
         suggestionFingerprint: 'fp_abc',
+        currentSuggestionFingerprint: 'fp_abc',
         wabaId: 'waba-1',
       },
     });

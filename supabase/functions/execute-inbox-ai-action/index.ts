@@ -28,6 +28,7 @@ Deno.serve(async (req) => {
       stableKey: parsed.stableKey,
       action: parsed.action,
       suggestionFingerprint: parsed.suggestionFingerprint,
+      currentSuggestionFingerprint: parsed.currentSuggestionFingerprint,
       deps,
     });
 

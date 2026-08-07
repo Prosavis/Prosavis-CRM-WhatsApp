@@ -830,6 +830,7 @@ export async function executeInboxAiAction(
   action: InboxAiProposedAction,
   meta?: {
     suggestionFingerprint?: string;
+    currentSuggestionFingerprint?: string;
     wabaId?: string;
   },
 ): Promise<ExecuteInboxAiActionResult> {
@@ -841,6 +842,9 @@ export async function executeInboxAiAction(
     action,
     ...(meta?.suggestionFingerprint
       ? { suggestionFingerprint: meta.suggestionFingerprint }
+      : {}),
+    ...(meta?.currentSuggestionFingerprint
+      ? { currentSuggestionFingerprint: meta.currentSuggestionFingerprint }
       : {}),
     ...(meta?.wabaId ? { wabaId: meta.wabaId } : {}),
   });

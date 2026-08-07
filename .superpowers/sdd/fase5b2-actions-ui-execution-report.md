@@ -17,6 +17,8 @@ Ejecución confirmada de `proposedActions[]` con chips en composer (`ChatArea`) 
 | Execution engine (tag/payment/template/citas) | `inboxAiActionExecution.test.ts` | `_shared/inboxAiActionExecution.ts` + deps |
 | Service mapping | `whatsappService.types.test.ts` | `executeInboxAiAction()` + `historyMeta`/`conversationTags` |
 | Chip guards (confirm copy + pending) | `proposedActionChips.test.ts` | `ProposedActionChips` + handlers UI |
+| Gate: stale assert wired (client+Edge) | helpers + execution source-sensitive | `prepareConfirmed…` + `assertSuggestionNotStale` in `executeInboxAiAction` |
+| Gate: ignore in-flight UI after re-suggest | `shouldApplyInboxAiActionUiEffects` | ChatArea captura fingerprint al confirmar; skip snack/composer/tags |
 
 No se usó RTL (el repo no tiene `@testing-library/react`); cobertura UI vía helpers + servicio + componente presentacional.
 
@@ -50,13 +52,23 @@ No se usó RTL (el repo no tiene `@testing-library/react`); cobertura UI vía he
 3. **send_template** — match exacto name+language APPROVED en Meta; envía vía outbound.
 4. **create/reschedule_appointment** — directory por teléfono; bridge con `operationId` lowercase; mapea 401/409/422.
 
+## Gate 5B2 — fixes Important
+
+1. **`assertSuggestionNotStale` cableado**
+   - Cliente: `prepareConfirmedInboxAiActionFingerprints` (llama assert) antes de `executeInboxAiAction`.
+   - Edge/`executeInboxAiAction`: si viene `suggestionFingerprint`, llama `assertSuggestionNotStale` vs `currentSuggestionFingerprint` (409 `stale_suggestion`).
+   - Tests source-sensitive fallan si se omite el call.
+2. **In-flight tras re-sugerencia**
+   - `suggestionFingerprintRef` + fingerprint capturado al confirmar.
+   - Al resolver: `shouldApplyInboxAiActionUiEffects` — si el fingerprint actual cambió, no snack / insert composer / `onTagsChanged`.
+   - No se cancelan mutaciones remotas ya ejecutadas.
+
 ## Verificaciones
 
-- `npx vitest run src/utils src/services/whatsappService.types.test.ts` → **203 passed**
-- Enfoque 5B2: **29 passed** (helpers/execution/firebaseHttp/chips/service)
+- Enfoque gate-fix 5B2: **36 passed** (helpers/execution/firebaseHttp/chips/service)
 - `npm run type-check` → OK
-- ESLint enfocado a archivos 5B2 → OK
-- `graphify update .` desde `GitHub/` → ejecutado
+- ESLint enfocado → OK
+- `graphify update .` desde `GitHub/` → ejecutado (fase inicial)
 
 ## Commits locales
 
@@ -65,6 +77,8 @@ No se usó RTL (el repo no tiene `@testing-library/react`); cobertura UI vía he
 | `1e8fdf3` | feat(inbox-ai): add confirmed action execution edge and Firebase bridge |
 | `ce19ecd` | feat(inbox-ai): add proposed action chips with confirmation UX |
 | `6818cc9` | docs(sdd): add Fase 5B2 actions UI execution report |
+| `d29d937` | docs(sdd): record Fase 5B2 local commit hashes in report |
+| _(gate)_ | fix(inbox-ai): wire stale assert and ignore in-flight UI effects |
 
 Solo archivos 5B2; no push/deploy/secrets. `fase5c-*` brief quedó sin commit.
 
@@ -82,3 +96,4 @@ Solo archivos 5B2; no push/deploy/secrets. `fase5c-*` brief quedó sin commit.
 3. **RTL ausente:** no hay test de componente montado; guards cubiertos con helpers.
 4. **WIP ajeno:** no se tocó V5 ni el brief `fase5c-*`; sin reset/stash/checkout.
 5. **Deploy pendiente:** la Edge `execute-inbox-ai-action` requiere deploy Supabase + secret `FIREBASE_CRM_BRIDGE_SECRET` / URL opcional ya existentes en entorno.
+6. **Stale Edge sin `currentSuggestionFingerprint`:** si el cliente envía solo `suggestionFingerprint`, `assertSuggestionNotStale` no-op (ambos lados requeridos para comparar). El cliente 5B2 siempre envía ambos vía `prepareConfirmed…`.

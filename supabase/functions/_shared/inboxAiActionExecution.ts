@@ -1,6 +1,9 @@
 import type { InboxAiProposedAction } from './inboxAiActions.ts';
 import { FirebaseCrmBridgeHttpError } from './firebaseHttp.ts';
-import { mergeTagIds } from './inboxAiActionHelpers.ts';
+import {
+  assertSuggestionNotStale,
+  mergeTagIds,
+} from './inboxAiActionHelpers.ts';
 
 const OFFICIAL_DURATIONS = new Set([120, 180, 240, 360, 480]);
 
@@ -167,6 +170,7 @@ export function parseExecuteInboxAiActionRequest(body: unknown): {
   stableKey: string;
   action: InboxAiProposedAction;
   suggestionFingerprint?: string;
+  currentSuggestionFingerprint?: string;
 } {
   if (!isRecord(body)) {
     throw new ExecuteInboxAiActionError(400, 'Body JSON inválido.');
@@ -184,7 +188,9 @@ export function parseExecuteInboxAiActionRequest(body: unknown): {
   assertActionShape(action);
 
   const suggestionFingerprint = asTrimmedString(body.suggestionFingerprint) || undefined;
-  return { stableKey, action, suggestionFingerprint };
+  const currentSuggestionFingerprint =
+    asTrimmedString(body.currentSuggestionFingerprint) || undefined;
+  return { stableKey, action, suggestionFingerprint, currentSuggestionFingerprint };
 }
 
 function mapAppointmentBridgeError(error: unknown): never {
@@ -233,11 +239,26 @@ export async function executeInboxAiAction(params: {
   stableKey: string;
   action: InboxAiProposedAction;
   suggestionFingerprint?: string;
+  currentSuggestionFingerprint?: string;
   deps: InboxAiActionExecutionDeps;
 }): Promise<ExecuteInboxAiActionResult> {
-  const { action, deps, suggestionFingerprint } = params;
+  const { action, deps, suggestionFingerprint, currentSuggestionFingerprint } = params;
   assertRequiresConfirmation(action);
   assertActionShape(action);
+
+  if (suggestionFingerprint) {
+    try {
+      assertSuggestionNotStale(suggestionFingerprint, currentSuggestionFingerprint);
+    } catch (error) {
+      throw new ExecuteInboxAiActionError(
+        409,
+        error instanceof Error
+          ? error.message
+          : 'Suggestion is stale; request a fresh AI suggestion before executing.',
+        'stale_suggestion',
+      );
+    }
+  }
 
   const conversation = await deps.loadConversation(params.stableKey);
   const fingerprint = suggestionFingerprint

@@ -91,6 +91,8 @@ import ProposedActionChips from './ProposedActionChips';
 import {
   buildSuggestionFingerprint,
   canStartActionExecution,
+  prepareConfirmedInboxAiActionFingerprints,
+  shouldApplyInboxAiActionUiEffects,
 } from '../../../supabase/functions/_shared/inboxAiActionHelpers';
 import type { ForwardWhatsAppResult } from '@/services/forwardWhatsAppMessage';
 import { isForwardableMessage } from '@/services/forwardWhatsAppMessage';
@@ -244,6 +246,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [suggestionHint, setSuggestionHint] = useState<string | null>(null);
   const [proposedActions, setProposedActions] = useState<InboxAiProposedAction[]>([]);
   const [suggestionFingerprint, setSuggestionFingerprint] = useState<string | null>(null);
+  const suggestionFingerprintRef = useRef<string | null>(null);
   const [executingActionId, setExecutingActionId] = useState<string | null>(null);
   const [aiContextDialogOpen, setAiContextDialogOpen] = useState(false);
   const [aiExtraContext, setAiExtraContext] = useState('');
@@ -345,10 +348,15 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   }, [conversation.id, stableKey]);
 
   useEffect(() => {
+    suggestionFingerprintRef.current = suggestionFingerprint;
+  }, [suggestionFingerprint]);
+
+  useEffect(() => {
     setSuggestionDraft('');
     setSuggestionHint(null);
     setProposedActions([]);
     setSuggestionFingerprint(null);
+    suggestionFingerprintRef.current = null;
     setExecutingActionId(null);
     setBookingContext(null);
     setSessionWindow(null);
@@ -743,12 +751,37 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     const confirmed = window.confirm(`¿Ejecutar: ${action.label}?`);
     if (!confirmed) return;
 
+    const capturedFingerprint = suggestionFingerprintRef.current;
+    let fingerprintMeta: {
+      suggestionFingerprint?: string;
+      currentSuggestionFingerprint?: string;
+    };
+    try {
+      fingerprintMeta = prepareConfirmedInboxAiActionFingerprints({
+        capturedFingerprint,
+        currentFingerprint: suggestionFingerprintRef.current,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'La sugerencia ya no es válida';
+      setSnack({ open: true, message, severity: 'error' });
+      return;
+    }
+
     setExecutingActionId(action.id);
     try {
       const result = await executeInboxAiAction(stableKey, action, {
-        suggestionFingerprint: suggestionFingerprint ?? undefined,
+        ...fingerprintMeta,
         wabaId,
       });
+
+      // Ignore UI side-effects if a newer suggestion arrived while in-flight.
+      // Remote mutations (if any) already completed; do not roll them back.
+      if (!shouldApplyInboxAiActionUiEffects(
+        capturedFingerprint,
+        suggestionFingerprintRef.current,
+      )) {
+        return;
+      }
 
       switch (result.type) {
         case 'apply_tag':
@@ -794,6 +827,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         }
       }
     } catch (err) {
+      if (!shouldApplyInboxAiActionUiEffects(
+        capturedFingerprint,
+        suggestionFingerprintRef.current,
+      )) {
+        return;
+      }
       const message = err instanceof Error ? err.message : 'No se pudo ejecutar la acción';
       setSnack({ open: true, message, severity: 'error' });
     } finally {
@@ -804,7 +843,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     insertPaymentLinkInComposer,
     onTagsChanged,
     stableKey,
-    suggestionFingerprint,
     wabaId,
   ]);
 

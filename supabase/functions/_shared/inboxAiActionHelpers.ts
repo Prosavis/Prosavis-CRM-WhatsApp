@@ -61,6 +61,41 @@ export function assertSuggestionNotStale(
   }
 }
 
+/**
+ * Pre-execute guard for confirmed actions.
+ * When a captured fingerprint is present, current must match (calls assertSuggestionNotStale).
+ */
+export function prepareConfirmedInboxAiActionFingerprints(params: {
+  capturedFingerprint: string | null | undefined;
+  currentFingerprint: string | null | undefined;
+}): {
+  suggestionFingerprint?: string;
+  currentSuggestionFingerprint?: string;
+} {
+  const captured = params.capturedFingerprint?.trim() || undefined;
+  const current = params.currentFingerprint?.trim() || undefined;
+  assertSuggestionNotStale(captured, current);
+  if (!captured) return {};
+  return {
+    suggestionFingerprint: captured,
+    currentSuggestionFingerprint: current,
+  };
+}
+
+/**
+ * Post-resolve UI guard: ignore in-flight success side-effects after re-suggestion.
+ * Does not cancel remote mutations already performed.
+ */
+export function shouldApplyInboxAiActionUiEffects(
+  capturedFingerprint: string | null | undefined,
+  currentFingerprint: string | null | undefined,
+): boolean {
+  const captured = capturedFingerprint?.trim() || '';
+  if (!captured) return true;
+  const current = currentFingerprint?.trim() || '';
+  return captured === current;
+}
+
 export function canStartActionExecution(
   executingActionId: string | null | undefined,
   actionId: string,
