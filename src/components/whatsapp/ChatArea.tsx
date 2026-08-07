@@ -62,6 +62,7 @@ import {
   markAsRead,
   patchWhatsAppConversationAdmin,
   suggestWhatsAppAgentReply,
+  executeInboxAiAction,
   getWhatsAppBookingContext,
   deleteWhatsAppMessages,
   deleteWhatsAppConversationPermanently,
@@ -78,6 +79,7 @@ import {
   type WhatsAppSnippet,
   type WhatsAppMediaBatchAttachment,
   type BookingContextData,
+  type InboxAiProposedAction,
   type WhatsAppAdminPresence,
   type WhatsAppSticker,
   type WhatsAppStickerFolder,
@@ -85,6 +87,11 @@ import {
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import EditIcon from '@mui/icons-material/Edit';
 import BookingAssistantDrawer from './BookingAssistantDrawer';
+import ProposedActionChips from './ProposedActionChips';
+import {
+  buildSuggestionFingerprint,
+  canStartActionExecution,
+} from '../../../supabase/functions/_shared/inboxAiActionHelpers';
 import type { ForwardWhatsAppResult } from '@/services/forwardWhatsAppMessage';
 import { isForwardableMessage } from '@/services/forwardWhatsAppMessage';
 import { ContactAvatar } from '@/components/common/ContactAvatar';
@@ -235,6 +242,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [suggestionDraft, setSuggestionDraft] = useState('');
   const [suggestionLoading, setSuggestionLoading] = useState(false);
   const [suggestionHint, setSuggestionHint] = useState<string | null>(null);
+  const [proposedActions, setProposedActions] = useState<InboxAiProposedAction[]>([]);
+  const [suggestionFingerprint, setSuggestionFingerprint] = useState<string | null>(null);
+  const [executingActionId, setExecutingActionId] = useState<string | null>(null);
   const [aiContextDialogOpen, setAiContextDialogOpen] = useState(false);
   const [aiExtraContext, setAiExtraContext] = useState('');
   const [bookingContext, setBookingContext] = useState<BookingContextData | null>(null);
@@ -337,6 +347,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   useEffect(() => {
     setSuggestionDraft('');
     setSuggestionHint(null);
+    setProposedActions([]);
+    setSuggestionFingerprint(null);
+    setExecutingActionId(null);
     setBookingContext(null);
     setSessionWindow(null);
     setBookingDrawerOpen(false);
@@ -616,6 +629,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const handleRequestSuggestion = useCallback(async (forceGenerate = false, extraContext?: string) => {
     setSuggestionLoading(true);
     setSuggestionHint(null);
+    setProposedActions([]);
+    setSuggestionFingerprint(null);
+    setExecutingActionId(null);
     try {
       const result = await suggestWhatsAppAgentReply(
         stableKey,
@@ -624,6 +640,14 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         extraContext,
       );
       setSessionWindow(result.sessionWindow);
+      const nextActions = result.proposedActions ?? [];
+      const nextSuggestion = result.suggestion ?? '';
+      setProposedActions(nextActions);
+      setSuggestionFingerprint(
+        nextActions.length || nextSuggestion
+          ? buildSuggestionFingerprint(nextSuggestion, nextActions)
+          : null,
+      );
       if (result.suggestion) {
         setSuggestionDraft(result.suggestion);
         setSuggestionHint(null);
@@ -702,6 +726,87 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     setAiExtraContext('');
     void handleRequestSuggestion(false, context);
   }, [aiExtraContext, handleRequestSuggestion]);
+
+  const insertPaymentLinkInComposer = useCallback((url: string) => {
+    setSuggestionDraft((prev) => {
+      if (!prev?.trim()) return url;
+      const wompiRegex = /https?:\/\/checkout\.wompi\.co\/[^\s)]+/gi;
+      if (wompiRegex.test(prev)) {
+        return prev.replace(wompiRegex, url);
+      }
+      return `${prev.trim()}\n\n${url}`;
+    });
+  }, []);
+
+  const handleConfirmProposedAction = useCallback(async (action: InboxAiProposedAction) => {
+    if (!canStartActionExecution(executingActionId, action.id)) return;
+    const confirmed = window.confirm(`¿Ejecutar: ${action.label}?`);
+    if (!confirmed) return;
+
+    setExecutingActionId(action.id);
+    try {
+      const result = await executeInboxAiAction(stableKey, action, {
+        suggestionFingerprint: suggestionFingerprint ?? undefined,
+        wabaId,
+      });
+
+      switch (result.type) {
+        case 'apply_tag':
+          setSnack({
+            open: true,
+            message: result.alreadyPresent
+              ? `Etiqueta ya asignada: ${result.tagName}`
+              : `Etiqueta aplicada: ${result.tagName}`,
+            severity: 'success',
+          });
+          onTagsChanged?.();
+          break;
+        case 'send_payment_link':
+          insertPaymentLinkInComposer(result.text);
+          setSnack({
+            open: true,
+            message: 'Link de pago insertado en el borrador (no enviado).',
+            severity: 'success',
+          });
+          break;
+        case 'send_template':
+          setSnack({
+            open: true,
+            message: 'Plantilla enviada correctamente.',
+            severity: 'success',
+          });
+          break;
+        case 'create_appointment':
+        case 'reschedule_appointment':
+          setSnack({
+            open: true,
+            message: `Cita lista: ${result.appointmentId}`,
+            severity: 'success',
+          });
+          break;
+        default: {
+          const _exhaustive: never = result;
+          setSnack({
+            open: true,
+            message: `Acción desconocida: ${String((_exhaustive as { type?: string }).type)}`,
+            severity: 'error',
+          });
+        }
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'No se pudo ejecutar la acción';
+      setSnack({ open: true, message, severity: 'error' });
+    } finally {
+      setExecutingActionId(null);
+    }
+  }, [
+    executingActionId,
+    insertPaymentLinkInComposer,
+    onTagsChanged,
+    stableKey,
+    suggestionFingerprint,
+    wabaId,
+  ]);
 
   const handleOpenBookingAssistant = useCallback(async () => {
     // Si ya tenemos contexto cargado (vía sugerencia de IA o carga previa),
@@ -1335,6 +1440,18 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               </IconButton>
             </Box>
           )}
+          {proposedActions.length > 0 && (
+            <Box sx={{ px: 1.5, pt: 1, pb: 0.5 }}>
+              <ProposedActionChips
+                proposedActions={proposedActions}
+                executingActionId={executingActionId}
+                onConfirmAction={(action) => {
+                  void handleConfirmProposedAction(action);
+                }}
+                dense
+              />
+            </Box>
+          )}
           <MessageInput
             conversationKey={stableKey}
             onSend={handleSend}
@@ -1373,18 +1490,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           wompiPaymentReference={wompiPaymentReference}
           wompiAmountCOP={wompiAmountCOP}
           checkoutSyncEpoch={bookingCheckoutSyncEpoch}
-          onInsertPaymentLink={(url) => {
-            setSuggestionDraft((prev) => {
-              if (!prev?.trim()) return url;
-              // Si el draft ya contiene un link Wompi (genérico o firmado), lo
-              // REEMPLAZAMOS para evitar dejar dos links de pago en el mensaje.
-              const wompiRegex = /https?:\/\/checkout\.wompi\.co\/[^\s)]+/gi;
-              if (wompiRegex.test(prev)) {
-                return prev.replace(wompiRegex, url);
-              }
-              return `${prev.trim()}\n\n${url}`;
-            });
-          }}
+          onInsertPaymentLink={insertPaymentLinkInComposer}
           wabaId={wabaId}
           phoneNumberId={phoneNumberId}
           recipientPhone={conversation.contactPhone || conversation.phone || stableKey}
@@ -1392,6 +1498,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           lastInboundAt={lastInboundAt}
           lastMessageDirection={conversation.lastMessageDirection}
           sessionWindow={sessionWindow}
+          proposedActions={proposedActions}
+          executingActionId={executingActionId}
+          onConfirmAction={(action) => {
+            void handleConfirmProposedAction(action);
+          }}
         />
       )}
 

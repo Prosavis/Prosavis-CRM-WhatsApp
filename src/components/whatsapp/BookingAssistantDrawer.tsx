@@ -29,10 +29,12 @@ import {
   listWhatsAppMessageTemplates,
   sendWhatsAppTemplateMessageAdmin,
   type BookingContextData,
+  type InboxAiProposedAction,
   type WhatsAppTemplateSummary,
 } from '@/services/whatsappService';
 import MetaTemplateEditor from '@/components/whatsapp/templates/MetaTemplateEditor';
 import TemplateLibrary from '@/components/whatsapp/templates/TemplateLibrary';
+import ProposedActionChips from '@/components/whatsapp/ProposedActionChips';
 import {
   buildDisplayMessageBody,
   buildTemplateSendComponents,
@@ -67,6 +69,9 @@ interface BookingAssistantDrawerProps {
   lastInboundAt?: Date | null;
   lastMessageDirection?: 'inbound' | 'outbound';
   sessionWindow?: MetaSessionWindow | null;
+  proposedActions?: InboxAiProposedAction[];
+  executingActionId?: string | null;
+  onConfirmAction?: (action: InboxAiProposedAction) => void;
 }
 
 const STAGE_LABELS: Record<string, string> = {
@@ -123,6 +128,9 @@ const BookingAssistantDrawer: React.FC<BookingAssistantDrawerProps> = ({
   lastInboundAt = null,
   lastMessageDirection,
   sessionWindow = null,
+  proposedActions = [],
+  executingActionId = null,
+  onConfirmAction,
 }) => {
   const activeStep = getActiveStep(bookingContext.stage);
   const { collectedData, missingData, availableSlots, paymentStatus, calculatedPrice, clientInfo } = bookingContext;
@@ -701,6 +709,21 @@ const BookingAssistantDrawer: React.FC<BookingAssistantDrawerProps> = ({
               >
                 Usar esta sugerencia
               </Button>
+            </>
+          )}
+
+          {proposedActions.length > 0 && onConfirmAction && (
+            <>
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="subtitle2" fontWeight={600} mb={1}>
+                Acciones propuestas
+              </Typography>
+              <ProposedActionChips
+                proposedActions={proposedActions}
+                executingActionId={executingActionId}
+                onConfirmAction={onConfirmAction}
+                dense
+              />
             </>
           )}
         </Box>

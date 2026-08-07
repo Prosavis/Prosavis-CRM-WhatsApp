@@ -4,6 +4,8 @@ import type { Database } from '@/types/database';
 import type { WhatsAppMetrics } from '@/types/whatsapp';
 import type { NormalizedBookingContext } from '../../supabase/functions/_shared/bookingContext';
 import type { InboxAiProposedAction } from '../../supabase/functions/_shared/inboxAiActions';
+import type { ExecuteInboxAiActionResult } from '../../supabase/functions/_shared/inboxAiActionExecution';
+import type { ConversationHistoryMeta } from '../../supabase/functions/_shared/conversationHistory';
 import {
   getMetaSessionWindow,
   type MetaSessionWindow,
@@ -13,7 +15,7 @@ import {
   type WhatsAppPresenceTrackPayload,
 } from '@/utils/whatsappAdminPresence';
 
-export type { InboxAiProposedAction };
+export type { InboxAiProposedAction, ExecuteInboxAiActionResult };
 
 type ConversationRow = Database['public']['Tables']['whatsapp_conversations']['Row'];
 type MessageRow = Database['public']['Tables']['whatsapp_message_log']['Row'];
@@ -785,6 +787,8 @@ export interface SuggestReplyResult {
   wompiCheckoutUrl?: string;
   wompiPaymentReference?: string;
   wompiAmountCOP?: number;
+  historyMeta?: ConversationHistoryMeta;
+  conversationTags?: string[];
 }
 
 export async function suggestWhatsAppAgentReply(
@@ -798,6 +802,8 @@ export async function suggestWhatsAppAgentReply(
     wompiCheckoutUrl?: string;
     wompiPaymentReference?: string;
     wompiAmountCOP?: number;
+    historyMeta?: ConversationHistoryMeta;
+    conversationTags?: string[];
   }>('suggest-whatsapp-agent-reply', {
     stableKey,
     forceGenerate,
@@ -814,7 +820,34 @@ export async function suggestWhatsAppAgentReply(
     wompiCheckoutUrl: data.wompiCheckoutUrl,
     wompiPaymentReference: data.wompiPaymentReference,
     wompiAmountCOP: data.wompiAmountCOP,
+    historyMeta: data.historyMeta,
+    conversationTags: data.conversationTags,
   };
+}
+
+export async function executeInboxAiAction(
+  stableKey: string,
+  action: InboxAiProposedAction,
+  meta?: {
+    suggestionFingerprint?: string;
+    wabaId?: string;
+  },
+): Promise<ExecuteInboxAiActionResult> {
+  const data = await invokeFn<{
+    success?: boolean;
+    result?: ExecuteInboxAiActionResult;
+  }>('execute-inbox-ai-action', {
+    stableKey,
+    action,
+    ...(meta?.suggestionFingerprint
+      ? { suggestionFingerprint: meta.suggestionFingerprint }
+      : {}),
+    ...(meta?.wabaId ? { wabaId: meta.wabaId } : {}),
+  });
+  if (!data.result) {
+    throw new Error('La función execute-inbox-ai-action no devolvió result.');
+  }
+  return data.result;
 }
 
 export interface BookingContextResult {
