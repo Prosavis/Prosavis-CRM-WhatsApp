@@ -13,6 +13,7 @@ import type {
 } from './inboxAiKnowledge.ts';
 import type { InboxAiMemory } from './inboxAiMemory.ts';
 import type { MetaSessionWindow } from './metaSessionWindow.ts';
+import { formatCoverageCatalogBlock } from './coverageCatalog.ts';
 import { formatPricingCatalogBlock } from './pricingCatalog.ts';
 
 const UPCOMING_APPTS = 5;
@@ -38,7 +39,8 @@ export const SECTION_CHAR_BUDGETS = Object.freeze({
   '=== Propiedades / ubicaciones de apoyos ===': 1_400,
   '=== Tags ===': 600,
   '=== Catálogo oficial de precios (fuente de verdad) ===': 2_500,
-  '=== Respuestas oficiales de la casa ===': 4_500,
+  '=== Cobertura oficial de servicios (fuente de verdad) ===': 1_200,
+  '=== Respuestas oficiales de la casa ===': 3_300,
   '=== Citas / apoyos (Firestore, fuente de verdad) ===': 3_000,
   '=== Historial WhatsApp ===': 57_500,
 } as const);
@@ -555,6 +557,13 @@ export function formatInboxAiContextBlock(params: {
     pricingLines,
   ));
 
+  const coverageLines = formatCoverageCatalogBlock().split('\n');
+  coverageLines.shift();
+  sections.push(buildSection(
+    '=== Cobertura oficial de servicios (fuente de verdad) ===',
+    coverageLines,
+  ));
+
   sections.push(buildSection(
     '=== Respuestas oficiales de la casa ===',
     formatOfficialAnswers(params.officialAnswers),
@@ -820,8 +829,18 @@ export const INBOX_AI_SYSTEM_INSTRUCTION =
   'p. ej. si se van a las 8:00 → propone 7:00) para que alguien reciba al personal, entregar llaves/acceso ' +
   'y garantizar limpieza correcta y seguridad. Explica brevemente que priorizamos seguridad y confianza. ' +
   'Si no queda claro quién recibe, pregunta cómo nos abrirán o si prefieren llegada anticipada. ' +
+  'AUDIOS: si el historial trae "[Audio transcrito]:", ese texto ES el mensaje del cliente. ' +
+  'Nunca digas que no pudiste escuchar el audio ni pidas que lo escriba de nuevo. ' +
+  'Si pospone, cancela o dice que ya resolvió, respeta eso: no insistas en agendar hoy ni pegues link de pago. ' +
   'Al hablar de apoyos, usa fecha/hora, dirección, cliente y auxiliar solo si aporta; no inventes auxiliares ni direcciones. ' +
   'Usa precios únicamente desde el catálogo oficial incluido en el contexto. ' +
+  'Para cotizaciones nuevas ofrece únicamente 4, 6 u 8 horas de ese catálogo; ' +
+  'elige la duración según el tamaño del inmueble (p. ej. 3+ habitaciones → 6 horas). ' +
+  'Si una respuesta oficial contradice ese catálogo (precios o duraciones), ignórala. ' +
+  'COBERTURA GEOGRÁFICA: usa únicamente "=== Cobertura oficial de servicios (fuente de verdad) ===". ' +
+  'Si preguntan dónde están ubicados, da la sede oficial de Pereira de esa sección. ' +
+  'Nunca afirmes que atienden en Bogotá, Cali, Medellín u otras ciudades fuera de esa lista. ' +
+  'Si una respuesta oficial contradice esa cobertura, ignórala. ' +
   'Nunca afirmes un pago sin datos autoritativos de CRM/Firestore. ' +
   'Nunca inventes horarios disponibles; usa solo disponibilidad confirmada por una fuente real. ' +
   'Ofrece únicamente horarios incluidos en "=== Disponibilidad real (próximos días) ===" y, ' +

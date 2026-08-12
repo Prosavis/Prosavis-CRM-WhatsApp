@@ -1,3 +1,24 @@
+const VISITS_ALERT_SECRET_KEYS = [
+  "VISITS_ALERT_PHONE",
+  "USER_CONSOLE_URL",
+  "WHATSAPP_ACCESS_TOKEN",
+  "WHATSAPP_PHONE_NUMBER_ID",
+] as const;
+
+export function listMissingVisitsAlertSecrets(): string[] {
+  const missing: string[] = VISITS_ALERT_SECRET_KEYS.filter(
+    (key) => !Deno.env.get(key)?.trim(),
+  );
+  const enabled =
+    Deno.env.get("ENABLE_META_SEND")?.trim().toLowerCase() === "true";
+  if (!enabled) missing.push("ENABLE_META_SEND");
+  return missing;
+}
+
+export function visitsAlertConfigured(): boolean {
+  return listMissingVisitsAlertSecrets().length === 0;
+}
+
 export function buildVisitAttentionAlert(input: {
   satisfaction: number;
   complaintId: string;

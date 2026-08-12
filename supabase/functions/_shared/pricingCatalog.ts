@@ -11,12 +11,23 @@ import {
 
 export const PROFESSIONAL_KIT_SURCHARGE_COP = 30_000;
 
+/** Incluye tarifas legacy (2h/3h) para citas históricas y cobros; no cotizar. */
 const BASE_PRICE_BY_DURATION_MINUTES: Readonly<Record<number, number>> = {
   120: 58_000,
   180: 78_000,
   240: 88_000,
   360: 118_000,
   480: 148_000,
+};
+
+export const BOOKABLE_CLEANING_DURATIONS_MINUTES = [240, 360, 480] as const;
+
+const BOOKABLE_DURATION_HINTS: Readonly<
+  Record<(typeof BOOKABLE_CLEANING_DURATIONS_MINUTES)[number], string>
+> = {
+  240: 'hasta 2 habitaciones; el más solicitado',
+  360: 'casa / apto grande (3+ habitaciones)',
+  480: 'casa grande / oficina / grandes superficies',
 };
 
 export interface ResolvedDurationPrice {
@@ -47,12 +58,19 @@ function formatCOP(value: number): string {
 }
 
 export function formatPricingCatalogBlock(): string {
+  const bookableLines = BOOKABLE_CLEANING_DURATIONS_MINUTES.map((minutes) => {
+    const hours = minutes / 60;
+    const priceCOP = BASE_PRICE_BY_DURATION_MINUTES[minutes];
+    const hint = BOOKABLE_DURATION_HINTS[minutes];
+    return `- ${hours} horas (${minutes} min) → COP ${formatCOP(priceCOP)} — ${hint}`;
+  });
   const lines = [
     '=== Catálogo oficial de precios (fuente de verdad) ===',
-    ...Object.entries(BASE_PRICE_BY_DURATION_MINUTES).map(
-      ([minutes, priceCOP]) => `- ${minutes} minutos → COP ${formatCOP(priceCOP)}`,
-    ),
-    `- Kit profesional → COP ${formatCOP(PROFESSIONAL_KIT_SURCHARGE_COP)} adicionales`,
+    'Duraciones agendables (únicas que puedes ofrecer en cotizaciones nuevas):',
+    ...bookableLines,
+    `- Kit profesional → COP ${formatCOP(PROFESSIONAL_KIT_SURCHARGE_COP)} adicionales (opcional)`,
+    'No ofrezcas 2 horas ni 3 horas en cotizaciones nuevas (tarifas legacy, no agendables).',
+    'Elige la duración según el tamaño del inmueble (habitaciones/baños) usando las pistas de arriba.',
     'No inventes, estimes ni modifiques estos valores.',
   ];
   return lines.join('\n');

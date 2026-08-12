@@ -64,6 +64,64 @@ describe('getConversationHistoryWithMeta', () => {
       newestAt: '2026-08-06T12:03:00.000Z',
     });
   });
+
+  it('replaces the [audio] placeholder with the voice transcription when enabled', async () => {
+    const query = {
+      select: () => query,
+      eq: () => query,
+      order: () => query,
+      limit: () => Promise.resolve({
+        data: [{
+          direction: 'inbound',
+          message_body: '[audio]',
+          caption: '',
+          media_type: 'audio',
+          voice_transcription:
+            'ya tengo personas acá que me están ayudando, ya dejemos así y la otra semana retomo',
+          hidden_from_panel: false,
+          created_at: '2026-08-12T16:15:09.000Z',
+        }],
+        error: null,
+      }),
+    };
+    const result = await getConversationHistoryWithMeta(
+      { from: () => query },
+      '573146283332',
+      10,
+      { includeVoiceTranscriptions: true },
+    );
+
+    expect(result.turns).toHaveLength(1);
+    expect(result.turns[0]?.text).toMatch(/^\[Audio transcrito\]:/);
+    expect(result.turns[0]?.text).toContain('ya tengo personas acá');
+    expect(result.turns[0]?.text).not.toBe('[audio]');
+  });
+
+  it('keeps the [audio] placeholder when transcriptions are disabled', async () => {
+    const query = {
+      select: () => query,
+      eq: () => query,
+      order: () => query,
+      limit: () => Promise.resolve({
+        data: [{
+          direction: 'inbound',
+          message_body: '[audio]',
+          media_type: 'audio',
+          voice_transcription: 'texto que no debe entrar',
+          created_at: '2026-08-12T16:15:09.000Z',
+        }],
+        error: null,
+      }),
+    };
+    const result = await getConversationHistoryWithMeta(
+      { from: () => query },
+      '573146283332',
+      10,
+      { includeVoiceTranscriptions: false },
+    );
+
+    expect(result.turns[0]?.text).toBe('[audio]');
+  });
 });
 
 describe('buildMergedTurns', () => {

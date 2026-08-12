@@ -1,0 +1,33 @@
+name: OPS V5 SQL gate
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "supabase/migrations/**"
+      - "supabase/tests/**"
+      - "supabase/config.toml"
+      - ".github/workflows/ops-v5-sql-gate.yml"
+  pull_request:
+    paths:
+      - "supabase/migrations/**"
+      - "supabase/tests/**"
+      - "supabase/config.toml"
+      - ".github/workflows/ops-v5-sql-gate.yml"
+
+jobs:
+  sql-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.114.0
+      - name: Start local database
+        run: supabase db start
+      - name: Reset, test and lint
+        run: |
+          supabase db reset --local --yes
+          supabase test db --local
+          supabase db lint --local

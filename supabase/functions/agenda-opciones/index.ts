@@ -10,7 +10,10 @@ import {
   parseAgendaOptionsRequest,
 } from "../_shared/agenda/api.ts";
 import { buildAgendaOptions } from "../_shared/agenda/engine.ts";
-import { loadAgendaRuntimeConfig } from "../_shared/agenda/runtimeConfig.ts";
+import {
+  loadAgendaRuntimeConfig,
+  resolveEffectiveAutomationLevel,
+} from "../_shared/agenda/runtimeConfig.ts";
 import {
   bogotaMinuteOfDay,
   operationalDateUtcRange,
@@ -235,10 +238,10 @@ Deno.serve(async (request) => {
     );
   }
 
-  const runtime = loadAgendaRuntimeConfig();
+  const envRuntime = loadAgendaRuntimeConfig();
   let parsed: AgendaOptionsApiRequest;
   try {
-    parsed = parseAgendaOptionsRequest(await request.json(), runtime);
+    parsed = parseAgendaOptionsRequest(await request.json(), envRuntime);
   } catch (error) {
     return strictJsonResponse(
       request,
@@ -246,6 +249,20 @@ Deno.serve(async (request) => {
       400,
     );
   }
+
+  const policy = await context.supabase
+    .from("ops_automation_policies")
+    .select("policy_level,level_2_enabled,level_3_human_approved_at")
+    .eq("service_id", parsed.serviceId)
+    .maybeSingle();
+  const automationLevel = resolveEffectiveAutomationLevel({
+    envLevel: envRuntime.automationLevel,
+    policyLevel: optionalNumber(policy.data?.policy_level),
+    level2Enabled: policy.data?.level_2_enabled === true,
+    level3Approved: Boolean(policy.data?.level_3_human_approved_at),
+  });
+  const runtime = { ...envRuntime, automationLevel };
+  parsed.request.automationLevel = automationLevel;
 
   const requestContext = {
     service_id: parsed.serviceId,

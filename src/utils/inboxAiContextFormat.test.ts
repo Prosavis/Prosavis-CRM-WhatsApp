@@ -176,8 +176,19 @@ describe('formatInboxAiContextBlock', () => {
     expect(block).toContain('referencia Wompi: APPT-123');
     expect(block).toContain('Cliente: Hola');
     expect(block).toContain('=== Catálogo oficial de precios (fuente de verdad) ===');
-    expect(block).toContain('120 minutos → COP 58.000');
+    expect(block).toContain('4 horas (240 min) → COP 88.000');
+    expect(block).toContain('6 horas (360 min) → COP 118.000');
+    expect(block).toContain('8 horas (480 min) → COP 148.000');
+    expect(block).toContain('3+ habitaciones');
+    expect(block).not.toContain('120 minutos → COP 58.000');
+    expect(block).not.toContain('180 minutos → COP 78.000');
     expect(block).toContain('Kit profesional → COP 30.000 adicionales');
+    expect(block).toContain('=== Cobertura oficial de servicios (fuente de verdad) ===');
+    expect(block).toContain('Cra. 23 #85-13 Manzana 5 Casa 17, Pereira, Risaralda');
+    expect(block).toContain('Pereira — cobertura directa');
+    expect(block).toContain('Dosquebradas — cobertura directa');
+    expect(block).toContain('Cerritos — cobertura directa');
+    expect(block).toContain('Santa Rosa de Cabal');
   });
 
   it('degrades gracefully without directory or appointments', () => {
@@ -300,6 +311,10 @@ describe('formatInboxAiContextBlock', () => {
     expect(block).toContain('/precio | Precio base');
     expect(block).toContain('¿Dónde tienen cobertura?');
     expect(block).toMatch(/reutiliza.+redacción oficial.+antes de improvisar/i);
+    expect(block).toContain('=== Cobertura oficial de servicios (fuente de verdad) ===');
+    expect(block).toContain('Pereira — cobertura directa');
+    expect(block.indexOf('=== Cobertura oficial de servicios (fuente de verdad) ==='))
+      .toBeLessThan(block.indexOf('=== Respuestas oficiales de la casa ==='));
   });
 
   it('clips every section independently and keeps the complete block within its ceiling', () => {
@@ -404,6 +419,10 @@ describe('INBOX_AI_SYSTEM_INSTRUCTION', () => {
 
   it('requires grounded prices, payments, availability and Meta templates', () => {
     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/precios.+catálogo oficial/i);
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/únicamente 4, 6 u 8 horas/i);
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(
+      /respuesta oficial contradice ese catálogo.+ignórala/i,
+    );
     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/pago.+datos autoritativos/i);
     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/nunca inventes.+horarios disponibles/i);
     expect(INBOX_AI_SYSTEM_INSTRUCTION).toContain(
@@ -419,6 +438,24 @@ describe('INBOX_AI_SYSTEM_INSTRUCTION', () => {
     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(
       /respuestas oficiales de la casa.+antes de improvisar/i,
     );
+  });
+
+  it('grounds geographic coverage and forbids inventing Bogotá or other cities', () => {
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toContain(
+      '=== Cobertura oficial de servicios (fuente de verdad) ===',
+    );
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/nunca afirmes.+Bogotá/i);
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(
+      /respuesta oficial contradice esa cobertura.+ignórala/i,
+    );
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(
+      /dónde están ubicados.+sede oficial de Pereira/i,
+    );
+  });
+
+  it('treats audio transcriptions as the client message and forbids claiming it was inaudible', () => {
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/\[Audio transcrito\]/);
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/nunca digas que no pudiste escuchar/i);
   });
 });
 

@@ -17,3 +17,4 @@
 - Fase 5C telemetry + transparency panel: complete (APPROVED; commits 4349ab1..082f16f).
 - Ops closure: remote migrations memory+suggestion_log applied; Firebase `PROSAVIS_CRM_BRIDGE_SECRET` + Supabase `FIREBASE_CRM_BRIDGE_SECRET` set; deployed `crmGetAvailableSlots`/`crmAppointmentActions` + 4 Inbox AI Edges; Firestore indexes deployed; `CRM_INBOX_AI_CONTEXTO.md` updated; HTTP smoke 401 OK; inbox UI smoke still manual.
 - Inbox IA plan: COMPLETE pending human inbox smoke.
+- Audit 12/08/2026: CRM master and Firebase main match origin; remote migrations memory+suggestion_log present; Edges execute-inbox-ai-action and close-whatsapp-ai-suggestion-log ACTIVE; Functions crmGetAvailableSlots and crmAppointmentActions ACTIVE. No remaining product phase. Local uncommitted coverageCatalog is outside this plan.

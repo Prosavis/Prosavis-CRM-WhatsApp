@@ -24,6 +24,50 @@ export interface ConversationHistoryResult {
 export const DEFAULT_HISTORY_LIMIT = 150;
 /** Tope de caracteres del transcript tras merge (se recorta desde lo más antiguo). */
 export const DEFAULT_TRANSCRIPT_CHAR_BUDGET = 60_000;
+export const AUDIO_TRANSCRIPT_PREFIX = '[Audio transcrito]:';
+
+function asTrimmedText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function isMediaPlaceholder(text: string, mediaType: string | null): boolean {
+  if (!mediaType) return false;
+  return text.toLowerCase() === `[${mediaType.toLowerCase()}]`;
+}
+
+/**
+ * Texto que entra al historial de IA. Si hay transcripción de audio y el
+ * toggle está activo, sustituye el placeholder `[audio]` del webhook.
+ */
+export function resolveConversationTurnText(
+  row: {
+    message_body?: unknown;
+    caption?: unknown;
+    media_type?: unknown;
+    voice_transcription?: unknown;
+  },
+  includeVoiceTranscriptions = false,
+): string {
+  const mediaType = asTrimmedText(row.media_type) || null;
+  const body = asTrimmedText(row.message_body);
+  const caption = asTrimmedText(row.caption);
+  const transcription = includeVoiceTranscriptions
+    ? asTrimmedText(row.voice_transcription)
+    : '';
+
+  if (transcription && (mediaType === 'audio' || isMediaPlaceholder(body, mediaType))) {
+    const labeled = `${AUDIO_TRANSCRIPT_PREFIX} ${transcription}`;
+    if (caption && caption !== transcription && !isMediaPlaceholder(caption, mediaType)) {
+      return `${caption}\n${labeled}`;
+    }
+    return labeled;
+  }
+
+  const text = body || caption;
+  if (text) return text;
+  if (mediaType) return `[${mediaType}]`;
+  return '';
+}
 
 export async function getConversationHistory(
   supabase: SupabaseClient,
@@ -64,16 +108,10 @@ export async function getConversationHistoryWithMeta(
 
   const turns: ConversationTurn[] = [];
   for (const row of rowsChronological) {
-    let text = (row.message_body || row.caption || '').trim();
-    if (
-      !text &&
-      row.media_type === 'audio' &&
-      options?.includeVoiceTranscriptions &&
-      row.voice_transcription
-    ) {
-      text = String(row.voice_transcription).trim();
-    }
-    if (!text && row.media_type) text = `[${row.media_type}]`;
+    const text = resolveConversationTurnText(
+      row,
+      options?.includeVoiceTranscriptions === true,
+    );
     if (!text) continue;
     turns.push({
       role: row.direction === 'inbound' ? 'user' : 'bot',

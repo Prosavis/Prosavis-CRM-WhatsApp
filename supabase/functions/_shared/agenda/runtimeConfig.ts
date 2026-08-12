@@ -42,14 +42,86 @@ function configuredWeights(): AgendaEngineWeights {
   }
 }
 
-export function loadAgendaRuntimeConfig(): AgendaRuntimeConfig {
+const COMMERCIAL_ENV_KEYS = [
+  "OPS_V5_LABOR_HOURLY_COP",
+  "OPS_V5_LABOR_DAILY_FLOOR_COP",
+  "OPS_V5_EMPLOYER_COST_MULTIPLIER",
+  "OPS_V5_TRANSPORT_PER_VISIT_COP",
+  "OPS_V5_TRAVEL_FALLBACK_URBAN_KMH",
+  "OPS_V5_TRAVEL_MINIMUM_FALLBACK_MINUTES",
+  "OPS_V5_ENGINE_WEIGHTS",
+] as const;
+
+export interface AutomationPolicySnapshot {
+  envLevel: number;
+  policyLevel?: number | null;
+  level2Enabled?: boolean | null;
+  level3Approved?: boolean | null;
+}
+
+function envFlagEnabled(name: string): boolean {
+  return optionalBoolean(name) === true;
+}
+
+function requestedAutomationLevel(): number {
   const automationLevel = optionalNumber("OPS_V5_AUTOMATION_LEVEL");
+  if (
+    automationLevel === undefined ||
+    !Number.isInteger(automationLevel) ||
+    automationLevel < 1 ||
+    automationLevel > 3
+  ) {
+    return 1;
+  }
+  return automationLevel;
+}
+
+export function resolveEffectiveAutomationLevel(
+  input: AutomationPolicySnapshot,
+): number {
+  const envLevel = Number.isInteger(input.envLevel) &&
+      input.envLevel >= 1 &&
+      input.envLevel <= 3
+    ? input.envLevel
+    : 1;
+  const policyLevel = Number.isInteger(input.policyLevel)
+    ? Number(input.policyLevel)
+    : envLevel;
+  let level = Math.min(envLevel, policyLevel);
+  if (level >= 3 && input.level3Approved !== true) {
+    level = 2;
+  }
+  if (level >= 2 && input.level2Enabled !== true) {
+    level = 1;
+  }
+  return level;
+}
+
+export function listMissingCommercialEnv(): string[] {
+  return COMMERCIAL_ENV_KEYS.filter((key) => {
+    const raw = Deno.env.get(key)?.trim();
+    if (!raw) return true;
+    if (key !== "OPS_V5_ENGINE_WEIGHTS") return false;
+    const weights = configuredWeights();
+    return weights.marginalCost +
+        weights.travelMinutes +
+        weights.rating +
+        weights.clientAffinity +
+        weights.incomeEquity +
+        weights.gapFit <= 0;
+  });
+}
+
+export function loadAgendaRuntimeConfig(): AgendaRuntimeConfig {
+  const requested = requestedAutomationLevel();
   return {
     specVersion: Deno.env.get("OPS_V5_SPEC_VERSION")?.trim() || "5.0.0",
-    automationLevel:
-      automationLevel !== undefined && Number.isInteger(automationLevel)
-        ? automationLevel
-        : 1,
+    automationLevel: resolveEffectiveAutomationLevel({
+      envLevel: requested,
+      policyLevel: requested,
+      level2Enabled: envFlagEnabled("OPS_V5_AUTOMATION_LEVEL_2_APPROVED"),
+      level3Approved: envFlagEnabled("OPS_V5_AUTOMATION_LEVEL_3_APPROVED"),
+    }),
     compliance: {
       criticalEquivalentDays: optionalNumber(
         "OPS_V5_CRITICAL_EQUIVALENT_DAYS",

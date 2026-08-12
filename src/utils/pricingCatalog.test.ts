@@ -65,15 +65,18 @@ describe('resolvePriceForDuration', () => {
 });
 
 describe('formatPricingCatalogBlock', () => {
-  it('includes every official duration, price and the kit surcharge', () => {
+  it('lists only bookable durations with property hints and forbids legacy 2h/3h quotes', () => {
     const block = formatPricingCatalogBlock();
 
-    expect(block).toContain('120 minutos → COP 58.000');
-    expect(block).toContain('180 minutos → COP 78.000');
-    expect(block).toContain('240 minutos → COP 88.000');
-    expect(block).toContain('360 minutos → COP 118.000');
-    expect(block).toContain('480 minutos → COP 148.000');
+    expect(block).toContain('4 horas (240 min) → COP 88.000');
+    expect(block).toContain('hasta 2 habitaciones');
+    expect(block).toContain('6 horas (360 min) → COP 118.000');
+    expect(block).toContain('3+ habitaciones');
+    expect(block).toContain('8 horas (480 min) → COP 148.000');
     expect(block).toContain('Kit profesional → COP 30.000 adicionales');
+    expect(block).toMatch(/no ofrezcas 2 horas ni 3 horas/i);
+    expect(block).not.toContain('120 minutos → COP 58.000');
+    expect(block).not.toContain('180 minutos → COP 78.000');
   });
 });
 

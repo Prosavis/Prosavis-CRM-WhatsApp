@@ -9,6 +9,8 @@
     "lint": "eslint .",
     "type-check": "tsc -b --noEmit",
     "test": "vitest run",
+    "test:ops-v5": "npx deno test --allow-read --allow-env supabase/functions/_shared/agenda/agendaEngine.test.ts supabase/functions/_shared/agenda/api.test.ts supabase/functions/_shared/agenda/runtimeConfig.test.ts supabase/functions/_shared/opsV5Readiness.test.ts supabase/functions/_shared/visitAttentionAlert.test.ts supabase/functions/_shared/opsMetrics.test.ts",
+    "test:ops-v5-sql": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ops-v5-sql-gate.ps1",
     "preview": "vite preview"
   },
   "dependencies": {

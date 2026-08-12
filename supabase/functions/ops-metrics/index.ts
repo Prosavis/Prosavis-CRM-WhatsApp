@@ -11,6 +11,13 @@ import {
   type OpsRollupRow,
   type OpsTeamMemberRow,
 } from "../_shared/opsMetrics.ts";
+import {
+  listMissingCommercialEnv,
+  loadAgendaRuntimeConfig,
+  resolveEffectiveAutomationLevel,
+} from "../_shared/agenda/runtimeConfig.ts";
+import { buildOpsV5Activation } from "../_shared/opsV5Readiness.ts";
+import { visitsAlertConfigured } from "../_shared/visitAttentionAlert.ts";
 
 const ROLLUP_FIELDS = [
   "operational_date",
@@ -101,13 +108,26 @@ Deno.serve(async (request) => {
     .select("id,name")
     .eq("service_id", range.serviceId)
     .eq("is_active", true);
+  const payrollQuery = context.supabase
+    .from("ops_v5_rating_payroll_config")
+    .select("is_active")
+    .eq("service_id", range.serviceId)
+    .maybeSingle();
+  const policyQuery = context.supabase
+    .from("ops_automation_policies")
+    .select("policy_level,level_2_enabled,level_3_human_approved_at")
+    .eq("service_id", range.serviceId)
+    .maybeSingle();
 
-  const [current, previous, cleanerFacts, members] = await Promise.all([
-    currentQuery,
-    previousQuery,
-    cleanerFactsQuery,
-    membersQuery,
-  ]);
+  const [current, previous, cleanerFacts, members, payroll, policy] =
+    await Promise.all([
+      currentQuery,
+      previousQuery,
+      cleanerFactsQuery,
+      membersQuery,
+      payrollQuery,
+      policyQuery,
+    ]);
   if (current.error || previous.error || cleanerFacts.error || members.error) {
     console.error("[ops-metrics] Query failed", {
       request_id: crypto.randomUUID(),
@@ -125,10 +145,29 @@ Deno.serve(async (request) => {
     (current.data ?? []) as unknown as OpsRollupRow[],
     (previous.data ?? []) as unknown as OpsRollupRow[],
   );
+  const envRuntime = loadAgendaRuntimeConfig();
+  const activation = buildOpsV5Activation({
+    automationLevel: resolveEffectiveAutomationLevel({
+      envLevel: envRuntime.automationLevel,
+      policyLevel: typeof policy.data?.policy_level === "number"
+        ? policy.data.policy_level
+        : envRuntime.automationLevel,
+      level2Enabled: policy.data?.level_2_enabled === true,
+      level3Approved: Boolean(policy.data?.level_3_human_approved_at),
+    }),
+    visitsAlertConfigured: visitsAlertConfigured(),
+    payrollConfigActive: payroll.data?.is_active === true
+      ? true
+      : payroll.data
+      ? false
+      : null,
+    missingCommercialEnv: listMissingCommercialEnv(),
+  });
   return strictJsonResponse(request, {
     data: {
       range,
       ...payload,
+      activation,
       cleaners: buildCleanerCapacityPayload(
         (cleanerFacts.data ?? []) as unknown as CleanerDayFactRow[],
         (members.data ?? []) as unknown as OpsTeamMemberRow[],

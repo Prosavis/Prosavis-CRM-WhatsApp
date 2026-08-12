@@ -1,5 +1,8 @@
 import { assertEquals, assertThrows } from "jsr:@std/assert";
-import { buildVisitAttentionAlert } from "./visitAttentionAlert.ts";
+import {
+  buildVisitAttentionAlert,
+  visitsAlertConfigured,
+} from "./visitAttentionAlert.ts";
 
 Deno.test(
   "visit attention alert contains a deep link without client PII",
@@ -14,6 +17,29 @@ Deno.test(
     );
   },
 );
+
+Deno.test("visits alert is unconfigured until every secret is present", () => {
+  const previous = new Map<string, string | undefined>();
+  const keys = [
+    "VISITS_ALERT_PHONE",
+    "USER_CONSOLE_URL",
+    "WHATSAPP_ACCESS_TOKEN",
+    "WHATSAPP_PHONE_NUMBER_ID",
+    "ENABLE_META_SEND",
+  ];
+  for (const key of keys) {
+    previous.set(key, Deno.env.get(key));
+    Deno.env.delete(key);
+  }
+  try {
+    assertEquals(visitsAlertConfigured(), false);
+  } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) Deno.env.delete(key);
+      else Deno.env.set(key, value);
+    }
+  }
+});
 
 Deno.test("visit attention alert requires configured destination", () => {
   assertThrows(() =>
