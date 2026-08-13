@@ -62,3 +62,6 @@ opencode.json
 
 # Graphify: knowledge graph (local, each dev generates their own)
 graphify-out/
+
+# Supabase CLI local branch pointer
+supabase/.branches/
