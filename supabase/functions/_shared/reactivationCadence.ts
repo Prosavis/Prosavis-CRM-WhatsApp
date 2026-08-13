@@ -68,8 +68,72 @@ export const REACTIVATION_STEPS: ReactivationStepDef[] = [
   },
 ];
 
-export function getStepDef(step: number): ReactivationStepDef | null {
-  return REACTIVATION_STEPS.find((s) => s.step === step) ?? null;
+/** Ventana Bogotá 12–31 ago 2026: reactivación en tono solidario (sin promo). */
+export const SOLIDARITY_OVERRIDE_START = '2026-08-12';
+export const SOLIDARITY_OVERRIDE_END = '2026-08-31';
+
+const RETORNO_OPERACION_BODY2 =
+  'ya retomamos operaciones desde el 12 de agosto y estamos listos para acompañarte';
+
+/** Plantillas solidarias por paso mientras dure el override de agosto. */
+const SOLIDARITY_STEP_TEMPLATES: Record<
+  ReactivationStepNumber,
+  Pick<ReactivationStepDef, 'templateName' | 'extraBodyParams' | 'label'>
+> = {
+  1: {
+    templateName: 'contingencia_regreso_esperanza_pereira',
+    label: 'Solidaridad regreso Pereira',
+  },
+  2: {
+    templateName: 'contingencia_retorno_operacion',
+    extraBodyParams: [RETORNO_OPERACION_BODY2],
+    label: 'Retorno de operaciones',
+  },
+  3: {
+    templateName: 'contingencia_apoyo_seguimiento',
+    label: 'Apoyo / cómo están',
+  },
+  4: {
+    templateName: 'contingencia_solidaridad_sismo',
+    label: 'Solidaridad sismo',
+  },
+  5: {
+    templateName: 'contingencia_apoyo_seguimiento',
+    label: 'Apoyo seguimiento',
+  },
+  6: {
+    templateName: 'contingencia_retorno_operacion',
+    extraBodyParams: [RETORNO_OPERACION_BODY2],
+    label: 'Cierre solidario retorno',
+  },
+};
+
+export function bogotaYmd(asOf: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(asOf);
+}
+
+/** true si la fecha Bogotá cae en 12–31 ago 2026 (inclusive). */
+export function isAugustSolidarityPeriod(asOf: Date = new Date()): boolean {
+  const ymd = bogotaYmd(asOf);
+  return ymd >= SOLIDARITY_OVERRIDE_START && ymd <= SOLIDARITY_OVERRIDE_END;
+}
+
+export function getStepDef(step: number, asOf: Date = new Date()): ReactivationStepDef | null {
+  const base = REACTIVATION_STEPS.find((s) => s.step === step) ?? null;
+  if (!base) return null;
+  if (!isAugustSolidarityPeriod(asOf)) return base;
+  const override = SOLIDARITY_STEP_TEMPLATES[base.step];
+  return {
+    ...base,
+    templateName: override.templateName,
+    extraBodyParams: override.extraBodyParams,
+    label: override.label,
+  };
 }
 
 export function nextStepNumber(currentStep: number): ReactivationStepNumber | null {
@@ -140,6 +204,16 @@ export function buildDisplayBody(clientName: string, step: ReactivationStepDef):
     }
     case 'seguimiento_final':
       return `Hola ${clientName}, solo quería dejarte saber que seguimos disponibles cuando necesites. Personal verificado, pago seguro, y verificación de identidad para tu tranquilidad. Si en algún momento necesitas, aquí estamos. ¡Que tengas buen día! 😊`;
+    case 'contingencia_regreso_esperanza_pereira':
+      return `Hola ${clientName}. Desde Prosavis queremos decirte que esperamos de corazón que tú y tu familia se encuentren bien y a salvo. Pereira y el Eje Cafetero son nuestro hogar: estamos con nuestra ciudad y listos para apoyarnos entre todos.`;
+    case 'contingencia_solidaridad_sismo':
+      return `Hola ${clientName}. Desde Prosavis queremos decirles que esperamos de corazón que usted y su familia se encuentren muy bien y a salvo tras el temblor. Estamos atentos a lo que necesiten. Un abrazo.`;
+    case 'contingencia_apoyo_seguimiento':
+      return `Hola ${clientName}. Solo queríamos saber cómo se encuentran usted y los suyos. En Prosavis seguimos a la orden si necesitan algo. Cuídese mucho.`;
+    case 'contingencia_retorno_operacion': {
+      const retorno = step.extraBodyParams?.[0] ?? RETORNO_OPERACION_BODY2;
+      return `Hola ${clientName}. Le informamos sobre el retorno de operaciones de Prosavis: ${retorno}. Cuando desee retomar su servicio, escríbanos y coordinamos. Gracias por su comprensión.`;
+    }
     default:
       return `Hola ${clientName}, mensaje de reactivación Prosavis (${step.templateName}).`;
   }

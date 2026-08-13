@@ -22,6 +22,7 @@ Complementa `agent-vercel-supabase-waba.mdc`.
 | **Postgres / migraciones** | `supabase`, `supabase-postgres-best-practices` |
 | **React CRM** | `vercel-react-best-practices`, `tanstack-query` |
 | **Efectos Canvas UI / html-in-canvas** | `canvas-ui` (MCP `shadcn` + `@canvas-ui`) |
+| **Elegir modelo / React difícil** | `reactbench` + `prosavis-firebase/docs/context/reactbench.md` |
 | **Tests** | `react-testing-library`, `javascript-typescript-jest` |
 | **WhatsApp** | MCP `prosavis-waba` (no duplicar en skill) |
 | **Directorio unificado** | `crm_directory` en Supabase — SSOT de contactos |

@@ -31,6 +31,7 @@ import {
 } from '../_shared/whatsappOutbound.ts';
 import { directoryPhoneLookupVariants } from '../_shared/directoryPhone.ts';
 import { getStableKeyFromRecipient, normalizePhone, resolveRecipient } from '../_shared/whatsappIdentity.ts';
+import { applyColdFailureTag } from '../_shared/coldAppUserOutreach.ts';
 
 const BULK_CONFIRM_PHRASE = 'CONFIRMAR_ENVIO_MASIVO';
 const BATCH_DELAY_MS = 1200;
@@ -332,6 +333,17 @@ Deno.serve(async (req) => {
           processed_at: new Date().toISOString(),
         })
         .eq('id', recipient.id);
+
+      if (outcome.status === 'failed') {
+        try {
+          await applyColdFailureTag(supabase, {
+            phone: String(recipient.phone ?? ''),
+            errorMessage: outcome.error,
+          });
+        } catch (tagErr) {
+          console.warn('[bulk-whatsapp-send] applyColdFailureTag', formatError(tagErr));
+        }
+      }
 
       processed += 1;
 

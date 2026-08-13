@@ -139,8 +139,8 @@ values
 
 grant select on foundation_rls_cases to anon, authenticated;
 
-select results_eq(
-  $$
+select is(
+  (
     select count(*)::bigint
     from pg_class c
     join pg_namespace n on n.oid = c.relnamespace
@@ -154,14 +154,14 @@ select results_eq(
         'cleaner_availability'
       )
       and c.relrowsecurity
-  $$,
-  array[6::bigint],
+  ),
+  6::bigint,
   'RLS is enabled on every foundation table'
 );
 
 select results_eq(
   $$
-    select tablename::text
+    select tablename::text collate "C"
     from pg_policies
     where schemaname = 'public'
       and tablename in (
@@ -180,18 +180,18 @@ select results_eq(
   $$,
   $$
     values
-      ('booking_addons'),
-      ('booking_crew'),
-      ('booking_events'),
-      ('bookings'),
-      ('buildings'),
-      ('cleaner_availability')
+      ('booking_addons'::text collate "C"),
+      ('booking_crew'::text collate "C"),
+      ('booking_events'::text collate "C"),
+      ('bookings'::text collate "C"),
+      ('buildings'::text collate "C"),
+      ('cleaner_availability'::text collate "C")
   $$,
   'each policy invokes app_private.is_crm_admin() in USING and WITH CHECK'
 );
 
-select results_eq(
-  $$
+select is(
+  (
     select count(*)::bigint
     from unnest(array[
       'buildings',
@@ -212,13 +212,13 @@ select results_eq(
       format('public.%I', name),
       privilege
     )
-  $$,
-  array[24::bigint],
+  ),
+  24::bigint,
   'authenticated receives each CRUD grant on every foundation table'
 );
 
-select results_eq(
-  $$
+select is(
+  (
     select count(*)::bigint
     from unnest(array[
       'buildings',
@@ -239,8 +239,8 @@ select results_eq(
       format('public.%I', name),
       privilege
     )
-  $$,
-  array[0::bigint],
+  ),
+  0::bigint,
   'anon receives none of the individual CRUD grants'
 );
 

@@ -69,7 +69,9 @@ $AllFunctions = @(
   'update-whatsapp-snippet',
   'update-whatsapp-sticker',
   'update-whatsapp-tag',
-  'update-whatsapp-template-preset'
+  'update-whatsapp-template-preset',
+  'visitas-ruta',
+  'visitas-registrar'
 )
 
 $Targets = if ($Only.Count -gt 0) { $Only } else { $AllFunctions }

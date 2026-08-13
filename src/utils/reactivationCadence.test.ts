@@ -8,7 +8,12 @@ import {
   REACTIVATION_STEPS,
   buildDisplayBody,
   getStepDef,
+  isAugustSolidarityPeriod,
 } from '../../supabase/functions/_shared/reactivationCadence';
+
+/** Fuera del override solidario ago-2026 (asserts de plantillas comerciales). */
+const AFTER_SOLIDARITY = new Date('2026-09-01T17:00:00.000Z');
+const DURING_SOLIDARITY = new Date('2026-08-17T17:00:00.000Z');
 
 const STEPS = [
   { step: 1, gapDaysFromPrevious: 0 },
@@ -75,7 +80,7 @@ describe('reactivation cadence gaps', () => {
   });
 
   it.each([1, 2])('shows the prepaid package promotion in step %i', (stepNumber) => {
-    const step = getStepDef(stepNumber);
+    const step = getStepDef(stepNumber, AFTER_SOLIDARITY);
     expect(step).not.toBeNull();
 
     const body = buildDisplayBody('María', step!);
@@ -86,5 +91,20 @@ describe('reactivation cadence gaps', () => {
     expect(body).toContain('$20.000');
     expect(body).toContain('pagar por anticipado');
     expect(body.toLowerCase()).not.toContain('misma profesional');
+  });
+
+  it('uses solidarity templates during 12–31 Aug 2026 Bogotá', () => {
+    expect(isAugustSolidarityPeriod(DURING_SOLIDARITY)).toBe(true);
+    expect(isAugustSolidarityPeriod(AFTER_SOLIDARITY)).toBe(false);
+
+    expect(getStepDef(1, DURING_SOLIDARITY)?.templateName).toBe(
+      'contingencia_regreso_esperanza_pereira',
+    );
+    expect(getStepDef(2, DURING_SOLIDARITY)?.templateName).toBe('contingencia_retorno_operacion');
+    expect(getStepDef(3, DURING_SOLIDARITY)?.templateName).toBe('contingencia_apoyo_seguimiento');
+
+    const body = buildDisplayBody('María', getStepDef(1, DURING_SOLIDARITY)!);
+    expect(body.toLowerCase()).toContain('corazón');
+    expect(body).not.toContain('$10.000');
   });
 });

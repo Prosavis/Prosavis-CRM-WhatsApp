@@ -40,8 +40,8 @@ select has_column(
   'lost requests expose recovery status'
 );
 
-select results_eq(
-  $$
+select is(
+  (
     select count(*)::bigint
     from pg_class c
     join pg_namespace n on n.oid = c.relnamespace
@@ -52,14 +52,14 @@ select results_eq(
       'comuna_travel_matrix'
     )
       and c.relrowsecurity
-  $$,
-  array[3::bigint],
+  ),
+  3::bigint,
   'RLS is enabled on every Phase 1A table'
 );
 
 select results_eq(
   $$
-    select tablename::text
+    select tablename::text collate "C"
     from pg_policies
     where schemaname = 'public'
       and tablename in (
@@ -75,15 +75,15 @@ select results_eq(
   $$,
   $$
     values
-      ('assignment_decisions'),
-      ('comuna_travel_matrix'),
-      ('lost_requests')
+      ('assignment_decisions'::text collate "C"),
+      ('comuna_travel_matrix'::text collate "C"),
+      ('lost_requests'::text collate "C")
   $$,
   'admin policies gate USING and WITH CHECK'
 );
 
-select results_eq(
-  $$
+select is(
+  (
     select count(*)::bigint
     from unnest(array[
       'assignment_decisions',
@@ -101,13 +101,13 @@ select results_eq(
       format('public.%I', name),
       privilege
     )
-  $$,
-  array[0::bigint],
+  ),
+  0::bigint,
   'anon has no Phase 1A table privileges'
 );
 
-select results_eq(
-  $$
+select is(
+  (
     select count(*)::bigint
     from unnest(array[
       'assignment_decisions',
@@ -125,8 +125,8 @@ select results_eq(
       format('public.%I', name),
       privilege
     )
-  $$,
-  array[12::bigint],
+  ),
+  12::bigint,
   'authenticated receives explicit CRUD grants guarded by RLS'
 );
 

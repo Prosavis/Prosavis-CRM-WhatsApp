@@ -12,6 +12,7 @@ import {
 import { UNARCHIVE_CONVERSATION_PATCH } from '../_shared/whatsappOutbound.ts';
 import { directoryPhoneKey } from '../_shared/directoryPhone.ts';
 import { REACTIVATION_SEQUENCE } from '../_shared/reactivationCadence.ts';
+import { applyColdFailureTag, removeColdFailureTags } from '../_shared/coldAppUserOutreach.ts';
 
 const encoder = new TextEncoder();
 type JsonRecord = Record<string, unknown>;
@@ -535,7 +536,7 @@ async function processStatus(params: {
 
   const { data: existingMessage, error: existingError } = await params.supabase
     .from('whatsapp_message_log')
-    .select('id,conversation_stable_key,raw_payload')
+    .select('id,conversation_stable_key,raw_payload,recipient_phone')
     .eq('wa_message_id', waMessageId)
     .maybeSingle();
 
@@ -543,7 +544,9 @@ async function processStatus(params: {
   if (!existingMessage) return 'missing';
 
   const isFailure = status === 'failed';
+  const isSuccessStatus = status === 'sent' || status === 'delivered' || status === 'read';
   const errorMessage = isFailure ? getStatusErrorMessage(params.status) : null;
+  const phone = String(existingMessage.recipient_phone ?? '').trim();
 
   const rawPayload = {
     ...asRecord(existingMessage.raw_payload),
@@ -552,6 +555,9 @@ async function processStatus(params: {
 
   const messageUpdate: JsonRecord = { status, raw_payload: rawPayload };
   if (isFailure && errorMessage) messageUpdate.error_message = errorMessage;
+  // Si Meta recupera la entrega (o el failed llegó fuera de orden), no dejar
+  // error_message/tags de fallo pegados en un mensaje que sí llegó.
+  if (isSuccessStatus) messageUpdate.error_message = null;
 
   const { error: updateMessageError } = await params.supabase
     .from('whatsapp_message_log')
@@ -579,6 +585,31 @@ async function processStatus(params: {
       p_error: errorMessage,
     });
     if (reconcileError) throw reconcileError;
+
+    // Misma clasificación Negativos que cold outreach (undeliverable Meta /
+    // failed to be sent) para métricas y exclusión de reintentos.
+    if (phone) {
+      try {
+        await applyColdFailureTag(params.supabase, {
+          phone,
+          errorMessage,
+        });
+      } catch (tagErr) {
+        console.warn('[on-whatsapp-webhook] applyColdFailureTag failed', {
+          phone,
+          error: tagErr instanceof Error ? tagErr.message : String(tagErr),
+        });
+      }
+    }
+  } else if (isSuccessStatus && phone) {
+    try {
+      await removeColdFailureTags(params.supabase, { phone });
+    } catch (tagErr) {
+      console.warn('[on-whatsapp-webhook] removeColdFailureTags failed', {
+        phone,
+        error: tagErr instanceof Error ? tagErr.message : String(tagErr),
+      });
+    }
   }
 
   return 'updated';

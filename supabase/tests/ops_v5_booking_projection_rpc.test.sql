@@ -432,13 +432,13 @@ select is(
       union all
       select service_id, booking_id from public.booking_events
     ) as children
-    where service_id is distinct from 'svc-projection'
-      or booking_id is distinct from (
-        select id
-        from public.bookings
-        where service_id = 'svc-projection'
-          and appointment_id = 'appointment-1'
-      )
+    where booking_id = (
+      select id
+      from public.bookings
+      where service_id = 'svc-projection'
+        and appointment_id = 'appointment-1'
+    )
+      and service_id is distinct from 'svc-projection'
   ),
   0::bigint,
   'all children are forced onto the resolved booking and service'

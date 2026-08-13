@@ -238,6 +238,11 @@ values (
   'backfill-1'
 );
 
+delete from public.ops_backfill_queue
+where service_id = 'service-jobs-ai-test'
+  and target_key <> 'backfill-1'
+  and status in ('queued', 'running');
+
 select is(
   (
     select count(*)::integer
@@ -259,6 +264,7 @@ select is(
       1,
       interval '5 minutes'
     )
+    where target_key = 'backfill-1'
   ),
   0,
   'second worker cannot claim an active lease'

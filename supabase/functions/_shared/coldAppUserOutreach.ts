@@ -205,6 +205,103 @@ export async function applyColdFailureTag(
   return tagName;
 }
 
+const COLD_FAILURE_TAG_NAMES = [
+  COLD_TAG_UNDELIVERABLE,
+  COLD_TAG_UUID_BUG,
+  COLD_TAG_FAILED_GENERIC,
+] as const;
+
+/**
+ * Quita tags Negativos de fallo Meta cuando la entrega se recupera
+ * (sent/delivered/read) o cuando se detectó un falso positivo.
+ */
+// deno-lint-ignore no-explicit-any
+export async function removeColdFailureTags(
+  supabase: any,
+  params: {
+    directoryId?: string | null;
+    phone: string;
+  },
+): Promise<number> {
+  const phone = String(params.phone ?? '').trim();
+  if (!phone) return 0;
+
+  const { data: tagRows } = await supabase
+    .from('whatsapp_chat_tags')
+    .select('id,name')
+    .in('name', [...COLD_FAILURE_TAG_NAMES])
+    .eq('archived', false);
+
+  const tagIds: string[] = (tagRows ?? []).map((t: { id: string }) => t.id).filter(Boolean);
+  if (!tagIds.length) return 0;
+
+  const phoneKey = phone.replace(/\D/g, '').slice(-10);
+  let { data: convs } = await supabase
+    .from('whatsapp_conversations')
+    .select('stable_key, tag_ids')
+    .eq('phone_key', phoneKey)
+    .limit(5);
+
+  if (!convs?.length) {
+    const { data: byStable } = await supabase
+      .from('whatsapp_conversations')
+      .select('stable_key, tag_ids')
+      .ilike('stable_key', `%${phoneKey}`)
+      .limit(5);
+    convs = byStable;
+  }
+
+  let removed = 0;
+  for (const conv of convs ?? []) {
+    const ids: string[] = Array.isArray(conv.tag_ids) ? conv.tag_ids : [];
+    const next = ids.filter((id) => !tagIds.includes(id));
+    if (next.length === ids.length) continue;
+    const { error } = await supabase
+      .from('whatsapp_conversations')
+      .update({ tag_ids: next })
+      .eq('stable_key', conv.stable_key);
+    if (!error) removed += 1;
+  }
+
+  if (params.directoryId) {
+    const { data: dir } = await supabase
+      .from('crm_directory')
+      .select('tags')
+      .eq('id', params.directoryId)
+      .maybeSingle();
+    const current: string[] = Array.isArray(dir?.tags) ? dir.tags : [];
+    const next = current.filter(
+      (t) => !COLD_FAILURE_TAG_NAMES.some((n) => n.toLowerCase() === String(t).toLowerCase()),
+    );
+    if (next.length !== current.length) {
+      await supabase
+        .from('crm_directory')
+        .update({ tags: next, updated_at: new Date().toISOString() })
+        .eq('id', params.directoryId);
+    }
+  } else if (phoneKey) {
+    // Fallback: directorio por phone_key / variantes.
+    const { data: dirs } = await supabase
+      .from('crm_directory')
+      .select('id, tags')
+      .or(`phone_key.eq.${phoneKey},phone.eq.+${phone},phone.eq.${phone}`)
+      .limit(5);
+    for (const dir of dirs ?? []) {
+      const current: string[] = Array.isArray(dir.tags) ? dir.tags : [];
+      const next = current.filter(
+        (t) => !COLD_FAILURE_TAG_NAMES.some((n) => n.toLowerCase() === String(t).toLowerCase()),
+      );
+      if (next.length === current.length) continue;
+      await supabase
+        .from('crm_directory')
+        .update({ tags: next, updated_at: new Date().toISOString() })
+        .eq('id', dir.id);
+    }
+  }
+
+  return removed;
+}
+
 /** Fill-only merge: identidad app + teléfono; no escribe display_name basura. */
 export function buildDirectoryUpsertPayload(plan: ColdRecipientPlan): Record<string, unknown> {
   const entry: Record<string, unknown> = {
