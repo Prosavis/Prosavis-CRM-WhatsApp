@@ -2071,9 +2071,13 @@ export async function setMyWhatsAppPresence(
     updatedAt: new Date().toISOString(),
   };
   session.lastPayload = payload;
-  const status = await session.channel.track(payload);
-  if (status !== 'ok') {
-    throw new Error(`Presence track failed: ${status}`);
+  try {
+    const status = await session.channel.track(payload);
+    if (status !== 'ok') {
+      console.warn('[setMyWhatsAppPresence] track failed:', status);
+    }
+  } catch (err) {
+    console.warn('[setMyWhatsAppPresence] track failed:', err);
   }
 }
 
