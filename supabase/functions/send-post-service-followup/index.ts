@@ -6,12 +6,17 @@ import {
 } from "../_shared/directoryPhone.ts";
 import { formatError } from "../_shared/errors.ts";
 import {
+  getFirestoreDocument,
+  runFirestoreQuery,
+} from "../_shared/firebaseAdminRest.ts";
+import {
   buildPostServiceMessageBody,
   buildPostServiceTemplateComponents,
   isPostServiceDirectoryStatusBlocked,
   POST_SERVICE_CAMPAIGN_TYPE,
   POST_SERVICE_TEMPLATE_LANGUAGE,
   POST_SERVICE_TEMPLATE_NAME,
+  resolvePostServiceRecurringSkip,
   type PostServiceFollowUpPayload,
 } from "../_shared/postServiceAutomation.ts";
 import { getServiceClient } from "../_shared/supabase.ts";
@@ -43,7 +48,9 @@ type PostServiceOutcome =
   | "skipped_status"
   | "skipped_disabled"
   | "skipped_blacklisted"
-  | "skipped_invalid_phone";
+  | "skipped_invalid_phone"
+  | "skipped_recurring"
+  | "skipped_has_future_booking";
 
 interface DirectoryRecipient {
   id: string;
@@ -52,6 +59,8 @@ interface DirectoryRecipient {
   phone: string | null;
   opt_out: boolean | null;
   status: string | null;
+  classification: string | null;
+  tags: string[] | null;
 }
 
 interface ExistingSentEvent {
@@ -127,7 +136,7 @@ async function findDirectoryRecipient(
   supabase: SupabaseClient,
   payload: PostServiceFollowUpPayload,
 ): Promise<DirectoryRecipient | null> {
-  const select = "id,display_name,full_name,phone,opt_out,status";
+  const select = "id,display_name,full_name,phone,opt_out,status,classification,tags";
 
   const { data: byClientId, error: clientError } = await supabase
     .from("crm_directory")
@@ -446,6 +455,60 @@ Deno.serve(async (req) => {
         outcome: "skipped_blacklisted",
         messageBody,
         error: "recipient_blocked",
+      });
+    }
+
+    const appointmentDoc = await getFirestoreDocument(
+      "appointments",
+      payload.appointmentData.appointmentId,
+    );
+    const isRecurringSeries = appointmentDoc?.isRecurringSeries === true;
+    const nowIso = new Date().toISOString();
+    const futureDocs = await runFirestoreQuery("appointments", {
+      where: {
+        compositeFilter: {
+          op: "AND",
+          filters: [
+            {
+              fieldFilter: {
+                field: { fieldPath: "clientId" },
+                op: "EQUAL",
+                value: { stringValue: payload.appointmentData.clientId },
+              },
+            },
+            {
+              fieldFilter: {
+                field: { fieldPath: "scheduledDate" },
+                op: "GREATER_THAN",
+                value: { timestampValue: nowIso },
+              },
+            },
+          ],
+        },
+      },
+    });
+    const activeFutureStatuses = new Set(["PENDING", "CONFIRMED"]);
+    const hasFutureBooking = futureDocs.some((doc) =>
+      doc.id !== payload.appointmentData.appointmentId &&
+      activeFutureStatuses.has(String(doc.data.status ?? "").trim())
+    );
+    const recurringSkip = resolvePostServiceRecurringSkip({
+      classification: directory?.classification,
+      tags: directory?.tags,
+      isRecurringSeries,
+      hasFutureBooking,
+    });
+    if (recurringSkip) {
+      return await skipWithEvent(supabase, {
+        runId,
+        payload,
+        directory,
+        normalizedPhone,
+        outcome: recurringSkip,
+        messageBody,
+        error: recurringSkip === "skipped_recurring"
+          ? "Cliente recurrente o cita de serie."
+          : "El cliente ya tiene una cita futura.",
       });
     }
 

@@ -15,6 +15,7 @@ import {
   IS_STRIKETHROUGH,
 } from 'lexical';
 
+import { unescapeInboxAiNewlines } from '../../../../supabase/functions/_shared/inboxAiSuggestionText';
 import { parseWhatsAppFormatting } from '@/utils/whatsappTextFormatting';
 
 function wrapTextWithWhatsAppMarkers(text: string, format: number): string {
@@ -108,6 +109,7 @@ export function $serializeWhatsAppString(): string {
 
 /** Puebla el editor desde un string con marcadores WhatsApp. Uso: dentro de `editor.update`. */
 export function $hydrateWhatsAppString(text: string): void {
+  const normalized = unescapeInboxAiNewlines(text);
   const root = $getRoot();
   root.clear();
   const paragraph = $createParagraphNode();
@@ -130,17 +132,17 @@ export function $hydrateWhatsAppString(text: string): void {
     }
   };
 
-  if (!text.trim()) {
-    if (text.length > 0) {
-      appendFormattedChunk(text, 0);
+  if (!normalized.trim()) {
+    if (normalized.length > 0) {
+      appendFormattedChunk(normalized, 0);
     }
     paragraph.selectEnd();
     return;
   }
 
-  const segments = parseWhatsAppFormatting(text);
-  if (segments.length === 0 && text.length > 0) {
-    appendFormattedChunk(text, 0);
+  const segments = parseWhatsAppFormatting(normalized);
+  if (segments.length === 0 && normalized.length > 0) {
+    appendFormattedChunk(normalized, 0);
     paragraph.selectEnd();
     return;
   }

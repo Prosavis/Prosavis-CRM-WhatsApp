@@ -1,6 +1,7 @@
 import type { NormalizedBookingContext } from './bookingContext.ts';
 import { geminiGenerateJson } from './geminiClient.ts';
 import type { InboxAiAppointment } from './inboxAiContextFormat.ts';
+import { cleanInboxAiSuggestionText } from './inboxAiSuggestionText.ts';
 
 export type InboxAiProposedActionType =
   | 'create_appointment'
@@ -450,7 +451,7 @@ export function normalizeInboxAiSuggestionOutput(
   }
 
   return {
-    suggestion: cleanText(source.suggestion),
+    suggestion: cleanInboxAiSuggestionText(source.suggestion),
     proposedActions,
   };
 }
@@ -462,6 +463,7 @@ const ACTION_GENERATION_INSTRUCTIONS = [
   'Todas las acciones requieren confirmación humana antes de ejecutarse.',
   'No inventes slots, IDs de citas, links, montos, tags ni plantillas.',
   'Si no hay una acción segura y grounded, devuelve proposedActions vacío.',
+  'En suggestion usa saltos de línea reales para listas y párrafos, nunca la secuencia literal \\n.',
 ].join('\n');
 
 export async function generateInboxAiSuggestion(params: {

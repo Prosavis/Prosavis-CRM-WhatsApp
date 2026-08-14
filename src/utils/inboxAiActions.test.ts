@@ -84,6 +84,41 @@ describe('normalizeInboxAiSuggestionOutput', () => {
     )).toBe(true);
   });
 
+  it('turns escaped newlines into real line breaks and keeps paragraph breaks', () => {
+    const result = normalizeInboxAiSuggestionOutput({
+      suggestion:
+        'Con gusto te comparto nuestras tarifas:\\n• 4 horas: $88.000\\n• 6 horas: $118.000\\n\\n¿En qué sector estás?',
+      proposedActions: [],
+    }, grounding);
+
+    expect(result.suggestion).toBe(
+      'Con gusto te comparto nuestras tarifas:\n• 4 horas: $88.000\n• 6 horas: $118.000\n\n¿En qué sector estás?',
+    );
+  });
+
+  it('preserves real newlines already present in the suggestion', () => {
+    const result = normalizeInboxAiSuggestionOutput({
+      suggestion: 'Hola, ¿cómo estás?\n\nEstas son las tarifas:\n• 4 horas: $88.000',
+      proposedActions: [],
+    }, grounding);
+
+    expect(result.suggestion).toBe(
+      'Hola, ¿cómo estás?\n\nEstas son las tarifas:\n• 4 horas: $88.000',
+    );
+  });
+
+  it('normalizes mixed real and escaped newlines from Gemini JSON', () => {
+    const result = normalizeInboxAiSuggestionOutput({
+      suggestion:
+        '¡Hola! Estamos en Pereira.\n\nTarifas:\\n• 4 horas: $88.000\\n• 6 horas: $118.000',
+      proposedActions: [],
+    }, grounding);
+
+    expect(result.suggestion).toBe(
+      '¡Hola! Estamos en Pereira.\n\nTarifas:\n• 4 horas: $88.000\n• 6 horas: $118.000',
+    );
+  });
+
   it('builds payment payloads exclusively from grounded checkout data', () => {
     const result = normalizeInboxAiSuggestionOutput({
       suggestion: 'Paga aquí',
@@ -421,6 +456,9 @@ describe('generateInboxAiSuggestion', () => {
     );
     expect(body.systemInstruction?.parts[0]?.text).toContain(
       'No inventes slots, IDs de citas, links, montos, tags ni plantillas',
+    );
+    expect(body.systemInstruction?.parts[0]?.text).toContain(
+      'nunca la secuencia literal \\n',
     );
     expect(body.contents[0]?.parts[0]?.text).toBe(
       'Contexto grounded de prueba',

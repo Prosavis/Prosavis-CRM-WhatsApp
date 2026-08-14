@@ -1,3 +1,8 @@
+import {
+  isRecurringClient,
+  type ClassifiableClient,
+} from "./clientClassification.ts";
+
 export const POST_SERVICE_TEMPLATE_NAME = "service_finalizado";
 export const POST_SERVICE_TEMPLATE_LANGUAGE = "es_CO";
 export const POST_SERVICE_CAMPAIGN_TYPE = "POST_SERVICIO";
@@ -82,4 +87,33 @@ export function isPostServiceDirectoryStatusBlocked(
   status: string | null | undefined,
 ): boolean {
   return BLOCKED_DIRECTORY_STATUSES.has((status ?? "").trim().toLowerCase());
+}
+
+export type PostServiceRecurringSkipOutcome =
+  | "skipped_recurring"
+  | "skipped_has_future_booking";
+
+export interface PostServiceRecurringSkipInput extends ClassifiableClient {
+  isRecurringSeries: boolean;
+  hasFutureBooking: boolean;
+}
+
+export function resolvePostServiceRecurringSkip(
+  input: PostServiceRecurringSkipInput,
+): PostServiceRecurringSkipOutcome | null {
+  if (
+    isRecurringClient({
+      classification: input.classification,
+      tags: input.tags,
+    })
+  ) {
+    return "skipped_recurring";
+  }
+  if (input.isRecurringSeries) {
+    return "skipped_recurring";
+  }
+  if (input.hasFutureBooking) {
+    return "skipped_has_future_booking";
+  }
+  return null;
 }

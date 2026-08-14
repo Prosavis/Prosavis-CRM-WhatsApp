@@ -67,6 +67,8 @@ export const POST_SERVICE_OUTCOME_LABEL: Record<string, string> = {
   skipped_missing_appointment: 'Omitido (sin cita)',
   skipped_not_eligible: 'Omitido (no elegible)',
   skipped_already_sent: 'Omitido (ya enviado)',
+  skipped_recurring: 'Omitido (recurrente)',
+  skipped_has_future_booking: 'Omitido (tiene cita futura)',
 };
 
 export const POST_SERVICE_OUTCOME_COLOR: Record<
@@ -85,4 +87,6 @@ export const POST_SERVICE_OUTCOME_COLOR: Record<
   skipped_missing_appointment: 'warning',
   skipped_not_eligible: 'default',
   skipped_already_sent: 'default',
+  skipped_recurring: 'default',
+  skipped_has_future_booking: 'default',
 };

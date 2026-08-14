@@ -5,6 +5,7 @@ import {
   POST_SERVICE_TEMPLATE_NAME,
   buildPostServiceMessageBody,
   buildPostServiceTemplateComponents,
+  resolvePostServiceRecurringSkip,
 } from '../../supabase/functions/_shared/postServiceAutomation';
 
 describe('post-service WhatsApp automation', () => {
@@ -32,5 +33,68 @@ describe('post-service WhatsApp automation', () => {
         ],
       },
     ]);
+  });
+
+  it('skips recurring clients tagged in classification or tags', () => {
+    expect(
+      resolvePostServiceRecurringSkip({
+        classification: 'Cliente recurrente',
+        tags: [],
+        isRecurringSeries: false,
+        hasFutureBooking: false,
+      }),
+    ).toBe('skipped_recurring');
+    expect(
+      resolvePostServiceRecurringSkip({
+        classification: null,
+        tags: ['recurrente'],
+        isRecurringSeries: false,
+        hasFutureBooking: false,
+      }),
+    ).toBe('skipped_recurring');
+  });
+
+  it('skips completed appointments that belong to a recurring series', () => {
+    expect(
+      resolvePostServiceRecurringSkip({
+        classification: null,
+        tags: [],
+        isRecurringSeries: true,
+        hasFutureBooking: false,
+      }),
+    ).toBe('skipped_recurring');
+  });
+
+  it('skips one-shot clients that already have a future booking', () => {
+    expect(
+      resolvePostServiceRecurringSkip({
+        classification: null,
+        tags: [],
+        isRecurringSeries: false,
+        hasFutureBooking: true,
+      }),
+    ).toBe('skipped_has_future_booking');
+  });
+
+  it('does not skip a one-shot client without a future booking', () => {
+    expect(
+      resolvePostServiceRecurringSkip({
+        classification: 'one-shot',
+        tags: ['nuevo'],
+        isRecurringSeries: false,
+        hasFutureBooking: false,
+      }),
+    ).toBeNull();
+  });
+
+  it('prefers recurring over future-booking when both apply', () => {
+    expect(
+      resolvePostServiceRecurringSkip({
+        classification: null,
+        tags: ['cliente recurrente'],
+        isRecurringSeries: false,
+        hasFutureBooking: true,
+      }),
+    ).toBe('skipped_recurring');
   });
 });
