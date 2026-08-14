@@ -48,6 +48,7 @@ export interface HeavyChat {
   mediaCount: number;
   totalBytes: number;
   lastMessageAt: string | null;
+  isLegacyPrefix?: boolean;
 }
 
 export type StorageSuggestionSeverity = 'critical' | 'warning' | 'info';
@@ -129,13 +130,30 @@ export type StorageMonitorAction =
   | 'optimize_duplicate_pdfs'
   | 'optimize_stale_catalog_pdfs'
   | 'delete_conversation_media'
+  | 'delete_storage_orphans'
   | 'backfill_metadata'
   | 'reconcile_index';
 
 export const DELETE_CONVERSATION_MEDIA_CONFIRM = 'ELIMINAR_MEDIA_CONVERSACION';
+export const DELETE_STORAGE_ORPHANS_CONFIRM = 'ELIMINAR_HUERFANOS_STORAGE';
 export const OPTIMIZE_DUPLICATE_PDFS_CONFIRM = 'OPTIMIZAR_PDFS_DUPLICADOS';
 export const OPTIMIZE_STALE_CATALOG_CONFIRM = 'OPTIMIZAR_CATALOGOS_ANTIGUOS';
 export const RECONCILE_STORAGE_INDEX_CONFIRM = 'RECONCILIAR_INDICE_STORAGE';
+
+export interface DeleteConversationMediaResult {
+  dryRun: boolean;
+  stableKey: string;
+  bytesFreed: number;
+  objectsAffected: number;
+}
+
+export interface DeleteStorageOrphansResult {
+  dryRun: boolean;
+  bytesFreed: number;
+  objectsAffected: number;
+  skippedReferenced: number;
+  previewPaths: string[];
+}
 
 type RankingSort = 'bytes' | 'messages' | 'date' | 'media';
 
@@ -266,12 +284,23 @@ export async function deleteConversationMedia(params: {
   stableKey: string;
   dryRun?: boolean;
   confirmPhrase?: string;
-}) {
-  return invokeStorageMonitor({
+}): Promise<DeleteConversationMediaResult> {
+  return invokeStorageMonitor<DeleteConversationMediaResult>({
     action: 'delete_conversation_media',
     stableKey: params.stableKey,
     dryRun: params.dryRun ?? true,
     confirmPhrase: params.confirmPhrase,
+  });
+}
+
+export async function deleteStorageOrphans(params?: {
+  dryRun?: boolean;
+  confirmPhrase?: string;
+}): Promise<DeleteStorageOrphansResult> {
+  return invokeStorageMonitor<DeleteStorageOrphansResult>({
+    action: 'delete_storage_orphans',
+    dryRun: params?.dryRun ?? true,
+    confirmPhrase: params?.confirmPhrase,
   });
 }
 

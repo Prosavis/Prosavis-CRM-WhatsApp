@@ -26,8 +26,17 @@ function waMeUrl(phone: string): string {
 }
 
 function displayValue(c: WhatsAppInternalContact): string {
-  if (c.kind === 'email') return c.value;
+  if (c.kind === 'email' || c.kind === 'link') return c.value;
   return c.copyDisplay ?? c.value;
+}
+
+function openUrl(c: WhatsAppInternalContact): string | null {
+  if (c.kind === 'link') return c.value;
+  if (c.kind === 'phone') {
+    const url = waMeUrl(c.value);
+    return url !== '#' ? url : null;
+  }
+  return null;
 }
 
 const WhatsAppInternalContactsButton: React.FC = () => {
@@ -47,7 +56,7 @@ const WhatsAppInternalContactsButton: React.FC = () => {
 
   return (
     <>
-      <Tooltip title="Información de la empresa: línea Meta, correos y teléfonos">
+      <Tooltip title="Información de la empresa: línea Meta, link del bot, correos y teléfonos">
         <IconButton
           size="small"
           onClick={(e) => setAnchorEl(e.currentTarget)}
@@ -72,7 +81,7 @@ const WhatsAppInternalContactsButton: React.FC = () => {
         <List dense disablePadding>
           {WHATSAPP_INTERNAL_CONTACTS.map((c) => {
             const text = displayValue(c);
-            const waUrl = c.kind === 'phone' ? waMeUrl(c.value) : null;
+            const waUrl = openUrl(c);
             return (
               <ListItem
                 key={`${c.kind}-${c.value}`}
@@ -111,7 +120,8 @@ const WhatsAppInternalContactsButton: React.FC = () => {
                       flex: '1 1 140px',
                       minWidth: 0,
                       wordBreak: 'break-word',
-                      fontFamily: c.kind === 'email' ? 'inherit' : 'ui-monospace, monospace',
+                      fontFamily:
+                        c.kind === 'email' ? 'inherit' : 'ui-monospace, monospace',
                     }}
                   >
                     {text}
@@ -124,7 +134,7 @@ const WhatsAppInternalContactsButton: React.FC = () => {
                   >
                     Copiar
                   </Button>
-                  {c.kind === 'phone' && waUrl && waUrl !== '#' && (
+                  {waUrl && (
                     <Button
                       size="small"
                       variant="contained"

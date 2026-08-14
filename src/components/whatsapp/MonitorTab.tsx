@@ -92,7 +92,7 @@ const MonitorTab: React.FC = () => {
             alignItems: 'stretch',
           }}>
             <ConversationLineHealthSection />
-            <OrphansSection suggestions={suggestions} />
+            <OrphansSection suggestions={suggestions} onRefresh={loadData} />
             <ConnectionsSection connections={connections} />
             <StorageLimitsSection />
           </Box>

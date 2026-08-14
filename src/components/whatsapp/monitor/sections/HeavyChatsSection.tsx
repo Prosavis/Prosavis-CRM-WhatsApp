@@ -17,6 +17,7 @@ import {
   DELETE_CONVERSATION_MEDIA_CONFIRM,
   type HeavyChat,
 } from '@/services/monitorService';
+import { isReservedStoragePrefix } from '@/utils/storageMonitorRules';
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';
@@ -57,6 +58,7 @@ const HeavyChatsSection: React.FC<HeavyChatsSectionProps> = ({
   const [confirmed, setConfirmed] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const theme = useTheme();
 
   const loadPage = useCallback(async () => {
@@ -88,6 +90,7 @@ const HeavyChatsSection: React.FC<HeavyChatsSectionProps> = ({
   }, [page, rowsPerPage, sort, loadPage]);
 
   const handleOpenInInbox = useCallback((chat: HeavyChat) => {
+    if (chat.isLegacyPrefix || isReservedStoragePrefix(chat.stableKey)) return;
     const next = new URLSearchParams(searchParams);
     next.delete('tab');
     next.set('conversation', chat.stableKey);
@@ -104,13 +107,19 @@ const HeavyChatsSection: React.FC<HeavyChatsSectionProps> = ({
     if (!deleteDialog.chat) return;
     setDeleting(true);
     setError(null);
+    setSuccess(null);
     try {
       if (deleteDialog.mode === 'media') {
-        await deleteConversationMedia({
+        const result = await deleteConversationMedia({
           stableKey: deleteDialog.chat.stableKey,
           dryRun: false,
           confirmPhrase: DELETE_CONVERSATION_MEDIA_CONFIRM,
         });
+        if (result.objectsAffected === 0) {
+          setError('No se borró ningún archivo. Si ves peso en Storage, usa «Purgar huérfanos seguros» o reconcilia el índice.');
+        } else {
+          setSuccess(`Se eliminaron ${result.objectsAffected} archivos (${formatBytes(result.bytesFreed)}).`);
+        }
       }
       setDeleteDialog({ open: false, chat: null, mode: 'media' });
       onRefresh();
@@ -167,6 +176,7 @@ const HeavyChatsSection: React.FC<HeavyChatsSectionProps> = ({
         </Stack>
 
         {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+        {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
 
         {chats.length === 0 ? (
           <Stack alignItems="center" spacing={1} sx={{ py: 3 }}>
@@ -190,24 +200,33 @@ const HeavyChatsSection: React.FC<HeavyChatsSectionProps> = ({
                 <TableBody>
                   {chats.map((chat, i) => {
                     const pct = (chat.totalBytes / maxBytes) * 100;
+                    const legacy = Boolean(chat.isLegacyPrefix || isReservedStoragePrefix(chat.stableKey));
                     return (
                       <TableRow
                         key={chat.stableKey}
-                        hover
+                        hover={!legacy}
                         onClick={() => handleOpenInInbox(chat)}
-                        sx={{ cursor: 'pointer' }}
-                        aria-label={`Abrir en inbox: ${chat.contactName || chat.contactPhone || 'Sin nombre'}`}
+                        sx={{ cursor: legacy ? 'default' : 'pointer' }}
+                        aria-label={legacy
+                          ? `Prefijo legacy: ${chat.stableKey}`
+                          : `Abrir en inbox: ${chat.contactName || chat.contactPhone || 'Sin nombre'}`}
                       >
                         <TableCell sx={{ pl: 2 }}>{medalIcon(i)}</TableCell>
                         <TableCell>
                           <Typography variant="body2" fontWeight={600} noWrap sx={{ maxWidth: 180 }}>
-                            {chat.contactName || chat.contactPhone || 'Sin nombre'}
+                            {legacy
+                              ? 'Prefijo legacy'
+                              : (chat.contactName || chat.contactPhone || 'Sin nombre')}
                           </Typography>
-                          {chat.contactPhone && chat.contactName && (
+                          {legacy ? (
+                            <Typography variant="caption" fontFamily="monospace" color="warning.main">
+                              {chat.stableKey} — usa purga de huérfanos
+                            </Typography>
+                          ) : chat.contactPhone && chat.contactName ? (
                             <Typography variant="caption" fontFamily="monospace" color="text.secondary">
                               {chat.contactPhone}
                             </Typography>
-                          )}
+                          ) : null}
                         </TableCell>
                         <TableCell align="right">{formatNumber(chat.messageCount)}</TableCell>
                         <TableCell align="right">
@@ -231,14 +250,20 @@ const HeavyChatsSection: React.FC<HeavyChatsSectionProps> = ({
                           />
                         </TableCell>
                         <TableCell align="center" sx={{ pr: 2 }}>
-                          <Tooltip title="Eliminar multimedia (Storage + DB)">
-                            <IconButton
-                              size="small"
-                              color="warning"
-                              onClick={(e) => { e.stopPropagation(); handleDeleteMedia(chat); }}
-                            >
-                              <DeleteSweepIcon fontSize="small" />
-                            </IconButton>
+                          <Tooltip title={legacy
+                            ? 'No es un chat. Purga huérfanos seguros en la tarjeta de objetos huérfanos.'
+                            : 'Eliminar multimedia (Storage + DB)'}
+                          >
+                            <span>
+                              <IconButton
+                                size="small"
+                                color="warning"
+                                disabled={legacy}
+                                onClick={(e) => { e.stopPropagation(); handleDeleteMedia(chat); }}
+                              >
+                                <DeleteSweepIcon fontSize="small" />
+                              </IconButton>
+                            </span>
                           </Tooltip>
                         </TableCell>
                       </TableRow>

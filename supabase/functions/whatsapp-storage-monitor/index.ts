@@ -6,6 +6,13 @@ import { formatError } from '../_shared/errors.ts';
 import { requireCrmAdmin } from '../_shared/supabase.ts';
 import { computeSha256Hex, WHATSAPP_MEDIA_BUCKET } from '../_shared/whatsappMediaStorage.ts';
 import { PLAN_FREE_STORAGE_BYTES } from '../_shared/storageLimits.ts';
+import {
+  DELETE_STORAGE_ORPHANS_CONFIRM,
+  isReservedStoragePrefix,
+  isSafeStorageOrphan,
+  mediaIdFromStoragePath,
+  objectSizeBytes,
+} from '../_shared/storageMonitorRules.ts';
 
 // deno-lint-ignore no-explicit-any
 type SupabaseClient = any;
@@ -16,6 +23,7 @@ export const OPTIMIZE_DUPLICATE_PDFS_CONFIRM = 'OPTIMIZAR_PDFS_DUPLICADOS';
 export const OPTIMIZE_STALE_CATALOG_CONFIRM = 'OPTIMIZAR_CATALOGOS_ANTIGUOS';
 export const DELETE_CONVERSATION_MEDIA_CONFIRM = 'ELIMINAR_MEDIA_CONVERSACION';
 export const RECONCILE_STORAGE_INDEX_CONFIRM = 'RECONCILIAR_INDICE_STORAGE';
+export { DELETE_STORAGE_ORPHANS_CONFIRM };
 
 const SHA_BACKFILL_BATCH = 25;
 const BACKFILL_MAX_ITERATIONS = 20;
@@ -61,14 +69,25 @@ async function logOptimization(
 }
 
 function mapRankingRow(row: Row) {
+  const stableKey = String(row.stable_key ?? '');
   return {
-    stableKey: row.stable_key,
+    stableKey,
     contactName: row.contact_name ?? null,
     contactPhone: row.contact_phone ?? null,
     messageCount: row.message_count ?? 0,
     mediaCount: row.media_count ?? 0,
     totalBytes: row.total_bytes ?? 0,
     lastMessageAt: row.last_message_at ?? null,
+    isLegacyPrefix: isReservedStoragePrefix(stableKey),
+  };
+}
+
+function excludeLegacyRanking(rows: ReturnType<typeof mapRankingRow>[], totalCount: number) {
+  const filtered = rows.filter((row) => !row.isLegacyPrefix);
+  const hidden = rows.length - filtered.length;
+  return {
+    rows: filtered,
+    totalCount: Math.max(0, totalCount - hidden),
   };
 }
 
@@ -106,11 +125,15 @@ async function handleDashboard(supabase: SupabaseClient) {
   if (suggestionsRes.error) throw new Error(`get_storage_suggestions: ${suggestionsRes.error.message ?? JSON.stringify(suggestionsRes.error)}`);
 
   const rankingJson = rankingRes.data as { rows?: Row[]; total_count?: number };
+  const ranking = excludeLegacyRanking(
+    (rankingJson.rows ?? []).map(mapRankingRow),
+    rankingJson.total_count ?? 0,
+  );
   return {
     storage: mapStorageStats(statsRes.data as Row),
     overview: overviewRes.data,
-    heavyChats: (rankingJson.rows ?? []).map(mapRankingRow),
-    rankingTotalCount: rankingJson.total_count ?? 0,
+    heavyChats: ranking.rows,
+    rankingTotalCount: ranking.totalCount,
     suggestions: suggestionsRes.data ?? [],
   };
 }
@@ -131,9 +154,13 @@ async function handleRanking(
   if (error) throw error;
 
   const json = data as { rows?: Row[]; total_count?: number };
+  const ranking = excludeLegacyRanking(
+    (json.rows ?? []).map(mapRankingRow),
+    json.total_count ?? 0,
+  );
   return {
-    rows: (json.rows ?? []).map(mapRankingRow),
-    totalCount: json.total_count ?? 0,
+    rows: ranking.rows,
+    totalCount: ranking.totalCount,
     limit,
     offset,
     sort,
@@ -221,19 +248,88 @@ async function deleteMediaCopies(
   for (const copy of copies) {
     bytesFreed += copy.size_bytes ?? 0;
     paths.push(copy.storage_path);
-    if (!dryRun) {
-      await supabase.storage.from(WHATSAPP_MEDIA_BUCKET).remove([copy.storage_path]);
-      await supabase.from('whatsapp_media_assets').delete().eq('id', copy.asset_id);
-      if (copy.message_log_id) {
-        await supabase.from('whatsapp_message_log').update({
-          storage_path: null,
-          storage_url: null,
-          media_url: null,
-        }).eq('id', copy.message_log_id);
+    if (dryRun) continue;
+
+    const { error: removeError } = await supabase.storage
+      .from(WHATSAPP_MEDIA_BUCKET)
+      .remove([copy.storage_path]);
+    if (removeError) {
+      throw new Error(`No se pudo borrar ${copy.storage_path}: ${removeError.message}`);
+    }
+
+    if (copy.asset_id) {
+      const { error: delError } = await supabase
+        .from('whatsapp_media_assets')
+        .delete()
+        .eq('id', copy.asset_id);
+      if (delError) {
+        throw new Error(`No se pudo borrar el índice de ${copy.storage_path}: ${delError.message}`);
       }
+    } else {
+      const { error: delByPath } = await supabase
+        .from('whatsapp_media_assets')
+        .delete()
+        .eq('storage_path', copy.storage_path)
+        .eq('bucket_id', WHATSAPP_MEDIA_BUCKET);
+      if (delByPath) {
+        throw new Error(`No se pudo borrar el índice de ${copy.storage_path}: ${delByPath.message}`);
+      }
+    }
+
+    const logUpdate = {
+      storage_path: null,
+      storage_url: null,
+      media_url: null,
+    };
+    const logQuery = copy.message_log_id
+      ? supabase.from('whatsapp_message_log').update(logUpdate).eq('id', copy.message_log_id)
+      : supabase.from('whatsapp_message_log').update(logUpdate).eq('storage_path', copy.storage_path);
+    const { error: upError } = await logQuery;
+    if (upError) {
+      throw new Error(`No se pudo actualizar el log de ${copy.storage_path}: ${upError.message}`);
     }
   }
   return { bytesFreed, objectsAffected: copies.length, paths };
+}
+
+async function listStorageObjectsByPrefix(
+  supabase: SupabaseClient,
+  prefix: string,
+): Promise<Array<{ name: string; size_bytes: number }>> {
+  const like = `${prefix}/%`;
+  const { data, error } = await supabase
+    .schema('storage')
+    .from('objects')
+    .select('name, metadata')
+    .eq('bucket_id', WHATSAPP_MEDIA_BUCKET)
+    .like('name', like);
+  if (!error && data) {
+    return data.map((row: Row) => ({
+      name: String(row.name ?? ''),
+      size_bytes: objectSizeBytes(row.metadata),
+    })).filter((row: { name: string }) => row.name);
+  }
+
+  const objects: Array<{ name: string; size_bytes: number }> = [];
+  const pageSize = 1000;
+  let offset = 0;
+  while (true) {
+    const listed = await supabase.storage
+      .from(WHATSAPP_MEDIA_BUCKET)
+      .list(prefix, { limit: pageSize, offset, sortBy: { column: 'name', order: 'asc' } });
+    if (listed.error) throw listed.error;
+    const files = listed.data ?? [];
+    for (const file of files) {
+      if (!file.name || file.id == null) continue;
+      objects.push({
+        name: `${prefix}/${file.name}`,
+        size_bytes: objectSizeBytes(file.metadata),
+      });
+    }
+    if (files.length < pageSize) break;
+    offset += pageSize;
+  }
+  return objects;
 }
 
 async function handleOptimizeDuplicatePdfs(
@@ -321,26 +417,50 @@ async function handleDeleteConversationMedia(
   const stableKey = String(body.stableKey ?? body.conversationId ?? '').trim();
 
   if (!stableKey) return jsonResponse({ error: 'stableKey requerido.' }, 400);
+  if (isReservedStoragePrefix(stableKey)) {
+    return jsonResponse({
+      error: 'Este prefijo no es un chat. Usa «Purgar huérfanos seguros» para archivos legacy sin referencia.',
+    }, 400);
+  }
   if (!dryRun && confirmation !== DELETE_CONVERSATION_MEDIA_CONFIRM) {
     return jsonResponse({ error: 'Confirmación incorrecta.' }, 400);
   }
 
-  const { data: assets, error } = await supabase
-    .from('whatsapp_media_assets')
-    .select('id, storage_path, size_bytes, message_log_id')
-    .eq('conversation_stable_key', stableKey)
-    .eq('bucket_id', WHATSAPP_MEDIA_BUCKET);
+  const [{ data: assets, error }, storageObjects] = await Promise.all([
+    supabase
+      .from('whatsapp_media_assets')
+      .select('id, storage_path, size_bytes, message_log_id')
+      .eq('conversation_stable_key', stableKey)
+      .eq('bucket_id', WHATSAPP_MEDIA_BUCKET),
+    listStorageObjectsByPrefix(supabase, stableKey),
+  ]);
   if (error) throw error;
 
-  const copies = (assets ?? []).map((a: Row) => ({
-    asset_id: a.id,
-    storage_path: a.storage_path,
-    conversation_stable_key: stableKey,
-    size_bytes: a.size_bytes ?? 0,
-    created_at: '',
-    message_log_id: a.message_log_id,
-  }));
+  const byPath = new Map<string, CopyRow>();
+  for (const obj of storageObjects) {
+    byPath.set(obj.name, {
+      asset_id: '',
+      storage_path: obj.name,
+      conversation_stable_key: stableKey,
+      size_bytes: obj.size_bytes,
+      created_at: '',
+    });
+  }
+  for (const asset of assets ?? []) {
+    const path = String(asset.storage_path ?? '');
+    if (!path) continue;
+    const existing = byPath.get(path);
+    byPath.set(path, {
+      asset_id: String(asset.id ?? ''),
+      storage_path: path,
+      conversation_stable_key: stableKey,
+      size_bytes: existing?.size_bytes || Number(asset.size_bytes ?? 0) || 0,
+      created_at: '',
+      message_log_id: asset.message_log_id ? String(asset.message_log_id) : undefined,
+    });
+  }
 
+  const copies = [...byPath.values()];
   const result = await deleteMediaCopies(supabase, copies, dryRun);
 
   await logOptimization(supabase, {
@@ -348,7 +468,7 @@ async function handleDeleteConversationMedia(
     dryRun,
     bytesFreed: result.bytesFreed,
     objectsAffected: result.objectsAffected,
-    details: { stableKey },
+    details: { stableKey, storageObjectCount: storageObjects.length, indexedCount: (assets ?? []).length },
     executedBy: userId,
   });
 
@@ -357,6 +477,115 @@ async function handleDeleteConversationMedia(
     stableKey,
     bytesFreed: result.bytesFreed,
     objectsAffected: result.objectsAffected,
+  };
+}
+
+async function loadMessageLogRefs(
+  supabase: SupabaseClient,
+  paths: string[],
+  mediaIds: string[],
+): Promise<{ messageLogPaths: Set<string>; messageLogMediaIds: Set<string> }> {
+  const messageLogPaths = new Set<string>();
+  const messageLogMediaIds = new Set<string>();
+  const chunkSize = 100;
+
+  for (let i = 0; i < paths.length; i += chunkSize) {
+    const slice = paths.slice(i, i + chunkSize);
+    const { data, error } = await supabase
+      .from('whatsapp_message_log')
+      .select('storage_path')
+      .in('storage_path', slice);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      if (row.storage_path) messageLogPaths.add(String(row.storage_path));
+    }
+  }
+
+  for (let i = 0; i < mediaIds.length; i += chunkSize) {
+    const slice = mediaIds.slice(i, i + chunkSize);
+    const { data, error } = await supabase
+      .from('whatsapp_message_log')
+      .select('media_id')
+      .in('media_id', slice);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      if (row.media_id) messageLogMediaIds.add(String(row.media_id));
+    }
+  }
+
+  return { messageLogPaths, messageLogMediaIds };
+}
+
+async function handleDeleteStorageOrphans(
+  supabase: SupabaseClient,
+  userRpc: SupabaseClient,
+  userId: string,
+  body: Row,
+) {
+  const dryRun = body.dryRun !== false;
+  const confirmation = String(body.confirmPhrase ?? '').trim();
+  if (!dryRun && confirmation !== DELETE_STORAGE_ORPHANS_CONFIRM) {
+    return jsonResponse({ error: 'Confirmación incorrecta.' }, 400);
+  }
+
+  const { data: orphansData, error: orphansError } = await userRpc.rpc('get_storage_orphans');
+  if (orphansError) throw orphansError;
+
+  const orphans = (orphansData ?? {}) as {
+    storage_without_db?: Array<{ storage_path: string; size_bytes: number }>;
+  };
+  const candidates = orphans.storage_without_db ?? [];
+
+  const candidatePaths = candidates.map((item) => String(item.storage_path ?? '')).filter(Boolean);
+  const candidateMediaIds = candidatePaths
+    .map((path) => mediaIdFromStoragePath(path))
+    .filter((id): id is string => Boolean(id));
+  const { messageLogPaths, messageLogMediaIds } = await loadMessageLogRefs(
+    supabase,
+    candidatePaths,
+    candidateMediaIds,
+  );
+
+  const indexedPaths = new Set<string>();
+  const safe: CopyRow[] = [];
+  for (const item of candidates) {
+    const storagePath = String(item.storage_path ?? '');
+    if (!isSafeStorageOrphan({
+      storagePath,
+      indexedPaths,
+      messageLogPaths,
+      messageLogMediaIds,
+    })) continue;
+    safe.push({
+      asset_id: '',
+      storage_path: storagePath,
+      conversation_stable_key: mediaIdFromStoragePath(storagePath) ?? '',
+      size_bytes: Number(item.size_bytes ?? 0) || 0,
+      created_at: '',
+    });
+  }
+
+  const result = await deleteMediaCopies(supabase, safe, dryRun);
+
+  await logOptimization(supabase, {
+    action: 'delete_storage_orphans',
+    dryRun,
+    bytesFreed: result.bytesFreed,
+    objectsAffected: result.objectsAffected,
+    details: {
+      candidateCount: candidates.length,
+      skippedReferenced: candidates.length - safe.length,
+      paths: result.paths.slice(0, 50),
+    },
+    executedBy: userId,
+  });
+
+  return {
+    dryRun,
+    bytesFreed: result.bytesFreed,
+    objectsAffected: result.objectsAffected,
+    skippedReferenced: candidates.length - safe.length,
+    previewPaths: result.paths.slice(0, 20),
   };
 }
 
@@ -531,6 +760,10 @@ Deno.serve(async (req) => {
         break;
       case 'delete_conversation_media':
         result = await handleDeleteConversationMedia(supabase, user.id, body);
+        if (result instanceof Response) return result;
+        break;
+      case 'delete_storage_orphans':
+        result = await handleDeleteStorageOrphans(supabase, userRpc, user.id, body);
         if (result instanceof Response) return result;
         break;
       case 'backfill_metadata':
