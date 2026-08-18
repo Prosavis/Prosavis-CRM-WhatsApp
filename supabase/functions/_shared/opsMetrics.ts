@@ -40,6 +40,7 @@ export interface CleanerDayFactRow {
 export interface OpsTeamMemberRow {
   id: string;
   name: string;
+  is_active?: boolean | null;
 }
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -109,15 +110,37 @@ function comparison(current: number, previous: number) {
   };
 }
 
+export function resolveCleanerDisplayName(
+  name: string | null | undefined,
+): string {
+  const trimmed = name?.trim();
+  return trimmed ? trimmed : "Sin nombre";
+}
+
+export function shouldIncludeCleanerCapacityRow(
+  row: CleanerDayFactRow,
+  member: OpsTeamMemberRow | undefined,
+): boolean {
+  const sold = typeof row.sold_minutes === "number" &&
+      Number.isFinite(row.sold_minutes)
+    ? row.sold_minutes
+    : 0;
+  if (sold > 0) return true;
+  return member?.is_active === true;
+}
+
 export function buildCleanerCapacityPayload(
   rows: readonly CleanerDayFactRow[],
   members: readonly OpsTeamMemberRow[],
 ) {
-  const names = new Map(members.map((member) => [member.id, member.name]));
+  const byId = new Map(members.map((member) => [member.id, member]));
   return rows
+    .filter((row) =>
+      shouldIncludeCleanerCapacityRow(row, byId.get(row.cleaner_id))
+    )
     .map((row) => ({
       ...row,
-      cleaner_name: names.get(row.cleaner_id) ?? "Operaria",
+      cleaner_name: resolveCleanerDisplayName(byId.get(row.cleaner_id)?.name),
     }))
     .sort(
       (left, right) =>

@@ -105,9 +105,8 @@ Deno.serve(async (request) => {
     .lte("operational_date", range.to);
   const membersQuery = context.supabase
     .from("crm_team_members")
-    .select("id,name")
-    .eq("service_id", range.serviceId)
-    .eq("is_active", true);
+    .select("id,name,is_active")
+    .eq("service_id", range.serviceId);
   const payrollQuery = context.supabase
     .from("ops_v5_rating_payroll_config")
     .select("is_active")

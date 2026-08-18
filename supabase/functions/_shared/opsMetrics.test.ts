@@ -3,6 +3,8 @@ import {
   buildCleanerCapacityPayload,
   buildOpsMetricsPayload,
   parseOpsMetricsQuery,
+  resolveCleanerDisplayName,
+  shouldIncludeCleanerCapacityRow,
 } from "./opsMetrics.ts";
 
 Deno.test(
@@ -119,6 +121,54 @@ Deno.test(
   },
 );
 
+Deno.test("resolveCleanerDisplayName never falls back to Operaria", () => {
+  assertEquals(resolveCleanerDisplayName("Doris"), "Doris");
+  assertEquals(resolveCleanerDisplayName("  "), "Sin nombre");
+  assertEquals(resolveCleanerDisplayName(null), "Sin nombre");
+});
+
+Deno.test(
+  "capacity keeps inactive members only when they already sold time",
+  () => {
+    assertEquals(
+      shouldIncludeCleanerCapacityRow(
+        {
+          cleaner_id: "inactive",
+          operational_date: "2026-08-18",
+          accepted_minutes: 660,
+          sold_minutes: 0,
+        },
+        { id: "inactive", name: "Yeimy", is_active: false },
+      ),
+      false,
+    );
+    assertEquals(
+      shouldIncludeCleanerCapacityRow(
+        {
+          cleaner_id: "inactive-sold",
+          operational_date: "2026-08-18",
+          accepted_minutes: 360,
+          sold_minutes: 360,
+        },
+        { id: "inactive-sold", name: "Yeimy", is_active: false },
+      ),
+      true,
+    );
+    assertEquals(
+      shouldIncludeCleanerCapacityRow(
+        {
+          cleaner_id: "residue",
+          operational_date: "2026-08-18",
+          accepted_minutes: 660,
+          sold_minutes: 0,
+        },
+        undefined,
+      ),
+      false,
+    );
+  },
+);
+
 Deno.test("zero accepted minutes stays out of utilization denominator", () => {
   const payload = buildOpsMetricsPayload([
     {
@@ -153,8 +203,8 @@ Deno.test(
         },
       ],
       [
-        { id: "cleaner-1", name: "Ana" },
-        { id: "cleaner-2", name: "Beatriz" },
+        { id: "cleaner-1", name: "Ana", is_active: true },
+        { id: "cleaner-2", name: "Beatriz", is_active: true },
       ],
     );
 

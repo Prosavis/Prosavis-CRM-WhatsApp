@@ -72,6 +72,8 @@ $AllFunctions = @(
   'update-whatsapp-template-preset',
   'visitas-ruta',
   'visitas-registrar',
+  'ops-metrics',
+  'agenda-opciones',
   'whatsapp-storage-monitor'
 )
 

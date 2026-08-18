@@ -455,6 +455,7 @@ interface RecoveryMemberRow {
   id: string;
   name: string;
   accepts_composite: boolean | null;
+  is_active: boolean | null;
 }
 
 const SERVICE_ID_PATTERN = /^[A-Za-z0-9_-]{3,160}$/;
@@ -577,9 +578,8 @@ export async function serveRecoveryAgendaOptions(
       .limit(100),
     context.supabase
       .from("crm_team_members")
-      .select("id,name,accepts_composite")
-      .eq("service_id", query.serviceId)
-      .eq("is_active", true),
+      .select("id,name,accepts_composite,is_active")
+      .eq("service_id", query.serviceId),
   ]);
 
   if (candidateResult.error || memberResult.error) {
@@ -605,22 +605,26 @@ export async function serveRecoveryAgendaOptions(
   );
   const candidates =
     (candidateResult.data ?? []) as unknown as RecoveryCandidateRow[];
-  const windows: AgendaRecoveryWindowInput[] = candidates.map((candidate) => {
-    const member = members.get(candidate.cleaner_id);
-    return {
-      id: candidate.id,
-      cleanerId: candidate.cleaner_id,
-      cleanerName: member?.name?.trim() || "Profesional",
-      windowStart: candidate.window_start,
-      windowEnd: candidate.window_end,
-      availableMinutes: candidate.available_minutes,
-      acceptsComposite: member?.accepts_composite === true,
-      singlePriceCOP: candidate.single_price_cop,
-      pairPriceCOP: candidate.pair_price_cop,
-      estimatedMarginalCostCOP: candidate.estimated_marginal_cost_cop,
-      addons: parseAddons(candidate.addons),
-    };
-  });
+  const windows: AgendaRecoveryWindowInput[] = candidates.flatMap(
+    (candidate) => {
+      const member = members.get(candidate.cleaner_id);
+      if (!member || member.is_active !== true) return [];
+      const cleanerName = member.name?.trim() || "Sin nombre";
+      return [{
+        id: candidate.id,
+        cleanerId: candidate.cleaner_id,
+        cleanerName,
+        windowStart: candidate.window_start,
+        windowEnd: candidate.window_end,
+        availableMinutes: candidate.available_minutes,
+        acceptsComposite: member.accepts_composite === true,
+        singlePriceCOP: candidate.single_price_cop,
+        pairPriceCOP: candidate.pair_price_cop,
+        estimatedMarginalCostCOP: candidate.estimated_marginal_cost_cop,
+        addons: parseAddons(candidate.addons),
+      }];
+    },
+  );
   const alternatives = buildAgendaRecoveryAlternatives(windows);
   const clientName =
     candidates.find((candidate) => candidate.suggested_client_name?.trim())
