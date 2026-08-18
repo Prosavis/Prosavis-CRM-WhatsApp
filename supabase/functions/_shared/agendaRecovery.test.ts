@@ -2,7 +2,9 @@ import { assertEquals, assertStringIncludes } from "jsr:@std/assert";
 import {
   buildAgendaRecoveryAlternatives,
   buildRecoveryJobPlan,
+  filterRescueWindows,
   formatRecoveryWhatsAppScript,
+  rankAgendaRecoveryAlternatives,
 } from "./agendaRecovery.ts";
 
 const baseWindow = {
@@ -128,6 +130,55 @@ Deno.test("overlapping composite cleaners produce a priced pair alternative", ()
     saleAllowed: true,
     addons: [],
   });
+});
+
+Deno.test("rescue drops Francy and ranks Jennifer last", () => {
+  const windows = filterRescueWindows([
+    {
+      ...baseWindow,
+      id: "francy",
+      cleanerId: "vF4kcE8kMFQiFIPLLo9OnYJ5E5l1",
+      cleanerName: "Francy Olivera",
+      singlePriceCOP: null,
+      pairPriceCOP: null,
+      estimatedMarginalCostCOP: null,
+    },
+    {
+      ...baseWindow,
+      id: "jennifer",
+      cleanerId: "LgumzEtuf2aKlmiEofBM3KauMN32",
+      cleanerName: "Jennifer Molina",
+      singlePriceCOP: null,
+      pairPriceCOP: null,
+      estimatedMarginalCostCOP: null,
+    },
+    {
+      ...baseWindow,
+      id: "johanna",
+      cleanerId: "8Z9jgT9wQ0SDmNnv4QkZfaMD5IH3",
+      cleanerName: "Johanna Guerra",
+      singlePriceCOP: null,
+      pairPriceCOP: null,
+      estimatedMarginalCostCOP: null,
+    },
+  ]);
+  assertEquals(
+    windows.map((window) => window.cleanerId),
+    [
+      "LgumzEtuf2aKlmiEofBM3KauMN32",
+      "8Z9jgT9wQ0SDmNnv4QkZfaMD5IH3",
+    ],
+  );
+  const ranked = rankAgendaRecoveryAlternatives(
+    buildAgendaRecoveryAlternatives(windows),
+  );
+  assertEquals(ranked[0].cleanerIds[0], "8Z9jgT9wQ0SDmNnv4QkZfaMD5IH3");
+  assertEquals(
+    ranked[ranked.length - 1].cleanerIds.includes(
+      "LgumzEtuf2aKlmiEofBM3KauMN32",
+    ),
+    true,
+  );
 });
 
 Deno.test("18:00 Bogotá helper targets recoverables for tomorrow", () => {

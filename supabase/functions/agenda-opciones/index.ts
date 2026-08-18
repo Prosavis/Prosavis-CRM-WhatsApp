@@ -3,7 +3,10 @@ import {
   type AgendaRecoveryAddonInput,
   type AgendaRecoveryWindowInput,
   buildAgendaRecoveryAlternatives,
+  filterRescueWindows,
   formatRecoveryWhatsAppScript,
+  rankAgendaRecoveryAlternatives,
+  sumRecoverableMinutes,
 } from "../_shared/agendaRecovery.ts";
 import {
   type AgendaOptionsApiRequest,
@@ -605,7 +608,7 @@ export async function serveRecoveryAgendaOptions(
   );
   const candidates =
     (candidateResult.data ?? []) as unknown as RecoveryCandidateRow[];
-  const windows: AgendaRecoveryWindowInput[] = candidates.flatMap(
+  const rawWindows: AgendaRecoveryWindowInput[] = candidates.flatMap(
     (candidate) => {
       const member = members.get(candidate.cleaner_id);
       if (!member || member.is_active !== true) return [];
@@ -625,7 +628,10 @@ export async function serveRecoveryAgendaOptions(
       }];
     },
   );
-  const alternatives = buildAgendaRecoveryAlternatives(windows);
+  const windows = filterRescueWindows(rawWindows);
+  const alternatives = rankAgendaRecoveryAlternatives(
+    buildAgendaRecoveryAlternatives(windows),
+  );
   const clientName =
     candidates.find((candidate) => candidate.suggested_client_name?.trim())
       ?.suggested_client_name ?? null;
@@ -716,11 +722,8 @@ export async function serveRecoveryAgendaOptions(
       serviceId: query.serviceId,
       operationalDate: query.date,
       generatedAt: new Date().toISOString(),
-      recoverableMinutes: candidates.reduce(
-        (sum, candidate) => sum + candidate.available_minutes,
-        0,
-      ),
-      candidateCount: candidates.length,
+      recoverableMinutes: sumRecoverableMinutes(windows),
+      candidateCount: windows.length,
       ...(decisionId ? { decisionId } : {}),
       ...(query.appointmentId ? { appointmentId: query.appointmentId } : {}),
       ...(suggestedOptionId ? { suggestedOptionId } : {}),

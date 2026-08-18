@@ -1,3 +1,8 @@
+import {
+  isExcludedFromRescue,
+  minAssignPriority,
+} from "./agenda/schedulingPreferences.ts";
+
 export type AgendaRecoveryFlag =
   | "unknown_price"
   | "unknown_cost"
@@ -127,6 +132,35 @@ function buildAlternative(input: {
     saleAllowed: flags.length === 0,
     addons: normalizeAddons(input.addons, flags),
   };
+}
+
+export function filterRescueWindows(
+  windows: AgendaRecoveryWindowInput[],
+): AgendaRecoveryWindowInput[] {
+  return windows.filter((window) => !isExcludedFromRescue(window.cleanerId));
+}
+
+export function sumRecoverableMinutes(
+  windows: AgendaRecoveryWindowInput[],
+): number {
+  return windows.reduce(
+    (sum, window) => sum + Math.max(0, Math.round(window.availableMinutes)),
+    0,
+  );
+}
+
+export function rankAgendaRecoveryAlternatives(
+  alternatives: AgendaRecoveryAlternative[],
+): AgendaRecoveryAlternative[] {
+  return alternatives.slice().sort((left, right) => {
+    const priority =
+      minAssignPriority(right.cleanerIds) - minAssignPriority(left.cleanerIds);
+    if (priority !== 0) return priority;
+    if (left.kind !== right.kind) {
+      return left.kind === "single" ? -1 : 1;
+    }
+    return left.windowStart.localeCompare(right.windowStart);
+  });
 }
 
 export function buildAgendaRecoveryAlternatives(
