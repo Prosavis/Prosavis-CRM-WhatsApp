@@ -1,6 +1,6 @@
 import { supabase } from '@/config/supabase';
 import { getApp } from 'firebase/app';
-import { PLAN_FREE_STORAGE_BYTES } from '@/constants/storageLimits';
+import { PLAN_STORAGE_BYTES } from '@/constants/storageLimits';
 
 // ──────────────────────────────────────────────
 // Tipos
@@ -192,7 +192,7 @@ async function invokeStorageMonitor<T>(body: Record<string, unknown>): Promise<T
 function mapOverview(raw: Record<string, unknown>): StorageOverview {
   const buckets = (raw.buckets as Array<Record<string, unknown>> | undefined) ?? [];
   return {
-    planLimitBytes: Number(raw.plan_limit_bytes ?? PLAN_FREE_STORAGE_BYTES),
+    planLimitBytes: Number(raw.plan_limit_bytes ?? PLAN_STORAGE_BYTES),
     totalBytes: Number(raw.total_bytes ?? 0),
     usedPercent: Number(raw.used_percent ?? 0),
     freeBytes: Number(raw.free_bytes ?? 0),

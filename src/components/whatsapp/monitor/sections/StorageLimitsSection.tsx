@@ -42,7 +42,7 @@ const StorageLimitsSection: React.FC = () => {
       <Collapse in={open}>
         <Box sx={{ mt: 2 }}>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
-            Plan Free Supabase: {STORAGE_LIMITS.bucketObjectMaxLabel} por objeto · 1 GB total · TUS desde {STORAGE_LIMITS.tusThresholdLabel}
+            Plan {STORAGE_LIMITS.planName} Supabase ($25/mes): {STORAGE_LIMITS.bucketObjectMaxLabel} por objeto · {STORAGE_LIMITS.planStorageLabel} total · TUS desde {STORAGE_LIMITS.tusThresholdLabel}
           </Typography>
 
           <Table size="small">
@@ -66,7 +66,7 @@ const StorageLimitsSection: React.FC = () => {
               <TableRow>
                 <TableCell>Plan total</TableCell>
                 <TableCell>—</TableCell>
-                <TableCell>1 GB (Free)</TableCell>
+                <TableCell>{STORAGE_LIMITS.planStorageLabel} ({STORAGE_LIMITS.planName})</TableCell>
               </TableRow>
             </TableBody>
           </Table>

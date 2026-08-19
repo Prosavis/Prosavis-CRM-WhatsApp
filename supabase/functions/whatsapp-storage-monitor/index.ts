@@ -5,7 +5,7 @@ import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { formatError } from '../_shared/errors.ts';
 import { requireCrmAdmin } from '../_shared/supabase.ts';
 import { computeSha256Hex, WHATSAPP_MEDIA_BUCKET } from '../_shared/whatsappMediaStorage.ts';
-import { PLAN_FREE_STORAGE_BYTES } from '../_shared/storageLimits.ts';
+import { PLAN_STORAGE_BYTES } from '../_shared/storageLimits.ts';
 import {
   DELETE_STORAGE_ORPHANS_CONFIRM,
   isReservedStoragePrefix,
@@ -91,15 +91,17 @@ function excludeLegacyRanking(rows: ReturnType<typeof mapRankingRow>[], totalCou
   };
 }
 
-function mapStorageStats(json: Row) {
+function mapStorageStats(json: Row, planLimitBytes = PLAN_STORAGE_BYTES) {
   const breakdown = json.breakdown ?? {};
+  const limit = planLimitBytes > 0 ? planLimitBytes : PLAN_STORAGE_BYTES;
+  const totalBytes = json.total_bytes ?? 0;
   return {
     totalObjects: json.total_objects ?? 0,
-    totalBytes: json.total_bytes ?? 0,
-    bucketLimit: PLAN_FREE_STORAGE_BYTES,
-    usedPercent: Math.min(100, +((json.total_bytes ?? 0) / PLAN_FREE_STORAGE_BYTES * 100).toFixed(1)),
-    freeBytes: PLAN_FREE_STORAGE_BYTES - (json.total_bytes ?? 0),
-    freePercent: Math.min(100, +(((PLAN_FREE_STORAGE_BYTES - (json.total_bytes ?? 0)) / PLAN_FREE_STORAGE_BYTES) * 100).toFixed(1)),
+    totalBytes,
+    bucketLimit: limit,
+    usedPercent: Math.min(100, +((totalBytes / limit) * 100).toFixed(1)),
+    freeBytes: Math.max(0, limit - totalBytes),
+    freePercent: Math.min(100, +(((limit - totalBytes) / limit) * 100).toFixed(1)),
     breakdown: {
       image: breakdown.image ?? { count: 0, bytes: 0 },
       video: breakdown.video ?? { count: 0, bytes: 0 },
@@ -129,9 +131,11 @@ async function handleDashboard(supabase: SupabaseClient) {
     (rankingJson.rows ?? []).map(mapRankingRow),
     rankingJson.total_count ?? 0,
   );
+  const overview = overviewRes.data as Row;
+  const planLimitBytes = Number(overview?.plan_limit_bytes ?? PLAN_STORAGE_BYTES);
   return {
-    storage: mapStorageStats(statsRes.data as Row),
-    overview: overviewRes.data,
+    storage: mapStorageStats(statsRes.data as Row, planLimitBytes),
+    overview,
     heavyChats: ranking.rows,
     rankingTotalCount: ranking.totalCount,
     suggestions: suggestionsRes.data ?? [],

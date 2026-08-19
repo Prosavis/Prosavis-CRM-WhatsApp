@@ -19,6 +19,7 @@ import RadialGauge from '../charts/RadialGauge';
 import {
   STORAGE_ALERT_CRITICAL_PERCENT,
   STORAGE_ALERT_WARNING_PERCENT,
+  STORAGE_LIMITS,
 } from '@/constants/storageLimits';
 import type { MediaBreakdown, StorageOverview, StorageStats } from '@/services/monitorService';
 
@@ -101,7 +102,7 @@ const StorageOverviewSection: React.FC<StorageOverviewSectionProps> = ({ storage
           <AlertTitle>
             {alertSeverity === 'error' ? 'Almacenamiento crítico' : 'Almacenamiento elevado'}
           </AlertTitle>
-          Uso al {usedPercent.toFixed(1)}% del plan Free (1 GB).
+          Uso al {usedPercent.toFixed(1)}% del plan {STORAGE_LIMITS.planName} ({STORAGE_LIMITS.planStorageLabel}).
           {alertSeverity === 'error'
             ? ' Libera espacio urgentemente desde Optimización.'
             : ' Revisa el ranking de chats pesados.'}

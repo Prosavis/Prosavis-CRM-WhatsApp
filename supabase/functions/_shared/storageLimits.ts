@@ -1,6 +1,13 @@
 /** Límites de Storage y media — fuente compartida Edge (espejo de src/constants/storageLimits.ts). */
 
-export const PLAN_FREE_STORAGE_BYTES = 1 * 1024 * 1024 * 1024; // 1 GB Supabase Free
+/** File Storage incluido en Supabase Pro ($25/mes): 100 GB. Free era 1 GB. */
+export const PLAN_STORAGE_BYTES = 100 * 1024 * 1024 * 1024;
+
+/** @deprecated Usar PLAN_STORAGE_BYTES. Alias por compatibilidad. */
+export const PLAN_FREE_STORAGE_BYTES = PLAN_STORAGE_BYTES;
+
+export const PLAN_STORAGE_LABEL = '100 GB';
+export const PLAN_NAME = 'Pro';
 
 export const WHATSAPP_MEDIA_BUCKET_LIMIT_BYTES = 104_857_600; // 100 MB/objeto
 export const STORAGE_RESUMABLE_THRESHOLD_BYTES = 6 * 1024 * 1024;
@@ -18,7 +25,11 @@ export const META_MEDIA_LIMITS = {
 } as const;
 
 export const STORAGE_LIMITS = {
-  planFreeBytes: PLAN_FREE_STORAGE_BYTES,
+  planName: PLAN_NAME,
+  planStorageBytes: PLAN_STORAGE_BYTES,
+  planStorageLabel: PLAN_STORAGE_LABEL,
+  /** @deprecated Usar planStorageBytes */
+  planFreeBytes: PLAN_STORAGE_BYTES,
   bucketObjectMaxBytes: WHATSAPP_MEDIA_BUCKET_LIMIT_BYTES,
   tusThresholdBytes: STORAGE_RESUMABLE_THRESHOLD_BYTES,
   tusChunkBytes: STORAGE_TUS_CHUNK_BYTES,

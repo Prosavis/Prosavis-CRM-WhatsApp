@@ -197,7 +197,9 @@ RPCs Postgres (`SECURITY DEFINER`, admin CRM): `get_storage_stats`, `get_storage
 
 Fuente de verdad de bytes: `storage.objects.metadata->size`. Índice semántico: `whatsapp_media_assets` (`sha256`, `size_bytes`, chat).
 
-Migración: `supabase/migrations/20260702130000_storage_monitor_intelligence.sql`.
+**Plan File Storage:** Supabase **Pro ($25/mes)** → **100 GB** incluidos. Umbral en `platform_settings.storage_monitor_thresholds` (`plan_storage_bytes`). Doc: [CRM_STORAGE_MONITOR.md](../prosavis-firebase/docs/whatsapp/CRM_STORAGE_MONITOR.md).
+
+Migraciones: `supabase/migrations/20260702130000_storage_monitor_intelligence.sql`, `20260819180000_storage_monitor_plan_pro_100gb.sql`.
 
 ## Verificación de código
 
