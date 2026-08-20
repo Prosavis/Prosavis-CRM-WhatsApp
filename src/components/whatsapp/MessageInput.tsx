@@ -840,12 +840,17 @@ const MessageInput: React.FC<MessageInputProps> = ({
                 )}
                 <Chip
                   icon={<PendingIcon />}
-                  label={`${pendingFile.file.name} · ${(pendingFile.file.size / (1024 * 1024)).toFixed(1)} MB${statusText}`}
+                  label={`${pendingFile.file.name} · ${(pendingFile.file.size / (1024 * 1024)).toFixed(1)} MB${statusText}${
+                    pendingFile.status === 'failed' && pendingFile.error
+                      ? ` — ${pendingFile.error}`
+                      : ''
+                  }`}
                   onDelete={sending ? undefined : () => clearPendingFile(pendingFile.id)}
                   deleteIcon={<CloseIcon />}
                   color={pendingFile.status === 'failed' ? 'error' : 'default'}
                   size="small"
-                  sx={{ maxWidth: 420 }}
+                  sx={{ maxWidth: 520 }}
+                  title={pendingFile.error || pendingFile.file.name}
                 />
               </Box>
             );

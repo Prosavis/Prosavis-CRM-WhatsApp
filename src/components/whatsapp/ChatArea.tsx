@@ -607,6 +607,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           : `wa_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
       const uploaded: WhatsAppMediaBatchAttachment[] = [];
+      const uploadErrors: string[] = [];
       for (const [index, attachment] of attachments.entries()) {
         try {
           onStatusChange(attachment.id, 'uploading');
@@ -631,12 +632,17 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           });
         } catch (err) {
           const message = err instanceof Error ? err.message : 'No se pudo subir el archivo';
+          uploadErrors.push(message);
           onStatusChange(attachment.id, 'failed', message);
         }
       }
 
       if (uploaded.length === 0) {
-        throw new Error('No se pudo subir ningún adjunto.');
+        throw new Error(
+          uploadErrors[0]
+            ? `No se pudo subir el adjunto: ${uploadErrors[0]}`
+            : 'No se pudo subir ningún adjunto a Storage.',
+        );
       }
 
       uploaded.forEach((item) => onStatusChange(item.clientAttachmentId, 'sending'));

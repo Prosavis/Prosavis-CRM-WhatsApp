@@ -11,11 +11,19 @@ import {
   createWhatsAppMediaSignedUrl,
   OUTBOUND_META_SIGNED_URL_EXPIRES_SECONDS,
 } from './whatsappMediaStorage.ts';
+import {
+  buildOutboundMediaPayload,
+  defaultMimeForMediaType,
+  type MediaType,
+} from './whatsappOutboundMedia.ts';
 
-export type MediaType = 'image' | 'audio' | 'video' | 'document' | 'sticker';
+export type { MediaType };
+export { buildOutboundMediaPayload, defaultMimeForMediaType };
 
 export const WHATSAPP_API_VERSION = 'v21.0';
 export const WHATSAPP_API_TIMEOUT_MS = 20000;
+/** Upload a Graph puede superar 20s con PDFs/videos medianos. */
+export const WHATSAPP_MEDIA_UPLOAD_TIMEOUT_MS = 60000;
 export const STATIC_STICKER_MAX_BYTES = 100 * 1024;
 export const ANIMATED_STICKER_MAX_BYTES = 500 * 1024;
 export const MAX_BATCH_ATTACHMENTS = 10;
@@ -171,12 +179,132 @@ function validateSticker(params: {
   return null;
 }
 
+export async function uploadMediaBinaryToMeta(params: {
+  phoneNumberId: string;
+  accessToken: string;
+  file: Blob;
+  mimeType: string;
+  filename: string;
+}): Promise<string> {
+  const form = new FormData();
+  form.append('messaging_product', 'whatsapp');
+  form.append('type', params.mimeType);
+  form.append('file', params.file, params.filename);
+
+  const response = await fetch(
+    `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${params.phoneNumberId}/media`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${params.accessToken}` },
+      body: form,
+      signal: AbortSignal.timeout(WHATSAPP_MEDIA_UPLOAD_TIMEOUT_MS),
+    },
+  );
+
+  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  const id = String(payload.id ?? '').trim();
+  if (!response.ok || !id) {
+    const message =
+      metaErrorMessage({ metaResponse: payload }) ??
+      `Meta media upload failed (${response.status})`;
+    throw new Error(message);
+  }
+  return id;
+}
+
+async function resolveOutboundMediaForMeta(
+  supabase: SupabaseClient,
+  params: {
+    mediaType: MediaType;
+    mediaUrl: string;
+    storagePath?: string;
+    mimeType?: string;
+    filename?: string;
+    phoneNumberId: string;
+    accessToken: string;
+  },
+): Promise<{ mediaId?: string; mediaUrlForLog: string }> {
+  let mediaUrlForLog = params.mediaUrl;
+  const storagePath = params.storagePath?.trim();
+
+  if (storagePath) {
+    mediaUrlForLog =
+      params.mediaType === 'sticker'
+        ? await createStickerSignedUrl(
+            supabase,
+            storagePath,
+            OUTBOUND_META_SIGNED_URL_EXPIRES_SECONDS,
+          )
+        : await createWhatsAppMediaSignedUrl(
+            supabase,
+            storagePath,
+            OUTBOUND_META_SIGNED_URL_EXPIRES_SECONDS,
+          );
+
+    const bucket = params.mediaType === 'sticker' ? 'whatsapp-stickers' : 'whatsapp-media';
+    const objectPath =
+      params.mediaType === 'sticker' ? stickerStorageObjectPath(storagePath) : storagePath;
+    const { data: blob, error } = await supabase.storage.from(bucket).download(objectPath);
+    if (error || !blob) {
+      throw error ?? new Error('No se pudo leer el archivo desde Storage.');
+    }
+
+    const mimeType =
+      params.mimeType?.trim() ||
+      blob.type?.trim() ||
+      defaultMimeForMediaType(params.mediaType);
+    const filename =
+      params.filename?.trim() ||
+      objectPath.split('/').pop() ||
+      `file.${mimeType.split('/')[1] || 'bin'}`;
+
+    const mediaId = await uploadMediaBinaryToMeta({
+      phoneNumberId: params.phoneNumberId,
+      accessToken: params.accessToken,
+      file: blob,
+      mimeType,
+      filename,
+    });
+    return { mediaId, mediaUrlForLog };
+  }
+
+  // Sin storagePath: si hay HTTPS, subimos el binario a Meta (evita weblink).
+  if (params.mediaUrl.startsWith('https://')) {
+    const fileRes = await fetch(params.mediaUrl, {
+      signal: AbortSignal.timeout(WHATSAPP_MEDIA_UPLOAD_TIMEOUT_MS),
+    });
+    if (!fileRes.ok) {
+      throw new Error(`No se pudo descargar media para subir a Meta (${fileRes.status}).`);
+    }
+    const bytes = await fileRes.arrayBuffer();
+    const mimeType =
+      params.mimeType?.trim() ||
+      fileRes.headers.get('content-type')?.split(';')[0]?.trim() ||
+      defaultMimeForMediaType(params.mediaType);
+    const filename =
+      params.filename?.trim() ||
+      `file.${mimeType.split('/')[1] || 'bin'}`;
+    const mediaId = await uploadMediaBinaryToMeta({
+      phoneNumberId: params.phoneNumberId,
+      accessToken: params.accessToken,
+      file: new Blob([bytes], { type: mimeType }),
+      mimeType,
+      filename,
+    });
+    return { mediaId, mediaUrlForLog };
+  }
+
+  // Último recurso (p.ej. URL no https): link — Meta suele fallar con Storage signed URLs.
+  return { mediaUrlForLog };
+}
+
 export async function sendToMeta(params: {
   to: string;
   phoneNumberId: string;
   accessToken: string;
   messageBody?: string;
   mediaUrl?: string;
+  mediaId?: string;
   mediaType?: MediaType;
   caption?: string;
   filename?: string;
@@ -218,19 +346,14 @@ export async function sendToMeta(params: {
           : {}),
       },
     };
-  } else if (params.mediaUrl && params.mediaType) {
-    const mediaPayload: Record<string, unknown> = { link: params.mediaUrl };
-    if (
-      params.caption &&
-      (params.mediaType === 'image' ||
-        params.mediaType === 'video' ||
-        params.mediaType === 'document')
-    ) {
-      mediaPayload.caption = params.caption;
-    }
-    if (params.mediaType === 'document' && params.filename) {
-      mediaPayload.filename = params.filename;
-    }
+  } else if (params.mediaType && (params.mediaId || params.mediaUrl)) {
+    const mediaPayload = buildOutboundMediaPayload({
+      mediaType: params.mediaType,
+      mediaId: params.mediaId,
+      mediaUrl: params.mediaUrl,
+      caption: params.caption,
+      filename: params.filename,
+    });
     requestBody = {
       messaging_product: 'whatsapp',
       ...recipientPayload,
@@ -275,7 +398,7 @@ export async function sendToMeta(params: {
 
   const logMessageBody = params.templateName
     ? (params.messageBody ?? `[Plantilla] ${params.templateName}`)
-    : params.mediaUrl && params.mediaType
+    : params.mediaType && (params.mediaId || params.mediaUrl)
       ? params.caption || `[${params.mediaType}]`
       : params.reactionEmoji !== undefined
         ? params.reactionEmoji
@@ -441,29 +564,31 @@ export async function sendWhatsAppMediaOutbound(
 
   await ensureConversation(supabase, stableKey, recipientPhone, graph.phoneNumberId);
 
-  let mediaUrlForMeta = params.mediaUrl;
-  if (params.storagePath?.trim()) {
-    // Stickers viven en bucket whatsapp-stickers (path con o sin prefijo);
-    // el resto de media sale de whatsapp-media.
-    mediaUrlForMeta =
-      params.mediaType === 'sticker'
-        ? await createStickerSignedUrl(
-            supabase,
-            params.storagePath.trim(),
-            OUTBOUND_META_SIGNED_URL_EXPIRES_SECONDS,
-          )
-        : await createWhatsAppMediaSignedUrl(
-            supabase,
-            params.storagePath.trim(),
-            OUTBOUND_META_SIGNED_URL_EXPIRES_SECONDS,
-          );
+  // Meta no puede descargar signed URLs de Supabase de forma fiable (131053 / HTTP 500).
+  // Subimos el binario a Graph `/media` y enviamos por `id`.
+  let mediaUrlForLog = params.mediaUrl;
+  let mediaId: string | undefined;
+  try {
+    const resolved = await resolveOutboundMediaForMeta(supabase, {
+      mediaType: params.mediaType,
+      mediaUrl: params.mediaUrl,
+      storagePath: params.storagePath,
+      mimeType: params.mimeType,
+      filename: params.filename,
+      phoneNumberId: graph.phoneNumberId,
+      accessToken: graph.accessToken,
+    });
+    mediaUrlForLog = resolved.mediaUrlForLog;
+    mediaId = resolved.mediaId;
+  } catch (error) {
+    return { success: false, error: formatError(error) };
   }
 
   const metaResult = await sendToMeta({
     to: params.to,
     phoneNumberId: graph.phoneNumberId,
     accessToken: graph.accessToken,
-    mediaUrl: mediaUrlForMeta,
+    ...(mediaId ? { mediaId } : { mediaUrl: mediaUrlForLog }),
     mediaType: params.mediaType,
     caption: params.caption,
     filename: params.filename,
@@ -478,7 +603,7 @@ export async function sendWhatsAppMediaOutbound(
     sender_type: 'agent',
     message_body: metaResult.logMessageBody,
     media_type: params.mediaType,
-    media_url: mediaUrlForMeta,
+    media_url: mediaUrlForLog,
     caption: params.caption ?? null,
     filename: params.filename ?? null,
     status: metaResult.status,
