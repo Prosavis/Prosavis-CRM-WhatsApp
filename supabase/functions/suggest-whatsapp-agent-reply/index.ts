@@ -139,6 +139,7 @@ Deno.serve(async (req) => {
         sessionWindow: ctx.sessionWindow,
         propertySummary: ctx.propertySummary,
       },
+      greetingFirstName: ctx.greetingFirstName,
       suggestionLog: {
         supabase,
         stableKey,

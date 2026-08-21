@@ -14,6 +14,7 @@ import {
   buildSuggestionLogContextMeta,
   insertWhatsAppAiSuggestionLog,
 } from './inboxAiSuggestionLog.ts';
+import { rewriteSuggestionGreetingName } from './inboxAiNameGrounding.ts';
 
 /** Cliente Supabase tipado de forma laxa. */
 // deno-lint-ignore no-explicit-any
@@ -60,6 +61,7 @@ export async function createGeneratedInboxAiSuggestionResponse(params: {
   contextPrompt: string;
   grounding: InboxAiActionGrounding;
   responseContext: InboxAiResponseContext;
+  greetingFirstName?: string | null;
   suggestionLog?: SuggestionLogWriteParams | null;
 }): Promise<Response> {
   const suggestionOutput = await generateInboxAiSuggestion({
@@ -68,6 +70,10 @@ export async function createGeneratedInboxAiSuggestionResponse(params: {
     contextPrompt: params.contextPrompt,
     grounding: params.grounding,
   });
+  suggestionOutput.suggestion = rewriteSuggestionGreetingName(
+    suggestionOutput.suggestion,
+    params.greetingFirstName,
+  );
   const {
     wompiCheckoutUrl,
     wompiPaymentReference,

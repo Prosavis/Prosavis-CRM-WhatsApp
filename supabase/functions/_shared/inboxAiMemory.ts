@@ -6,6 +6,10 @@ import {
   resolveGeminiModel,
 } from './geminiClient.ts';
 import type { ConversationHistoryMeta } from './conversationHistory.ts';
+import {
+  memoryUsesForeignClientName,
+  rewriteMemoryClientName,
+} from './inboxAiNameGrounding.ts';
 
 type SupabaseClient = any;
 
@@ -174,9 +178,10 @@ async function countVisibleMessages(
   return count;
 }
 
-function buildMemoryPrompt(
+export function buildInboxAiMemoryPrompt(
   previous: InboxAiMemory | null,
   transcript: string,
+  canonicalName?: string | null,
 ): string {
   const previousJson = previous
     ? JSON.stringify({
@@ -186,10 +191,18 @@ function buildMemoryPrompt(
       agreements: previous.agreements,
     })
     : 'Sin memoria anterior.';
+  const identityLines = canonicalName?.trim()
+    ? [
+      `El nombre canónico del contacto es ${canonicalName.trim()}.`,
+      'No sustituyas ese nombre por otros nombres que solo aparecen en el transcript; pueden ser terceros o datos de reserva.',
+      '',
+    ]
+    : [];
   return [
     'Actualiza una memoria compacta de esta conversación de WhatsApp.',
     'Conserva únicamente hechos observables en el texto, acuerdos, preferencias y objeciones vigentes.',
     'No inventes, no completes datos ausentes y elimina información obsoleta o contradicha.',
+    ...identityLines,
     'Devuelve solo el JSON solicitado por el esquema.',
     '',
     'Memoria anterior:',
@@ -210,11 +223,36 @@ function defaultDependencies(): InboxAiMemoryDependencies {
   };
 }
 
+async function persistInboxAiMemory(
+  supabase: SupabaseClient,
+  memory: InboxAiMemory,
+): Promise<boolean> {
+  const { error } = await supabase
+    .from(MEMORY_TABLE)
+    .upsert({
+      stable_key: memory.stableKey,
+      summary: memory.summary,
+      preferences: memory.preferences,
+      objections: memory.objections,
+      agreements: memory.agreements,
+      last_summarized_message_at: memory.lastSummarizedMessageAt,
+      message_count: memory.messageCount,
+      model: memory.model,
+      updated_at: memory.updatedAt,
+    }, { onConflict: 'stable_key' });
+  if (error) {
+    warnMemory('memory-upsert-failed', error);
+    return false;
+  }
+  return true;
+}
+
 export async function loadOrRefreshInboxAiMemory(params: {
   supabase: SupabaseClient;
   stableKey: string;
   transcript: string;
   historyMeta: ConversationHistoryMeta;
+  canonicalName?: string | null;
   dependencies?: Partial<InboxAiMemoryDependencies>;
 }): Promise<InboxAiMemory | null> {
   const dependencies = {
@@ -262,6 +300,18 @@ export async function loadOrRefreshInboxAiMemory(params: {
     newVisibleMessageCount,
     historyTruncated: params.historyMeta.truncated,
   })) {
+    if (
+      previous
+      && params.canonicalName
+      && memoryUsesForeignClientName(previous, params.canonicalName)
+    ) {
+      const sanitized = {
+        ...rewriteMemoryClientName(previous, params.canonicalName),
+        updatedAt: dependencies.now(),
+      };
+      await persistInboxAiMemory(params.supabase, sanitized);
+      return sanitized;
+    }
     return previous;
   }
 
@@ -289,7 +339,7 @@ export async function loadOrRefreshInboxAiMemory(params: {
     const generated = await dependencies.generateJson({
       apiKey,
       model,
-      prompt: buildMemoryPrompt(previous, params.transcript),
+      prompt: buildInboxAiMemoryPrompt(previous, params.transcript, params.canonicalName),
       temperature: 0,
       maxOutputTokens: 2_048,
       responseJsonSchema: INBOX_AI_MEMORY_RESPONSE_SCHEMA,
@@ -303,7 +353,7 @@ export async function loadOrRefreshInboxAiMemory(params: {
   }
 
   const updatedAt = dependencies.now();
-  const refreshed: InboxAiMemory = {
+  let refreshed: InboxAiMemory = {
     stableKey: params.stableKey,
     ...normalized,
     lastSummarizedMessageAt: params.historyMeta.newestAt ?? null,
@@ -311,26 +361,10 @@ export async function loadOrRefreshInboxAiMemory(params: {
     model,
     updatedAt,
   };
-  const row = {
-    stable_key: refreshed.stableKey,
-    summary: refreshed.summary,
-    preferences: refreshed.preferences,
-    objections: refreshed.objections,
-    agreements: refreshed.agreements,
-    last_summarized_message_at: refreshed.lastSummarizedMessageAt,
-    message_count: refreshed.messageCount,
-    model: refreshed.model,
-    updated_at: refreshed.updatedAt,
-  };
-
-  try {
-    const { error } = await params.supabase
-      .from(MEMORY_TABLE)
-      .upsert(row, { onConflict: 'stable_key' });
-    if (error) throw error;
-    return refreshed;
-  } catch (error) {
-    warnMemory('memory-upsert-failed', error);
-    return previous;
+  if (params.canonicalName) {
+    refreshed = rewriteMemoryClientName(refreshed, params.canonicalName);
   }
+
+  const persisted = await persistInboxAiMemory(params.supabase, refreshed);
+  return persisted ? refreshed : previous;
 }

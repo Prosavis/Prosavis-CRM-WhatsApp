@@ -33,6 +33,8 @@ export interface InboxAiConversationContext {
   assignedTo: string | null;
   lastIntent: string | null;
   automatedInboundDisabled: boolean;
+  contactName?: string | null;
+  whatsappProfileName?: string | null;
 }
 
 export interface InboxAiOfficialSnippet {
@@ -96,7 +98,9 @@ export async function loadConversationContext(
 ): Promise<InboxAiConversationContext> {
   const { data: conversation, error: conversationError } = await supabase
     .from('whatsapp_conversations')
-    .select('tag_ids, admin_notes, assigned_to, last_intent, automated_inbound_disabled')
+    .select(
+      'tag_ids, admin_notes, assigned_to, last_intent, automated_inbound_disabled, contact_name, whatsapp_profile_name',
+    )
     .eq('stable_key', stableKey)
     .limit(1)
     .maybeSingle();
@@ -141,6 +145,8 @@ export async function loadConversationContext(
     assignedTo: asTrimmedString(conversation?.assigned_to),
     lastIntent: asTrimmedString(conversation?.last_intent),
     automatedInboundDisabled: conversation?.automated_inbound_disabled === true,
+    contactName: asTrimmedString(conversation?.contact_name),
+    whatsappProfileName: asTrimmedString(conversation?.whatsapp_profile_name),
   };
 }
 

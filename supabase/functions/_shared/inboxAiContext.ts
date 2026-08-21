@@ -16,6 +16,12 @@ import {
   normalizeDirectoryPhoneE164,
 } from './directoryPhone.ts';
 import { runFirestoreQuery } from './firebaseAdminRest.ts';
+import {
+  appointmentLookbackIso,
+  buildInboxAiClientIdAppointmentQuery,
+  buildInboxAiClientPhoneAppointmentQuery,
+  filterAppointmentsByLookback,
+} from './inboxAiAppointmentQuery.ts';
 import { scheduledDateToIso } from './clientSegments.ts';
 import { normalizePhone } from './whatsappIdentity.ts';
 import {
@@ -43,6 +49,10 @@ import {
   type InboxAiMemory,
 } from './inboxAiMemory.ts';
 import {
+  resolveInboxAiCanonicalName,
+  resolveInboxAiGreetingFirstName,
+} from './inboxAiNameGrounding.ts';
+import {
   buildMetaSessionWindow,
   type MetaSessionWindow,
 } from './metaSessionWindow.ts';
@@ -65,8 +75,6 @@ type SupabaseClient = any;
 
 const UPCOMING_APPTS = 5;
 const PAST_APPTS = 5;
-const APPT_QUERY_LIMIT = 40;
-const APPT_LOOKBACK_MONTHS = 18;
 
 export interface InboxAiContext {
   phone: string;
@@ -85,6 +93,9 @@ export interface InboxAiContext {
   formattedBlock: string;
   /** Rol del último turn tras merge (el presupuesto recorta desde lo antiguo). */
   lastTurnRole: 'user' | 'bot' | null;
+  canonicalName: string | null;
+  greetingFirstName: string | null;
+  appointmentsLoadFailed: boolean;
 }
 
 function asTrimmedString(value: unknown): string | null {
@@ -162,37 +173,18 @@ async function queryAppointmentsByField(
   fieldPath: string,
   stringValue: string,
 ): Promise<InboxAiAppointment[]> {
-  const lookback = new Date();
-  lookback.setMonth(lookback.getMonth() - APPT_LOOKBACK_MONTHS);
-  const lookbackIso = lookback.toISOString();
+  const lookbackIso = appointmentLookbackIso();
+  const structuredQuery = fieldPath === 'clientPhone'
+    ? buildInboxAiClientPhoneAppointmentQuery(fieldPath, stringValue)
+    : buildInboxAiClientIdAppointmentQuery(fieldPath, stringValue, lookbackIso);
 
-  const docs = await runFirestoreQuery('appointments', {
-    where: {
-      compositeFilter: {
-        op: 'AND',
-        filters: [
-          {
-            fieldFilter: {
-              field: { fieldPath },
-              op: 'EQUAL',
-              value: { stringValue },
-            },
-          },
-          {
-            fieldFilter: {
-              field: { fieldPath: 'scheduledDate' },
-              op: 'GREATER_THAN_OR_EQUAL',
-              value: { timestampValue: lookbackIso },
-            },
-          },
-        ],
-      },
-    },
-    orderBy: [{ field: { fieldPath: 'scheduledDate' }, direction: 'DESCENDING' }],
-    limit: APPT_QUERY_LIMIT,
-  });
-
-  return docs.map(mapAppointmentDoc).filter((a): a is InboxAiAppointment => a != null);
+  const docs = await runFirestoreQuery('appointments', structuredQuery);
+  const mapped = docs.map(mapAppointmentDoc).filter(
+    (appointment): appointment is InboxAiAppointment => appointment != null,
+  );
+  return fieldPath === 'clientPhone'
+    ? filterAppointmentsByLookback(mapped, lookbackIso)
+    : mapped;
 }
 
 export interface LoadAppointmentsResult {
@@ -202,6 +194,8 @@ export interface LoadAppointmentsResult {
   allAppointments: InboxAiAppointment[];
   /** Todas las citas únicas halladas en lookback (antes del slice de UI/contexto). */
   totalCount: number;
+  /** True si todas las queries Firestore fallaron. */
+  appointmentsLoadFailed: boolean;
 }
 
 /**
@@ -234,11 +228,15 @@ export async function loadAppointmentsForContact(params: {
   if (params.directoryId?.trim()) clientIds.add(params.directoryId.trim());
 
   const byId = new Map<string, InboxAiAppointment>();
+  let attempts = 0;
+  let successes = 0;
 
   const runSafe = async (field: string, value: string) => {
+    attempts += 1;
     try {
       const rows = await queryAppointmentsByField(field, value);
       for (const row of rows) byId.set(row.id, row);
+      successes += 1;
     } catch (err) {
       console.warn(
         JSON.stringify({
@@ -276,6 +274,7 @@ export async function loadAppointmentsForContact(params: {
     appointments: [...upcoming, ...past],
     allAppointments: all,
     totalCount,
+    appointmentsLoadFailed: attempts > 0 && successes === 0,
   };
 }
 
@@ -310,12 +309,6 @@ export async function buildInboxAiContext(
   const lastTurnRole = merged[merged.length - 1]?.role ?? null;
   const nowIso = new Date().toISOString();
   const sessionWindow = buildMetaSessionWindow(completeMerged, nowIso);
-  const memory = await loadOrRefreshInboxAiMemory({
-    supabase,
-    stableKey,
-    transcript,
-    historyMeta,
-  });
 
   let conversationContext: InboxAiConversationContext = {
     tags: [],
@@ -350,11 +343,26 @@ export async function buildInboxAiContext(
     );
   }
 
+  const canonicalName = resolveInboxAiCanonicalName({
+    directoryName: directory?.fullName,
+    contactName: conversationContext.contactName,
+    whatsappProfileName: conversationContext.whatsappProfileName,
+  });
+  const greetingFirstName = resolveInboxAiGreetingFirstName(canonicalName);
+  const memory = await loadOrRefreshInboxAiMemory({
+    supabase,
+    stableKey,
+    transcript,
+    historyMeta,
+    canonicalName,
+  });
+
   const officialAnswers = await loadOfficialAnswers(supabase);
 
   let appointments: InboxAiAppointment[] = [];
   let allAppointments: InboxAiAppointment[] = [];
   let appointmentCount = 0;
+  let appointmentsLoadFailed = false;
   try {
     const loaded = await loadAppointmentsForContact({
       phone,
@@ -364,7 +372,9 @@ export async function buildInboxAiContext(
     appointments = loaded.appointments;
     allAppointments = loaded.allAppointments;
     appointmentCount = loaded.totalCount;
+    appointmentsLoadFailed = loaded.appointmentsLoadFailed === true;
   } catch (err) {
+    appointmentsLoadFailed = true;
     console.warn(
       JSON.stringify({
         scope: 'inbox-ai-context',
@@ -399,6 +409,9 @@ export async function buildInboxAiContext(
     propertySummary,
     sessionWindow,
     nowIso,
+    canonicalName,
+    greetingFirstName,
+    appointmentsLoadFailed,
   });
 
   return {
@@ -416,5 +429,8 @@ export async function buildInboxAiContext(
     sessionWindow,
     formattedBlock,
     lastTurnRole,
+    canonicalName,
+    greetingFirstName,
+    appointmentsLoadFailed,
   };
 }

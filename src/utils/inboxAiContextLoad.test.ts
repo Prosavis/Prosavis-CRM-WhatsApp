@@ -81,6 +81,8 @@ describe('loadConversationContext', () => {
         assigned_to: 'agent-9',
         last_intent: 'booking',
         automated_inbound_disabled: true,
+        contact_name: 'Marii Duque✨',
+        whatsapp_profile_name: 'Marii Duque✨',
       }],
       whatsapp_chat_tags: [
         { id: 'tag-1', name: 'Favorito', archived: false },
@@ -97,11 +99,15 @@ describe('loadConversationContext', () => {
       assignedTo: 'agent-9',
       lastIntent: 'booking',
       automatedInboundDisabled: true,
+      contactName: 'Marii Duque✨',
+      whatsappProfileName: 'Marii Duque✨',
     });
     expect(calls).toContainEqual({
       table: 'whatsapp_conversations',
       method: 'select',
-      args: ['tag_ids, admin_notes, assigned_to, last_intent, automated_inbound_disabled'],
+      args: [
+        'tag_ids, admin_notes, assigned_to, last_intent, automated_inbound_disabled, contact_name, whatsapp_profile_name',
+      ],
     });
     expect(calls).toContainEqual({
       table: 'whatsapp_chat_tags',

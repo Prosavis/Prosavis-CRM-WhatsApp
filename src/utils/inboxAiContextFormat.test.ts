@@ -189,6 +189,84 @@ describe('formatInboxAiContextBlock', () => {
     expect(block).toContain('Dosquebradas — cobertura directa');
     expect(block).toContain('Cerritos — cobertura directa');
     expect(block).toContain('Santa Rosa de Cabal');
+    expect(block).not.toContain('Nombre para saludar:');
+  });
+
+  it('includes the canonical greeting name and forbids using other transcript names', () => {
+    const block = formatInboxAiContextBlock({
+      phone: '573150004639',
+      transcript: 'Cliente: 22 de agosto Julieth Duque',
+      historyMeta: { loaded: 1, truncated: false },
+      memory: null,
+      directory: {
+        fullName: 'Marii Duque✨',
+        isReturningClient: false,
+      },
+      appointments: [],
+      sessionWindow: {
+        status: 'open',
+        lastInboundAt: null,
+        expiresAt: null,
+        requiresTemplate: false,
+      },
+      nowIso: '2026-08-21T19:58:00.000Z',
+      canonicalName: 'Marii Duque✨',
+      greetingFirstName: 'Marii',
+    });
+    expect(block).toContain('Nombre canónico: Marii Duque✨');
+    expect(block).toContain('Nombre para saludar: Marii');
+    expect(block).toMatch(/no lo uses para saludar/i);
+  });
+
+  it('flags a live service and a failed appointment load', () => {
+    const block = formatInboxAiContextBlock({
+      phone: '573150004639',
+      transcript: 'Cliente: hola',
+      historyMeta: { loaded: 1, truncated: false },
+      memory: null,
+      directory: { fullName: 'Marii Duque✨', isReturningClient: true },
+      appointments: [{
+        id: 'a1',
+        scheduledDate: '2026-08-21T19:00:00.000Z',
+        status: 'IN_PROGRESS',
+        serviceName: 'Prosavis Limpieza',
+        address: 'Parque Jardín',
+        clientName: 'Marii Duque✨',
+        providerName: 'Diana Lucía Ramirez Vallejo',
+        paymentStatus: 'PAGO_PENDIENTE',
+      }],
+      appointmentCount: 1,
+      sessionWindow: {
+        status: 'open',
+        lastInboundAt: null,
+        expiresAt: null,
+        requiresTemplate: false,
+      },
+      nowIso: '2026-08-21T19:58:00.000Z',
+    });
+    expect(block).toContain('Apoyo en curso ahora:');
+    expect(block).toContain('IN_PROGRESS');
+    expect(block).toContain('Diana Lucía Ramirez Vallejo');
+
+    const failed = formatInboxAiContextBlock({
+      phone: '573150004639',
+      transcript: 'Cliente: hola',
+      historyMeta: { loaded: 1, truncated: false },
+      memory: null,
+      directory: null,
+      appointments: [],
+      appointmentCount: 0,
+      appointmentsLoadFailed: true,
+      sessionWindow: {
+        status: 'unknown',
+        lastInboundAt: null,
+        expiresAt: null,
+        requiresTemplate: true,
+      },
+      nowIso: '2026-08-21T19:58:00.000Z',
+    });
+    expect(failed).toContain('No se pudieron cargar las citas de Firestore');
+    expect(failed).not.toContain('Sin citas/apoyos encontrados para este contacto.');
   });
 
   it('degrades gracefully without directory or appointments', () => {
@@ -456,6 +534,13 @@ describe('INBOX_AI_SYSTEM_INSTRUCTION', () => {
   it('treats audio transcriptions as the client message and forbids claiming it was inaudible', () => {
     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/\[Audio transcrito\]/);
     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/nunca digas que no pudiste escuchar/i);
+  });
+
+  it('requires greeting with the canonical inbox name only', () => {
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/Nombre para saludar/i);
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(
+      /No uses otros nombres de la memoria ni del historial para saludar/i,
+    );
   });
 });
 

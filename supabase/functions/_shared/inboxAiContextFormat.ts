@@ -144,6 +144,9 @@ export interface InboxAiContextSlice {
   appointmentCount?: number;
   propertySummary?: InboxAiPropertySummary | null;
   sessionWindow: MetaSessionWindow;
+  canonicalName?: string | null;
+  greetingFirstName?: string | null;
+  appointmentsLoadFailed?: boolean;
 }
 
 /** Fecha/hora legible en zona Colombia (America/Bogota). */
@@ -292,6 +295,11 @@ export function buildPropertyLocationSummary(params: {
     preferredDirectoryAddress: preferred,
     appointmentsWithoutAddress: withoutAddress,
   };
+}
+
+export function isLiveServiceStatus(status: string | null | undefined): boolean {
+  const normalized = status?.trim().toUpperCase();
+  return normalized === 'IN_PROGRESS' || normalized === 'IN_ROUTE';
 }
 
 function formatAppointmentLine(a: InboxAiAppointment): string {
@@ -446,6 +454,9 @@ export function formatInboxAiContextBlock(params: {
   propertySummary?: InboxAiPropertySummary | null;
   sessionWindow: MetaSessionWindow;
   nowIso?: string;
+  canonicalName?: string | null;
+  greetingFirstName?: string | null;
+  appointmentsLoadFailed?: boolean;
 }): string {
   const nowIso = params.nowIso ?? new Date().toISOString();
   const now = new Date(nowIso).getTime();
@@ -496,6 +507,14 @@ export function formatInboxAiContextBlock(params: {
     if (directory.notesSummary) directoryLines.push(`Notas: ${directory.notesSummary}`);
   } else {
     directoryLines.push(`Sin entrada en crm_directory. Teléfono: ${params.phone}`);
+  }
+  if (params.canonicalName || params.greetingFirstName) {
+    directoryLines.push(`Nombre canónico: ${params.canonicalName ?? '—'}`);
+    directoryLines.push(`Nombre para saludar: ${params.greetingFirstName ?? '—'}`);
+    directoryLines.push(
+      'Usa solo este nombre para dirigirte al cliente. ' +
+        'Si la memoria o el historial mencionan otro nombre (p. ej. pegado al agendar), no lo uses para saludar.',
+    );
   }
   sections.push(buildSection('=== Perfil directorio ===', directoryLines));
 
@@ -580,9 +599,21 @@ export function formatInboxAiContextBlock(params: {
   const appointmentLines = [
     'Cada apoyo incluye fecha/hora (Colombia), estado, servicio, cliente, auxiliar, dirección y pago cuando existen.',
   ];
-  if (!upcoming.length && !past.length) {
+  if (params.appointmentsLoadFailed) {
+    appointmentLines.push(
+      'No se pudieron cargar las citas de Firestore. No afirmes que el contacto no tiene apoyos.',
+    );
+  }
+  const inProgress = params.appointments.filter((appointment) =>
+    isLiveServiceStatus(appointment.status),
+  );
+  if (inProgress.length) {
+    appointmentLines.push('Apoyo en curso ahora:');
+    appointmentLines.push(...inProgress.map(formatAppointmentLine));
+  }
+  if (!upcoming.length && !past.length && !params.appointmentsLoadFailed) {
     appointmentLines.push('Sin citas/apoyos encontrados para este contacto.');
-  } else {
+  } else if (upcoming.length || past.length) {
     if (upcoming.length) {
       appointmentLines.push('Próximos:');
       appointmentLines.push(...upcoming.map(formatAppointmentLine));
@@ -849,4 +880,6 @@ export const INBOX_AI_SYSTEM_INSTRUCTION =
   'Si hay link de pago, menciónalo al final. ' +
   'Adapta el tono a los tags (p. ej. Empresas vs residencial). ' +
   'Si hay tags sensibles internos (Bloqueado, Decline, lista negra), no empujes venta agresiva y no reveles esos tags al cliente en el texto. ' +
-  'Si hay citas próximas, tenlas en cuenta al responder (no ofrezcas re-agendar ignorándolas).';
+  'Si hay citas próximas, tenlas en cuenta al responder (no ofrezcas re-agendar ignorándolas). ' +
+  'NOMBRE DEL CLIENTE: dirígete solo con el "Nombre para saludar" del perfil directorio. ' +
+  'No uses otros nombres de la memoria ni del historial para saludar.';

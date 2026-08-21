@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   INBOX_AI_MEMORY_REFRESH_MESSAGE_THRESHOLD,
+  buildInboxAiMemoryPrompt,
   loadOrRefreshInboxAiMemory,
   normalizeInboxAiMemoryJson,
   shouldRefreshInboxAiMemory,
@@ -110,6 +111,18 @@ const priorMemoryRow: Row = {
   updated_at: priorMemory.updatedAt,
 };
 
+describe('buildInboxAiMemoryPrompt', () => {
+  it('includes the canonical contact name so Gemini does not replace it', () => {
+    const prompt = buildInboxAiMemoryPrompt(
+      priorMemory,
+      'Cliente: 22 de agosto Julieth Duque',
+      'Marii Duque✨',
+    );
+    expect(prompt).toContain('El nombre canónico del contacto es Marii Duque✨.');
+    expect(prompt).toContain('No sustituyas ese nombre');
+  });
+});
+
 describe('normalizeInboxAiMemoryJson', () => {
   it('keeps only unique, non-empty strings from Gemini JSON', () => {
     expect(normalizeInboxAiMemoryJson({
@@ -203,6 +216,44 @@ describe('loadOrRefreshInboxAiMemory', () => {
     expect(supabase.calls.filter((call) =>
       call.table === 'whatsapp_message_log' && call.method === 'select'
     )).toHaveLength(1);
+  });
+
+  it('upserts a sanitized memory below the threshold when the stored name conflicts', async () => {
+    const conflictingRow: Row = {
+      ...priorMemoryRow,
+      summary: 'Julieth Duque solicita un servicio de aseo.',
+    };
+    const supabase = createMemorySupabaseDouble({
+      memory: conflictingRow,
+      totalVisible: 39,
+      newVisible: 19,
+    });
+    const generateJson = vi.fn();
+
+    await expect(loadOrRefreshInboxAiMemory({
+      supabase: supabase.client,
+      stableKey: priorMemory.stableKey,
+      transcript: 'Cliente: Hola',
+      historyMeta: {
+        loaded: 2,
+        truncated: false,
+        newestAt: '2026-08-05T12:00:00.000Z',
+      },
+      canonicalName: 'Marii Duque✨',
+      dependencies: {
+        getApiKey: () => 'test-key',
+        resolveModel: () => 'memory-model',
+        generateJson,
+        now: () => '2026-08-05T12:01:00.000Z',
+      },
+    })).resolves.toMatchObject({
+      summary: 'Marii Duque solicita un servicio de aseo.',
+      updatedAt: '2026-08-05T12:01:00.000Z',
+    });
+
+    expect(generateJson).not.toHaveBeenCalled();
+    expect(supabase.upserts).toHaveLength(1);
+    expect(supabase.upserts[0]?.summary).toBe('Marii Duque solicita un servicio de aseo.');
   });
 
   it('uses one total count when no prior memory exists', async () => {
