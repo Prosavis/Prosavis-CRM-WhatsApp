@@ -1,0 +1,39 @@
+name: Deploy Vercel
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'production o preview'
+        required: true
+        default: production
+        type: choice
+        options:
+          - production
+          - preview
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          if [ -z "$VERCEL_TOKEN" ] || [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ]; then
+            echo "Faltan secrets VERCEL_TOKEN, VERCEL_ORG_ID o VERCEL_PROJECT_ID."
+            exit 1
+          fi
+          if [ "${{ inputs.environment }}" = "production" ]; then
+            npx --yes vercel deploy --prod --yes --token="$VERCEL_TOKEN"
+          else
+            npx --yes vercel deploy --yes --token="$VERCEL_TOKEN"
+          fi
