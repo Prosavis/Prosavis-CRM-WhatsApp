@@ -32,6 +32,7 @@ $AllFunctions = @(
   'discount-codes-admin',
   'ensure-whatsapp-conversation-from-lead',
   'get-prosavis-cleaning-wompi-checkout-url',
+  'get-inbox-ai-context',
   'get-whatsapp-booking-context',
   'get-whatsapp-business-profile',
   'get-whatsapp-media-signed-url',
