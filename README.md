@@ -40,6 +40,7 @@ La app corre en `http://localhost:3001`.
 - `admin@prosavis.com` (`super_admin`)
 - `support@prosavis.com` (`super_admin`)
 - `oliverafrancy@gmail.com` (`admin`)
+- `johislaflaca07@gmail.com` (`admin`)
 
 Habilitar el proveedor **Google** en Supabase Auth (Dashboard → Authentication → Providers) y agregar la URL de callback de la app (`https://prosavis-crm-whatsapp.vercel.app/login` y `http://localhost:3001/login`).
 

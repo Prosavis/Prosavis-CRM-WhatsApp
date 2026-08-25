@@ -9,6 +9,7 @@ const FALLBACK_ADMIN_EMAILS = [
   "admin@prosavis.com",
   "support@prosavis.com",
   "oliverafrancy@gmail.com",
+  "johislaflaca07@gmail.com",
 ];
 
 export interface AdminActor {
