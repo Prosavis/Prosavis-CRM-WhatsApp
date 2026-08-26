@@ -51,6 +51,7 @@ const WARM_LEAD_PRIORITY = [
 ];
 
 const COLD_OUTREACH_PRIORITY = [
+  'outreach_empresas_limpieza',
   'outreach_intro_prosavis',
   'outreach_invitacion_agendar',
   'outreach_respuesta_si_quiere_precios',

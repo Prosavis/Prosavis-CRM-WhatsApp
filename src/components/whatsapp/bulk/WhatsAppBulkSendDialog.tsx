@@ -146,6 +146,7 @@ const WhatsAppBulkSendDialog: React.FC<WhatsAppBulkSendDialogProps> = ({
           ...(message.mode === 'text' ? { richBody: message.text.trim() } : {}),
           phoneNumberId,
           confirmation: BULK_CONFIRM_PHRASE,
+          chunkSize: 10,
         },
         (chunk) => {
           setJobId(chunk.jobId);

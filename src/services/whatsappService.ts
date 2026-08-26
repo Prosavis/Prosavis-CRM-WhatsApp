@@ -947,6 +947,8 @@ export interface BulkWhatsAppSendStartParams {
   richBody?: string;
   phoneNumberId?: string;
   confirmation: string;
+  /** Destinatarios por invocación. El worker acepta 1–50 (default 25). */
+  chunkSize?: number;
 }
 
 /** Crea el job, registra destinatarios y procesa el primer lote. */

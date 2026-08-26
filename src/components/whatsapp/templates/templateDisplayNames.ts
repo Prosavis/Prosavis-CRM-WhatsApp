@@ -13,6 +13,7 @@ const TEMPLATE_DISPLAY_NAMES: Record<string, string> = {
   outreach_intro_prosavis: 'Intro Prosavis',
   outreach_invitacion_agendar: 'Invitación a agendar',
   outreach_respuesta_si_quiere_precios: 'Respuesta precios',
+  outreach_empresas_limpieza: 'Outreach empresas limpieza',
   welcome_greeting: 'Bienvenida',
 };
 
