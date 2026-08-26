@@ -25,6 +25,7 @@ Complementa `agent-vercel-supabase-waba.mdc`.
 | **Elegir modelo / React difícil** | `reactbench` + `prosavis-firebase/docs/context/reactbench.md` |
 | **Tests** | `react-testing-library`, `javascript-typescript-jest` |
 | **WhatsApp** | MCP `prosavis-waba` (no duplicar en skill) |
+| **Operar inbox / WhatsApp** | `crm-inbox-operator` + `publicidad/docs/messaging/` + playbooks |
 | **Directorio unificado** | `crm_directory` en Supabase — SSOT de contactos |
 
 ## MCPs
