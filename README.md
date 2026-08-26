@@ -4,9 +4,15 @@ Aplicativo independiente para operar Inbox, Métricas, Leads y Descuentos de Wha
 
 **Migración:** datos históricos importados desde Firestore (mayo 2026).
 
-**Documentación centralizada** (prosavis-firebase):
+**Operar envíos (canónico en publicidad):**
 
-- [CRM_INBOX_AI_CONTEXTO.md](../prosavis-firebase/docs/whatsapp/CRM_INBOX_AI_CONTEXTO.md) — **sugerencias IA ✨** (Gemini 3.6 Flash + contexto CRM: tags, citas, propiedades)
+- [Hub mensajería](../publicidad/docs/messaging/README.md) — correo + WhatsApp
+- [UI del CRM vs comando/MCP](../publicidad/docs/messaging/crm-envio-ui-vs-comando.md)
+- [Operar inbox ✨ / Grok](../publicidad/docs/messaging/inbox-operar.md)
+
+**Documentación de implementación** (prosavis-firebase):
+
+- [CRM_INBOX_AI_CONTEXTO.md](../prosavis-firebase/docs/whatsapp/CRM_INBOX_AI_CONTEXTO.md) — **sugerencias IA ✨** (Gemini + chips; arquitectura)
 - [CRM_INBOX_BULK_TAGS.md](../prosavis-firebase/docs/whatsapp/CRM_INBOX_BULK_TAGS.md) — **tags masivos** (checklist por intersección; quitar/agregar en lote)
 - [MIGRACION_SUPABASE_CRM.md](../prosavis-firebase/docs/whatsapp/MIGRACION_SUPABASE_CRM.md) — cutover, runbook, rollback
 - [WHATSAPP_CRM_SUPABASE_ARQUITECTURA.md](../prosavis-firebase/docs/whatsapp/WHATSAPP_CRM_SUPABASE_ARQUITECTURA.md) — schema, Edge Functions, Storage
