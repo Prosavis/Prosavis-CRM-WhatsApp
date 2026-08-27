@@ -125,6 +125,7 @@ import {
   directoryDisplayTags,
   directoryTagColor,
 } from '@/utils/directoryDisplayTags';
+import { quotedMessagePreview } from '@/utils/whatsappCoexStub';
 import type { WhatsAppTagFolder } from '@/types/whatsapp';
 import TagListGrouped from './TagListGrouped';
 import type { MetaSessionWindow } from '../../../supabase/functions/_shared/metaSessionWindow';
@@ -1607,7 +1608,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                   {replyToMessage.direction === 'inbound' ? 'Cliente' : 'Tú'}
                 </Typography>
                 <Typography variant="body2" noWrap color="text.secondary" sx={{ fontSize: '0.8rem' }}>
-                  {replyToMessage.messageBody || replyToMessage.caption || `[${replyToMessage.mediaType || 'media'}]`}
+                  {quotedMessagePreview(
+                    replyToMessage.messageBody || replyToMessage.caption || `[${replyToMessage.mediaType || 'media'}]`,
+                  )}
                 </Typography>
               </Box>
               <IconButton size="small" onClick={() => setReplyToMessage(null)}>

@@ -80,6 +80,7 @@ import {
 } from '@/constants/inboxCategories';
 import { useLongPress } from '@/hooks/useLongPress';
 import { coloredChipSx } from '@/utils/coloredChipStyles';
+import { conversationPreviewText } from '@/utils/whatsappCoexStub';
 
 /** Diff applied to each selected conversation: add new tags, remove deselected common tags. */
 export type BulkTagChanges = {
@@ -302,7 +303,7 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
                     minWidth: 0,
                   }}
                 >
-                  {conv.lastMessageText || 'Sin mensajes'}
+                  {conversationPreviewText(conv.lastMessageText)}
                 </Typography>
               </Box>
               {conv.isPinned && (

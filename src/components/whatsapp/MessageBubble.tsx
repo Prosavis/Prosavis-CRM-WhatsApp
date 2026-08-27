@@ -57,6 +57,10 @@ import {
 } from '@/services/whatsappService';
 import ClientDateText from '@/components/common/ClientDateText';
 import { WhatsAppFormattedText } from '@/utils/whatsappTextFormatting';
+import {
+  isCommercialOrphanStatusStub,
+  quotedMessagePreview,
+} from '@/utils/whatsappCoexStub';
 
 export interface MessageReaction {
   actorKey: string;
@@ -723,8 +727,15 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
 
   const caption = message.caption || '';
   const body = message.messageBody || '';
+  const missingCoexBody = isCommercialOrphanStatusStub(body);
   const bodyIsMediaTag = body.startsWith('[');
-  const displayText = hasMedia && caption ? caption : bodyIsMediaTag ? '' : body;
+  const displayText = missingCoexBody
+    ? ''
+    : hasMedia && caption
+      ? caption
+      : bodyIsMediaTag
+        ? ''
+        : body;
   const showTextBody = Boolean(displayText);
 
   const copyablePlainText = (() => {
@@ -826,7 +837,9 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
           {message.replyToWaMessageId && (() => {
             const quoted = allMessages.find((m) => m.waMessageId === message.replyToWaMessageId);
             if (!quoted) return null;
-            const quotedText = quoted.messageBody || quoted.caption || `[${quoted.mediaType || 'media'}]`;
+            const quotedText = quotedMessagePreview(
+              quoted.messageBody || quoted.caption || `[${quoted.mediaType || 'media'}]`,
+            );
             return (
               <Box
                 sx={{
@@ -881,7 +894,16 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
             </Typography>
           )}
 
-          {!showTextBody && !hasMedia && !hasLocation && !hasContacts && body && (
+          {missingCoexBody && !hasMedia && !hasLocation && !hasContacts && (
+            <Typography
+              variant="caption"
+              sx={{ fontStyle: 'italic', color: 'text.secondary', display: 'block', lineHeight: 1.4 }}
+            >
+              Sin texto
+            </Typography>
+          )}
+
+          {!showTextBody && !missingCoexBody && !hasMedia && !hasLocation && !hasContacts && body && (
             <Typography
               variant="body2"
               sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'text.primary', lineHeight: 1.4 }}
