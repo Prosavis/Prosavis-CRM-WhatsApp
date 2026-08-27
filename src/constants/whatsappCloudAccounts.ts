@@ -11,7 +11,7 @@ export const WHATSAPP_CLOUD_COMMERCIAL = {
   wabaId: import.meta.env.VITE_WHATSAPP_COMMERCIAL_WABA_ID?.trim() || '1680332820009096',
   phoneDisplay:
     import.meta.env.VITE_WHATSAPP_COMMERCIAL_PHONE_DISPLAY?.trim() || '+57 311 212 1108',
-  label: import.meta.env.VITE_WHATSAPP_COMMERCIAL_LABEL?.trim() || 'Comercial 311',
+  label: import.meta.env.VITE_WHATSAPP_COMMERCIAL_LABEL?.trim() || 'Inbox Comercial',
 };
 
 export type WhatsAppCloudProduction = typeof WHATSAPP_CLOUD_PRODUCTION;

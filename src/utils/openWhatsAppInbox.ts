@@ -13,7 +13,7 @@ export interface OpenWhatsAppInboxParams {
 
 /**
  * Asegura la conversación (si hay teléfono) y navega al inbox correcto:
- * Citas 312 por defecto, Comercial 311 si el hilo o phoneNumberId es comercial.
+ * Inbox Bot por defecto, Inbox Comercial si el hilo o phoneNumberId es comercial.
  */
 export async function openWhatsAppInbox(params: OpenWhatsAppInboxParams): Promise<boolean> {
   const phone = params.phone?.trim() || null;

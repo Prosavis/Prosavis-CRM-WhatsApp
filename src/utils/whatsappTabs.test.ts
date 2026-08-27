@@ -15,7 +15,7 @@ import {
 } from './whatsappTabs';
 
 describe('whatsappTabs', () => {
-  it('uses Citas 312 as the default inbox tab', () => {
+  it('uses Inbox Bot as the default inbox tab', () => {
     const search = new URLSearchParams();
     expect(resolveWhatsAppTabKey(search)).toBe('inbox');
     expect(resolveWhatsAppLineFilter(search)).toBe('bot');
@@ -23,7 +23,7 @@ describe('whatsappTabs', () => {
     expect(whatsappTabFromIndex(1)).toBe('commercial');
   });
 
-  it('opens Comercial 311 from the canonical tab query', () => {
+  it('opens Inbox Comercial from the canonical tab query', () => {
     const search = new URLSearchParams('tab=commercial');
     expect(resolveWhatsAppTabKey(search)).toBe('commercial');
     expect(resolveWhatsAppLineFilter(search)).toBe('commercial');
@@ -40,7 +40,7 @@ describe('whatsappTabs', () => {
     expect(resolveWhatsAppTabKey(next)).toBe('commercial');
   });
 
-  it('keeps line=all as a hidden diagnostic view on Citas', () => {
+  it('keeps line=all as a hidden diagnostic view on Inbox Bot', () => {
     const search = new URLSearchParams('line=all');
     expect(resolveWhatsAppTabKey(search)).toBe('inbox');
     expect(resolveWhatsAppLineFilter(search)).toBe('all');
@@ -49,7 +49,7 @@ describe('whatsappTabs', () => {
     expect(next.get('line')).toBe('all');
   });
 
-  it('clears leftover commercial line params when switching to Citas', () => {
+  it('clears leftover commercial line params when switching to Inbox Bot', () => {
     const next = applyWhatsAppTab(new URLSearchParams('tab=commercial&line=commercial'), 'inbox');
     expect(next.get('tab')).toBeNull();
     expect(next.get('line')).toBeNull();

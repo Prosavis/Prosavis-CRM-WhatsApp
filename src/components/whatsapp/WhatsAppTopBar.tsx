@@ -45,8 +45,8 @@ function buildTabItems(directoryTotalContacts: number | null) {
       : 'Directorio';
 
   return [
-    { key: 'inbox' as const, icon: <InboxIcon fontSize="small" />, label: 'Citas 312' },
-    { key: 'commercial' as const, icon: <StorefrontIcon fontSize="small" />, label: 'Comercial 311' },
+    { key: 'inbox' as const, icon: <InboxIcon fontSize="small" />, label: 'Inbox Bot' },
+    { key: 'commercial' as const, icon: <StorefrontIcon fontSize="small" />, label: 'Inbox Comercial' },
     { key: 'metrics' as const, icon: <BarChartIcon fontSize="small" />, label: 'Métricas' },
     { key: 'leads' as const, icon: <ContactPhoneIcon fontSize="small" />, label: directoryLabel },
     { key: 'discounts' as const, icon: <ConfirmationNumberIcon fontSize="small" />, label: 'Descuentos' },
