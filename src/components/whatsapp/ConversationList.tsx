@@ -1131,7 +1131,10 @@ const ConversationList: React.FC<ConversationListProps> = ({
           const directoryTagKeys = new Set(directoryTags.map((tag) => tag.toLowerCase()));
           const convTags = (conv.tagIds || [])
             .map((id) => tagMap.get(id))
-            .filter((tag): tag is WhatsAppTag => Boolean(tag) && !directoryTagKeys.has(tag.name.toLowerCase()));
+            .filter((tag): tag is WhatsAppTag => {
+              if (!tag) return false;
+              return !directoryTagKeys.has(tag.name.toLowerCase());
+            });
           const isUnread = Boolean(conv.unreadCount > 0 || conv.crmForceUnread);
           const peers = presenceByConversationId?.[conv.id] || [];
           const peerSummary = summarizePeerPresences(peers);
