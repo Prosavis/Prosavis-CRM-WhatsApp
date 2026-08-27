@@ -173,9 +173,21 @@ function mapMessageRow(row: MessageRow): WhatsAppMessage {
     voiceTranscriptionStatus: row.voice_transcription_status as
       | 'completed'
       | 'failed'
+      | 'pending'
       | undefined,
     voiceTranscriptionError: row.voice_transcription_error ?? undefined,
     voiceTranscriptionFailedAt: toDate(row.voice_transcription_failed_at),
+    mediaAnalysisText: row.media_analysis_text ?? undefined,
+    mediaAnalysisAt: toDate(row.media_analysis_at),
+    mediaAnalysisModel: row.media_analysis_model ?? undefined,
+    mediaAnalysisBytes: row.media_analysis_bytes ?? undefined,
+    mediaAnalysisStatus: row.media_analysis_status as
+      | 'completed'
+      | 'failed'
+      | 'pending'
+      | undefined,
+    mediaAnalysisError: row.media_analysis_error ?? undefined,
+    mediaAnalysisFailedAt: toDate(row.media_analysis_failed_at),
     hiddenFromPanel: row.hidden_from_panel,
     revokedAt: toDate(row.revoked_at),
     revokedReason: row.revoked_reason as WhatsAppMessage['revokedReason'],
@@ -266,9 +278,16 @@ export interface WhatsAppMessage {
   voiceTranscriptionModel?: string;
   voiceTranscriptionMimeType?: string;
   voiceTranscriptionBytes?: number;
-  voiceTranscriptionStatus?: 'completed' | 'failed';
+  voiceTranscriptionStatus?: 'completed' | 'failed' | 'pending';
   voiceTranscriptionError?: string;
   voiceTranscriptionFailedAt?: Date;
+  mediaAnalysisText?: string;
+  mediaAnalysisAt?: Date;
+  mediaAnalysisModel?: string;
+  mediaAnalysisBytes?: number;
+  mediaAnalysisStatus?: 'completed' | 'failed' | 'pending';
+  mediaAnalysisError?: string;
+  mediaAnalysisFailedAt?: Date;
   hiddenFromPanel?: boolean;
   revokedAt?: Date;
   revokedReason?: 'user_revoke' | 'crm';
@@ -679,6 +698,17 @@ export async function transcribeWhatsAppInboundAudio(
   return data as { success: boolean; transcript: string; cached?: boolean };
 }
 
+export async function analyzeWhatsAppInboundImage(
+  messageLogId: string,
+  force = false,
+): Promise<{ success: boolean; analysis: string; cached?: boolean }> {
+  const data = await invokeFn('analyze-whatsapp-inbound-image', {
+    messageLogId,
+    ...(force ? { force } : {}),
+  });
+  return data as { success: boolean; analysis: string; cached?: boolean };
+}
+
 export async function markAsRead(
   waMessageId: string | undefined,
   conversationKey?: string,
@@ -799,6 +829,7 @@ export async function suggestWhatsAppAgentReply(
   forceGenerate = false,
   includeVoiceTranscriptions = false,
   extraContext?: string,
+  includeImageAnalysis = true,
 ): Promise<SuggestReplyResult> {
   const data = await invokeFn<SuggestReplyResult & {
     hint?: string;
@@ -813,6 +844,7 @@ export async function suggestWhatsAppAgentReply(
     stableKey,
     forceGenerate,
     includeVoiceTranscriptions,
+    includeImageAnalysis,
     ...(extraContext?.trim() ? { extraContext: extraContext.trim() } : {}),
   });
   return {
@@ -891,10 +923,12 @@ export interface BookingContextResult {
 export async function getWhatsAppBookingContext(
   stableKey: string,
   includeVoiceTranscriptions = false,
+  includeImageAnalysis = true,
 ): Promise<BookingContextResult> {
   const data = await invokeFn<BookingContextResult>('get-whatsapp-booking-context', {
     stableKey,
     includeVoiceTranscriptions,
+    includeImageAnalysis,
   });
   return {
     bookingContext: data.bookingContext ?? null,

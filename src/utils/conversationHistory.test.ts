@@ -97,6 +97,61 @@ describe('getConversationHistoryWithMeta', () => {
     expect(result.turns[0]?.text).not.toBe('[audio]');
   });
 
+  it('replaces the [image] placeholder with cached analysis when enabled', async () => {
+    const query = {
+      select: () => query,
+      eq: () => query,
+      order: () => query,
+      limit: () => Promise.resolve({
+        data: [{
+          direction: 'inbound',
+          message_body: '[image]',
+          caption: 'sala',
+          media_type: 'image',
+          media_analysis_text: 'Sala con sofá y manchas en el piso.',
+          created_at: '2026-08-27T13:00:00.000Z',
+        }],
+        error: null,
+      }),
+    };
+    const result = await getConversationHistoryWithMeta(
+      { from: () => query },
+      '573001112233',
+      10,
+      { includeImageAnalysis: true },
+    );
+
+    expect(result.turns[0]?.text).toContain('[Imagen]:');
+    expect(result.turns[0]?.text).toContain('Sala con sofá');
+    expect(result.turns[0]?.text).toContain('sala');
+  });
+
+  it('keeps the [image] placeholder when image analysis is disabled', async () => {
+    const query = {
+      select: () => query,
+      eq: () => query,
+      order: () => query,
+      limit: () => Promise.resolve({
+        data: [{
+          direction: 'inbound',
+          message_body: '[image]',
+          media_type: 'image',
+          media_analysis_text: 'no debe entrar',
+          created_at: '2026-08-27T13:00:00.000Z',
+        }],
+        error: null,
+      }),
+    };
+    const result = await getConversationHistoryWithMeta(
+      { from: () => query },
+      '573001112233',
+      10,
+      { includeImageAnalysis: false },
+    );
+
+    expect(result.turns[0]?.text).toBe('[image]');
+  });
+
   it('keeps the [audio] placeholder when transcriptions are disabled', async () => {
     const query = {
       select: () => query,

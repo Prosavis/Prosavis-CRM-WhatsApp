@@ -27,8 +27,19 @@ describe('parseInboxAiContextPackRequest', () => {
       ok: true,
       stableKey: '573001112233',
       includeVoiceTranscriptions: true,
+      includeImageAnalysis: false,
       durationMinutes: 240,
     });
+  });
+
+  it('opts into image analysis only when requested', () => {
+    const parsed = parseInboxAiContextPackRequest({
+      phone: '573001112233',
+      includeImageAnalysis: true,
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.includeImageAnalysis).toBe(true);
   });
 
   it('accepts a numeric duration string and prefers stableKey', () => {
@@ -42,6 +53,7 @@ describe('parseInboxAiContextPackRequest', () => {
       ok: true,
       stableKey: '57abc',
       includeVoiceTranscriptions: false,
+      includeImageAnalysis: false,
       durationMinutes: 360,
     });
   });

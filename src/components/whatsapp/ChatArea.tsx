@@ -311,9 +311,14 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     stableKey,
   );
   const voiceTranscriptionStorageKey = `wa-include-voice-transcriptions:${phoneNumberId || 'default'}:${myUid || 'admin'}`;
+  const imageAnalysisStorageKey = `wa-include-image-analysis:${phoneNumberId || 'default'}:${myUid || 'admin'}`;
   const [includeVoiceTranscriptions, setIncludeVoiceTranscriptions] = useState(() => {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem(voiceTranscriptionStorageKey) === 'true';
+  });
+  const [includeImageAnalysis, setIncludeImageAnalysis] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    return window.localStorage.getItem(imageAnalysisStorageKey) !== 'false';
   });
   const [stickers, setStickers] = useState<WhatsAppSticker[]>([]);
   const [stickerFolders, setStickerFolders] = useState<WhatsAppStickerFolder[]>([]);
@@ -398,11 +403,25 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    const stored = window.localStorage.getItem(imageAnalysisStorageKey);
+    setIncludeImageAnalysis(stored !== 'false');
+  }, [imageAnalysisStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
     window.localStorage.setItem(
       voiceTranscriptionStorageKey,
       includeVoiceTranscriptions ? 'true' : 'false',
     );
   }, [includeVoiceTranscriptions, voiceTranscriptionStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(
+      imageAnalysisStorageKey,
+      includeImageAnalysis ? 'true' : 'false',
+    );
+  }, [includeImageAnalysis, imageAnalysisStorageKey]);
 
   const loadStickers = useCallback(async () => {
     setStickersLoading(true);
@@ -692,6 +711,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         forceGenerate,
         includeVoiceTranscriptions,
         extraContext,
+        includeImageAnalysis,
       );
       setSessionWindow(result.sessionWindow);
       setUsedHistoryMeta(result.historyMeta ?? null);
@@ -768,7 +788,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     } finally {
       setSuggestionLoading(false);
     }
-  }, [includeVoiceTranscriptions, stableKey]);
+  }, [includeImageAnalysis, includeVoiceTranscriptions, stableKey]);
 
   const handleSuggestionRequestOption = useCallback((options?: { withContext?: boolean }) => {
     if (options?.withContext) {
@@ -908,7 +928,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
     setBookingContextLoading(true);
     try {
-      const result = await getWhatsAppBookingContext(stableKey, includeVoiceTranscriptions);
+      const result = await getWhatsAppBookingContext(
+        stableKey,
+        includeVoiceTranscriptions,
+        includeImageAnalysis,
+      );
       setSessionWindow(result.sessionWindow);
       if (result.bookingContext) {
         setBookingContext(result.bookingContext);
@@ -927,7 +951,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     } finally {
       setBookingContextLoading(false);
     }
-  }, [bookingContext, includeVoiceTranscriptions, stableKey]);
+  }, [bookingContext, includeImageAnalysis, includeVoiceTranscriptions, stableKey]);
 
   const handleToggleSelect = useCallback((id: string) => {
     setSelectedIds((prev) => {
@@ -1190,16 +1214,19 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       onLoadedConversationInbound?.(loadedConversationInbound);
     }
   }, [loadedConversationInbound, onLoadedConversationInbound]);
-  const pendingInboundAudioCount = useMemo(
-    () =>
-      visibleMessages.filter(
+  const inboundAudioStats = useMemo(() => {
+    const inboundAudios = visibleMessages.filter(
+      (message) => message.direction === 'inbound' && message.mediaType === 'audio',
+    );
+    return {
+      pending: inboundAudios.filter((message) => message.voiceTranscriptionStatus === 'pending').length,
+      missing: inboundAudios.filter(
         (message) =>
-          message.direction === 'inbound' &&
-          message.mediaType === 'audio' &&
-          message.voiceTranscriptionStatus !== 'completed',
+          message.voiceTranscriptionStatus !== 'completed' &&
+          message.voiceTranscriptionStatus !== 'pending',
       ).length,
-    [visibleMessages],
-  );
+    };
+  }, [visibleMessages]);
   const reactionsByTarget = useMemo(
     () => deriveReactionsByTarget(messages, pendingReactions),
     [messages, pendingReactions],
@@ -1482,24 +1509,46 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               borderColor: 'divider',
             }}
           >
-            <FormControlLabel
-              control={
-                <Switch
-                  size="small"
-                  checked={includeVoiceTranscriptions}
-                  onChange={(event) => setIncludeVoiceTranscriptions(event.target.checked)}
-                />
-              }
-              label={
-                <Typography variant="caption">
-                  Incluir transcripciones en IA
-                </Typography>
-              }
-              sx={{ m: 0 }}
-            />
-            {includeVoiceTranscriptions && pendingInboundAudioCount > 0 && (
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    size="small"
+                    checked={includeVoiceTranscriptions}
+                    onChange={(event) => setIncludeVoiceTranscriptions(event.target.checked)}
+                  />
+                }
+                label={
+                  <Typography variant="caption">
+                    Incluir transcripciones en IA
+                  </Typography>
+                }
+                sx={{ m: 0 }}
+              />
+              <FormControlLabel
+                control={
+                  <Switch
+                    size="small"
+                    checked={includeImageAnalysis}
+                    onChange={(event) => setIncludeImageAnalysis(event.target.checked)}
+                  />
+                }
+                label={
+                  <Typography variant="caption">
+                    Analizar imágenes en IA
+                  </Typography>
+                }
+                sx={{ m: 0 }}
+              />
+            </Box>
+            {includeVoiceTranscriptions && inboundAudioStats.missing > 0 && (
               <Alert severity="warning" sx={{ mt: 0.75, py: 0 }}>
-                Hay {pendingInboundAudioCount} audio(s) sin transcribir. No se usarán en la IA hasta transcribirlos.
+                Hay {inboundAudioStats.missing} audio(s) sin transcribir. No se usarán en la IA hasta transcribirlos.
+              </Alert>
+            )}
+            {includeVoiceTranscriptions && inboundAudioStats.missing === 0 && inboundAudioStats.pending > 0 && (
+              <Alert severity="info" sx={{ mt: 0.75, py: 0 }}>
+                Transcribiendo {inboundAudioStats.pending} audio(s)…
               </Alert>
             )}
           </Box>

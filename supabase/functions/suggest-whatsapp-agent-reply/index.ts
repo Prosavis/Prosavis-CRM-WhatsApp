@@ -40,6 +40,7 @@ Deno.serve(async (req) => {
     const stableKey = String(body.stableKey ?? '').trim();
     const forceGenerate = body.forceGenerate === true;
     const includeVoiceTranscriptions = body.includeVoiceTranscriptions === true;
+    const includeImageAnalysis = body.includeImageAnalysis === true;
     const extraContext = normalizeExtraContext(body.extraContext);
 
     if (!stableKey) return jsonResponse({ error: 'Se requiere stableKey.' }, 400);
@@ -49,7 +50,10 @@ Deno.serve(async (req) => {
 
     let ctx;
     try {
-      ctx = await buildInboxAiContext(supabase, stableKey, { includeVoiceTranscriptions });
+      ctx = await buildInboxAiContext(supabase, stableKey, {
+        includeVoiceTranscriptions,
+        includeImageAnalysis,
+      });
     } catch (err) {
       const msg = String((err as Error)?.message ?? err);
       if (msg.includes('historial') || msg.includes('mensajes del cliente')) {

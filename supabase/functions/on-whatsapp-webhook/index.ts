@@ -13,6 +13,14 @@ import { UNARCHIVE_CONVERSATION_PATCH } from '../_shared/whatsappOutbound.ts';
 import { directoryPhoneKey } from '../_shared/directoryPhone.ts';
 import { REACTIVATION_SEQUENCE } from '../_shared/reactivationCadence.ts';
 import { applyColdFailureTag, removeColdFailureTags } from '../_shared/coldAppUserOutreach.ts';
+import { scheduleBackgroundWork } from '../_shared/edgeBackground.ts';
+import {
+  inboundAudioNeedsAutoTranscription,
+} from '../_shared/inboxAiMediaLimits.ts';
+import {
+  isVoiceTranscriptionEnabled,
+  transcribeInboundAudioById,
+} from '../_shared/transcribeInboundAudio.ts';
 
 const encoder = new TextEncoder();
 type JsonRecord = Record<string, unknown>;
@@ -437,6 +445,25 @@ async function processInboundMessage(params: {
       size_bytes: mediaFileSize,
       sha256: mediaSha256,
     });
+  }
+
+  const insertedMessageId = insertedMessage?.id ?? null;
+  if (
+    inboundAudioNeedsAutoTranscription({
+      mediaType: content.mediaType,
+      messageLogId: insertedMessageId,
+      mediaId: content.mediaId,
+    }) &&
+    isVoiceTranscriptionEnabled() &&
+    insertedMessageId
+  ) {
+    await params.supabase.from('whatsapp_message_log').update({
+      voice_transcription_status: 'pending',
+    }).eq('id', insertedMessageId);
+    scheduleBackgroundWork(
+      transcribeInboundAudioById(params.supabase, insertedMessageId),
+      'auto-stt',
+    );
   }
 
   // Actualiza directorio: last_response_at + opt-out por "PARAR".

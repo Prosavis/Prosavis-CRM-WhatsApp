@@ -53,6 +53,7 @@ import {
   downloadMediaBlob,
   getExtensionFromMime,
   transcribeWhatsAppInboundAudio,
+  analyzeWhatsAppInboundImage,
 } from '@/services/whatsappService';
 import ClientDateText from '@/components/common/ClientDateText';
 import { WhatsAppFormattedText } from '@/utils/whatsappTextFormatting';
@@ -321,11 +322,19 @@ const MediaContent: React.FC<{ message: WhatsAppMessage; onOpenLightbox?: (url: 
   const [transcript, setTranscript] = useState(message.voiceTranscription || '');
   const [transcribing, setTranscribing] = useState(false);
   const [transcriptionError, setTranscriptionError] = useState('');
+  const [imageAnalysis, setImageAnalysis] = useState(message.mediaAnalysisText || '');
+  const [analyzingImage, setAnalyzingImage] = useState(false);
+  const [imageAnalysisError, setImageAnalysisError] = useState('');
 
   useEffect(() => {
     setTranscript(message.voiceTranscription || '');
     setTranscriptionError(message.voiceTranscriptionError || '');
   }, [message.voiceTranscription, message.voiceTranscriptionError]);
+
+  useEffect(() => {
+    setImageAnalysis(message.mediaAnalysisText || '');
+    setImageAnalysisError(message.mediaAnalysisError || '');
+  }, [message.mediaAnalysisText, message.mediaAnalysisError]);
 
   const handleDownload = useCallback(async () => {
     if (!effectiveUrl) return;
@@ -348,6 +357,22 @@ const MediaContent: React.FC<{ message: WhatsAppMessage; onOpenLightbox?: (url: 
       setTranscribing(false);
     }
   }, [message.id, message.mediaId]);
+
+  const handleAnalyzeImage = useCallback(async (force = false) => {
+    setAnalyzingImage(true);
+    setImageAnalysisError('');
+    try {
+      const result = await analyzeWhatsAppInboundImage(message.id, force);
+      setImageAnalysis(result.analysis);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'No se pudo analizar la imagen';
+      setImageAnalysisError(msg);
+    } finally {
+      setAnalyzingImage(false);
+    }
+  }, [message.id]);
+
+  const autoTranscribing = message.voiceTranscriptionStatus === 'pending' && !transcript;
 
   const transcriptionControls =
     message.mediaType === 'audio' && message.direction === 'inbound' && message.mediaId ? (
@@ -375,16 +400,57 @@ const MediaContent: React.FC<{ message: WhatsAppMessage; onOpenLightbox?: (url: 
           <Button
             size="small"
             variant="outlined"
-            startIcon={transcribing ? <CircularProgress size={14} /> : <SubtitlesIcon />}
-            disabled={transcribing}
+            startIcon={(transcribing || autoTranscribing) ? <CircularProgress size={14} /> : <SubtitlesIcon />}
+            disabled={transcribing || autoTranscribing}
             onClick={() => void handleTranscribe(false)}
           >
-            {transcribing ? 'Transcribiendo…' : 'Transcribir'}
+            {(transcribing || autoTranscribing) ? 'Transcribiendo…' : 'Transcribir'}
           </Button>
         )}
         {transcriptionError && (
           <Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.5 }}>
             {transcriptionError}
+          </Typography>
+        )}
+      </Box>
+    ) : null;
+
+  const imageAnalysisControls =
+    message.mediaType === 'image' && message.direction === 'inbound' ? (
+      <Box sx={{ mt: 0.75 }}>
+        {imageAnalysis ? (
+          <Box sx={{ p: 1, borderRadius: 1, bgcolor: 'rgba(37, 211, 102, 0.08)' }}>
+            <Typography variant="caption" fontWeight={600} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <ImageIcon sx={{ fontSize: 14 }} />
+              Análisis de imagen
+            </Typography>
+            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', mt: 0.25 }}>
+              {imageAnalysis}
+            </Typography>
+            <Button
+              size="small"
+              variant="text"
+              disabled={analyzingImage}
+              onClick={() => void handleAnalyzeImage(true)}
+              sx={{ mt: 0.5, px: 0 }}
+            >
+              {analyzingImage ? 'Analizando…' : 'Volver a analizar'}
+            </Button>
+          </Box>
+        ) : (
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={analyzingImage ? <CircularProgress size={14} /> : <ImageIcon />}
+            disabled={analyzingImage || !message.storagePath}
+            onClick={() => void handleAnalyzeImage(false)}
+          >
+            {analyzingImage ? 'Analizando…' : 'Analizar imagen'}
+          </Button>
+        )}
+        {imageAnalysisError && (
+          <Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.5 }}>
+            {imageAnalysisError}
           </Typography>
         )}
       </Box>
@@ -457,36 +523,42 @@ const MediaContent: React.FC<{ message: WhatsAppMessage; onOpenLightbox?: (url: 
   if (message.mediaType === 'image') {
     if (effectiveUrl) {
       return (
-        <Box sx={{ mb: 0.5, borderRadius: 1, overflow: 'hidden', maxWidth: 300, position: 'relative', '&:hover .img-actions': { opacity: 1 } }}>
-          <img
-            src={effectiveUrl}
-            alt={message.caption || 'Imagen'}
-            style={{ width: '100%', display: 'block', borderRadius: 4, cursor: 'pointer' }}
-            loading="lazy"
-            onClick={() => onOpenLightbox?.(effectiveUrl)}
-          />
-          <Box className="img-actions" sx={{ position: 'absolute', top: 4, right: 4, opacity: 0, transition: 'opacity 0.2s', display: 'flex', gap: 0.5 }}>
-            <IconButton size="small" sx={{ bgcolor: 'rgba(0,0,0,0.5)', color: '#fff', '&:hover': { bgcolor: 'rgba(0,0,0,0.7)' } }} onClick={() => onOpenLightbox?.(effectiveUrl)}>
-              <ZoomInIcon fontSize="small" />
-            </IconButton>
-            <IconButton size="small" sx={{ bgcolor: 'rgba(0,0,0,0.5)', color: '#fff', '&:hover': { bgcolor: 'rgba(0,0,0,0.7)' } }} onClick={handleDownload}>
-              <DownloadIcon fontSize="small" />
-            </IconButton>
+        <Box sx={{ mb: 0.5, maxWidth: 300 }}>
+          <Box sx={{ borderRadius: 1, overflow: 'hidden', position: 'relative', '&:hover .img-actions': { opacity: 1 } }}>
+            <img
+              src={effectiveUrl}
+              alt={message.caption || 'Imagen'}
+              style={{ width: '100%', display: 'block', borderRadius: 4, cursor: 'pointer' }}
+              loading="lazy"
+              onClick={() => onOpenLightbox?.(effectiveUrl)}
+            />
+            <Box className="img-actions" sx={{ position: 'absolute', top: 4, right: 4, opacity: 0, transition: 'opacity 0.2s', display: 'flex', gap: 0.5 }}>
+              <IconButton size="small" sx={{ bgcolor: 'rgba(0,0,0,0.5)', color: '#fff', '&:hover': { bgcolor: 'rgba(0,0,0,0.7)' } }} onClick={() => onOpenLightbox?.(effectiveUrl)}>
+                <ZoomInIcon fontSize="small" />
+              </IconButton>
+              <IconButton size="small" sx={{ bgcolor: 'rgba(0,0,0,0.5)', color: '#fff', '&:hover': { bgcolor: 'rgba(0,0,0,0.7)' } }} onClick={handleDownload}>
+                <DownloadIcon fontSize="small" />
+              </IconButton>
+            </Box>
           </Box>
+          {imageAnalysisControls}
         </Box>
       );
     }
     return (
-      <MediaErrorPlaceholder
-        icon={<ImageIcon sx={{ color: '#667781' }} />}
-        label="Imagen — toca para ver"
-        loading={loading}
-        error={error}
-        errorMessage={errorMessage || 'No se pudo cargar la imagen'}
-        permanentError={permanentError}
-        canResolve={Boolean(message.mediaId)}
-        onResolve={resolveMedia}
-      />
+      <Box sx={{ mb: 0.5, maxWidth: 300 }}>
+        <MediaErrorPlaceholder
+          icon={<ImageIcon sx={{ color: '#667781' }} />}
+          label="Imagen — toca para ver"
+          loading={loading}
+          error={error}
+          errorMessage={errorMessage || 'No se pudo cargar la imagen'}
+          permanentError={permanentError}
+          canResolve={Boolean(message.mediaId)}
+          onResolve={resolveMedia}
+        />
+        {imageAnalysisControls}
+      </Box>
     );
   }
 

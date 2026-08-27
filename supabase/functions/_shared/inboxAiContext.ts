@@ -4,6 +4,7 @@
  * historial reciente, tags, directorio y citas Firestore.
  */
 
+import { analyzeUncachedInboundImagesForConversation } from './analyzeInboundImage.ts';
 import {
   DEFAULT_HISTORY_LIMIT,
   DEFAULT_TRANSCRIPT_CHAR_BUDGET,
@@ -283,6 +284,7 @@ export async function buildInboxAiContext(
   stableKey: string,
   options?: {
     includeVoiceTranscriptions?: boolean;
+    includeImageAnalysis?: boolean;
     historyLimit?: number;
     transcriptCharBudget?: number;
   },
@@ -291,8 +293,19 @@ export async function buildInboxAiContext(
   const historyLimit = options?.historyLimit ?? DEFAULT_HISTORY_LIMIT;
   const charBudget = options?.transcriptCharBudget ?? DEFAULT_TRANSCRIPT_CHAR_BUDGET;
 
+  if (options?.includeImageAnalysis === true) {
+    try {
+      await analyzeUncachedInboundImagesForConversation(supabase, stableKey, {
+        historyLimit,
+      });
+    } catch (error) {
+      console.error('[inbox-ai] image analysis batch failed', error);
+    }
+  }
+
   const history = await getConversationHistoryWithMeta(supabase, stableKey, historyLimit, {
     includeVoiceTranscriptions: options?.includeVoiceTranscriptions === true,
+    includeImageAnalysis: options?.includeImageAnalysis === true,
   });
   if (!history.turns.length) {
     throw new Error('No se encontró historial de conversación.');

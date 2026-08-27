@@ -103,6 +103,9 @@ verify_jwt = false
 [functions.get-inbox-ai-context]
 verify_jwt = false
 
+[functions.analyze-whatsapp-inbound-image]
+verify_jwt = false
+
 [functions.get-prosavis-cleaning-wompi-checkout-url]
 verify_jwt = false
 

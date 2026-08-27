@@ -308,6 +308,18 @@ export async function uploadToWhatsAppBucket(
   }
 }
 
+export async function downloadWhatsAppBucketBytes(
+  supabase: SupabaseClient,
+  storagePath: string,
+  bucketId = WHATSAPP_MEDIA_BUCKET,
+): Promise<Uint8Array> {
+  const { data, error } = await supabase.storage.from(bucketId).download(storagePath);
+  if (error || !data) {
+    throw error ?? new Error('No se pudo leer media de Storage.');
+  }
+  return new Uint8Array(await data.arrayBuffer());
+}
+
 export async function createWhatsAppMediaSignedUrl(
   supabase: SupabaseClient,
   storagePath: string,

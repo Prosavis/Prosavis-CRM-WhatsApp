@@ -434,3 +434,50 @@ export async function geminiTranscribeAudio(params: {
 
   return extractTextFromResponse(data);
 }
+
+function imageMimeType(mimeType: string): string {
+  const base = mimeType.split(';')[0].trim().toLowerCase();
+  if (base === 'image/png') return 'image/png';
+  if (base === 'image/webp') return 'image/webp';
+  if (base === 'image/gif') return 'image/gif';
+  return 'image/jpeg';
+}
+
+/**
+ * Describe una foto inbound de WhatsApp para el operador / packer de inbox.
+ * No inventa precios ni disponibilidad.
+ */
+export async function geminiAnalyzeImage(params: {
+  apiKey: string;
+  buffer: Uint8Array;
+  mimeType: string;
+  model?: string;
+}): Promise<string> {
+  const model = params.model ??
+    resolveGeminiModel('GEMINI_MODEL_IMAGE_ANALYSIS', DEFAULT_GEMINI_MODEL);
+
+  const mime = imageMimeType(params.mimeType);
+  const imageB64 = bytesToBase64(params.buffer);
+
+  const instruction =
+    'Describe esta imagen de WhatsApp en español de Colombia para un operador de limpieza. ' +
+    'Incluye: qué se ve, texto visible (OCR) y datos útiles para cotizar o agendar ' +
+    '(dirección, metros, suciedad, tipo de inmueble). ' +
+    'No inventes precios ni disponibilidad. Si no se entiende, dilo sin especular.';
+
+  const data = await geminiRequest({
+    apiKey: params.apiKey,
+    model,
+    contents: [{
+      role: 'user',
+      parts: [
+        { inlineData: { mimeType: mime, data: imageB64 } },
+        { text: instruction },
+      ],
+    }],
+    temperature: 0,
+    maxOutputTokens: 1024,
+  });
+
+  return extractTextFromResponse(data);
+}

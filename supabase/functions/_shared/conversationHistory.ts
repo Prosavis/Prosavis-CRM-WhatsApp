@@ -25,6 +25,7 @@ export const DEFAULT_HISTORY_LIMIT = 150;
 /** Tope de caracteres del transcript tras merge (se recorta desde lo más antiguo). */
 export const DEFAULT_TRANSCRIPT_CHAR_BUDGET = 60_000;
 export const AUDIO_TRANSCRIPT_PREFIX = '[Audio transcrito]:';
+export const IMAGE_ANALYSIS_PREFIX = '[Imagen]:';
 
 function asTrimmedText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -45,20 +46,42 @@ export function resolveConversationTurnText(
     caption?: unknown;
     media_type?: unknown;
     voice_transcription?: unknown;
+    media_analysis_text?: unknown;
   },
-  includeVoiceTranscriptions = false,
+  options: boolean | {
+    includeVoiceTranscriptions?: boolean;
+    includeImageAnalysis?: boolean;
+  } = false,
 ): string {
+  const includeVoiceTranscriptions = typeof options === 'boolean'
+    ? options
+    : options.includeVoiceTranscriptions === true;
+  const includeImageAnalysis = typeof options === 'boolean'
+    ? false
+    : options.includeImageAnalysis === true;
   const mediaType = asTrimmedText(row.media_type) || null;
   const body = asTrimmedText(row.message_body);
   const caption = asTrimmedText(row.caption);
   const transcription = includeVoiceTranscriptions
     ? asTrimmedText(row.voice_transcription)
     : '';
+  const imageAnalysis = includeImageAnalysis
+    ? asTrimmedText(row.media_analysis_text)
+    : '';
 
   if (transcription && (mediaType === 'audio' || isMediaPlaceholder(body, mediaType))) {
     const labeled = `${AUDIO_TRANSCRIPT_PREFIX} ${transcription}`;
     if (caption && caption !== transcription && !isMediaPlaceholder(caption, mediaType)) {
       return `${caption}\n${labeled}`;
+    }
+    return labeled;
+  }
+
+  if (imageAnalysis && mediaType === 'image') {
+    const labeled = `${IMAGE_ANALYSIS_PREFIX} ${imageAnalysis}`;
+    const captionOrBody = caption || (body && !isMediaPlaceholder(body, mediaType) ? body : '');
+    if (captionOrBody && captionOrBody !== imageAnalysis) {
+      return `${captionOrBody}\n${labeled}`;
     }
     return labeled;
   }
@@ -73,7 +96,7 @@ export async function getConversationHistory(
   supabase: SupabaseClient,
   stableKey: string,
   limit = DEFAULT_HISTORY_LIMIT,
-  options?: { includeVoiceTranscriptions?: boolean },
+  options?: { includeVoiceTranscriptions?: boolean; includeImageAnalysis?: boolean },
 ): Promise<ConversationTurn[]> {
   const result = await getConversationHistoryWithMeta(supabase, stableKey, limit, options);
   return result.turns;
@@ -87,12 +110,12 @@ export async function getConversationHistoryWithMeta(
   supabase: SupabaseClient,
   stableKey: string,
   limit = DEFAULT_HISTORY_LIMIT,
-  options?: { includeVoiceTranscriptions?: boolean },
+  options?: { includeVoiceTranscriptions?: boolean; includeImageAnalysis?: boolean },
 ): Promise<ConversationHistoryResult> {
   const { data, error } = await supabase
     .from('whatsapp_message_log')
     .select(
-      'direction,message_body,caption,media_type,voice_transcription,hidden_from_panel,created_at',
+      'direction,message_body,caption,media_type,voice_transcription,media_analysis_text,hidden_from_panel,created_at',
     )
     .eq('conversation_stable_key', stableKey)
     .eq('hidden_from_panel', false)
@@ -108,10 +131,10 @@ export async function getConversationHistoryWithMeta(
 
   const turns: ConversationTurn[] = [];
   for (const row of rowsChronological) {
-    const text = resolveConversationTurnText(
-      row,
-      options?.includeVoiceTranscriptions === true,
-    );
+    const text = resolveConversationTurnText(row, {
+      includeVoiceTranscriptions: options?.includeVoiceTranscriptions === true,
+      includeImageAnalysis: options?.includeImageAnalysis === true,
+    });
     if (!text) continue;
     turns.push({
       role: row.direction === 'inbound' ? 'user' : 'bot',

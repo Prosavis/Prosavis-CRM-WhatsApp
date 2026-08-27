@@ -95,6 +95,7 @@ describe('Inbox AI response contracts', () => {
         stableKey: 'stable-key-1',
         forceGenerate: false,
         includeVoiceTranscriptions: false,
+        includeImageAnalysis: true,
       },
     });
     expect(result.proposedActions).toEqual([action]);

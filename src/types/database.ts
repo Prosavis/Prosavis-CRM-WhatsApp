@@ -115,6 +115,13 @@ export interface Database {
           appointment_id: string | null;
           error_message: string | null;
           voice_transcription: string | null;
+          media_analysis_text: string | null;
+          media_analysis_at: string | null;
+          media_analysis_model: string | null;
+          media_analysis_bytes: number | null;
+          media_analysis_status: string | null;
+          media_analysis_error: string | null;
+          media_analysis_failed_at: string | null;
           hidden_from_panel: boolean;
           revoked_at: string | null;
           revoked_reason: string | null;
