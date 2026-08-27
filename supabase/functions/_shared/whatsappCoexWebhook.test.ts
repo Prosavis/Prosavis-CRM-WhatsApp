@@ -7,6 +7,7 @@ import {
 import {
   COMMERCIAL_ORPHAN_STATUS_STUB,
   parseCoexCustomerPhone,
+  persistCoexMessage,
   shouldIgnoreBotCoexField,
   shouldPersistCommercialOrphanStatus,
   shouldSkipMissingCommercialStatus,
@@ -157,4 +158,160 @@ Deno.test('echo replaces the Facebook/phone stub but not a real body', () => {
     shouldUpgradeCoexStub(COMMERCIAL_ORPHAN_STATUS_STUB, COMMERCIAL_ORPHAN_STATUS_STUB),
     false,
   );
+});
+
+type MemoryRow = Record<string, unknown>;
+
+function createMemorySupabase(seed?: {
+  messages?: MemoryRow[];
+  conversations?: MemoryRow[];
+}) {
+  const tables: Record<string, MemoryRow[]> = {
+    whatsapp_message_log: [...(seed?.messages ?? [])],
+    whatsapp_conversations: [...(seed?.conversations ?? [])],
+    whatsapp_media_assets: [],
+  };
+
+  const matches = (row: MemoryRow, filters: Array<[string, unknown]>) =>
+    filters.every(([key, value]) => row[key] === value);
+
+  const from = (table: string) => {
+    const filters: Array<[string, unknown]> = [];
+    let mode: 'select' | 'insert' | 'update' | 'upsert' = 'select';
+    let payload: MemoryRow | null = null;
+
+    const run = () => {
+      const list = tables[table] ?? [];
+      if (mode === 'insert' && payload) {
+        if (payload.wa_message_id && list.some((row) => row.wa_message_id === payload?.wa_message_id)) {
+          return { data: null, error: { code: '23505' } };
+        }
+        const row = { id: `${table}-${list.length + 1}`, ...payload };
+        list.push(row);
+        tables[table] = list;
+        return { data: row, error: null };
+      }
+      if (mode === 'update' && payload) {
+        for (const row of list) {
+          if (matches(row, filters)) Object.assign(row, payload);
+        }
+        return { data: null, error: null };
+      }
+      const row = list.find((item) => matches(item, filters)) ?? null;
+      return { data: row, error: null };
+    };
+
+    const api: Record<string, unknown> = {
+      select() {
+        return api;
+      },
+      insert(row: MemoryRow) {
+        mode = 'insert';
+        payload = row;
+        return api;
+      },
+      update(row: MemoryRow) {
+        mode = 'update';
+        payload = row;
+        return api;
+      },
+      upsert(row: MemoryRow) {
+        mode = 'upsert';
+        const list = tables[table] ?? [];
+        const existing = list.find((item) => item.stable_key === row.stable_key);
+        if (existing) Object.assign(existing, row);
+        else list.push({ ...row });
+        tables[table] = list;
+        return Promise.resolve({ error: null });
+      },
+      eq(column: string, value: unknown) {
+        filters.push([column, value]);
+        return Object.assign(api, Promise.resolve(run()));
+      },
+      maybeSingle: async () => run(),
+      single: async () => run(),
+    };
+    return api;
+  };
+
+  return {
+    tables,
+    from,
+  };
+}
+
+Deno.test('text echo upgrades the commercial stub body', async () => {
+  const waMessageId = 'wamid.echo.text';
+  const db = createMemorySupabase({
+    messages: [{
+      id: 'stub-1',
+      wa_message_id: waMessageId,
+      message_body: COMMERCIAL_ORPHAN_STATUS_STUB,
+      conversation_stable_key: conversationStableKey('573146283332', COMMERCIAL_PHONE_NUMBER_ID),
+    }],
+    conversations: [{
+      stable_key: conversationStableKey('573146283332', COMMERCIAL_PHONE_NUMBER_ID),
+      last_message_text: COMMERCIAL_ORPHAN_STATUS_STUB,
+    }],
+  });
+
+  const status = await persistCoexMessage({
+    supabase: db as never,
+    phoneNumberId: COMMERCIAL_PHONE_NUMBER_ID,
+    defaultDirection: 'outbound',
+    message: {
+      id: waMessageId,
+      from: '573112121108',
+      to: '573146283332',
+      timestamp: '1756300000',
+      type: 'text',
+      text: { body: 'respuesta prueba 2 desde panel de facebook cuenta nicolas' },
+    },
+  });
+
+  assertEquals(status, 'updated');
+  assertEquals(
+    db.tables.whatsapp_message_log[0].message_body,
+    'respuesta prueba 2 desde panel de facebook cuenta nicolas',
+  );
+});
+
+Deno.test('image echo stores media_id without throwing', async () => {
+  const db = createMemorySupabase();
+  const status = await persistCoexMessage({
+    supabase: db as never,
+    phoneNumberId: COMMERCIAL_PHONE_NUMBER_ID,
+    defaultDirection: 'outbound',
+    message: {
+      id: 'wamid.echo.image',
+      from: '573112121108',
+      to: '573146283332',
+      timestamp: '1756300001',
+      type: 'image',
+      image: { id: 'media-123', mime_type: 'image/jpeg', caption: 'foto del local' },
+    },
+  });
+
+  assertEquals(status, 'inserted');
+  assertEquals(db.tables.whatsapp_message_log[0].media_id, 'media-123');
+  assertEquals(db.tables.whatsapp_message_log[0].media_type, 'image');
+  assertEquals(db.tables.whatsapp_message_log[0].message_body, 'foto del local');
+});
+
+Deno.test('echo without to does not throw', async () => {
+  const db = createMemorySupabase();
+  const status = await persistCoexMessage({
+    supabase: db as never,
+    phoneNumberId: COMMERCIAL_PHONE_NUMBER_ID,
+    defaultDirection: 'outbound',
+    message: {
+      id: 'wamid.echo.noto',
+      from: '573112121108',
+      timestamp: '1756300002',
+      type: 'text',
+      text: { body: 'sin destinatario' },
+    },
+  });
+  assertEquals(status, 'skipped');
+  assertEquals(db.tables.whatsapp_message_log.length, 0);
 });

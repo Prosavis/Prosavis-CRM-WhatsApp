@@ -125,6 +125,7 @@ import {
   directoryDisplayTags,
   directoryTagColor,
 } from '@/utils/directoryDisplayTags';
+import { formatColombiaDateLabel } from '@/utils/colombiaTime';
 import { quotedMessagePreview } from '@/utils/whatsappCoexStub';
 import type { WhatsAppTagFolder } from '@/types/whatsapp';
 import TagListGrouped from './TagListGrouped';
@@ -161,11 +162,7 @@ interface ChatAreaProps {
 function groupMessagesByDate(messages: WhatsAppMessage[]): Map<string, WhatsAppMessage[]> {
   const groups = new Map<string, WhatsAppMessage[]>();
   for (const msg of messages) {
-    const dateKey = msg.createdAt.toLocaleDateString('es-CO', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    });
+    const dateKey = formatColombiaDateLabel(msg.createdAt);
     if (!groups.has(dateKey)) groups.set(dateKey, []);
     groups.get(dateKey)!.push(msg);
   }

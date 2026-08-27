@@ -1,26 +1,12 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { isUsableName } from '../_shared/contactDisplayName.ts';
 import { clientFromApiKey, getServiceClient } from '../_shared/supabase.ts';
-import {
-  buildStoragePath,
-  downloadWhatsAppMediaFromMeta,
-  getWhatsAppAccessToken,
-  OUTBOUND_META_SIGNED_URL_EXPIRES_SECONDS,
-  persistToWhatsAppBucket,
-  WhatsAppMediaError,
-} from '../_shared/whatsappMediaStorage.ts';
+import { hydratePersistedMessageMedia } from '../_shared/whatsappMediaHydrate.ts';
+import { getMessageContent } from '../_shared/whatsappMessageContent.ts';
 import { UNARCHIVE_CONVERSATION_PATCH } from '../_shared/whatsappOutbound.ts';
 import { directoryPhoneKey } from '../_shared/directoryPhone.ts';
 import { REACTIVATION_SEQUENCE } from '../_shared/reactivationCadence.ts';
 import { applyColdFailureTag, removeColdFailureTags } from '../_shared/coldAppUserOutreach.ts';
-import { scheduleBackgroundWork } from '../_shared/edgeBackground.ts';
-import {
-  inboundAudioNeedsAutoTranscription,
-} from '../_shared/inboxAiMediaLimits.ts';
-import {
-  isVoiceTranscriptionEnabled,
-  transcribeInboundAudioById,
-} from '../_shared/transcribeInboundAudio.ts';
 import { conversationStableKey } from '../_shared/whatsappLines.ts';
 import {
   persistCommercialOrphanStatus,
@@ -149,170 +135,6 @@ function getContactName(contacts: unknown[], senderPhone: string): string | null
   }
 
   return null;
-}
-
-function getMessageContent(message: JsonRecord): {
-  messageBody: string | null;
-  mediaType: string | null;
-  mediaId: string | null;
-  caption: string | null;
-  mimeType: string | null;
-  filename: string | null;
-  location: JsonRecord | null;
-  contacts: unknown[] | null;
-  reactionTo: string | null;
-  reactionRemoved: boolean;
-  isVoiceNote: boolean;
-} {
-  const type = getString(message.type) || 'unknown';
-
-  if (type === 'text') {
-    const text = asRecord(message.text);
-    return {
-      messageBody: getString(text.body) || null,
-      mediaType: null,
-      mediaId: null,
-      caption: null,
-      mimeType: null,
-      filename: null,
-      location: null,
-      contacts: null,
-      reactionTo: null,
-      reactionRemoved: false,
-      isVoiceNote: false,
-    };
-  }
-
-  if (type === 'location') {
-    const location = asRecord(message.location);
-    return {
-      messageBody: getString(location.name) || getString(location.address) || '[ubicación]',
-      mediaType: null,
-      mediaId: null,
-      caption: null,
-      mimeType: null,
-      filename: null,
-      location,
-      contacts: null,
-      reactionTo: null,
-      reactionRemoved: false,
-      isVoiceNote: false,
-    };
-  }
-
-  if (type === 'contacts') {
-    const contacts = asArray(message.contacts);
-    return {
-      messageBody: '[contacto]',
-      mediaType: null,
-      mediaId: null,
-      caption: null,
-      mimeType: null,
-      filename: null,
-      location: null,
-      contacts,
-      reactionTo: null,
-      reactionRemoved: false,
-      isVoiceNote: false,
-    };
-  }
-
-  if (type === 'reaction') {
-    const reaction = asRecord(message.reaction);
-    const emoji = getString(reaction.emoji);
-    return {
-      messageBody: emoji,
-      mediaType: null,
-      mediaId: null,
-      caption: null,
-      mimeType: null,
-      filename: null,
-      location: null,
-      contacts: null,
-      reactionTo: getString(reaction.message_id) || null,
-      reactionRemoved: emoji === '',
-      isVoiceNote: false,
-    };
-  }
-
-  const supportedMediaTypes = new Set(['image', 'audio', 'video', 'document', 'sticker']);
-  if (!supportedMediaTypes.has(type)) {
-    return {
-      messageBody: `[${type}]`,
-      mediaType: null,
-      mediaId: null,
-      caption: null,
-      mimeType: null,
-      filename: null,
-      location: null,
-      contacts: null,
-      reactionTo: null,
-      reactionRemoved: false,
-      isVoiceNote: false,
-    };
-  }
-
-  const media = asRecord(message[type]);
-  const caption = getString(media.caption) || null;
-  const filename = getString(media.filename) || null;
-
-  return {
-    messageBody: caption || filename || `[${type}]`,
-    mediaType: type,
-    mediaId: getString(media.id) || null,
-    caption,
-    mimeType: getString(media.mime_type) || null,
-    filename,
-    location: null,
-    contacts: null,
-    reactionTo: null,
-    reactionRemoved: false,
-    isVoiceNote: type === 'audio' && media.voice === true,
-  };
-}
-
-async function persistInboundMedia(params: {
-  supabase: ReturnType<typeof getServiceClient>;
-  mediaId: string;
-  mimeType: string | null;
-  stableKey: string;
-}): Promise<{ storagePath: string | null; storageUrl: string | null; fileSize: number | null; sha256: string | null }> {
-  if (!getWhatsAppAccessToken()) {
-    console.error('[on-whatsapp-webhook] persistInboundMedia: WHATSAPP_ACCESS_TOKEN ausente', {
-      mediaId: params.mediaId,
-    });
-    return { storagePath: null, storageUrl: null, fileSize: null, sha256: null };
-  }
-
-  try {
-    const { bytes, mimeType } = await downloadWhatsAppMediaFromMeta(params.mediaId);
-    const resolvedMimeType = mimeType || params.mimeType || 'application/octet-stream';
-    const storagePath = buildStoragePath(params.stableKey, params.mediaId, resolvedMimeType);
-    const persisted = await persistToWhatsAppBucket(
-      params.supabase,
-      bytes,
-      storagePath,
-      resolvedMimeType,
-      OUTBOUND_META_SIGNED_URL_EXPIRES_SECONDS,
-    );
-    return {
-      storagePath: persisted.storagePath,
-      storageUrl: persisted.signedUrl,
-      fileSize: persisted.fileSize,
-      sha256: persisted.sha256,
-    };
-  } catch (error) {
-    const details =
-      error instanceof WhatsAppMediaError
-        ? { code: error.code, statusCode: error.statusCode, message: error.message }
-        : { message: String(error) };
-    console.error('[on-whatsapp-webhook] persistInboundMedia failed', {
-      mediaId: params.mediaId,
-      stableKey: params.stableKey,
-      ...details,
-    });
-    return { storagePath: null, storageUrl: null, fileSize: null, sha256: null };
-  }
 }
 
 async function remapLidConversationToPhone(params: {
@@ -547,74 +369,14 @@ async function processInboundMessage(params: {
   if (insertError && isUniqueViolation(insertError)) return 'duplicate';
   if (insertError) throw insertError;
 
-  let storagePath: string | null = null;
-  let storageUrl: string | null = null;
-  let mediaFileSize: number | null = null;
-  let mediaSha256: string | null = null;
-  if (content.mediaId) {
-    const persisted = await persistInboundMedia({
-      supabase: params.supabase,
-      mediaId: content.mediaId,
-      mimeType: content.mimeType,
-      stableKey,
-    });
-    storagePath = persisted.storagePath;
-    storageUrl = persisted.storageUrl;
-    mediaFileSize = persisted.fileSize;
-    mediaSha256 = persisted.sha256;
-
-    if (storagePath && insertedMessage?.id) {
-      const { error: mediaUpdateError } = await params.supabase
-        .from('whatsapp_message_log')
-        .update({
-          storage_path: storagePath,
-          storage_url: storageUrl,
-          media_url: storageUrl,
-          mime_type: content.mimeType,
-          size_bytes: mediaFileSize,
-        })
-        .eq('id', insertedMessage.id);
-      if (mediaUpdateError) {
-        console.error('[on-whatsapp-webhook] message media update failed', {
-          messageLogId: insertedMessage.id,
-          mediaId: content.mediaId,
-          error: mediaUpdateError,
-        });
-      }
-    }
-  }
-
-  if (content.mediaId && storagePath && insertedMessage?.id) {
-    await params.supabase.from('whatsapp_media_assets').insert({
-      message_log_id: insertedMessage.id,
-      conversation_stable_key: stableKey,
-      bucket_id: 'whatsapp-media',
-      storage_path: storagePath,
-      media_id: content.mediaId,
-      mime_type: content.mimeType,
-      size_bytes: mediaFileSize,
-      sha256: mediaSha256,
-    });
-  }
-
-  const insertedMessageId = insertedMessage?.id ?? null;
-  if (
-    inboundAudioNeedsAutoTranscription({
-      mediaType: content.mediaType,
-      messageLogId: insertedMessageId,
-      mediaId: content.mediaId,
-    }) &&
-    isVoiceTranscriptionEnabled() &&
-    insertedMessageId
-  ) {
-    await params.supabase.from('whatsapp_message_log').update({
-      voice_transcription_status: 'pending',
-    }).eq('id', insertedMessageId);
-    scheduleBackgroundWork(
-      transcribeInboundAudioById(params.supabase, insertedMessageId),
-      'auto-stt',
-    );
-  }
+  await hydratePersistedMessageMedia({
+    supabase: params.supabase,
+    messageLogId: insertedMessage?.id ?? null,
+    stableKey,
+    mediaId: content.mediaId,
+    mediaType: content.mediaType,
+    mimeType: content.mimeType,
+  });
 
   // Actualiza directorio: last_response_at + opt-out por "PARAR".
   // LID threads have no phone; the directory trigger already no-ops without one.

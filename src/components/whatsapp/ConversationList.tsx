@@ -80,6 +80,7 @@ import {
 } from '@/constants/inboxCategories';
 import { useLongPress } from '@/hooks/useLongPress';
 import { coloredChipSx } from '@/utils/coloredChipStyles';
+import { formatRelativeColombiaTime } from '@/utils/colombiaTime';
 import { conversationPreviewText } from '@/utils/whatsappCoexStub';
 
 /** Diff applied to each selected conversation: add new tags, remove deselected common tags. */
@@ -162,15 +163,7 @@ interface ConversationListProps {
 }
 
 function formatRelativeTime(date?: Date): string {
-  if (!date) return '';
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-  if (diffDays === 0) return date.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
-  if (diffDays === 1) return 'Ayer';
-  if (diffDays < 7) return date.toLocaleDateString('es-CO', { weekday: 'short' });
-  return date.toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: '2-digit' });
+  return formatRelativeColombiaTime(date);
 }
 
 interface ConversationRowProps {

@@ -57,6 +57,7 @@ import {
 } from '@/services/whatsappService';
 import ClientDateText from '@/components/common/ClientDateText';
 import { WhatsAppFormattedText } from '@/utils/whatsappTextFormatting';
+import { COLOMBIA_TIME_ZONE } from '@/utils/colombiaTime';
 import {
   isCommercialOrphanStatusStub,
   quotedMessagePreview,
@@ -90,6 +91,7 @@ const mediaCache = new Map<string, { url: string; mimeType: string; cachedAt: nu
 const MESSAGE_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
   hour: '2-digit',
   minute: '2-digit',
+  timeZone: COLOMBIA_TIME_ZONE,
 };
 
 function resolveMediaErrorDisplay(params: {

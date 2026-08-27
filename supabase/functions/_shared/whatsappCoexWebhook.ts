@@ -1,6 +1,8 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { conversationStableKey, isCommercialPhoneNumberId } from './whatsappLines.ts';
 import { formatWebhookError } from './whatsappInboundIdentity.ts';
+import { hydratePersistedMessageMedia } from './whatsappMediaHydrate.ts';
+import { getMessageContent, messageLogContentFields } from './whatsappMessageContent.ts';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -71,11 +73,14 @@ function getUnixDate(value: unknown): string {
   return new Date(timestamp * 1000).toISOString();
 }
 
-function messageBody(message: JsonRecord): string | null {
-  const type = getString(message.type) || 'text';
-  if (type === 'text') return getString(asRecord(message.text).body) || null;
-  const caption = getString(asRecord(message[type]).caption);
-  return caption || `[${type}]`;
+function originalMessageIdFromEcho(message: JsonRecord, kind: 'edit' | 'revoke'): string {
+  const nested = asRecord(message[kind]);
+  return getString(nested.original_message_id) || getString(message.original_message_id);
+}
+
+function editedEchoContent(message: JsonRecord) {
+  const nested = asRecord(asRecord(message.edit).message);
+  return Object.keys(nested).length > 0 ? getMessageContent(nested) : getMessageContent(message);
 }
 
 export function shouldIgnoreBotCoexField(
@@ -138,6 +143,86 @@ export async function persistCoexMessage(params: {
   defaultDirection?: 'inbound' | 'outbound';
   incrementUnread?: boolean;
 }): Promise<'inserted' | 'updated' | 'duplicate' | 'skipped'> {
+  const createdAt = getUnixDate(params.message.timestamp);
+  const echoType = getString(params.message.type);
+
+  if (echoType === 'revoke') {
+    const originalId = originalMessageIdFromEcho(params.message, 'revoke');
+    if (!originalId) return 'skipped';
+    const { data: original, error: originalError } = await params.supabase
+      .from('whatsapp_message_log')
+      .select('id')
+      .eq('wa_message_id', originalId)
+      .maybeSingle();
+    if (originalError) throw originalError;
+    if (!original?.id) return 'skipped';
+    const { error: revokeError } = await params.supabase
+      .from('whatsapp_message_log')
+      .update({
+        hidden_from_panel: true,
+        revoked_at: createdAt,
+        revoked_reason: 'coex_echo',
+      })
+      .eq('id', original.id);
+    if (revokeError) throw revokeError;
+    return 'updated';
+  }
+
+  if (echoType === 'edit') {
+    const originalId = originalMessageIdFromEcho(params.message, 'edit');
+    if (!originalId) return 'skipped';
+    const { data: original, error: originalError } = await params.supabase
+      .from('whatsapp_message_log')
+      .select('id, conversation_stable_key, message_body')
+      .eq('wa_message_id', originalId)
+      .maybeSingle();
+    if (originalError) throw originalError;
+    if (!original?.id) return 'skipped';
+    const content = editedEchoContent(params.message);
+    const { error: editError } = await params.supabase
+      .from('whatsapp_message_log')
+      .update({
+        ...messageLogContentFields(content),
+        raw_payload: params.message,
+      })
+      .eq('id', original.id);
+    if (editError) throw editError;
+    const conversationKey = String(original.conversation_stable_key || '');
+    if (conversationKey) {
+      const { data: existingConv } = await params.supabase
+        .from('whatsapp_conversations')
+        .select('last_message_text')
+        .eq('stable_key', conversationKey)
+        .maybeSingle();
+      if (
+        !existingConv ||
+        existingConv.last_message_text === original.message_body ||
+        shouldUpgradeCoexStub(existingConv.last_message_text as string | null, content.messageBody)
+      ) {
+        await params.supabase.from('whatsapp_conversations').update({
+          last_message_text: content.messageBody,
+        }).eq('stable_key', conversationKey);
+      }
+    }
+    await hydratePersistedMessageMedia({
+      supabase: params.supabase,
+      messageLogId: String(original.id),
+      stableKey: conversationKey,
+      mediaId: content.mediaId,
+      mediaType: content.mediaType,
+      mimeType: content.mimeType,
+    });
+    return 'updated';
+  }
+
+  if (
+    params.defaultDirection === 'outbound' &&
+    !getString(params.message.to) &&
+    !params.threadCustomerPhone
+  ) {
+    return 'skipped';
+  }
+
   const parsed = parseCoexCustomerPhone(
     params.message,
     params.phoneNumberId,
@@ -156,8 +241,8 @@ export async function persistCoexMessage(params: {
 
   const direction = params.defaultDirection ?? parsed.direction;
   const stableKey = conversationStableKey(parsed.customerPhone, params.phoneNumberId);
-  const body = messageBody(params.message);
-  const createdAt = getUnixDate(params.message.timestamp);
+  const content = getMessageContent(params.message);
+  const body = content.messageBody;
 
   if (existing) {
     if (!shouldUpgradeCoexStub(existing.message_body as string | null, body)) {
@@ -166,7 +251,7 @@ export async function persistCoexMessage(params: {
     const { error: upgradeError } = await params.supabase
       .from('whatsapp_message_log')
       .update({
-        message_body: body,
+        ...messageLogContentFields(content),
         raw_payload: params.message,
         sender_type: direction === 'outbound' ? 'app' : 'user',
         direction,
@@ -190,6 +275,14 @@ export async function persistCoexMessage(params: {
         last_message_direction: direction,
       }).eq('stable_key', conversationKey);
     }
+    await hydratePersistedMessageMedia({
+      supabase: params.supabase,
+      messageLogId: String(existing.id),
+      stableKey: conversationKey,
+      mediaId: content.mediaId,
+      mediaType: content.mediaType,
+      mimeType: content.mimeType,
+    });
     return 'updated';
   }
 
@@ -218,23 +311,38 @@ export async function persistCoexMessage(params: {
     { onConflict: 'stable_key' },
   );
 
-  const { error: insertError } = await params.supabase.from('whatsapp_message_log').insert({
-    conversation_stable_key: stableKey,
-    recipient_phone: parsed.customerPhone,
-    direction,
-    sender_type: direction === 'outbound' ? 'app' : 'user',
-    message_body: body,
-    status: direction === 'outbound' ? 'sent' : 'received',
-    wa_message_id: waMessageId,
-    phone_number_id: params.phoneNumberId,
-    hidden_from_panel: false,
-    raw_payload: params.message,
-    created_at: createdAt,
-  });
+  const { data: insertedMessage, error: insertError } = await params.supabase
+    .from('whatsapp_message_log')
+    .insert({
+      conversation_stable_key: stableKey,
+      recipient_phone: parsed.customerPhone,
+      direction,
+      sender_type: direction === 'outbound' ? 'app' : 'user',
+      ...messageLogContentFields(content),
+      media_url: null,
+      storage_url: null,
+      storage_path: null,
+      status: direction === 'outbound' ? 'sent' : 'received',
+      wa_message_id: waMessageId,
+      phone_number_id: params.phoneNumberId,
+      hidden_from_panel: false,
+      raw_payload: params.message,
+      created_at: createdAt,
+    })
+    .select('id')
+    .single();
   if (insertError && String((insertError as { code?: string }).code) === '23505') {
     return 'duplicate';
   }
   if (insertError) throw insertError;
+  await hydratePersistedMessageMedia({
+    supabase: params.supabase,
+    messageLogId: insertedMessage?.id ? String(insertedMessage.id) : null,
+    stableKey,
+    mediaId: content.mediaId,
+    mediaType: content.mediaType,
+    mimeType: content.mimeType,
+  });
   return 'inserted';
 }
 
