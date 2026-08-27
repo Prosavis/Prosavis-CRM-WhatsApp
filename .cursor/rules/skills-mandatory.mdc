@@ -27,6 +27,7 @@ Complementa `agent-vercel-supabase-waba.mdc`.
 | **WhatsApp** | MCP `prosavis-waba` (no duplicar en skill) |
 | **Operar inbox / WhatsApp** | `crm-inbox-operator` + `publicidad/docs/messaging/` + playbooks |
 | **Directorio unificado** | `crm_directory` en Supabase — SSOT de contactos |
+| **Clientes Limpieza / ficha / citas / notas** | `clientes-limpieza` + `prosavis-firebase/docs/context/clientes-escritorio.md` |
 
 ## MCPs
 
