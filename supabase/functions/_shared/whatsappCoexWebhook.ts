@@ -48,12 +48,28 @@ export function shouldIgnoreBotCoexField(
   return !isCommercialPhoneNumberId(phoneNumberId);
 }
 
-export function parseCoexCustomerPhone(message: JsonRecord, businessPhoneNumberId: string): {
+export function parseCoexCustomerPhone(
+  message: JsonRecord,
+  businessPhoneNumberId: string,
+  threadCustomerPhone?: string,
+): {
   customerPhone: string;
   direction: 'inbound' | 'outbound';
 } | null {
   const from = getString(message.from);
   const to = getString(message.to);
+  const threadCustomer = (threadCustomerPhone ?? '').trim();
+
+  if (threadCustomer) {
+    if (message.from_me === true || to === threadCustomer) {
+      return { customerPhone: threadCustomer, direction: 'outbound' };
+    }
+    if (message.from_me === false || from === threadCustomer) {
+      return { customerPhone: threadCustomer, direction: 'inbound' };
+    }
+    return { customerPhone: threadCustomer, direction: 'inbound' };
+  }
+
   if (!from && !to) return null;
   // Echoes from the Business App are outbound: from=business, to=customer.
   if (to && from && to !== from) {
@@ -69,10 +85,15 @@ export async function persistCoexMessage(params: {
   supabase: SupabaseClient;
   message: JsonRecord;
   phoneNumberId: string;
+  threadCustomerPhone?: string;
   defaultDirection?: 'inbound' | 'outbound';
   incrementUnread?: boolean;
 }): Promise<'inserted' | 'duplicate' | 'skipped'> {
-  const parsed = parseCoexCustomerPhone(params.message, params.phoneNumberId);
+  const parsed = parseCoexCustomerPhone(
+    params.message,
+    params.phoneNumberId,
+    params.threadCustomerPhone,
+  );
   if (!parsed) return 'skipped';
   const waMessageId = getString(params.message.id);
   if (!waMessageId) return 'skipped';
@@ -179,13 +200,11 @@ export async function processHistory(params: {
       for (const raw of asArray(threadRecord.messages)) {
         try {
           const message = asRecord(raw);
-          if (threadCustomer && !getString(message.to) && !getString(message.from)) {
-            message.to = threadCustomer;
-          }
           const status = await persistCoexMessage({
             supabase: params.supabase,
             message,
             phoneNumberId,
+            threadCustomerPhone: threadCustomer || undefined,
           });
           if (status === 'inserted') result.historyMessages += 1;
           else result.skipped += 1;

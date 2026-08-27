@@ -6,6 +6,29 @@
 ALTER TABLE public.crm_directory
   ADD COLUMN IF NOT EXISTS whatsapp_commercial_conversation_id text;
 
+ALTER TABLE public.whatsapp_message_log
+  DROP CONSTRAINT IF EXISTS whatsapp_message_log_sender_type_check;
+
+ALTER TABLE public.whatsapp_message_log
+  ADD CONSTRAINT whatsapp_message_log_sender_type_check
+  CHECK (sender_type IN ('bot', 'agent', 'system', 'user', 'app'));
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM public.whatsapp_conversations
+    WHERE phone_key IS NOT NULL
+      AND phone_number_id IS NOT NULL
+    GROUP BY phone_key, phone_number_id
+    HAVING count(*) > 1
+  ) THEN
+    RAISE EXCEPTION
+      'No se puede crear uq_whatsapp_conversations_phone_key_line: existen hilos duplicados por phone_key y phone_number_id';
+  END IF;
+END
+$$;
+
 CREATE UNIQUE INDEX IF NOT EXISTS uq_whatsapp_conversations_phone_key_line
   ON public.whatsapp_conversations (phone_key, phone_number_id)
   WHERE phone_key IS NOT NULL AND phone_number_id IS NOT NULL;
@@ -23,9 +46,9 @@ AS $$
 $$;
 
 CREATE OR REPLACE FUNCTION public.sync_conversation_to_directory()
- RETURNS trigger
- LANGUAGE plpgsql
- SET search_path TO 'public', 'pg_temp'
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE
   v_phone TEXT;
@@ -36,6 +59,7 @@ DECLARE
   v_candidate TEXT;
   v_is_commercial BOOLEAN;
   v_entry JSONB;
+  v_directory_id UUID;
 BEGIN
   v_phone := COALESCE(NEW.contact_phone, NEW.phone);
   IF v_phone IS NULL THEN
@@ -85,29 +109,37 @@ BEGIN
     'last_whatsapp_message_at', NEW.last_message_at,
     'last_whatsapp_message_text', NEW.last_message_text,
     'last_whatsapp_intent', NEW.last_intent,
-    'unread_whatsapp_count', NEW.unread_count,
-    'whatsapp_assigned_to', NEW.assigned_to::text,
     'source', 'WHATSAPP',
-    'channels', jsonb_build_array('WHATSAPP'),
-    'status', v_status
+    'channels', jsonb_build_array('WHATSAPP')
   );
 
   IF v_is_commercial THEN
+    -- No names, photo, assignment, unread count or bot conversation link:
+    -- commercial activity cannot replace CRM/bot profile state.
     v_entry := v_entry || jsonb_build_object(
       'whatsapp_commercial_conversation_id', NEW.stable_key
     );
-    -- Do not send names/photos: COALESCE(incoming, existing) would overwrite
-    -- CRM/bot profile with the commercial WA push name.
   ELSE
     v_entry := v_entry || jsonb_build_object(
       'full_name', v_full_name,
       'display_name', v_display_name,
       'photo_url', NEW.contact_photo_url,
-      'whatsapp_conversation_id', NEW.stable_key
+      'whatsapp_conversation_id', NEW.stable_key,
+      'unread_whatsapp_count', NEW.unread_count,
+      'whatsapp_assigned_to', NEW.assigned_to::text,
+      'status', v_status
     );
   END IF;
 
-  PERFORM public.upsert_directory_entry(v_entry, false, false);
+  v_directory_id := public.upsert_directory_entry(v_entry, false, false);
+
+  IF v_is_commercial THEN
+    UPDATE public.crm_directory
+    SET whatsapp_commercial_conversation_id = NEW.stable_key,
+        updated_at = now()
+    WHERE id = v_directory_id
+      AND whatsapp_commercial_conversation_id IS DISTINCT FROM NEW.stable_key;
+  END IF;
 
   RETURN NEW;
 END;
@@ -124,12 +156,8 @@ DECLARE
   v_classification TEXT;
   v_phone TEXT;
   v_entry JSONB;
+  v_directory_id UUID;
 BEGIN
-  -- Commercial thread tags never replace the bot/CRM classification.
-  IF public.is_commercial_whatsapp_line(NEW.phone_number_id) THEN
-    RETURN NEW;
-  END IF;
-
   IF NEW.tag_ids IS NULL OR cardinality(NEW.tag_ids) = 0 THEN
     v_tag_names := ARRAY[]::TEXT[];
     v_classification := 'unknown';
@@ -152,6 +180,23 @@ BEGIN
     normalize_directory_phone_e164(NEW.contact_phone),
     normalize_directory_phone_e164(NEW.phone)
   );
+
+  IF public.is_commercial_whatsapp_line(NEW.phone_number_id) THEN
+    -- Union only. Never replace bot/CRM classification or profile fields.
+    v_entry := jsonb_build_object(
+      'phone', v_phone,
+      'tags', to_jsonb(COALESCE(v_tag_names, ARRAY[]::TEXT[])),
+      'source', 'WHATSAPP',
+      'channels', jsonb_build_array('WHATSAPP')
+    );
+    v_directory_id := public.upsert_directory_entry(v_entry, false, false);
+    UPDATE public.crm_directory
+    SET whatsapp_commercial_conversation_id = NEW.stable_key,
+        updated_at = now()
+    WHERE id = v_directory_id
+      AND whatsapp_commercial_conversation_id IS DISTINCT FROM NEW.stable_key;
+    RETURN NEW;
+  END IF;
 
   v_entry := jsonb_build_object(
     'whatsapp_conversation_id', NEW.stable_key,

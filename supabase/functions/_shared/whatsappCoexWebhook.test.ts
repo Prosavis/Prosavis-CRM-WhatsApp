@@ -32,3 +32,31 @@ Deno.test('app echoes resolve the customer as the recipient', () => {
   );
   assertEquals(parsed, { customerPhone: '573146283332', direction: 'outbound' });
 });
+
+Deno.test('history uses thread customer as authoritative identity for inbound', () => {
+  const parsed = parseCoexCustomerPhone(
+    {
+      from: '573146283332',
+      to: '573112121108',
+      from_me: false,
+      id: 'wamid.history.inbound',
+    },
+    COMMERCIAL_PHONE_NUMBER_ID,
+    '573146283332',
+  );
+  assertEquals(parsed, { customerPhone: '573146283332', direction: 'inbound' });
+});
+
+Deno.test('history uses thread customer as authoritative identity for outbound', () => {
+  const parsed = parseCoexCustomerPhone(
+    {
+      from: '573112121108',
+      to: '573146283332',
+      from_me: true,
+      id: 'wamid.history.outbound',
+    },
+    COMMERCIAL_PHONE_NUMBER_ID,
+    '573146283332',
+  );
+  assertEquals(parsed, { customerPhone: '573146283332', direction: 'outbound' });
+});
