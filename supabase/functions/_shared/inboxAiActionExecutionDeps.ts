@@ -13,13 +13,13 @@ import {
   ensureConversation,
   getGraphCredentials,
   isRecipientBlocked,
+  outboundConversationKey,
   persistOutboundLog,
   sendToMeta,
   updateConversationPreview,
   WHATSAPP_API_VERSION,
 } from './whatsappOutbound.ts';
 import {
-  getStableKeyFromRecipient,
   normalizePhone,
   resolveRecipient,
 } from './whatsappIdentity.ts';
@@ -179,7 +179,7 @@ export function createInboxAiActionExecutionDeps(params: {
         messageBody: displayMessageBody,
         requirePhone: true,
       });
-      const stableKey = getStableKeyFromRecipient(phone);
+      const stableKey = outboundConversationKey(phone, graph.phoneNumberId);
       const recipient = resolveRecipient(phone);
       await ensureConversation(
         supabase,

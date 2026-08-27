@@ -20,6 +20,7 @@ import {
   type PostServiceFollowUpPayload,
 } from "../_shared/postServiceAutomation.ts";
 import { getServiceClient } from "../_shared/supabase.ts";
+import { assertBotOnlyAutomation } from "../_shared/whatsappLines.ts";
 import {
   assertMetaSendEnabled,
   ensureConversation,
@@ -532,6 +533,7 @@ Deno.serve(async (req) => {
 
     assertMetaSendEnabled();
     const graph = getGraphCredentials();
+    assertBotOnlyAutomation(graph.phoneNumberId);
     const components = buildPostServiceTemplateComponents(
       payload.clientName,
       payload.serviceDate,

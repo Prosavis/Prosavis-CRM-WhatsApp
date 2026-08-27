@@ -16,6 +16,13 @@ import {
   defaultMimeForMediaType,
   type MediaType,
 } from './whatsappOutboundMedia.ts';
+import {
+  BOT_PHONE_NUMBER_ID,
+  COMMERCIAL_PHONE_NUMBER_ID,
+  conversationStableKey,
+  customerPhoneFromStableKey,
+  resolveWhatsAppLine,
+} from './whatsappLines.ts';
 
 export type { MediaType };
 export { buildOutboundMediaPayload, defaultMimeForMediaType };
@@ -122,12 +129,30 @@ export function metaErrorCode(payload: Record<string, unknown>): number | undefi
   return metaResponse?.error?.code;
 }
 
+export function outboundCustomerPhone(to: string): string {
+  const customer = customerPhoneFromStableKey(to);
+  const recipient = resolveRecipient(customer);
+  return recipient.phone ? normalizePhone(recipient.phone) : getStableKeyFromRecipient(customer);
+}
+
+export function outboundConversationKey(to: string, phoneNumberId?: string): string {
+  return conversationStableKey(outboundCustomerPhone(to), phoneNumberId);
+}
+
 export function getGraphCredentials(phoneNumberIdOverride?: string): GraphCredentials {
-  const accessToken = Deno.env.get('WHATSAPP_ACCESS_TOKEN')?.trim() ?? '';
+  const line = resolveWhatsAppLine(phoneNumberIdOverride);
+  const accessToken = (
+    line === 'commercial'
+      ? (Deno.env.get('WHATSAPP_COMMERCIAL_ACCESS_TOKEN')?.trim()
+        || Deno.env.get('WHATSAPP_ACCESS_TOKEN')?.trim()
+        || '')
+      : (Deno.env.get('WHATSAPP_ACCESS_TOKEN')?.trim() ?? '')
+  );
   const phoneNumberId = (
-    phoneNumberIdOverride?.trim() ||
-    Deno.env.get('WHATSAPP_PHONE_NUMBER_ID')?.trim() ||
-    ''
+    phoneNumberIdOverride?.trim()
+    || (line === 'commercial'
+      ? (Deno.env.get('WHATSAPP_COMMERCIAL_PHONE_NUMBER_ID')?.trim() || COMMERCIAL_PHONE_NUMBER_ID)
+      : (Deno.env.get('WHATSAPP_PHONE_NUMBER_ID')?.trim() || BOT_PHONE_NUMBER_ID))
   );
   if (!accessToken || !phoneNumberId) {
     throw new Error('Credenciales WhatsApp incompletas (WHATSAPP_ACCESS_TOKEN y WHATSAPP_PHONE_NUMBER_ID).');
@@ -457,7 +482,7 @@ export async function ensureConversation(
 
   const row: Record<string, unknown> = {
     stable_key: stableKey,
-    phone: stableKey,
+    phone: recipientPhone,
     contact_phone: recipientPhone,
     phone_number_id: phoneNumberId || null,
     state: 'active',
@@ -558,9 +583,9 @@ export async function sendWhatsAppMediaOutbound(
     return { success: false, error: 'recipient_blocked' };
   }
 
-  const stableKey = getStableKeyFromRecipient(params.to);
-  const recipient = resolveRecipient(params.to);
-  const recipientPhone = recipient.phone ? normalizePhone(recipient.phone) : stableKey;
+  const recipientPhone = outboundCustomerPhone(params.to);
+  const stableKey = outboundConversationKey(recipientPhone, graph.phoneNumberId);
+  const recipient = resolveRecipient(recipientPhone);
 
   await ensureConversation(supabase, stableKey, recipientPhone, graph.phoneNumberId);
 
@@ -585,7 +610,7 @@ export async function sendWhatsAppMediaOutbound(
   }
 
   const metaResult = await sendToMeta({
-    to: params.to,
+    to: recipientPhone,
     phoneNumberId: graph.phoneNumberId,
     accessToken: graph.accessToken,
     ...(mediaId ? { mediaId } : { mediaUrl: mediaUrlForLog }),
@@ -669,9 +694,9 @@ export async function sendTextOutbound(
     return { success: false, error: 'recipient_blocked' };
   }
 
-  const stableKey = getStableKeyFromRecipient(params.to);
-  const recipient = resolveRecipient(params.to);
-  const recipientPhone = recipient.phone ? normalizePhone(recipient.phone) : stableKey;
+  const recipientPhone = outboundCustomerPhone(params.to);
+  const stableKey = outboundConversationKey(recipientPhone, graph.phoneNumberId);
+  const recipient = resolveRecipient(recipientPhone);
 
   await ensureConversation(
     supabase,
@@ -682,7 +707,7 @@ export async function sendTextOutbound(
   );
 
   const metaResult = await sendToMeta({
-    to: params.to,
+    to: recipientPhone,
     phoneNumberId: graph.phoneNumberId,
     accessToken: graph.accessToken,
     messageBody: params.text,

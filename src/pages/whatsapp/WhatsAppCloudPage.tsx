@@ -9,6 +9,7 @@ import MetricsTab, {
   PURGE_WHATSAPP_LOG_CONFIRM_PHRASE,
 } from '@/components/whatsapp/metrics/MetricsTab';
 import { WHATSAPP_CLOUD_PRODUCTION } from '@/constants/whatsappCloudAccounts';
+import type { WhatsAppLineFilter } from '@/utils/whatsappLines';
 import useSoundEffects from '@/hooks/useSoundEffects';
 import { ensureWhatsAppConversationFromLead } from '@/services/whatsappService';
 import { directoryService } from '@/services/directoryService';
@@ -106,6 +107,21 @@ const WhatsAppCloudPage: React.FC = () => {
 
   const focusPhone = searchParams.get('focusPhone') || undefined;
   const focusConversation = searchParams.get('conversation') || undefined;
+  const lineParam = searchParams.get('line');
+  const lineFilter: WhatsAppLineFilter =
+    lineParam === 'commercial' || lineParam === 'all' ? lineParam : 'bot';
+
+  const handleLineFilterChange = useCallback((filter: WhatsAppLineFilter) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (filter === 'bot') next.delete('line');
+        else next.set('line', filter);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
 
   const handleOpenLeadInInbox = useCallback(async (phone: string, name?: string) => {
     let conversationId: string | undefined;
@@ -227,6 +243,8 @@ const WhatsAppCloudPage: React.FC = () => {
           <WhatsAppLayout
             phoneNumberId={phoneNumberId}
             wabaId={wabaId}
+            lineFilter={lineFilter}
+            onLineFilterChange={handleLineFilterChange}
             focusPhone={focusPhone}
             onClearFocusPhone={handleClearFocusPhone}
             focusConversation={focusConversation}

@@ -3,6 +3,7 @@
 // Chunks reanudables (delay 5–10s) para no chocar el límite ~150s del worker.
 
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
+import { assertBotOnlyAutomation } from '../_shared/whatsappLines.ts';
 import { getServiceClient, requireCrmAdmin } from '../_shared/supabase.ts';
 import {
   applyColdFailureTag,
@@ -389,6 +390,7 @@ Deno.serve(async (req) => {
       };
 
       getGraphCredentials(payload.phoneNumberId);
+      assertBotOnlyAutomation(payload.phoneNumberId);
 
       const plans = await loadEligiblePlans(supabase, pilotLimit);
       if (!plans.length) {
@@ -473,6 +475,7 @@ Deno.serve(async (req) => {
     }
 
     const graph = getGraphCredentials(payload.phoneNumberId);
+    assertBotOnlyAutomation(graph.phoneNumberId);
 
     const { data: chunkData, error: chunkErr } = await supabase
       .from('whatsapp_broadcast_recipients')

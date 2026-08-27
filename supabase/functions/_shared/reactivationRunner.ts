@@ -34,6 +34,7 @@ import {
   sendToMeta,
   updateConversationPreview,
 } from './whatsappOutbound.ts';
+import { assertBotOnlyAutomation } from './whatsappLines.ts';
 import {
   getStableKeyFromRecipient,
   normalizePhone,
@@ -309,6 +310,7 @@ async function sendReactivationTemplate(params: {
 
   assertMetaSendEnabled();
   const graph = getGraphCredentials();
+  assertBotOnlyAutomation(graph.phoneNumberId);
   const phone = normalizePhone(params.phone);
   const components = buildTemplateComponents(params.clientName, step);
   const messageBody = buildDisplayBody(params.clientName, step);

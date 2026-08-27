@@ -12,6 +12,7 @@
 
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { getServiceClient } from '../_shared/supabase.ts';
+import { assertBotOnlyAutomation } from '../_shared/whatsappLines.ts';
 import { contactNameForReminderRecipient } from '../_shared/contactDisplayName.ts';
 import {
   assertMetaSendEnabled,
@@ -302,6 +303,7 @@ Deno.serve(async (req) => {
     // ── 5. Enviar vía Meta ──
     const displayBody = buildDisplayBody(templateName, recipientType, appointmentData, mapsLink);
     const graph = getGraphCredentials();
+    assertBotOnlyAutomation(graph.phoneNumberId);
 
     const metaResult = await sendToMeta({
       to: phone,

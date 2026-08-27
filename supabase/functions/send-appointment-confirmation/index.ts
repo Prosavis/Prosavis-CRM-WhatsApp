@@ -1,5 +1,6 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { getServiceClient } from '../_shared/supabase.ts';
+import { assertBotOnlyAutomation } from '../_shared/whatsappLines.ts';
 import { verifyAppointmentOwnership, verifyFirebaseToken } from '../_shared/firebaseAuth.ts';
 import {
   assertMetaSendEnabled,
@@ -126,6 +127,7 @@ Deno.serve(async (req) => {
 
     // 5. Enviar vía la WABA central y registrar en el log del CRM.
     const graph = getGraphCredentials();
+    assertBotOnlyAutomation(graph.phoneNumberId);
     const metaResult = await sendToMeta({
       to: phone,
       phoneNumberId: graph.phoneNumberId,

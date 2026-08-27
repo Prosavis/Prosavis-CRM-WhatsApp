@@ -7,11 +7,12 @@ import {
   formatError,
   getGraphCredentials,
   isRecipientBlocked,
+  outboundConversationKey,
   persistOutboundLog,
   sendToMeta,
   updateConversationPreview,
 } from '../_shared/whatsappOutbound.ts';
-import { getStableKeyFromRecipient, normalizePhone, resolveRecipient } from '../_shared/whatsappIdentity.ts';
+import { normalizePhone, resolveRecipient } from '../_shared/whatsappIdentity.ts';
 
 function validateE164ishPhone(input: string): string {
   const normalized = normalizePhone(input);
@@ -65,7 +66,7 @@ Deno.serve(async (req) => {
       requirePhone: true,
     });
 
-    const stableKey = getStableKeyFromRecipient(phone);
+    const stableKey = outboundConversationKey(phone, graph.phoneNumberId);
     const recipient = resolveRecipient(phone);
 
     await ensureConversation(supabase, stableKey, normalizePhone(phone), graph.phoneNumberId);

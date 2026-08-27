@@ -61,6 +61,7 @@ import {
 } from '@/hooks/useDirectoryContactMeta';
 import { pickContactPhotoUrl } from '@/utils/contactAvatar';
 import { resolveContactDisplayName, shouldSyncContactNameFromDirectory } from '@/utils/contactDisplayName';
+import { isCommercialPhoneNumberId, isCommercialStableKey } from '@/utils/whatsappLines';
 import { patchWhatsAppConversationAdmin } from '@/services/whatsappService';
 import {
   conversationMatchesInboxCategory,
@@ -270,6 +271,13 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
               <Typography variant="body1" fontWeight={isUnread ? 600 : 400} noWrap>
                 {rowName}
               </Typography>
+              {(isCommercialPhoneNumberId(conv.phoneNumberId) || isCommercialStableKey(conv.id)) && (
+                <Chip
+                  label="311"
+                  size="small"
+                  sx={{ height: 18, fontSize: '0.65rem', ml: 0.5, flexShrink: 0 }}
+                />
+              )}
             </Box>
             <Typography
               variant="caption"

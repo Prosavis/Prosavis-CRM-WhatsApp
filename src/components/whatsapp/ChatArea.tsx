@@ -115,6 +115,7 @@ import {
 import { coloredChipSx } from '@/utils/coloredChipStyles';
 import { prepareWhatsAppSticker } from '@/utils/prepareWhatsAppSticker';
 import { summarizePeerPresences } from '@/utils/whatsappAdminPresence';
+import { customerPhoneFromStableKey } from '@/utils/whatsappLines';
 import type { WhatsAppTagFolder } from '@/types/whatsapp';
 import TagListGrouped from './TagListGrouped';
 import type { MetaSessionWindow } from '../../../supabase/functions/_shared/metaSessionWindow';
@@ -295,7 +296,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-  const stableKey = conversation.phone || conversation.id;
+  const conversationKey = conversation.id;
+  const customerPhone =
+    conversation.contactPhone || conversation.phone || customerPhoneFromStableKey(conversation.id);
+  const sendPhoneNumberId = conversation.phoneNumberId || phoneNumberId;
+  const stableKey = conversationKey;
   const messages = useMemo(
     () =>
       selectConversationMessages(
@@ -519,7 +524,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     async (text: string) => {
       const replyId = replyToMessage?.waMessageId;
       setReplyToMessage(null);
-      await sendMessage(stableKey, text, phoneNumberId, replyId);
+      await sendMessage(customerPhone, text, sendPhoneNumberId, replyId);
 
       const openLogId = suggestionLogIdRef.current;
       if (openLogId && text.trim()) {
@@ -539,7 +544,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         }
       }
     },
-    [stableKey, phoneNumberId, replyToMessage],
+    [customerPhone, sendPhoneNumberId, replyToMessage],
   );
 
   const handleSendMedia = useCallback(
@@ -562,17 +567,17 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
       // La URL pública se usa como fallback; la Edge Function crea su propio signed URL
       // desde storagePath usando service_role, por lo que incluso si url está vacío funciona.
-      await sendMedia(stableKey, mediaType, url || `wa://${storagePath}`, {
+      await sendMedia(customerPhone, mediaType, url || `wa://${storagePath}`, {
         caption,
         storagePath,
         mimeType: file.type || undefined,
         sizeBytes: file.size,
         ...(mediaType === 'document' ? { filename: file.name } : {}),
-        ...(phoneNumberId ? { phoneNumberId } : {}),
+        ...(sendPhoneNumberId ? { phoneNumberId: sendPhoneNumberId } : {}),
         ...(replyId ? { replyToWaMessageId: replyId } : {}),
       });
     },
-    [stableKey, phoneNumberId, replyToMessage],
+    [customerPhone, sendPhoneNumberId, replyToMessage],
   );
 
   const handleUploadSticker = useCallback(async (
@@ -604,15 +609,15 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const handleSendSticker = useCallback(async (sticker: WhatsAppSticker) => {
     const replyId = replyToMessage?.waMessageId;
     setReplyToMessage(null);
-    await sendMedia(stableKey, 'sticker', sticker.downloadUrl, {
-      ...(phoneNumberId ? { phoneNumberId } : {}),
+    await sendMedia(customerPhone, 'sticker', sticker.downloadUrl, {
+      ...(sendPhoneNumberId ? { phoneNumberId: sendPhoneNumberId } : {}),
       ...(replyId ? { replyToWaMessageId: replyId } : {}),
       storagePath: sticker.storagePath,
       mimeType: sticker.mimeType,
       sizeBytes: sticker.sizeBytes,
       isAnimatedSticker: sticker.isAnimated === true,
     });
-  }, [phoneNumberId, replyToMessage, stableKey]);
+  }, [sendPhoneNumberId, replyToMessage, customerPhone]);
 
   const handleSendMediaBatch = useCallback(
     async (
@@ -669,8 +674,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       setReplyToMessage(null);
 
       const result = await sendMediaBatch({
-        to: stableKey,
-        phoneNumberId,
+        to: customerPhone,
+        phoneNumberId: sendPhoneNumberId,
         caption,
         replyToWaMessageId: replyId,
         clientBatchId,
@@ -694,7 +699,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
       return { failedClientAttachmentIds: [...failedIds] };
     },
-    [phoneNumberId, replyToMessage, stableKey],
+    [sendPhoneNumberId, replyToMessage, customerPhone],
   );
 
   const handleRequestSuggestion = useCallback(async (forceGenerate = false, extraContext?: string) => {
@@ -1171,10 +1176,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       delete reactionTimersRef.current[targetWaMessageId];
       try {
         await sendReaction({
-          to: stableKey,
+          to: customerPhone,
           reactToWaMessageId: targetWaMessageId,
           emoji,
-          phoneNumberId,
+          phoneNumberId: sendPhoneNumberId,
           clientRequestId,
         });
         setPendingReactions((prev) => {
@@ -1649,7 +1654,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           onInsertPaymentLink={insertPaymentLinkInComposer}
           wabaId={wabaId}
           phoneNumberId={phoneNumberId}
-          recipientPhone={conversation.contactPhone || conversation.phone || stableKey}
+          recipientPhone={customerPhone}
           conversationDisplayName={displayName}
           lastInboundAt={lastInboundAt}
           lastMessageDirection={conversation.lastMessageDirection}

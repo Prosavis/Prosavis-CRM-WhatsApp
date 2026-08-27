@@ -16,6 +16,7 @@
 //  exactamente quién recibió el mensaje y quién quedó pendiente/fallido.
 
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
+import { assertBotOnlyAutomation } from '../_shared/whatsappLines.ts';
 import { requireCrmAdmin } from '../_shared/supabase.ts';
 import {
   assertMetaSendEnabled,
@@ -227,6 +228,7 @@ Deno.serve(async (req) => {
 
       // Validamos credenciales antes de crear el job (evita jobs huérfanos).
       getGraphCredentials(payload.phoneNumberId);
+      assertBotOnlyAutomation(payload.phoneNumberId);
 
       const { data: job, error: jobError } = await supabase
         .from('whatsapp_broadcast_jobs')
@@ -297,6 +299,7 @@ Deno.serve(async (req) => {
     }
 
     const graph = getGraphCredentials(payload.phoneNumberId);
+    assertBotOnlyAutomation(graph.phoneNumberId);
 
     // ── Procesar un lote de pendientes (con tope de tiempo) ──────────────────
     const { data: chunkData, error: chunkErr } = await supabase

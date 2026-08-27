@@ -858,7 +858,11 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.25 }}>
               <SmartToyIcon sx={{ fontSize: 14, color: '#667781', mr: 0.5 }} />
               <Typography variant="caption" sx={{ color: '#667781', fontWeight: 500 }}>
-                {message.senderType === 'bot' ? 'Bot' : 'Sistema'}
+                {message.senderType === 'app'
+                  ? 'App (Francy)'
+                  : message.senderType === 'bot'
+                    ? 'Bot'
+                    : 'Sistema'}
               </Typography>
             </Box>
           )}

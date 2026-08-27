@@ -32,7 +32,7 @@ export interface WhatsAppMessage {
   recipientPhone?: string;
   recipientBsuid?: string;
   direction: 'inbound' | 'outbound';
-  senderType: 'bot' | 'agent' | 'system' | 'user';
+  senderType: 'bot' | 'agent' | 'system' | 'user' | 'app';
   agentUid?: string;
   messageBody?: string;
   mediaType?: 'image' | 'audio' | 'video' | 'document' | 'sticker';

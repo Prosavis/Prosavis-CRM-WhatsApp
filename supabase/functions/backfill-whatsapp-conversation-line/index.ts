@@ -1,5 +1,6 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { requireCrmAdmin } from '../_shared/supabase.ts';
+import { isCommercialPhoneNumberId } from '../_shared/whatsappLines.ts';
 
 /**
  * Repara conversaciones huérfanas sin phone_number_id (invisibles en el inbox
@@ -24,6 +25,15 @@ Deno.serve(async (req) => {
     if (!phoneNumberId) {
       return jsonResponse(
         { error: 'Falta phoneNumberId (body o WHATSAPP_PHONE_NUMBER_ID).' },
+        400,
+      );
+    }
+
+    if (isCommercialPhoneNumberId(phoneNumberId)) {
+      return jsonResponse(
+        {
+          error: 'El backfill de huérfanos solo asigna la línea bot. No se puede asignar al comercial.',
+        },
         400,
       );
     }

@@ -21,6 +21,12 @@ import {
   isVoiceTranscriptionEnabled,
   transcribeInboundAudioById,
 } from '../_shared/transcribeInboundAudio.ts';
+import { conversationStableKey } from '../_shared/whatsappLines.ts';
+import {
+  processHistory,
+  processSmbAppStateSync,
+  processSmbMessageEchoes,
+} from '../_shared/whatsappCoexWebhook.ts';
 
 const encoder = new TextEncoder();
 type JsonRecord = Record<string, unknown>;
@@ -29,6 +35,9 @@ interface ProcessingResult {
   inboundMessages: number;
   statuses: number;
   skippedDuplicates: number;
+  coexEchoes: number;
+  coexHistory: number;
+  coexContacts: number;
   errors: string[];
 }
 
@@ -316,6 +325,7 @@ async function processInboundMessage(params: {
 
   const metadata = asRecord(params.value.metadata);
   const phoneNumberId = getString(metadata.phone_number_id) || null;
+  const stableKey = conversationStableKey(senderPhone, phoneNumberId);
   const contactName = getContactName(params.contacts, senderPhone);
   const content = getMessageContent(params.message);
   const createdAt = getUnixDate(params.message.timestamp);
@@ -323,7 +333,7 @@ async function processInboundMessage(params: {
   const { data: existingConversation, error: conversationReadError } = await params.supabase
     .from('whatsapp_conversations')
     .select('unread_count, contact_name_locked')
-    .eq('stable_key', senderPhone)
+    .eq('stable_key', stableKey)
     .maybeSingle();
 
   if (conversationReadError) throw conversationReadError;
@@ -338,7 +348,7 @@ async function processInboundMessage(params: {
   const isNameLocked = existingConversation?.contact_name_locked === true;
 
   const conversationPatch: Record<string, unknown> = {
-    stable_key: senderPhone,
+    stable_key: stableKey,
     phone: senderPhone,
     state: 'active',
     contact_phone: senderPhone,
@@ -367,7 +377,7 @@ async function processInboundMessage(params: {
   const { data: insertedMessage, error: insertError } = await params.supabase
     .from('whatsapp_message_log')
     .insert({
-      conversation_stable_key: senderPhone,
+      conversation_stable_key: stableKey,
       recipient_phone: senderPhone,
       direction: 'inbound',
       sender_type: 'user',
@@ -406,7 +416,7 @@ async function processInboundMessage(params: {
       supabase: params.supabase,
       mediaId: content.mediaId,
       mimeType: content.mimeType,
-      stableKey: senderPhone,
+      stableKey,
     });
     storagePath = persisted.storagePath;
     storageUrl = persisted.storageUrl;
@@ -437,7 +447,7 @@ async function processInboundMessage(params: {
   if (content.mediaId && storagePath && insertedMessage?.id) {
     await params.supabase.from('whatsapp_media_assets').insert({
       message_log_id: insertedMessage.id,
-      conversation_stable_key: senderPhone,
+      conversation_stable_key: stableKey,
       bucket_id: 'whatsapp-media',
       storage_path: storagePath,
       media_id: content.mediaId,
@@ -650,13 +660,40 @@ async function processPayload(
     inboundMessages: 0,
     statuses: 0,
     skippedDuplicates: 0,
+    coexEchoes: 0,
+    coexHistory: 0,
+    coexContacts: 0,
     errors: [],
   };
 
   for (const entry of asArray(payload.entry)) {
     for (const change of asArray(asRecord(entry).changes)) {
-      const value = asRecord(asRecord(change).value);
+      const changeRecord = asRecord(change);
+      const field = getString(changeRecord.field) || 'messages';
+      const value = asRecord(changeRecord.value);
       const contacts = asArray(value.contacts);
+
+      if (field === 'smb_message_echoes') {
+        const coex = await processSmbMessageEchoes({ supabase, value });
+        result.coexEchoes += coex.echoes;
+        result.skippedDuplicates += coex.skipped;
+        result.errors.push(...coex.errors);
+        continue;
+      }
+      if (field === 'history') {
+        const coex = await processHistory({ supabase, value });
+        result.coexHistory += coex.historyMessages;
+        result.skippedDuplicates += coex.skipped;
+        result.errors.push(...coex.errors);
+        continue;
+      }
+      if (field === 'smb_app_state_sync') {
+        const coex = await processSmbAppStateSync({ supabase, value });
+        result.coexContacts += coex.contacts;
+        result.skippedDuplicates += coex.skipped;
+        result.errors.push(...coex.errors);
+        continue;
+      }
 
       for (const rawMessage of asArray(value.messages)) {
         try {

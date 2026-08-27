@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Box, Snackbar, Alert, Button } from '@mui/material';
+import { Box, Snackbar, Alert, Button, ToggleButton, ToggleButtonGroup } from '@mui/material';
 import { alpha, useTheme } from '@mui/material/styles';
 import ConversationList from './ConversationList';
 import ChatArea from './ChatArea';
@@ -25,6 +25,8 @@ import {
   getInboxCategorySettings,
   DELETE_WHATSAPP_CONVERSATION_CONFIRM_PHRASE,
   backfillWhatsAppConversationLine,
+  fetchConversationByStableKey,
+  type FetchConversationsOptions,
   type WhatsAppConversation,
   type WhatsAppTag,
   type WhatsAppTagFolder,
@@ -66,6 +68,15 @@ function resolveAdminDisplayName(
 }
 
 import { resolveContactDisplayName } from '@/utils/contactDisplayName';
+import {
+  BOT_PHONE_NUMBER_ID,
+  customerPhoneFromStableKey,
+  isCommercialPhoneNumberId,
+  phoneNumberIdForFilter,
+  siblingConversationStableKey,
+  wabaIdForLine,
+  type WhatsAppLineFilter,
+} from '@/utils/whatsappLines';
 
 function conversationShortLabel(c: WhatsAppConversation): string {
   return resolveContactDisplayName({
@@ -117,30 +128,43 @@ function conversationMatchesFocusPhone(
 ): boolean {
   if (!focusPhone) return false;
   if (c.phone === focusPhone || c.contactPhone === focusPhone) return true;
-  const fd = digitsOnly(focusPhone);
+  const fd = digitsOnly(customerPhoneFromStableKey(focusPhone));
   if (!fd) return false;
-  return fd === digitsOnly(c.phone) || fd === digitsOnly(c.contactPhone);
+  return (
+    fd === digitsOnly(customerPhoneFromStableKey(c.id)) ||
+    fd === digitsOnly(c.phone) ||
+    fd === digitsOnly(c.contactPhone)
+  );
 }
 
-/** Match deep-link `?conversation=` against stable_key or phone digits. */
+/** Match deep-link `?conversation=` against stable_key or customer phone digits. */
 function conversationMatchesFocusKey(
   focusKey: string | undefined,
   c: WhatsAppConversation,
 ): boolean {
   if (!focusKey) return false;
   if (c.id === focusKey) return true;
-  const kd = digitsOnly(focusKey);
+  const kd = digitsOnly(customerPhoneFromStableKey(focusKey));
   if (!kd) return false;
   return (
-    kd === digitsOnly(c.id) ||
+    kd === digitsOnly(customerPhoneFromStableKey(c.id)) ||
     kd === digitsOnly(c.phone) ||
     kd === digitsOnly(c.contactPhone)
+  );
+}
+
+function preferBotConversation(matches: WhatsAppConversation[]): WhatsAppConversation | undefined {
+  return (
+    matches.find((c) => !isCommercialPhoneNumberId(c.phoneNumberId) && !c.id.includes('__')) ??
+    matches[0]
   );
 }
 
 interface WhatsAppLayoutProps {
   phoneNumberId?: string;
   wabaId?: string;
+  lineFilter?: WhatsAppLineFilter;
+  onLineFilterChange?: (filter: WhatsAppLineFilter) => void;
   focusPhone?: string;
   /** Llamar al cerrar el chat que coincidía con `focusPhone` (p. ej. quitar el query de la URL). */
   onClearFocusPhone?: () => void;
@@ -156,6 +180,8 @@ interface WhatsAppLayoutProps {
 const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   phoneNumberId,
   wabaId,
+  lineFilter = 'bot',
+  onLineFilterChange,
   focusPhone,
   onClearFocusPhone,
   focusConversation,
@@ -203,6 +229,18 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     }
   }, [playSuccess, playError]);
 
+  const listPhoneNumberId = lineFilter === 'all' ? undefined : phoneNumberIdForFilter(lineFilter);
+  const listFetchOptions = useMemo<FetchConversationsOptions>(
+    () => ({ includeOrphans: lineFilter !== 'commercial' }),
+    [lineFilter],
+  );
+  const botPhoneNumberId = phoneNumberId || BOT_PHONE_NUMBER_ID;
+  const [siblingCommercialHint, setSiblingCommercialHint] = useState<{
+    unreadCount: number;
+    lastMessageAt?: Date;
+    conversationId: string;
+  } | null>(null);
+
   const notifyAudioRef = useRef<HTMLAudioElement | null>(null);
   const inboundBaselineReadyRef = useRef(false);
   const inboundPrevSnapshotRef = useRef<Map<string, { at: number }>>(new Map());
@@ -241,16 +279,16 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     inboundPrevSnapshotRef.current = new Map();
     clearAllComposerDrafts();
     setSelectedConversation(null);
-  }, [phoneNumberId]);
+  }, [phoneNumberId, lineFilter]);
 
   const handleRetryInbox = useCallback(() => {
     setSubscriptionKey((key) => key + 1);
   }, []);
 
   useEffect(() => {
-    if (authLoading || !session?.access_token || !phoneNumberId) return;
+    if (authLoading || !session?.access_token || !botPhoneNumberId || lineFilter === 'commercial') return;
 
-    const storageKey = `wa_line_backfill_v1_${phoneNumberId}`;
+    const storageKey = `wa_line_backfill_v1_${botPhoneNumberId}`;
     try {
       if (sessionStorage.getItem(storageKey) === '1') return;
     } catch {
@@ -261,18 +299,18 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     void (async () => {
       try {
         const dry = await backfillWhatsAppConversationLine({
-          phoneNumberId,
+          phoneNumberId: botPhoneNumberId,
           dryRun: true,
         });
         if (cancelled) return;
         if (dry.orphanCount > 0) {
           const result = await backfillWhatsAppConversationLine({
-            phoneNumberId,
+            phoneNumberId: botPhoneNumberId,
             dryRun: false,
           });
           if (cancelled) return;
           if (result.updatedCount > 0) {
-            const convs = await refetchConversations(phoneNumberId);
+            const convs = await refetchConversations(listPhoneNumberId, listFetchOptions);
             if (!cancelled) setConversations(convs);
           }
         }
@@ -289,7 +327,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [authLoading, session?.access_token, phoneNumberId]);
+  }, [authLoading, session?.access_token, botPhoneNumberId, lineFilter, listPhoneNumberId, listFetchOptions]);
 
   useEffect(() => {
     if (authLoading || !session?.access_token) {
@@ -305,23 +343,24 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
         setLoading(false);
         setInboxError(null);
       },
-      phoneNumberId,
+      listPhoneNumberId,
       (error) => {
         console.error('Error en listener de conversaciones:', error);
         setInboxError(error.message || 'No se pudieron cargar las conversaciones');
         setLoading(false);
       },
+      listFetchOptions,
     );
 
     return () => unsub();
-  }, [phoneNumberId, session?.access_token, authLoading, subscriptionKey]);
+  }, [listPhoneNumberId, listFetchOptions, session?.access_token, authLoading, subscriptionKey]);
 
   useEffect(() => {
     if (authLoading || !session?.access_token) return;
 
     const handleVisibilityChange = () => {
       if (document.visibilityState !== 'visible') return;
-      void refetchConversations(phoneNumberId)
+      void refetchConversations(listPhoneNumberId, listFetchOptions)
         .then((convs) => {
           setConversations(convs);
           setInboxError(null);
@@ -335,7 +374,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [phoneNumberId, session?.access_token, authLoading]);
+  }, [listPhoneNumberId, listFetchOptions, session?.access_token, authLoading]);
 
   const loadTags = useCallback(async () => {
     try {
@@ -462,18 +501,19 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   }, [conversations, selectedConversation]);
 
   useEffect(() => {
-    if (!phoneNumberId || !myUid) {
+    const presenceLineId = listPhoneNumberId || botPhoneNumberId;
+    if (!presenceLineId || !myUid) {
       setPresenceEntries([]);
       return;
     }
     const unsub = subscribeToWhatsAppAdminPresence(
-      phoneNumberId,
+      presenceLineId,
       myUid,
       (entries) => setPresenceEntries(entries),
       (err) => console.error('Error en listener de presencia WhatsApp:', err),
     );
     return () => unsub();
-  }, [phoneNumberId, myUid]);
+  }, [listPhoneNumberId, botPhoneNumberId, myUid]);
 
   useEffect(() => {
     if (!myUid) return;
@@ -519,11 +559,15 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     // Ya aplicamos este deep-link: no volver a forzar selección (evita pelear con clics del usuario).
     if (appliedDeepLinkTokenRef.current === focusToken) return;
 
-    const match = conversations.find(
+    const exact = focusConversation
+      ? conversations.find((c) => c.id === focusConversation)
+      : undefined;
+    const matches = conversations.filter(
       (c) =>
         (Boolean(focusConversation) && conversationMatchesFocusKey(focusConversation, c)) ||
         (Boolean(focusPhone) && conversationMatchesFocusPhone(focusPhone, c)),
     );
+    const match = exact ?? preferBotConversation(matches);
 
     if (match) {
       appliedDeepLinkTokenRef.current = focusToken;
@@ -541,7 +585,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     // Sin match aún: un refetch único (chat recién creado / backfill de línea).
     if (focusRefetchAttemptedRef.current === focusToken) return;
     focusRefetchAttemptedRef.current = focusToken;
-    void refetchConversations(phoneNumberId)
+    void refetchConversations(listPhoneNumberId, listFetchOptions)
       .then((convs) => setConversations(convs))
       .catch(() => {
         /* ignore */
@@ -550,18 +594,26 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     focusConversation,
     focusPhone,
     conversations,
-    phoneNumberId,
+    listPhoneNumberId,
+    listFetchOptions,
     onClearFocusDeepLink,
     onClearFocusPhone,
     onClearFocusConversation,
   ]);
 
   const recipientPhoneForTemplates = selectedConversation
-    ? selectedConversation.contactPhone || selectedConversation.phone || ''
+    ? selectedConversation.contactPhone
+      || selectedConversation.phone
+      || customerPhoneFromStableKey(selectedConversation.id)
     : '';
+  const activePhoneNumberId =
+    selectedConversation?.phoneNumberId || phoneNumberId || botPhoneNumberId;
+  const activeWabaId = selectedConversation
+    ? wabaIdForLine(isCommercialPhoneNumberId(selectedConversation.phoneNumberId) ? 'commercial' : 'bot')
+    : wabaId;
   const templateRecipientDigits = recipientPhoneForTemplates.replace(/\D/g, '');
   const canShowTemplates =
-    Boolean(selectedConversation && wabaId && phoneNumberId) &&
+    Boolean(selectedConversation && activeWabaId && activePhoneNumberId) &&
     templateRecipientDigits.length >= 10;
   const templateLastInboundAt =
     loadedConversationInbound &&
@@ -600,6 +652,43 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   const handleConversationPermanentlyDeleted = useCallback(() => {
     setSelectedConversation(null);
   }, []);
+
+  useEffect(() => {
+    if (!selectedConversation || isCommercialPhoneNumberId(selectedConversation.phoneNumberId)) {
+      setSiblingCommercialHint(null);
+      return;
+    }
+    const siblingKey = siblingConversationStableKey(selectedConversation.id);
+    if (!siblingKey) {
+      setSiblingCommercialHint(null);
+      return;
+    }
+    let cancelled = false;
+    void fetchConversationByStableKey(siblingKey)
+      .then((sibling) => {
+        if (cancelled || !sibling) {
+          if (!cancelled) setSiblingCommercialHint(null);
+          return;
+        }
+        const siblingTime = sibling.lastMessageAt?.getTime() ?? 0;
+        const selectedTime = selectedConversation.lastMessageAt?.getTime() ?? 0;
+        if (sibling.unreadCount > 0 && siblingTime >= selectedTime) {
+          setSiblingCommercialHint({
+            unreadCount: sibling.unreadCount,
+            lastMessageAt: sibling.lastMessageAt,
+            conversationId: sibling.id,
+          });
+        } else {
+          setSiblingCommercialHint(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setSiblingCommercialHint(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedConversation]);
 
   const handleOpenInboundChat = useCallback(() => {
     if (!inboundAlert) return;
@@ -655,7 +744,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     try {
       const isUnread = conversation.unreadCount > 0 || conversation.crmForceUnread;
       if (isUnread) {
-        await markAsRead(undefined, conversation.id, phoneNumberId);
+        await markAsRead(undefined, conversation.id, conversation.phoneNumberId || phoneNumberId);
         notifyAction('Conversación marcada como leída', 'success');
       } else {
         await patchWhatsAppConversationAdmin({
@@ -788,7 +877,8 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
       if (read) {
         const isUnread = conv && (conv.unreadCount > 0 || conv.crmForceUnread);
         if (isUnread) {
-          await markAsRead(undefined, id, phoneNumberId);
+          const conv = conversations.find((item) => item.id === id);
+          await markAsRead(undefined, id, conv?.phoneNumberId || phoneNumberId);
         }
       } else {
         await patchWhatsAppConversationAdmin({
@@ -877,6 +967,47 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
             minHeight: 0,
           }}
         >
+          {onLineFilterChange && (
+            <ToggleButtonGroup
+              exclusive
+              size="small"
+              fullWidth
+              value={lineFilter}
+              onChange={(_, value: WhatsAppLineFilter | null) => {
+                if (value) onLineFilterChange(value);
+              }}
+              sx={{ px: 1, pt: 1, flexShrink: 0 }}
+              aria-label="Línea WhatsApp"
+            >
+              <ToggleButton value="bot">Citas 312</ToggleButton>
+              <ToggleButton value="commercial">Comercial 311</ToggleButton>
+              <ToggleButton value="all">Todas</ToggleButton>
+            </ToggleButtonGroup>
+          )}
+          {siblingCommercialHint && (
+            <Alert
+              severity="warning"
+              sx={{ m: 1, flexShrink: 0 }}
+              action={
+                onLineFilterChange ? (
+                  <Button
+                    color="inherit"
+                    size="small"
+                    onClick={() => {
+                      onLineFilterChange('commercial');
+                      setSelectedConversation(null);
+                    }}
+                  >
+                    Ver comercial
+                  </Button>
+                ) : undefined
+              }
+            >
+              La línea comercial tiene {siblingCommercialHint.unreadCount} mensaje
+              {siblingCommercialHint.unreadCount === 1 ? '' : 's'} sin leer más reciente.
+              Léela antes de reactivar.
+            </Alert>
+          )}
           {inboxError && (
             <Alert
               severity="error"
@@ -924,8 +1055,8 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
             <ChatArea
               key={selectedConversation.id}
               conversation={selectedConversation}
-              phoneNumberId={phoneNumberId}
-              wabaId={wabaId}
+              phoneNumberId={activePhoneNumberId}
+              wabaId={activeWabaId}
               headerDisplayName={contactCtx.displayName ?? ''}
               headerPhotoUrl={contactCtx.photoUrl}
               onToggleContactPanel={handleToggleContactPanel}
@@ -950,15 +1081,15 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
           )}
         </Box>
 
-        {showRightColumn && selectedConversation && rightPanel === 'templates' && canShowTemplates && wabaId && phoneNumberId && (
+        {showRightColumn && selectedConversation && rightPanel === 'templates' && canShowTemplates && activeWabaId && activePhoneNumberId && (
           <TemplatesSidePanel
-            wabaId={wabaId}
-            phoneNumberId={phoneNumberId}
+            wabaId={activeWabaId}
+            phoneNumberId={activePhoneNumberId}
             recipientPhone={recipientPhoneForTemplates}
             onApplyDraftToComposer={setComposerDraft}
             snippets={snippets}
             onSnippetsChanged={loadSnippets}
-            conversationStableKey={selectedConversation.phone || selectedConversation.id}
+            conversationStableKey={selectedConversation.id}
             conversationDisplayName={contactCtx.displayName ?? undefined}
             lastInboundAt={templateLastInboundAt}
             lastMessageDirection={selectedConversation.lastMessageDirection}
@@ -1011,7 +1142,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
       <NewContactDialog
         open={newContactOpen}
         onClose={() => setNewContactOpen(false)}
-        phoneNumberId={phoneNumberId}
+        phoneNumberId={listPhoneNumberId || botPhoneNumberId}
         onCreated={handleContactCreated}
       />
 

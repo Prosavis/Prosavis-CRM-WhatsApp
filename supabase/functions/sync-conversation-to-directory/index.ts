@@ -6,6 +6,7 @@ import {
   normalizeDirectoryPhoneE164,
 } from '../_shared/directoryPhone.ts';
 import { getServiceClient } from '../_shared/supabase.ts';
+import { isCommercialPhoneNumberId } from '../_shared/whatsappLines.ts';
 
 interface WebhookPayload {
   type: 'INSERT' | 'UPDATE';
@@ -29,6 +30,7 @@ interface ConversationRecord {
   unread_count?: number;
   state?: string;
   is_archived?: boolean;
+  phone_number_id?: string;
 }
 
 function safeString(value: unknown): string | null {
@@ -76,6 +78,7 @@ Deno.serve(async (req) => {
 
     const record = payload.record as ConversationRecord;
     const supabase = getServiceClient();
+    const isCommercial = isCommercialPhoneNumberId(safeString(record.phone_number_id));
 
     // --- Resolver phone (E.164 canónico) ---
     const rawPhone = safeString(record.contact_phone) || safeString(record.phone);
@@ -124,16 +127,34 @@ Deno.serve(async (req) => {
     // --- Construir el JSONB para upsert_directory_entry ---
     // phone ya está normalizado a E.164 (línea 92: normalizeDirectoryPhoneE164)
     const entry: Record<string, unknown> = {
-      full_name: displayName || phone,
-      display_name: displayName,
       phone,
-      photo_url: safeString(record.contact_photo_url),
       last_whatsapp_message_at: safeString(record.last_message_at),
       last_whatsapp_message_text: safeString(record.last_message_text),
       last_whatsapp_intent: safeString(record.last_intent),
-      whatsapp_conversation_id: safeString(record.stable_key) || safeString(record.id),
       channels: ['WHATSAPP'],
     };
+
+    if (isCommercial) {
+      entry.whatsapp_commercial_conversation_id =
+        safeString(record.stable_key) || safeString(record.id);
+      const existingFullName = existingEntry
+        ? safeString(existingEntry.full_name as string | undefined)
+        : null;
+      const existingDisplayName = existingEntry
+        ? safeString(existingEntry.display_name as string | undefined)
+        : null;
+      if (!isUsableName(existingFullName) && displayName) {
+        entry.full_name = displayName;
+      }
+      if (!isUsableName(existingDisplayName) && displayName) {
+        entry.display_name = displayName;
+      }
+    } else {
+      entry.full_name = displayName || phone;
+      entry.display_name = displayName;
+      entry.photo_url = safeString(record.contact_photo_url);
+      entry.whatsapp_conversation_id = safeString(record.stable_key) || safeString(record.id);
+    }
 
     // --- WhatsApp assigned_to ---
     // Always sync assigned_to: set to uuid or null

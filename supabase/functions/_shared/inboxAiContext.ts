@@ -8,6 +8,7 @@ import { analyzeUncachedInboundImagesForConversation } from './analyzeInboundIma
 import {
   DEFAULT_HISTORY_LIMIT,
   DEFAULT_TRANSCRIPT_CHAR_BUDGET,
+  buildMergedTurns,
   buildTranscriptWithBudget,
   getConversationHistoryWithMeta,
   type ConversationHistoryMeta,
@@ -25,6 +26,11 @@ import {
 } from './inboxAiAppointmentQuery.ts';
 import { scheduledDateToIso } from './clientSegments.ts';
 import { normalizePhone } from './whatsappIdentity.ts';
+import {
+  customerPhoneFromStableKey,
+  isCommercialStableKey,
+  siblingConversationStableKey,
+} from './whatsappLines.ts';
 import {
   INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET,
   INBOX_AI_SYSTEM_INSTRUCTION,
@@ -289,7 +295,7 @@ export async function buildInboxAiContext(
     transcriptCharBudget?: number;
   },
 ): Promise<InboxAiContext> {
-  const phone = normalizePhone(stableKey);
+  const phone = normalizePhone(customerPhoneFromStableKey(stableKey));
   const historyLimit = options?.historyLimit ?? DEFAULT_HISTORY_LIMIT;
   const charBudget = options?.transcriptCharBudget ?? DEFAULT_TRANSCRIPT_CHAR_BUDGET;
 
@@ -307,12 +313,37 @@ export async function buildInboxAiContext(
     includeVoiceTranscriptions: options?.includeVoiceTranscriptions === true,
     includeImageAnalysis: options?.includeImageAnalysis === true,
   });
-  if (!history.turns.length) {
+  const siblingKey = siblingConversationStableKey(stableKey);
+  let siblingTurns: typeof history.turns = [];
+  if (siblingKey) {
+    try {
+      const sibling = await getConversationHistoryWithMeta(
+        supabase,
+        siblingKey,
+        Math.min(historyLimit, 40),
+        {
+          includeVoiceTranscriptions: options?.includeVoiceTranscriptions === true,
+          includeImageAnalysis: options?.includeImageAnalysis === true,
+        },
+      );
+      siblingTurns = sibling.turns;
+    } catch {
+      siblingTurns = [];
+    }
+  }
+  if (!history.turns.length && !siblingTurns.length) {
     throw new Error('No se encontró historial de conversación.');
   }
 
+  const primaryLabel = isCommercialStableKey(stableKey) ? '[comercial]' : '[bot]';
+  const siblingLabel = isCommercialStableKey(stableKey) ? '[bot]' : '[comercial]';
+  const labeledTurns = [
+    ...history.turns.map((turn) => ({ ...turn, text: `${primaryLabel} ${turn.text}` })),
+    ...siblingTurns.map((turn) => ({ ...turn, text: `${siblingLabel} ${turn.text}` })),
+  ].sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? ''));
+
   const { transcript, meta: historyMeta, merged, completeMerged } = buildTranscriptWithBudget(
-    history.turns,
+    labeledTurns.length ? labeledTurns : history.turns,
     history.meta,
     charBudget,
   );
@@ -321,7 +352,10 @@ export async function buildInboxAiContext(
   }
   const lastTurnRole = merged[merged.length - 1]?.role ?? null;
   const nowIso = new Date().toISOString();
-  const sessionWindow = buildMetaSessionWindow(completeMerged, nowIso);
+  const operatedMerged = history.turns.length
+    ? buildMergedTurns(history.turns)
+    : completeMerged;
+  const sessionWindow = buildMetaSessionWindow(operatedMerged, nowIso);
 
   let conversationContext: InboxAiConversationContext = {
     tags: [],

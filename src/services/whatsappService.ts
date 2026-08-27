@@ -244,7 +244,7 @@ export interface WhatsAppMessage {
   recipientPhone?: string;
   recipientBsuid?: string;
   direction: 'inbound' | 'outbound';
-  senderType: 'bot' | 'agent' | 'system' | 'user';
+  senderType: 'bot' | 'agent' | 'system' | 'user' | 'app';
   agentUid?: string;
   messageBody?: string;
   mediaType?: 'image' | 'audio' | 'video' | 'document' | 'sticker';
@@ -367,8 +367,16 @@ function dedupeWhatsAppMessagesByWaMessageId(
   return messages.filter((m) => !dropIds.has(m.id));
 }
 
-async function fetchConversations(phoneNumberId?: string): Promise<WhatsAppConversation[]> {
+export type FetchConversationsOptions = {
+  includeOrphans?: boolean;
+};
+
+async function fetchConversations(
+  phoneNumberId?: string,
+  options?: FetchConversationsOptions,
+): Promise<WhatsAppConversation[]> {
   const allRows: ConversationRow[] = [];
+  const includeOrphans = options?.includeOrphans !== false;
 
   for (let page = 0; page < CONVERSATIONS_MAX_PAGES; page += 1) {
     const from = page * CONVERSATIONS_PAGE_SIZE;
@@ -382,9 +390,10 @@ async function fetchConversations(phoneNumberId?: string): Promise<WhatsAppConve
       .range(from, to);
 
     if (phoneNumberId) {
-      // Incluir null: recordatorios/bulk antiguos crearon chats sin phone_number_id
-      // y el filtro estricto los ocultaba del inbox aunque el mensaje existiera.
-      query = query.or(`phone_number_id.eq.${phoneNumberId},phone_number_id.is.null`);
+      // Bot: incluir null (recordatorios/bulk antiguos). Comercial: solo esa línea.
+      query = includeOrphans
+        ? query.or(`phone_number_id.eq.${phoneNumberId},phone_number_id.is.null`)
+        : query.eq('phone_number_id', phoneNumberId);
     }
 
     const { data, error } = await query;
@@ -401,14 +410,30 @@ async function fetchConversations(phoneNumberId?: string): Promise<WhatsAppConve
 
 export async function refetchConversations(
   phoneNumberId?: string,
+  options?: FetchConversationsOptions,
 ): Promise<WhatsAppConversation[]> {
-  return fetchConversations(phoneNumberId);
+  return fetchConversations(phoneNumberId, options);
+}
+
+export async function fetchConversationByStableKey(
+  stableKey: string,
+): Promise<WhatsAppConversation | null> {
+  const key = stableKey.trim();
+  if (!key) return null;
+  const { data, error } = await supabase
+    .from('whatsapp_conversations')
+    .select('*')
+    .eq('stable_key', key)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? mapConversationRow(data) : null;
 }
 
 export function subscribeToConversations(
   callback: (conversations: WhatsAppConversation[]) => void,
   phoneNumberId?: string,
   onError?: (error: Error) => void,
+  options?: FetchConversationsOptions,
 ): Unsubscribe {
   let disposed = false;
   let channel: RealtimeChannel | null = null;
@@ -417,7 +442,7 @@ export function subscribeToConversations(
   const load = async () => {
     if (disposed) return;
     try {
-      callback(await fetchConversations(phoneNumberId));
+      callback(await fetchConversations(phoneNumberId, options));
     } catch (error) {
       onError?.(error instanceof Error ? error : new Error(String(error)));
     }
@@ -433,7 +458,9 @@ export function subscribeToConversations(
 
   void load();
   channel = supabase
-    .channel(`whatsapp-conversations:${phoneNumberId ?? 'all'}`)
+    .channel(
+      `whatsapp-conversations:${phoneNumberId ?? 'all'}:${options?.includeOrphans === false ? 'strict' : 'orphans'}`,
+    )
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'whatsapp_conversations' },
