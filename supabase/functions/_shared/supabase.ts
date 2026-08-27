@@ -16,6 +16,20 @@ export function getServiceClient() {
   });
 }
 
+export function clientFromApiKey(apiKey: string) {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  if (!supabaseUrl || !apiKey.trim()) {
+    throw new Error('Faltan SUPABASE_URL o API key.');
+  }
+
+  return createClient(supabaseUrl, apiKey.trim(), {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+}
+
 /** Cliente con JWT del admin para RPCs que validan app_private.is_crm_admin(). */
 export function getUserRpcClient(authHeader: string) {
   const supabaseUrl = Deno.env.get('SUPABASE_URL')?.trim();

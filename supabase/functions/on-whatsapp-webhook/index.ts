@@ -1,6 +1,6 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { isUsableName } from '../_shared/contactDisplayName.ts';
-import { getServiceClient } from '../_shared/supabase.ts';
+import { clientFromApiKey, getServiceClient } from '../_shared/supabase.ts';
 import {
   buildStoragePath,
   downloadWhatsAppMediaFromMeta,
@@ -934,11 +934,35 @@ async function createOrGetWebhookEvent(params: {
   return { event: existingEvent, created: false };
 }
 
-function authorizeServiceRoleReplay(req: Request): boolean {
+function decodeJwtPayload(token: string): JsonRecord | null {
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  try {
+    const normalized = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const pad = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
+    return asRecord(JSON.parse(atob(normalized + pad)));
+  } catch {
+    return null;
+  }
+}
+
+async function authorizeServiceRoleReplay(req: Request): Promise<boolean> {
   const expected = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
   const header = req.headers.get('Authorization') ?? '';
-  if (!expected || !header.startsWith('Bearer ')) return false;
-  return timingSafeEqual(header.slice('Bearer '.length), expected);
+  if (!header.startsWith('Bearer ')) return false;
+  const token = header.slice('Bearer '.length).trim();
+  if (!token) return false;
+  if (expected && token.length === expected.length && timingSafeEqual(token, expected)) {
+    return true;
+  }
+  if (getString(decodeJwtPayload(token)?.role) !== 'service_role') return false;
+  try {
+    const probe = clientFromApiKey(token);
+    const { error } = await probe.from('whatsapp_webhook_events').select('id').limit(1);
+    return !error;
+  } catch {
+    return false;
+  }
 }
 
 async function replayUnprocessedCommercialEvents(
@@ -1039,7 +1063,7 @@ Deno.serve(async (req) => {
     }
 
     if (!parseError && isReplayUnprocessedRequest(payload)) {
-      if (!authorizeServiceRoleReplay(req)) {
+      if (!await authorizeServiceRoleReplay(req)) {
         return jsonResponse({ error: 'No autorizado.' }, 401);
       }
       const replay = await replayUnprocessedCommercialEvents(
