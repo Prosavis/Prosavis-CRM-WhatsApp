@@ -36,6 +36,7 @@ import {
 } from '../_shared/whatsappInboundIdentity.ts';
 import {
   filterCommercialWebhookEvents,
+  isReplayAllLinesRequest,
   isReplayUnprocessedRequest,
   replaySinceFromPayload,
 } from '../_shared/whatsappWebhookReplay.ts';
@@ -968,6 +969,7 @@ async function authorizeServiceRoleReplay(req: Request): Promise<boolean> {
 async function replayUnprocessedCommercialEvents(
   supabase: ReturnType<typeof getServiceClient>,
   since: string,
+  allLines = false,
 ): Promise<{
   since: string;
   scanned: number;
@@ -989,7 +991,9 @@ async function replayUnprocessedCommercialEvents(
     .limit(500);
 
   if (error) throw error;
-  const commercialEvents = filterCommercialWebhookEvents(events ?? []);
+  const commercialEvents = allLines
+    ? (events ?? [])
+    : filterCommercialWebhookEvents(events ?? []);
   const results: Array<{
     id: string;
     processed: boolean;
@@ -1069,6 +1073,7 @@ Deno.serve(async (req) => {
       const replay = await replayUnprocessedCommercialEvents(
         supabase,
         replaySinceFromPayload(payload),
+        isReplayAllLinesRequest(payload),
       );
       return jsonResponse({ ok: true, replay });
     }

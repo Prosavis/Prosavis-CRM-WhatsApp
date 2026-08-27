@@ -22,6 +22,10 @@ export function isReplayUnprocessedRequest(payload: unknown): boolean {
   return asRecord(payload).replay_unprocessed === true;
 }
 
+export function isReplayAllLinesRequest(payload: unknown): boolean {
+  return asRecord(payload).all_lines === true;
+}
+
 export function replaySinceFromPayload(payload: unknown): string {
   return getString(asRecord(payload).since) || COMMERCIAL_REPLAY_DEFAULT_SINCE;
 }

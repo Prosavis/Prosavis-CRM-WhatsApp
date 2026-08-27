@@ -6,6 +6,7 @@ import {
 import {
   COMMERCIAL_REPLAY_DEFAULT_SINCE,
   filterCommercialWebhookEvents,
+  isReplayAllLinesRequest,
   isReplayUnprocessedRequest,
   payloadHasPhoneNumberId,
   replaySinceFromPayload,
@@ -38,6 +39,8 @@ const botPayload = {
 Deno.test('replay request is detected before webhook persistence', () => {
   assertEquals(isReplayUnprocessedRequest({ replay_unprocessed: true }), true);
   assertEquals(isReplayUnprocessedRequest({ replay_unprocessed: false }), false);
+  assertEquals(isReplayAllLinesRequest({ replay_unprocessed: true }), false);
+  assertEquals(isReplayAllLinesRequest({ replay_unprocessed: true, all_lines: true }), true);
   assertEquals(isReplayUnprocessedRequest(commercialPayload), false);
   assertEquals(replaySinceFromPayload({ replay_unprocessed: true }), COMMERCIAL_REPLAY_DEFAULT_SINCE);
   assertEquals(
