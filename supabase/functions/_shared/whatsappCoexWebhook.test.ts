@@ -9,6 +9,7 @@ import {
   parseCoexCustomerPhone,
   shouldIgnoreBotCoexField,
   shouldPersistCommercialOrphanStatus,
+  shouldSkipMissingCommercialStatus,
   shouldUpgradeCoexStub,
 } from './whatsappCoexWebhook.ts';
 
@@ -116,6 +117,30 @@ Deno.test('commercial orphan statuses persist only with recipient and 311', () =
       phoneNumberId: COMMERCIAL_PHONE_NUMBER_ID,
       recipientId: '',
       waMessageId: 'wamid.1',
+    }),
+    false,
+  );
+});
+
+Deno.test('LID-only commercial statuses are skipped instead of failing the event', () => {
+  assertEquals(
+    shouldSkipMissingCommercialStatus({
+      phoneNumberId: COMMERCIAL_PHONE_NUMBER_ID,
+      recipientId: '',
+    }),
+    true,
+  );
+  assertEquals(
+    shouldSkipMissingCommercialStatus({
+      phoneNumberId: COMMERCIAL_PHONE_NUMBER_ID,
+      recipientId: '573005653159',
+    }),
+    false,
+  );
+  assertEquals(
+    shouldSkipMissingCommercialStatus({
+      phoneNumberId: BOT_PHONE_NUMBER_ID,
+      recipientId: '',
     }),
     false,
   );

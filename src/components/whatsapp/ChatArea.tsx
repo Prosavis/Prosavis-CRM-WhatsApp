@@ -115,12 +115,16 @@ import {
 import { coloredChipSx } from '@/utils/coloredChipStyles';
 import { prepareWhatsAppSticker } from '@/utils/prepareWhatsAppSticker';
 import { summarizePeerPresences } from '@/utils/whatsappAdminPresence';
-import { customerPhoneFromStableKey } from '@/utils/whatsappLines';
+import { customerPhoneFromStableKey, isLidStableKey } from '@/utils/whatsappLines';
 import {
   getDirectoryMetaForConversation,
   useDirectoryContactMeta,
 } from '@/hooks/useDirectoryContactMeta';
-import { directoryDisplayTags } from '@/utils/directoryDisplayTags';
+import {
+  catalogColorByTagName,
+  directoryDisplayTags,
+  directoryTagColor,
+} from '@/utils/directoryDisplayTags';
 import type { WhatsAppTagFolder } from '@/types/whatsapp';
 import TagListGrouped from './TagListGrouped';
 import type { MetaSessionWindow } from '../../../supabase/functions/_shared/metaSessionWindow';
@@ -306,6 +310,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     conversation.contactPhone || conversation.phone || customerPhoneFromStableKey(conversation.id);
   const sendPhoneNumberId = conversation.phoneNumberId || phoneNumberId;
   const stableKey = conversationKey;
+  const isLidThread = isLidStableKey(stableKey);
   const messages = useMemo(
     () =>
       selectConversationMessages(
@@ -1258,6 +1263,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     ? directoryDisplayTags(getDirectoryMetaForConversation(conversation, directoryMetaByPhoneKey) ?? {})
     : [];
   const directoryTagKeys = new Set(directoryTags.map((tag) => tag.toLowerCase()));
+  const tagColorByName = catalogColorByTagName(tags ?? []);
   const displayName =
     headerDisplayName ||
     conversation.contactName ||
@@ -1328,8 +1334,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                     key={`dir-${tag}`}
                     label={tag}
                     size="small"
-                    variant="outlined"
-                    sx={{ height: 18, fontSize: '0.65rem' }}
+                    sx={coloredChipSx(
+                      theme,
+                      directoryTagColor(tag, tagColorByName) ?? theme.palette.text.secondary,
+                      'filled',
+                      { height: 18, fontSize: '0.65rem' },
+                    )}
                   />
                 ))}
                 {(conversation.tagIds || []).map((tagId) => {
@@ -1633,8 +1643,15 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               />
             </Box>
           )}
+          {isLidThread && (
+            <Alert severity="info" sx={{ mx: 1.5, mt: 1 }}>
+              Este chat es una cuenta de Facebook (LID) sin número de WhatsApp. No se puede
+              responder desde el CRM hasta que la persona escriba con su teléfono.
+            </Alert>
+          )}
           <MessageInput
             conversationKey={stableKey}
+            disabled={isLidThread}
             onSend={handleSend}
             onSendMedia={handleSendMedia}
             onSendMediaBatch={handleSendMediaBatch}

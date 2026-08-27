@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(12);
+select plan(15);
 
 select has_column(
   'public',
@@ -156,6 +156,54 @@ select lives_ok(
     )
   $$,
   'Coex app echoes are accepted by sender_type constraint'
+);
+
+select lives_ok(
+  $$
+    SELECT public.upsert_directory_entry(
+      jsonb_build_object(
+        'phone', '573009999001',
+        'source', 'WHATSAPP',
+        'channels', jsonb_build_array('WHATSAPP')
+      ),
+      false,
+      false
+    )
+  $$,
+  'upsert_directory_entry INSERT coalesces full_name when Meta sends no name'
+);
+
+select ok(
+  exists (
+    select 1
+    from public.crm_directory
+    where phone_key = public.directory_phone_key('573009999001')
+      and full_name is not null
+      and length(trim(full_name)) > 0
+  ),
+  'new WhatsApp phone without full_name still gets a directory name'
+);
+
+select lives_ok(
+  $$
+    insert into public.whatsapp_conversations (
+      stable_key,
+      phone,
+      contact_phone,
+      phone_number_id,
+      last_message_text,
+      last_message_at
+    )
+    values (
+      '573009999002__1043086062223440',
+      '573009999002',
+      '573009999002',
+      '1043086062223440',
+      'Hola buena tarde',
+      '2026-08-27T20:47:11Z'
+    )
+  $$,
+  'new commercial conversation does not roll back when directory has no prior row'
 );
 
 select * from finish();

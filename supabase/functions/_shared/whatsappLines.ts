@@ -9,6 +9,7 @@ export const COMMERCIAL_PHONE_NUMBER_ID = '1043086062223440';
 export const BOT_WABA_ID = '1644307903653451';
 export const COMMERCIAL_WABA_ID = '1680332820009096';
 export const COMMERCIAL_STABLE_KEY_SEP = '__';
+export const LID_CUSTOMER_PREFIX = 'lid:';
 
 export type WhatsAppLineId = 'bot' | 'commercial';
 
@@ -70,6 +71,14 @@ export function customerPhoneFromStableKey(stableKey: string): string {
   const idx = stableKey.indexOf(COMMERCIAL_STABLE_KEY_SEP);
   if (idx === -1) return stableKey.trim();
   return stableKey.slice(0, idx).trim();
+}
+
+export function isLidCustomerKey(customerKey: string | null | undefined): boolean {
+  return (customerKey ?? '').trim().startsWith(LID_CUSTOMER_PREFIX);
+}
+
+export function isLidStableKey(stableKey: string | null | undefined): boolean {
+  return isLidCustomerKey(customerPhoneFromStableKey(stableKey ?? ''));
 }
 
 export function siblingConversationStableKey(stableKey: string): string | null {

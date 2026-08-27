@@ -1,5 +1,6 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { conversationStableKey, isCommercialPhoneNumberId } from './whatsappLines.ts';
+import { formatWebhookError } from './whatsappInboundIdentity.ts';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -27,6 +28,16 @@ export function shouldPersistCommercialOrphanStatus(params: {
     isCommercialPhoneNumberId(params.phoneNumberId) &&
       (params.recipientId ?? '').trim() &&
       (params.waMessageId ?? '').trim(),
+  );
+}
+
+export function shouldSkipMissingCommercialStatus(params: {
+  phoneNumberId?: string | null;
+  recipientId?: string | null;
+}): boolean {
+  return (
+    isCommercialPhoneNumberId(params.phoneNumberId) &&
+    !(params.recipientId ?? '').trim()
   );
 }
 
@@ -335,7 +346,7 @@ export async function processSmbMessageEchoes(params: {
       if (status === 'inserted' || status === 'updated') result.echoes += 1;
       else result.skipped += 1;
     } catch (error) {
-      result.errors.push(`echo: ${String(error)}`);
+      result.errors.push(`echo: ${formatWebhookError(error)}`);
     }
   }
   return result;
@@ -367,7 +378,7 @@ export async function processHistory(params: {
           if (status === 'inserted') result.historyMessages += 1;
           else result.skipped += 1;
         } catch (error) {
-          result.errors.push(`history: ${String(error)}`);
+          result.errors.push(`history: ${formatWebhookError(error)}`);
         }
       }
     }
@@ -427,7 +438,7 @@ export async function processSmbAppStateSync(params: {
       if (error) throw error;
       result.contacts += 1;
     } catch (error) {
-      result.errors.push(`state_sync: ${String(error)}`);
+      result.errors.push(`state_sync: ${formatWebhookError(error)}`);
     }
   }
   return result;

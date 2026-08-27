@@ -5,6 +5,7 @@ import {
   conversationStableKey,
   customerPhoneFromStableKey,
   isCommercialStableKey,
+  isLidStableKey,
   resolveWhatsAppLine,
   siblingConversationStableKey,
 } from './whatsappLines';
@@ -24,5 +25,11 @@ describe('whatsappLines', () => {
     expect(customerPhoneFromStableKey(key)).toBe(CUSTOMER);
     expect(siblingConversationStableKey(CUSTOMER)).toBe(key);
     expect(siblingConversationStableKey(key)).toBe(CUSTOMER);
+  });
+
+  it('detects commercial LID threads that have no WhatsApp phone yet', () => {
+    const key = conversationStableKey('lid:CO.2284278722318211', COMMERCIAL_PHONE_NUMBER_ID);
+    expect(isLidStableKey(key)).toBe(true);
+    expect(isLidStableKey(conversationStableKey(CUSTOMER, COMMERCIAL_PHONE_NUMBER_ID))).toBe(false);
   });
 });

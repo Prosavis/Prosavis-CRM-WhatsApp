@@ -27,7 +27,18 @@ import {
   processHistory,
   processSmbAppStateSync,
   processSmbMessageEchoes,
+  shouldSkipMissingCommercialStatus,
 } from '../_shared/whatsappCoexWebhook.ts';
+import {
+  formatWebhookError,
+  lidCustomerKey,
+  resolveInboundCustomer,
+} from '../_shared/whatsappInboundIdentity.ts';
+import {
+  filterCommercialWebhookEvents,
+  isReplayUnprocessedRequest,
+  replaySinceFromPayload,
+} from '../_shared/whatsappWebhookReplay.ts';
 
 const encoder = new TextEncoder();
 type JsonRecord = Record<string, unknown>;
@@ -303,15 +314,123 @@ async function persistInboundMedia(params: {
   }
 }
 
+async function remapLidConversationToPhone(params: {
+  supabase: ReturnType<typeof getServiceClient>;
+  userId: string;
+  phone: string;
+  phoneNumberId: string | null;
+}): Promise<void> {
+  const lidKey = conversationStableKey(lidCustomerKey(params.userId), params.phoneNumberId);
+  const phoneKey = conversationStableKey(params.phone, params.phoneNumberId);
+  if (!params.userId || !params.phone || lidKey === phoneKey) return;
+
+  const { data: lidConv, error: lidReadError } = await params.supabase
+    .from('whatsapp_conversations')
+    .select(
+      'stable_key, unread_count, contact_name, contact_name_locked, whatsapp_profile_name, contact_photo_url, last_message_text, last_message_at, last_message_direction, last_message_outbound_status, last_intent, assigned_to, is_archived, is_pinned, state, tag_ids, metadata, phone_number_id',
+    )
+    .eq('stable_key', lidKey)
+    .maybeSingle();
+  if (lidReadError) throw lidReadError;
+  if (!lidConv) return;
+
+  const { data: phoneConv, error: phoneReadError } = await params.supabase
+    .from('whatsapp_conversations')
+    .select('unread_count, last_message_at, last_message_text, last_message_direction, metadata')
+    .eq('stable_key', phoneKey)
+    .maybeSingle();
+  if (phoneReadError) throw phoneReadError;
+
+  const lidMeta = asRecord(lidConv.metadata);
+  const nextMetadata = {
+    ...asRecord(phoneConv?.metadata),
+    ...lidMeta,
+    lidUserId: params.userId,
+    remappedFromLid: lidKey,
+  };
+
+  if (!phoneConv) {
+    const { error: insertError } = await params.supabase.from('whatsapp_conversations').insert({
+      stable_key: phoneKey,
+      phone: params.phone,
+      contact_phone: params.phone,
+      state: lidConv.state ?? 'active',
+      unread_count: lidConv.unread_count ?? 0,
+      contact_name: lidConv.contact_name,
+      contact_name_locked: lidConv.contact_name_locked,
+      whatsapp_profile_name: lidConv.whatsapp_profile_name,
+      contact_photo_url: lidConv.contact_photo_url,
+      last_message_text: lidConv.last_message_text,
+      last_message_at: lidConv.last_message_at,
+      last_message_direction: lidConv.last_message_direction,
+      last_message_outbound_status: lidConv.last_message_outbound_status,
+      last_intent: lidConv.last_intent,
+      assigned_to: lidConv.assigned_to,
+      is_archived: lidConv.is_archived,
+      is_pinned: lidConv.is_pinned,
+      tag_ids: lidConv.tag_ids,
+      metadata: nextMetadata,
+      phone_number_id: params.phoneNumberId ?? lidConv.phone_number_id,
+      ...UNARCHIVE_CONVERSATION_PATCH,
+    });
+    if (insertError) throw insertError;
+  } else {
+    const lidLast = lidConv.last_message_at
+      ? new Date(String(lidConv.last_message_at)).getTime()
+      : 0;
+    const phoneLast = phoneConv.last_message_at
+      ? new Date(String(phoneConv.last_message_at)).getTime()
+      : 0;
+    const mergeNewer = lidLast > phoneLast;
+    const { error: mergeError } = await params.supabase
+      .from('whatsapp_conversations')
+      .update({
+        phone: params.phone,
+        contact_phone: params.phone,
+        unread_count: Number(phoneConv.unread_count ?? 0) + Number(lidConv.unread_count ?? 0),
+        metadata: nextMetadata,
+        ...(mergeNewer
+          ? {
+            last_message_text: lidConv.last_message_text,
+            last_message_at: lidConv.last_message_at,
+            last_message_direction: lidConv.last_message_direction,
+          }
+          : {}),
+      })
+      .eq('stable_key', phoneKey);
+    if (mergeError) throw mergeError;
+  }
+
+  const { error: moveMessagesError } = await params.supabase
+    .from('whatsapp_message_log')
+    .update({
+      conversation_stable_key: phoneKey,
+      recipient_phone: params.phone,
+    })
+    .eq('conversation_stable_key', lidKey);
+  if (moveMessagesError) throw moveMessagesError;
+
+  await params.supabase
+    .from('whatsapp_media_assets')
+    .update({ conversation_stable_key: phoneKey })
+    .eq('conversation_stable_key', lidKey);
+
+  const { error: deleteLidError } = await params.supabase
+    .from('whatsapp_conversations')
+    .delete()
+    .eq('stable_key', lidKey);
+  if (deleteLidError) throw deleteLidError;
+}
+
 async function processInboundMessage(params: {
   supabase: ReturnType<typeof getServiceClient>;
   message: JsonRecord;
   value: JsonRecord;
   contacts: unknown[];
 }): Promise<'inserted' | 'duplicate'> {
-  const senderPhone = getString(params.message.from);
+  const identity = resolveInboundCustomer(params.message, params.contacts);
   const waMessageId = getString(params.message.id);
-  if (!senderPhone || !waMessageId) {
+  if (!identity || !waMessageId) {
     throw new Error('Mensaje entrante sin from o id.');
   }
 
@@ -326,14 +445,26 @@ async function processInboundMessage(params: {
 
   const metadata = asRecord(params.value.metadata);
   const phoneNumberId = getString(metadata.phone_number_id) || null;
-  const stableKey = conversationStableKey(senderPhone, phoneNumberId);
-  const contactName = getContactName(params.contacts, senderPhone);
+  const isLid = identity.kind === 'lid';
+  const customerKey = identity.customerKey;
+
+  if (identity.kind === 'phone' && identity.userId) {
+    await remapLidConversationToPhone({
+      supabase: params.supabase,
+      userId: identity.userId,
+      phone: customerKey,
+      phoneNumberId,
+    });
+  }
+
+  const stableKey = conversationStableKey(customerKey, phoneNumberId);
+  const contactName = identity.profileName ?? getContactName(params.contacts, customerKey);
   const content = getMessageContent(params.message);
   const createdAt = getUnixDate(params.message.timestamp);
 
   const { data: existingConversation, error: conversationReadError } = await params.supabase
     .from('whatsapp_conversations')
-    .select('unread_count, contact_name_locked')
+    .select('unread_count, contact_name_locked, metadata')
     .eq('stable_key', stableKey)
     .maybeSingle();
 
@@ -347,20 +478,27 @@ async function processInboundMessage(params: {
   // - Si Meta manda un nombre no usable (solo emoji/símbolos), tampoco pisa contact_name.
   // `whatsapp_profile_name` sí refleja el push name de Meta (incluso emoji) para diagnóstico.
   const isNameLocked = existingConversation?.contact_name_locked === true;
+  const nextMetadata: JsonRecord = { ...asRecord(existingConversation?.metadata) };
+  if (identity.userId) nextMetadata.lidUserId = identity.userId;
+  if (identity.username) nextMetadata.username = identity.username;
 
   const conversationPatch: Record<string, unknown> = {
     stable_key: stableKey,
-    phone: senderPhone,
     state: 'active',
-    contact_phone: senderPhone,
     last_message_text: lastMessageText,
     last_message_at: createdAt,
     last_message_direction: 'inbound',
     last_message_outbound_status: null,
     unread_count: unreadCount,
     phone_number_id: phoneNumberId,
+    metadata: nextMetadata,
     ...UNARCHIVE_CONVERSATION_PATCH,
   };
+
+  if (!isLid) {
+    conversationPatch.phone = customerKey;
+    conversationPatch.contact_phone = customerKey;
+  }
 
   if (contactName !== null) {
     conversationPatch.whatsapp_profile_name = contactName;
@@ -379,7 +517,7 @@ async function processInboundMessage(params: {
     .from('whatsapp_message_log')
     .insert({
       conversation_stable_key: stableKey,
-      recipient_phone: senderPhone,
+      recipient_phone: customerKey,
       direction: 'inbound',
       sender_type: 'user',
       message_body: content.messageBody,
@@ -478,12 +616,15 @@ async function processInboundMessage(params: {
   }
 
   // Actualiza directorio: last_response_at + opt-out por "PARAR".
-  await syncDirectoryOnInbound({
-    supabase: params.supabase,
-    senderPhone,
-    messageBody: content.messageBody,
-    createdAt,
-  });
+  // LID threads have no phone; the directory trigger already no-ops without one.
+  if (!isLid) {
+    await syncDirectoryOnInbound({
+      supabase: params.supabase,
+      senderPhone: customerKey,
+      messageBody: content.messageBody,
+      createdAt,
+    });
+  }
 
   return 'inserted';
 }
@@ -566,7 +707,7 @@ async function processStatus(params: {
   supabase: ReturnType<typeof getServiceClient>;
   status: JsonRecord;
   phoneNumberId: string | null;
-}): Promise<'updated' | 'missing'> {
+}): Promise<'updated' | 'missing' | 'skipped'> {
   const waMessageId = getString(params.status.id);
   const status = getString(params.status.status);
   if (!waMessageId || !status) {
@@ -588,7 +729,17 @@ async function processStatus(params: {
       phoneNumberId: params.phoneNumberId,
     });
   }
-  if (!existingMessage) return 'missing';
+  if (!existingMessage) {
+    if (
+      shouldSkipMissingCommercialStatus({
+        phoneNumberId: params.phoneNumberId,
+        recipientId: getString(params.status.recipient_id),
+      })
+    ) {
+      return 'skipped';
+    }
+    return 'missing';
+  }
 
   const isFailure = status === 'failed';
   const isSuccessStatus = status === 'sent' || status === 'delivered' || status === 'read';
@@ -717,7 +868,7 @@ async function processPayload(
           if (processed === 'duplicate') result.skippedDuplicates += 1;
           else result.inboundMessages += 1;
         } catch (error) {
-          result.errors.push(`message: ${String(error)}`);
+          result.errors.push(`message: ${formatWebhookError(error)}`);
         }
       }
 
@@ -733,11 +884,11 @@ async function processPayload(
 
           if (processed === 'missing') {
             result.errors.push(`status: no existe mensaje ${getString(asRecord(rawStatus).id)}`);
-          } else {
+          } else if (processed === 'updated') {
             result.statuses += 1;
           }
         } catch (error) {
-          result.errors.push(`status: ${String(error)}`);
+          result.errors.push(`status: ${formatWebhookError(error)}`);
         }
       }
     }
@@ -783,6 +934,72 @@ async function createOrGetWebhookEvent(params: {
   return { event: existingEvent, created: false };
 }
 
+function authorizeServiceRoleReplay(req: Request): boolean {
+  const expected = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  const header = req.headers.get('Authorization') ?? '';
+  if (!expected || !header.startsWith('Bearer ')) return false;
+  return timingSafeEqual(header.slice('Bearer '.length), expected);
+}
+
+async function replayUnprocessedCommercialEvents(
+  supabase: ReturnType<typeof getServiceClient>,
+  since: string,
+): Promise<{
+  since: string;
+  scanned: number;
+  replayed: number;
+  results: Array<{
+    id: string;
+    processed: boolean;
+    inboundMessages: number;
+    statuses: number;
+    errors: string[];
+  }>;
+}> {
+  const { data: events, error } = await supabase
+    .from('whatsapp_webhook_events')
+    .select('id, payload, processed, error_message, received_at')
+    .eq('processed', false)
+    .gte('received_at', since)
+    .order('received_at', { ascending: true })
+    .limit(500);
+
+  if (error) throw error;
+  const commercialEvents = filterCommercialWebhookEvents(events ?? []);
+  const results: Array<{
+    id: string;
+    processed: boolean;
+    inboundMessages: number;
+    statuses: number;
+    errors: string[];
+  }> = [];
+
+  for (const event of commercialEvents) {
+    const processingResult = await processPayload(supabase, asRecord(event.payload));
+    const processed = processingResult.errors.length === 0;
+    const errorMessage = processed ? null : processingResult.errors.join(' | ');
+    const { error: updateError } = await supabase
+      .from('whatsapp_webhook_events')
+      .update({ processed, error_message: errorMessage })
+      .eq('id', event.id);
+    if (updateError) throw updateError;
+    results.push({
+      id: event.id,
+      processed,
+      inboundMessages: processingResult.inboundMessages,
+      statuses: processingResult.statuses,
+      errors: processingResult.errors,
+    });
+  }
+
+  return {
+    since,
+    scanned: (events ?? []).length,
+    replayed: results.length,
+    results,
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -817,8 +1034,19 @@ Deno.serve(async (req) => {
     try {
       payload = asRecord(JSON.parse(rawBody || '{}'));
     } catch (error) {
-      parseError = `JSON invalido: ${String(error)}`;
+      parseError = `JSON invalido: ${formatWebhookError(error)}`;
       payload = { rawBody };
+    }
+
+    if (!parseError && isReplayUnprocessedRequest(payload)) {
+      if (!authorizeServiceRoleReplay(req)) {
+        return jsonResponse({ error: 'No autorizado.' }, 401);
+      }
+      const replay = await replayUnprocessedCommercialEvents(
+        supabase,
+        replaySinceFromPayload(payload),
+      );
+      return jsonResponse({ ok: true, replay });
     }
 
     const initialErrorMessage = parseError ?? (verified ? null : 'Firma Meta invalida.');
@@ -859,6 +1087,6 @@ Deno.serve(async (req) => {
       result: processingResult,
     }, processed ? 200 : 207);
   } catch (error) {
-    return jsonResponse({ error: String(error) }, 500);
+    return jsonResponse({ error: formatWebhookError(error) }, 500);
   }
 });
