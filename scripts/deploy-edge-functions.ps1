@@ -51,6 +51,7 @@ $AllFunctions = @(
   'mark-whatsapp-as-read',
   'on-whatsapp-webhook',
   'patch-whatsapp-conversation',
+  'post-service-automations-monitor',
   'purge-whatsapp-message-log',
   'reactivation-automations-monitor',
   'reminder-automations-monitor',
@@ -59,6 +60,7 @@ $AllFunctions = @(
   'run-whatsapp-reactivations',
   'send-appointment-confirmation',
   'send-appointment-reminder',
+  'send-post-service-followup',
   'send-whatsapp-chat-message',
   'send-whatsapp-media-batch',
   'send-whatsapp-reaction',
@@ -78,6 +80,7 @@ $AllFunctions = @(
   'visitas-registrar',
   'ops-metrics',
   'agenda-opciones',
+  'app-automations-admin',
   'whatsapp-storage-monitor'
 )
 
