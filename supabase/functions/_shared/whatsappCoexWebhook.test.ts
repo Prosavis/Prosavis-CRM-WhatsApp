@@ -60,3 +60,33 @@ Deno.test('history uses thread customer as authoritative identity for outbound',
   );
   assertEquals(parsed, { customerPhone: '573146283332', direction: 'outbound' });
 });
+
+Deno.test('official Meta history outbound has no to or from_me', () => {
+  const parsed = parseCoexCustomerPhone(
+    {
+      from: '15550783881',
+      id: 'wamid.history.official.outbound',
+      timestamp: '1759351100',
+      type: 'text',
+      text: { body: 'Hello' },
+    },
+    COMMERCIAL_PHONE_NUMBER_ID,
+    '16505551234',
+  );
+  assertEquals(parsed, { customerPhone: '16505551234', direction: 'outbound' });
+});
+
+Deno.test('official Meta history inbound uses from === thread.id', () => {
+  const parsed = parseCoexCustomerPhone(
+    {
+      from: '16505551234',
+      id: 'wamid.history.official.inbound',
+      timestamp: '1759351101',
+      type: 'text',
+      text: { body: 'Hi' },
+    },
+    COMMERCIAL_PHONE_NUMBER_ID,
+    '16505551234',
+  );
+  assertEquals(parsed, { customerPhone: '16505551234', direction: 'inbound' });
+});

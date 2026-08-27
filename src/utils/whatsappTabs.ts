@@ -28,6 +28,9 @@ export function isWhatsAppTabKey(value: string | null | undefined): value is Wha
 export function resolveWhatsAppTabKey(search: URLSearchParams): WhatsAppTabKey {
   const tab = search.get('tab');
   if (isWhatsAppTabKey(tab) && tab !== 'inbox') return tab;
+  if (isCommercialConversationRef({ conversationId: search.get('conversation') })) {
+    return 'commercial';
+  }
   if (!tab && search.get('line') === 'commercial') return 'commercial';
   return 'inbox';
 }
@@ -67,6 +70,14 @@ export function normalizeWhatsAppSearchParams(search: URLSearchParams): {
     changed = true;
   }
   if (next.get('tab') === 'commercial' && next.has('line')) {
+    next.delete('line');
+    changed = true;
+  }
+  if (
+    isCommercialConversationRef({ conversationId: next.get('conversation') }) &&
+    next.get('tab') !== 'commercial'
+  ) {
+    next.set('tab', 'commercial');
     next.delete('line');
     changed = true;
   }
@@ -141,15 +152,8 @@ export function preferConversationForFilter<
   T extends { id: string; phoneNumberId?: string | null },
 >(matches: T[], filter: WhatsAppLineFilter): T | undefined {
   if (matches.length === 0) return undefined;
-  if (filter === 'commercial') {
-    return matches.find((conversation) =>
-      conversationBelongsToLineFilter(conversation, 'commercial'),
-    ) ?? matches[0];
-  }
-  return (
-    matches.find((conversation) => conversationBelongsToLineFilter(conversation, 'bot')) ??
-    matches[0]
-  );
+  if (filter === 'all') return matches[0];
+  return matches.find((conversation) => conversationBelongsToLineFilter(conversation, filter));
 }
 
 export function whatsappTabIndex(tab: WhatsAppTabKey): number {

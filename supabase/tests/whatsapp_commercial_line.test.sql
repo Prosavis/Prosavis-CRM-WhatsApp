@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(11);
+select plan(12);
 
 select has_column(
   'public',
@@ -23,6 +23,12 @@ select has_index(
   'whatsapp_conversations',
   'uq_whatsapp_conversations_phone_key_line',
   'one conversation per customer and WhatsApp line'
+);
+
+select has_table(
+  'public',
+  'whatsapp_coex_health',
+  'Coex health snapshots are persisted for monitoring'
 );
 
 select ok(

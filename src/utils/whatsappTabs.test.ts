@@ -94,5 +94,16 @@ describe('whatsappTabs', () => {
     expect(conversationBelongsToLineFilter(bot, 'all')).toBe(true);
     expect(preferConversationForFilter([bot, commercial], 'bot')?.id).toBe(bot.id);
     expect(preferConversationForFilter([bot, commercial], 'commercial')?.id).toBe(commercial.id);
+    expect(preferConversationForFilter([bot], 'commercial')).toBeUndefined();
+    expect(preferConversationForFilter([commercial], 'bot')).toBeUndefined();
+  });
+
+  it('normalizes a commercial conversation key even without tab=', () => {
+    const { next, changed } = normalizeWhatsAppSearchParams(
+      new URLSearchParams('conversation=573146283332__1043086062223440'),
+    );
+    expect(changed).toBe(true);
+    expect(next.get('tab')).toBe('commercial');
+    expect(resolveWhatsAppTabKey(next)).toBe('commercial');
   });
 });

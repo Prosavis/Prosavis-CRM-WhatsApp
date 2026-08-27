@@ -12,6 +12,7 @@ import HeavyChatsSection from './monitor/sections/HeavyChatsSection';
 import OptimizationSection from './monitor/sections/OptimizationSection';
 import OrphansSection from './monitor/sections/OrphansSection';
 import ConversationLineHealthSection from './monitor/sections/ConversationLineHealthSection';
+import CoexHealthSection from './monitor/sections/CoexHealthSection';
 import ConnectionsSection from './monitor/sections/ConnectionsSection';
 import MetricsGrid from './monitor/metrics/MetricsGrid';
 import MonitorSkeleton from './monitor/ui/MonitorSkeleton';
@@ -92,6 +93,7 @@ const MonitorTab: React.FC = () => {
             alignItems: 'stretch',
           }}>
             <ConversationLineHealthSection />
+            <CoexHealthSection />
             <OrphansSection suggestions={suggestions} onRefresh={loadData} />
             <ConnectionsSection connections={connections} />
             <StorageLimitsSection />

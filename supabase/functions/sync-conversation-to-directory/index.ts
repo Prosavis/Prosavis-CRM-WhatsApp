@@ -135,26 +135,46 @@ Deno.serve(async (req) => {
     };
 
     if (isCommercial) {
-      entry.whatsapp_commercial_conversation_id =
-        safeString(record.stable_key) || safeString(record.id);
-      const existingFullName = existingEntry
-        ? safeString(existingEntry.full_name as string | undefined)
-        : null;
-      const existingDisplayName = existingEntry
-        ? safeString(existingEntry.display_name as string | undefined)
-        : null;
-      if (!isUsableName(existingFullName) && displayName) {
-        entry.full_name = displayName;
+      const commercialKey = safeString(record.stable_key) || safeString(record.id);
+      const { data: upsertedId, error: upsertError } = await supabase.rpc(
+        'upsert_directory_entry',
+        {
+          p_entry: {
+            phone,
+            last_whatsapp_message_at: safeString(record.last_message_at),
+            last_whatsapp_message_text: safeString(record.last_message_text),
+            last_whatsapp_intent: safeString(record.last_intent),
+            channels: ['WHATSAPP'],
+            source: 'WHATSAPP',
+          },
+          p_overwrite_classification: false,
+          p_replace_tags: false,
+        },
+      );
+      if (upsertError) {
+        console.error('[sync-conversation-to-directory] upsert_directory_entry falló:', upsertError);
+        throw upsertError;
       }
-      if (!isUsableName(existingDisplayName) && displayName) {
-        entry.display_name = displayName;
+      if (commercialKey && upsertedId) {
+        await supabase
+          .from('crm_directory')
+          .update({
+            whatsapp_commercial_conversation_id: commercialKey,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', upsertedId)
+          .neq('whatsapp_commercial_conversation_id', commercialKey);
       }
-    } else {
-      entry.full_name = displayName || phone;
-      entry.display_name = displayName;
-      entry.photo_url = safeString(record.contact_photo_url);
-      entry.whatsapp_conversation_id = safeString(record.stable_key) || safeString(record.id);
+      return new Response(JSON.stringify({ ok: true, directory_id: upsertedId, line: 'commercial' }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
+
+    entry.full_name = displayName || phone;
+    entry.display_name = displayName;
+    entry.photo_url = safeString(record.contact_photo_url);
+    entry.whatsapp_conversation_id = safeString(record.stable_key) || safeString(record.id);
 
     // --- WhatsApp assigned_to ---
     // Always sync assigned_to: set to uuid or null

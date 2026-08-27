@@ -59,13 +59,22 @@ export function parseCoexCustomerPhone(
   const from = getString(message.from);
   const to = getString(message.to);
   const threadCustomer = (threadCustomerPhone ?? '').trim();
+  const historyContext = asRecord(message.history_context);
+  const fromMe =
+    typeof message.from_me === 'boolean'
+      ? message.from_me
+      : typeof historyContext.from_me === 'boolean'
+        ? historyContext.from_me
+        : undefined;
 
   if (threadCustomer) {
-    if (message.from_me === true || to === threadCustomer) {
-      return { customerPhone: threadCustomer, direction: 'outbound' };
-    }
-    if (message.from_me === false || from === threadCustomer) {
+    if (fromMe === true) return { customerPhone: threadCustomer, direction: 'outbound' };
+    if (fromMe === false) return { customerPhone: threadCustomer, direction: 'inbound' };
+    if (from && from === threadCustomer) {
       return { customerPhone: threadCustomer, direction: 'inbound' };
+    }
+    if ((to && to === threadCustomer) || (from && from !== threadCustomer)) {
+      return { customerPhone: threadCustomer, direction: 'outbound' };
     }
     return { customerPhone: threadCustomer, direction: 'inbound' };
   }

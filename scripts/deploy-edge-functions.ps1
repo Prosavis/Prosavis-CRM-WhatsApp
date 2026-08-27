@@ -17,6 +17,7 @@ $ProjectRef = 'djzwjaegxbhlefanmmee'
 $AllFunctions = @(
   'assign-whatsapp-tags',
   'backfill-whatsapp-conversation-line',
+  'check-whatsapp-coex-health',
   'block-whatsapp-user-admin',
   'bulk-whatsapp-send',
   'create-whatsapp-snippet',

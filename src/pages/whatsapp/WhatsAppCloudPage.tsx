@@ -69,6 +69,7 @@ const WhatsAppCloudPage: React.FC = () => {
 
   const handleMainTabChange = (_: React.SyntheticEvent, value: WhatsAppTabKey) => {
     playNavigation();
+    if (value !== 'inbox') setBulkOpen(false);
     setSearchParams(
       (prev) => {
         const next = applyWhatsAppTab(prev, value);
@@ -182,15 +183,9 @@ const WhatsAppCloudPage: React.FC = () => {
     [setSearchParams],
   );
 
-  const handleOpenCommercialConversation = useCallback((conversationId?: string) => {
+  const handleOpenConversation = useCallback((detail: WhatsAppFocusChatDetail) => {
     setSearchParams(
-      (prev) => {
-        const next = applyWhatsAppTab(prev, 'commercial');
-        if (conversationId) next.set('conversation', conversationId);
-        else next.delete('conversation');
-        next.delete('focusPhone');
-        return next;
-      },
+      (prev) => applyWhatsAppFocusChat(prev, detail),
       { replace: true },
     );
   }, [setSearchParams]);
@@ -266,7 +261,7 @@ const WhatsAppCloudPage: React.FC = () => {
             phoneNumberId={inboxPhoneNumberId}
             wabaId={inboxWabaId}
             lineFilter={lineFilter}
-            onOpenCommercialConversation={handleOpenCommercialConversation}
+            onOpenConversation={handleOpenConversation}
             focusPhone={focusPhone}
             onClearFocusPhone={handleClearFocusPhone}
             focusConversation={focusConversation}

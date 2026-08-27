@@ -310,3 +310,38 @@ BEGIN
   RETURN NEW;
 END;
 $$;
+
+CREATE TABLE IF NOT EXISTS public.whatsapp_coex_health (
+  phone_number_id text PRIMARY KEY,
+  display_phone_number text,
+  verified_name text,
+  is_on_biz_app boolean,
+  platform_type text,
+  quality_rating text,
+  status text,
+  healthy boolean NOT NULL DEFAULT false,
+  alert_active boolean NOT NULL DEFAULT false,
+  last_checked_at timestamptz NOT NULL DEFAULT now(),
+  last_error text,
+  raw jsonb
+);
+
+ALTER TABLE public.whatsapp_coex_health ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS whatsapp_coex_health_select_admin ON public.whatsapp_coex_health;
+CREATE POLICY whatsapp_coex_health_select_admin
+  ON public.whatsapp_coex_health
+  FOR SELECT
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1
+      FROM public.admin_profiles p
+      WHERE p.id = auth.uid()
+        AND p.is_active = true
+        AND p.role IN ('admin', 'super_admin')
+    )
+  );
+
+GRANT SELECT ON public.whatsapp_coex_health TO authenticated;
+GRANT ALL ON public.whatsapp_coex_health TO service_role;

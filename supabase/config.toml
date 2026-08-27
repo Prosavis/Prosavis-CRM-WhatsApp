@@ -246,3 +246,6 @@ verify_jwt = false
 
 [functions.ai-context]
 verify_jwt = false
+
+[functions.check-whatsapp-coex-health]
+verify_jwt = false

@@ -1272,6 +1272,22 @@ export interface BackfillConversationLineResult {
   updatedCount: number;
 }
 
+export interface WhatsAppCoexHealthResult {
+  success: boolean;
+  healthy: boolean;
+  alertActive: boolean;
+  reason: string;
+  phoneNumberId: string;
+  isOnBizApp: boolean;
+  platformType: string | null;
+  qualityRating: string | null;
+  lastCheckedAt: string;
+}
+
+export async function checkWhatsAppCoexHealth(): Promise<WhatsAppCoexHealthResult> {
+  return invokeFn<WhatsAppCoexHealthResult>('check-whatsapp-coex-health', {});
+}
+
 /** Asigna phone_number_id a chats huérfanos (null) para que el inbox los liste. */
 export async function backfillWhatsAppConversationLine(params?: {
   phoneNumberId?: string;

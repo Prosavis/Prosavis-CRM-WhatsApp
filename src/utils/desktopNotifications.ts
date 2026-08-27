@@ -5,7 +5,7 @@ export const DESKTOP_NOTIFICATIONS_ONBOARDING_DISMISSED_KEY =
 export const WHATSAPP_FOCUS_CHAT_EVENT = 'whatsapp-focus-chat';
 
 export interface WhatsAppFocusChatDetail {
-  phone: string;
+  phone?: string;
   conversationId: string;
   phoneNumberId?: string;
 }
