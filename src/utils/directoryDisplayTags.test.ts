@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { directoryDisplayTags } from './directoryDisplayTags';
+import {
+  catalogColorByTagName,
+  directoryDisplayTags,
+  directoryTagColor,
+} from './directoryDisplayTags';
 
 describe('directoryDisplayTags', () => {
   it('uses directory tags and skips a duplicate classification', () => {
@@ -21,5 +25,21 @@ describe('directoryDisplayTags', () => {
       tags: ['', '  '],
       classification: 'unknown',
     })).toEqual([]);
+  });
+});
+
+describe('directoryTagColor', () => {
+  const catalog = catalogColorByTagName([
+    { name: 'Auxiliares', color: '#c62828' },
+    { name: 'TEST', color: '#1565c0' },
+  ]);
+
+  it('resolves catalog color by name ignoring case', () => {
+    expect(directoryTagColor('Auxiliares', catalog)).toBe('#c62828');
+    expect(directoryTagColor('auxiliares', catalog)).toBe('#c62828');
+  });
+
+  it('returns undefined for a label that is not in the catalog', () => {
+    expect(directoryTagColor('Cliente nuevo', catalog)).toBeUndefined();
   });
 });

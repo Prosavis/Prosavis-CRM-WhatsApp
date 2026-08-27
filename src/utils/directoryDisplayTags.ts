@@ -1,5 +1,25 @@
 const HIDDEN_CLASSIFICATIONS = new Set(['unknown', '']);
 
+export function catalogColorByTagName(
+  tags: Array<{ name?: string | null; color?: string | null }>,
+): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const tag of tags) {
+    const key = (tag.name ?? '').trim().toLowerCase();
+    const color = (tag.color ?? '').trim();
+    if (!key || !color || map.has(key)) continue;
+    map.set(key, color);
+  }
+  return map;
+}
+
+export function directoryTagColor(
+  label: string,
+  colorByName: Map<string, string>,
+): string | undefined {
+  return colorByName.get(label.trim().toLowerCase());
+}
+
 export function directoryDisplayTags(params: {
   tags?: string[] | null;
   classification?: string | null;

@@ -61,8 +61,7 @@ import {
 } from '@/hooks/useDirectoryContactMeta';
 import { pickContactPhotoUrl } from '@/utils/contactAvatar';
 import { resolveContactDisplayName, shouldSyncContactNameFromDirectory } from '@/utils/contactDisplayName';
-import { isCommercialPhoneNumberId, isCommercialStableKey } from '@/utils/whatsappLines';
-import { directoryDisplayTags } from '@/utils/directoryDisplayTags';
+import { catalogColorByTagName, directoryDisplayTags, directoryTagColor } from '@/utils/directoryDisplayTags';
 import { patchWhatsAppConversationAdmin } from '@/services/whatsappService';
 import {
   conversationMatchesInboxCategory,
@@ -180,6 +179,7 @@ interface ConversationRowProps {
   rowPhoto: string | undefined;
   convTags: WhatsAppTag[];
   directoryTags: string[];
+  tagColorByName: Map<string, string>;
   isUnread: boolean;
   peerSummary: ReturnType<typeof summarizePeerPresences> | null;
   selectionMode: boolean;
@@ -198,6 +198,7 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
   rowPhoto,
   convTags,
   directoryTags,
+  tagColorByName,
   isUnread,
   peerSummary,
   selectionMode,
@@ -274,13 +275,6 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
               <Typography variant="body1" fontWeight={isUnread ? 600 : 400} noWrap>
                 {rowName}
               </Typography>
-              {(isCommercialPhoneNumberId(conv.phoneNumberId) || isCommercialStableKey(conv.id)) && (
-                <Chip
-                  label="311"
-                  size="small"
-                  sx={{ height: 18, fontSize: '0.65rem', ml: 0.5, flexShrink: 0 }}
-                />
-              )}
             </Box>
             <Typography
               variant="caption"
@@ -322,8 +316,12 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
                     key={`dir-${tag}`}
                     label={tag}
                     size="small"
-                    variant="outlined"
-                    sx={{ height: 18, fontSize: '0.65rem' }}
+                    sx={coloredChipSx(
+                      theme,
+                      directoryTagColor(tag, tagColorByName) ?? theme.palette.text.secondary,
+                      'filled',
+                      { height: 18, fontSize: '0.65rem' },
+                    )}
                   />
                 ))}
                 {convTags.slice(0, 3).map((tag) => (
@@ -482,6 +480,8 @@ const ConversationList: React.FC<ConversationListProps> = ({
     tags.forEach((t) => map.set(t.id, t));
     return map;
   }, [tags]);
+
+  const tagColorByName = useMemo(() => catalogColorByTagName(tags), [tags]);
 
   const secondaryTags = useMemo(
     () => getSecondaryFilterTags(tags, categoryTagIds) as WhatsAppTag[],
@@ -1148,6 +1148,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
               rowPhoto={rowPhoto}
               convTags={convTags}
               directoryTags={directoryTags}
+              tagColorByName={tagColorByName}
               isUnread={isUnread}
               peerSummary={peerSummary}
               selectionMode={selectionMode}
