@@ -23,6 +23,7 @@ import {
 } from '../_shared/transcribeInboundAudio.ts';
 import { conversationStableKey } from '../_shared/whatsappLines.ts';
 import {
+  persistCommercialOrphanStatus,
   processHistory,
   processSmbAppStateSync,
   processSmbMessageEchoes,
@@ -564,6 +565,7 @@ function getStatusErrorMessage(status: JsonRecord): string | null {
 async function processStatus(params: {
   supabase: ReturnType<typeof getServiceClient>;
   status: JsonRecord;
+  phoneNumberId: string | null;
 }): Promise<'updated' | 'missing'> {
   const waMessageId = getString(params.status.id);
   const status = getString(params.status.status);
@@ -571,13 +573,21 @@ async function processStatus(params: {
     throw new Error('Status sin id o status.');
   }
 
-  const { data: existingMessage, error: existingError } = await params.supabase
+  const { data: foundMessage, error: existingError } = await params.supabase
     .from('whatsapp_message_log')
     .select('id,conversation_stable_key,raw_payload,recipient_phone')
     .eq('wa_message_id', waMessageId)
     .maybeSingle();
 
   if (existingError) throw existingError;
+  let existingMessage = foundMessage;
+  if (!existingMessage) {
+    existingMessage = await persistCommercialOrphanStatus({
+      supabase: params.supabase,
+      status: params.status,
+      phoneNumberId: params.phoneNumberId,
+    });
+  }
   if (!existingMessage) return 'missing';
 
   const isFailure = status === 'failed';
@@ -711,11 +721,14 @@ async function processPayload(
         }
       }
 
+      const phoneNumberId = getString(asRecord(value.metadata).phone_number_id) || null;
+
       for (const rawStatus of asArray(value.statuses)) {
         try {
           const processed = await processStatus({
             supabase,
             status: asRecord(rawStatus),
+            phoneNumberId,
           });
 
           if (processed === 'missing') {

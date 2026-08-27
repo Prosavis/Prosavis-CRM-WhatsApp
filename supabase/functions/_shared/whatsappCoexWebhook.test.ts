@@ -5,8 +5,11 @@ import {
   conversationStableKey,
 } from './whatsappLines.ts';
 import {
+  COMMERCIAL_ORPHAN_STATUS_STUB,
   parseCoexCustomerPhone,
   shouldIgnoreBotCoexField,
+  shouldPersistCommercialOrphanStatus,
+  shouldUpgradeCoexStub,
 } from './whatsappCoexWebhook.ts';
 
 Deno.test('Coex fields on the bot line are ignored', () => {
@@ -89,4 +92,44 @@ Deno.test('official Meta history inbound uses from === thread.id', () => {
     '16505551234',
   );
   assertEquals(parsed, { customerPhone: '16505551234', direction: 'inbound' });
+});
+
+Deno.test('commercial orphan statuses persist only with recipient and 311', () => {
+  assertEquals(
+    shouldPersistCommercialOrphanStatus({
+      phoneNumberId: COMMERCIAL_PHONE_NUMBER_ID,
+      recipientId: '573246549657',
+      waMessageId: 'wamid.1',
+    }),
+    true,
+  );
+  assertEquals(
+    shouldPersistCommercialOrphanStatus({
+      phoneNumberId: BOT_PHONE_NUMBER_ID,
+      recipientId: '573246549657',
+      waMessageId: 'wamid.1',
+    }),
+    false,
+  );
+  assertEquals(
+    shouldPersistCommercialOrphanStatus({
+      phoneNumberId: COMMERCIAL_PHONE_NUMBER_ID,
+      recipientId: '',
+      waMessageId: 'wamid.1',
+    }),
+    false,
+  );
+});
+
+Deno.test('echo replaces the Facebook/phone stub but not a real body', () => {
+  assertEquals(
+    shouldUpgradeCoexStub(COMMERCIAL_ORPHAN_STATUS_STUB, 'Ya le escribí al cliente'),
+    true,
+  );
+  assertEquals(shouldUpgradeCoexStub('', 'Hola'), true);
+  assertEquals(shouldUpgradeCoexStub('Hola', 'Otro texto'), false);
+  assertEquals(
+    shouldUpgradeCoexStub(COMMERCIAL_ORPHAN_STATUS_STUB, COMMERCIAL_ORPHAN_STATUS_STUB),
+    false,
+  );
 });

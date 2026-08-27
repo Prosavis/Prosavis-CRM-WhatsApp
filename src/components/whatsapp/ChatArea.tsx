@@ -116,6 +116,11 @@ import { coloredChipSx } from '@/utils/coloredChipStyles';
 import { prepareWhatsAppSticker } from '@/utils/prepareWhatsAppSticker';
 import { summarizePeerPresences } from '@/utils/whatsappAdminPresence';
 import { customerPhoneFromStableKey } from '@/utils/whatsappLines';
+import {
+  getDirectoryMetaForConversation,
+  useDirectoryContactMeta,
+} from '@/hooks/useDirectoryContactMeta';
+import { directoryDisplayTags } from '@/utils/directoryDisplayTags';
 import type { WhatsAppTagFolder } from '@/types/whatsapp';
 import TagListGrouped from './TagListGrouped';
 import type { MetaSessionWindow } from '../../../supabase/functions/_shared/metaSessionWindow';
@@ -1247,6 +1252,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   }, [myUid, reactionsByTarget]);
 
   const groupedMessages = groupMessagesByDate(visibleMessages);
+  const { metaByPhoneKey: directoryMetaByPhoneKey, ready: directoryMetaReady } =
+    useDirectoryContactMeta([conversation]);
+  const directoryTags = directoryMetaReady
+    ? directoryDisplayTags(getDirectoryMetaForConversation(conversation, directoryMetaByPhoneKey) ?? {})
+    : [];
+  const directoryTagKeys = new Set(directoryTags.map((tag) => tag.toLowerCase()));
   const displayName =
     headerDisplayName ||
     conversation.contactName ||
@@ -1312,9 +1323,18 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 <Typography variant="caption" color="text.secondary" noWrap>
                   {conversation.contactPhone || conversation.phone || ''}
                 </Typography>
+                {directoryTags.map((tag) => (
+                  <Chip
+                    key={`dir-${tag}`}
+                    label={tag}
+                    size="small"
+                    variant="outlined"
+                    sx={{ height: 18, fontSize: '0.65rem' }}
+                  />
+                ))}
                 {(conversation.tagIds || []).map((tagId) => {
                   const tag = tags.find((t) => t.id === tagId);
-                  if (!tag) return null;
+                  if (!tag || directoryTagKeys.has(tag.name.toLowerCase())) return null;
                   return (
                     <Chip
                       key={tag.id}

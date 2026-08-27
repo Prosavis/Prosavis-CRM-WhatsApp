@@ -11,6 +11,35 @@ export interface CoexProcessResult {
   errors: string[];
 }
 
+export const COMMERCIAL_ORPHAN_STATUS_STUB =
+  'Enviado desde WhatsApp Business / Facebook';
+
+export function isCommercialOrphanStatusStub(body: string | null | undefined): boolean {
+  return (body ?? '').trim() === COMMERCIAL_ORPHAN_STATUS_STUB;
+}
+
+export function shouldPersistCommercialOrphanStatus(params: {
+  phoneNumberId?: string | null;
+  recipientId?: string | null;
+  waMessageId?: string | null;
+}): boolean {
+  return Boolean(
+    isCommercialPhoneNumberId(params.phoneNumberId) &&
+      (params.recipientId ?? '').trim() &&
+      (params.waMessageId ?? '').trim(),
+  );
+}
+
+export function shouldUpgradeCoexStub(
+  existingBody: string | null | undefined,
+  incomingBody: string | null | undefined,
+): boolean {
+  const incoming = (incomingBody ?? '').trim();
+  if (!incoming || isCommercialOrphanStatusStub(incoming)) return false;
+  const existing = (existingBody ?? '').trim();
+  return !existing || isCommercialOrphanStatusStub(existing);
+}
+
 function asRecord(value: unknown): JsonRecord {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as JsonRecord)
@@ -97,7 +126,7 @@ export async function persistCoexMessage(params: {
   threadCustomerPhone?: string;
   defaultDirection?: 'inbound' | 'outbound';
   incrementUnread?: boolean;
-}): Promise<'inserted' | 'duplicate' | 'skipped'> {
+}): Promise<'inserted' | 'updated' | 'duplicate' | 'skipped'> {
   const parsed = parseCoexCustomerPhone(
     params.message,
     params.phoneNumberId,
@@ -109,16 +138,49 @@ export async function persistCoexMessage(params: {
 
   const { data: existing, error: existingError } = await params.supabase
     .from('whatsapp_message_log')
-    .select('id')
+    .select('id, message_body, conversation_stable_key')
     .eq('wa_message_id', waMessageId)
     .maybeSingle();
   if (existingError) throw existingError;
-  if (existing) return 'duplicate';
 
   const direction = params.defaultDirection ?? parsed.direction;
   const stableKey = conversationStableKey(parsed.customerPhone, params.phoneNumberId);
   const body = messageBody(params.message);
   const createdAt = getUnixDate(params.message.timestamp);
+
+  if (existing) {
+    if (!shouldUpgradeCoexStub(existing.message_body as string | null, body)) {
+      return 'duplicate';
+    }
+    const { error: upgradeError } = await params.supabase
+      .from('whatsapp_message_log')
+      .update({
+        message_body: body,
+        raw_payload: params.message,
+        sender_type: direction === 'outbound' ? 'app' : 'user',
+        direction,
+      })
+      .eq('id', existing.id);
+    if (upgradeError) throw upgradeError;
+
+    const conversationKey = String(existing.conversation_stable_key || stableKey);
+    const { data: existingConv } = await params.supabase
+      .from('whatsapp_conversations')
+      .select('last_message_text')
+      .eq('stable_key', conversationKey)
+      .maybeSingle();
+    if (
+      !existingConv ||
+      shouldUpgradeCoexStub(existingConv.last_message_text as string | null, body)
+    ) {
+      await params.supabase.from('whatsapp_conversations').update({
+        last_message_text: body,
+        last_message_at: createdAt,
+        last_message_direction: direction,
+      }).eq('stable_key', conversationKey);
+    }
+    return 'updated';
+  }
 
   const { data: existingConv } = await params.supabase
     .from('whatsapp_conversations')
@@ -165,6 +227,93 @@ export async function persistCoexMessage(params: {
   return 'inserted';
 }
 
+export async function persistCommercialOrphanStatus(params: {
+  supabase: SupabaseClient;
+  status: JsonRecord;
+  phoneNumberId: string | null;
+}): Promise<{
+  id: string;
+  conversation_stable_key: string;
+  raw_payload: unknown;
+  recipient_phone: string;
+} | null> {
+  const waMessageId = getString(params.status.id);
+  const recipientId = getString(params.status.recipient_id);
+  if (
+    !shouldPersistCommercialOrphanStatus({
+      phoneNumberId: params.phoneNumberId,
+      recipientId,
+      waMessageId,
+    })
+  ) {
+    return null;
+  }
+
+  const phoneNumberId = (params.phoneNumberId ?? '').trim();
+  const stableKey = conversationStableKey(recipientId, phoneNumberId);
+  const createdAt = getUnixDate(params.status.timestamp);
+  const deliveryStatus = getString(params.status.status) || 'sent';
+
+  const { data: existingConv } = await params.supabase
+    .from('whatsapp_conversations')
+    .select('last_message_at')
+    .eq('stable_key', stableKey)
+    .maybeSingle();
+  const existingLast = existingConv?.last_message_at
+    ? new Date(String(existingConv.last_message_at)).getTime()
+    : 0;
+  const statusTime = new Date(createdAt).getTime();
+  const shouldPreview = !existingLast || existingLast <= statusTime;
+
+  await params.supabase.from('whatsapp_conversations').upsert(
+    {
+      stable_key: stableKey,
+      phone: recipientId,
+      contact_phone: recipientId,
+      state: 'active',
+      phone_number_id: phoneNumberId,
+      ...(shouldPreview
+        ? {
+          last_message_text: COMMERCIAL_ORPHAN_STATUS_STUB,
+          last_message_at: createdAt,
+          last_message_direction: 'outbound',
+          last_message_outbound_status: deliveryStatus,
+        }
+        : {}),
+    },
+    { onConflict: 'stable_key' },
+  );
+
+  const { data: inserted, error: insertError } = await params.supabase
+    .from('whatsapp_message_log')
+    .insert({
+      conversation_stable_key: stableKey,
+      recipient_phone: recipientId,
+      direction: 'outbound',
+      sender_type: 'app',
+      message_body: COMMERCIAL_ORPHAN_STATUS_STUB,
+      status: deliveryStatus,
+      wa_message_id: waMessageId,
+      phone_number_id: phoneNumberId,
+      hidden_from_panel: false,
+      raw_payload: { orphanStatus: params.status },
+      created_at: createdAt,
+    })
+    .select('id, conversation_stable_key, raw_payload, recipient_phone')
+    .single();
+
+  if (insertError && String((insertError as { code?: string }).code) === '23505') {
+    const { data: existing } = await params.supabase
+      .from('whatsapp_message_log')
+      .select('id, conversation_stable_key, raw_payload, recipient_phone')
+      .eq('wa_message_id', waMessageId)
+      .maybeSingle();
+    return existing ?? null;
+  }
+  if (insertError) throw insertError;
+  return inserted;
+}
+
 export async function processSmbMessageEchoes(params: {
   supabase: SupabaseClient;
   value: JsonRecord;
@@ -183,7 +332,7 @@ export async function processSmbMessageEchoes(params: {
         phoneNumberId,
         defaultDirection: 'outbound',
       });
-      if (status === 'inserted') result.echoes += 1;
+      if (status === 'inserted' || status === 'updated') result.echoes += 1;
       else result.skipped += 1;
     } catch (error) {
       result.errors.push(`echo: ${String(error)}`);

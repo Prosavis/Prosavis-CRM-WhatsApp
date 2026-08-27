@@ -62,6 +62,7 @@ import {
 import { pickContactPhotoUrl } from '@/utils/contactAvatar';
 import { resolveContactDisplayName, shouldSyncContactNameFromDirectory } from '@/utils/contactDisplayName';
 import { isCommercialPhoneNumberId, isCommercialStableKey } from '@/utils/whatsappLines';
+import { directoryDisplayTags } from '@/utils/directoryDisplayTags';
 import { patchWhatsAppConversationAdmin } from '@/services/whatsappService';
 import {
   conversationMatchesInboxCategory,
@@ -178,6 +179,7 @@ interface ConversationRowProps {
   rowPhone: string | undefined;
   rowPhoto: string | undefined;
   convTags: WhatsAppTag[];
+  directoryTags: string[];
   isUnread: boolean;
   peerSummary: ReturnType<typeof summarizePeerPresences> | null;
   selectionMode: boolean;
@@ -195,6 +197,7 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
   rowPhone,
   rowPhoto,
   convTags,
+  directoryTags,
   isUnread,
   peerSummary,
   selectionMode,
@@ -312,8 +315,17 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
                 <PushPinIcon sx={{ fontSize: 14, color: 'text.secondary', ml: 0.5, flexShrink: 0, transform: 'rotate(45deg)' }} />
               )}
             </Box>
-            {convTags.length > 0 && (
+            {(directoryTags.length > 0 || convTags.length > 0) && (
               <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5, flexWrap: 'wrap' }}>
+                {directoryTags.slice(0, 3).map((tag) => (
+                  <Chip
+                    key={`dir-${tag}`}
+                    label={tag}
+                    size="small"
+                    variant="outlined"
+                    sx={{ height: 18, fontSize: '0.65rem' }}
+                  />
+                ))}
                 {convTags.slice(0, 3).map((tag) => (
                   <Chip
                     key={tag.id}
@@ -322,9 +334,9 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
                     sx={coloredChipSx(theme, tag.color, 'filled', { height: 18, fontSize: '0.65rem' })}
                   />
                 ))}
-                {convTags.length > 3 && (
+                {directoryTags.length + convTags.length > 3 && (
                   <Typography variant="caption" color="text.secondary">
-                    +{convTags.length - 3}
+                    +{directoryTags.length + convTags.length - 3}
                   </Typography>
                 )}
               </Box>
@@ -1110,7 +1122,16 @@ const ConversationList: React.FC<ConversationListProps> = ({
             directoryMetaReady ? dirMeta?.photoUrl : undefined,
             conv.contactPhotoUrl,
           );
-          const convTags = (conv.tagIds || []).map((id) => tagMap.get(id)).filter(Boolean) as WhatsAppTag[];
+          const directoryTags = directoryMetaReady
+            ? directoryDisplayTags({
+              tags: dirMeta?.tags,
+              classification: dirMeta?.classification,
+            })
+            : [];
+          const directoryTagKeys = new Set(directoryTags.map((tag) => tag.toLowerCase()));
+          const convTags = (conv.tagIds || [])
+            .map((id) => tagMap.get(id))
+            .filter((tag): tag is WhatsAppTag => Boolean(tag) && !directoryTagKeys.has(tag.name.toLowerCase()));
           const isUnread = Boolean(conv.unreadCount > 0 || conv.crmForceUnread);
           const peers = presenceByConversationId?.[conv.id] || [];
           const peerSummary = summarizePeerPresences(peers);
@@ -1123,6 +1144,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
               rowPhone={rowPhone}
               rowPhoto={rowPhoto}
               convTags={convTags}
+              directoryTags={directoryTags}
               isUnread={isUnread}
               peerSummary={peerSummary}
               selectionMode={selectionMode}

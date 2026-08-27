@@ -10,6 +10,8 @@ import type { WhatsAppConversation } from '@/services/whatsappService';
 export interface DirectoryContactMeta {
   photoUrl?: string;
   displayName?: string;
+  tags: string[];
+  classification?: string;
 }
 
 export interface DirectoryContactMetaResult {
@@ -76,12 +78,14 @@ export function useDirectoryContactMeta(
         photo_url: string | null;
         display_name: string | null;
         full_name: string | null;
+        tags: string[] | null;
+        classification: string | null;
       }> = [];
 
       for (const chunk of chunkArray(variants, CHUNK_SIZE)) {
         const { data, error } = await supabase
           .from('crm_directory')
-          .select('phone, phone_key, photo_url, display_name, full_name')
+          .select('phone, phone_key, photo_url, display_name, full_name, tags, classification')
           .in('phone', chunk);
 
         if (error) throw error;
@@ -102,16 +106,27 @@ export function useDirectoryContactMeta(
           row.full_name?.trim() ||
           undefined;
         const photoUrl = row.photo_url?.trim() || undefined;
+        const tags = (row.tags ?? []).map((tag) => tag.trim()).filter(Boolean);
+        const classification = row.classification?.trim() || undefined;
         const existing = next.get(key);
 
         if (!existing) {
-          next.set(key, { displayName, photoUrl });
+          next.set(key, { displayName, photoUrl, tags, classification });
           continue;
+        }
+
+        const mergedTags = [...existing.tags];
+        for (const tag of tags) {
+          if (!mergedTags.some((item) => item.toLowerCase() === tag.toLowerCase())) {
+            mergedTags.push(tag);
+          }
         }
 
         next.set(key, {
           displayName: existing.displayName || displayName,
           photoUrl: existing.photoUrl || photoUrl,
+          tags: mergedTags,
+          classification: existing.classification || classification,
         });
       }
 
