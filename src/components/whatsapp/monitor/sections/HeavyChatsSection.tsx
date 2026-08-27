@@ -18,6 +18,7 @@ import {
   type HeavyChat,
 } from '@/services/monitorService';
 import { isReservedStoragePrefix } from '@/utils/storageMonitorRules';
+import { applyWhatsAppFocusChat } from '@/utils/whatsappTabs';
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';
@@ -91,10 +92,10 @@ const HeavyChatsSection: React.FC<HeavyChatsSectionProps> = ({
 
   const handleOpenInInbox = useCallback((chat: HeavyChat) => {
     if (chat.isLegacyPrefix || isReservedStoragePrefix(chat.stableKey)) return;
-    const next = new URLSearchParams(searchParams);
-    next.delete('tab');
-    next.set('conversation', chat.stableKey);
-    if (chat.contactPhone) next.set('focusPhone', chat.contactPhone);
+    const next = applyWhatsAppFocusChat(searchParams, {
+      conversationId: chat.stableKey,
+      phone: chat.contactPhone,
+    });
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams]);
 

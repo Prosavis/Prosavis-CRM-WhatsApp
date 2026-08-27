@@ -13,6 +13,7 @@ import {
 import { useTheme as useMuiTheme } from '@mui/material/styles';
 import {
   Inbox as InboxIcon,
+  Storefront as StorefrontIcon,
   BarChart as BarChartIcon,
   ContactPhone as ContactPhoneIcon,
   ConfirmationNumber as ConfirmationNumberIcon,
@@ -26,13 +27,15 @@ import ThemeToggle from '@/components/common/ThemeToggle';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/hooks/useAuth';
 import { getProsavisLogoSrc } from '@/utils/prosavisBrand';
+import type { WhatsAppTabKey } from '@/utils/whatsappTabs';
 import WhatsAppInternalContactsButton from './WhatsAppInternalContactsButton';
 
 export interface WhatsAppTopBarProps {
-  activeTab: number;
-  onTabChange: (_: React.SyntheticEvent, value: number) => void;
+  activeTab: WhatsAppTabKey;
+  onTabChange: (_: React.SyntheticEvent, value: WhatsAppTabKey) => void;
   directoryTotalContacts: number | null;
   onOpenBulk: () => void;
+  showBulk?: boolean;
 }
 
 function buildTabItems(directoryTotalContacts: number | null) {
@@ -42,14 +45,15 @@ function buildTabItems(directoryTotalContacts: number | null) {
       : 'Directorio';
 
   return [
-    { icon: <InboxIcon fontSize="small" />, label: 'Inbox' },
-    { icon: <BarChartIcon fontSize="small" />, label: 'Métricas' },
-    { icon: <ContactPhoneIcon fontSize="small" />, label: directoryLabel },
-    { icon: <ConfirmationNumberIcon fontSize="small" />, label: 'Descuentos' },
-    { icon: <SettingsIcon fontSize="small" />, label: 'Configuración' },
-    { icon: <MonitorHeartIcon fontSize="small" />, label: 'Monitoreo' },
-    { icon: <AutoAwesomeIcon fontSize="small" />, label: 'Automatizaciones' },
-  ] as const;
+    { key: 'inbox' as const, icon: <InboxIcon fontSize="small" />, label: 'Citas 312' },
+    { key: 'commercial' as const, icon: <StorefrontIcon fontSize="small" />, label: 'Comercial 311' },
+    { key: 'metrics' as const, icon: <BarChartIcon fontSize="small" />, label: 'Métricas' },
+    { key: 'leads' as const, icon: <ContactPhoneIcon fontSize="small" />, label: directoryLabel },
+    { key: 'discounts' as const, icon: <ConfirmationNumberIcon fontSize="small" />, label: 'Descuentos' },
+    { key: 'settings' as const, icon: <SettingsIcon fontSize="small" />, label: 'Configuración' },
+    { key: 'monitoreo' as const, icon: <MonitorHeartIcon fontSize="small" />, label: 'Monitoreo' },
+    { key: 'automations' as const, icon: <AutoAwesomeIcon fontSize="small" />, label: 'Automatizaciones' },
+  ];
 }
 
 const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
@@ -57,6 +61,7 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
   onTabChange,
   directoryTotalContacts,
   onOpenBulk,
+  showBulk = true,
 }) => {
   const { mode } = useTheme();
   const { profile, signOut } = useAuth();
@@ -119,9 +124,10 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
           },
         }}
       >
-        {tabItems.map(({ icon, label }) => (
+        {tabItems.map(({ key, icon, label }) => (
           <Tab
-            key={label.startsWith('Directorio') ? 'Directorio' : label}
+            key={key}
+            value={key}
             icon={icon}
             iconPosition="start"
             label={compactTabs ? undefined : label}
@@ -152,19 +158,21 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
       >
         <WhatsAppInternalContactsButton />
 
-        <Tooltip title="Envío masivo WhatsApp">
-          <Button
-            variant="outlined"
-            size="small"
-            startIcon={<SendIcon />}
-            onClick={onOpenBulk}
-            sx={{ textTransform: 'none' }}
-          >
-            <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
-              Masivo
-            </Box>
-          </Button>
-        </Tooltip>
+        {showBulk && (
+          <Tooltip title="Envío masivo WhatsApp">
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<SendIcon />}
+              onClick={onOpenBulk}
+              sx={{ textTransform: 'none' }}
+            >
+              <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
+                Masivo
+              </Box>
+            </Button>
+          </Tooltip>
+        )}
 
         <ThemeToggle size="small" />
 

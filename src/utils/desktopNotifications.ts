@@ -7,6 +7,7 @@ export const WHATSAPP_FOCUS_CHAT_EVENT = 'whatsapp-focus-chat';
 export interface WhatsAppFocusChatDetail {
   phone: string;
   conversationId: string;
+  phoneNumberId?: string;
 }
 
 export interface InboundMessageNotificationParams {
@@ -14,6 +15,7 @@ export interface InboundMessageNotificationParams {
   body: string;
   conversationId: string;
   phone: string;
+  phoneNumberId?: string;
   icon?: string;
 }
 
@@ -90,6 +92,7 @@ export function showInboundMessageNotification(params: InboundMessageNotificatio
     dispatchWhatsAppFocusChat({
       phone: params.phone,
       conversationId: params.conversationId,
+      phoneNumberId: params.phoneNumberId,
     });
     notification.close();
   };

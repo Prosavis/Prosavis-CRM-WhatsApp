@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Box, Snackbar, Alert, Button, ToggleButton, ToggleButtonGroup } from '@mui/material';
+import { Box, Snackbar, Alert, Button } from '@mui/material';
 import { alpha, useTheme } from '@mui/material/styles';
 import ConversationList from './ConversationList';
 import ChatArea from './ChatArea';
@@ -77,6 +77,11 @@ import {
   wabaIdForLine,
   type WhatsAppLineFilter,
 } from '@/utils/whatsappLines';
+import { preferConversationForFilter } from '@/utils/whatsappTabs';
+import {
+  detectNewInboundConversations,
+  pickLatestInbound,
+} from '@/utils/whatsappInboundAlerts';
 
 function conversationShortLabel(c: WhatsAppConversation): string {
   return resolveContactDisplayName({
@@ -153,18 +158,11 @@ function conversationMatchesFocusKey(
   );
 }
 
-function preferBotConversation(matches: WhatsAppConversation[]): WhatsAppConversation | undefined {
-  return (
-    matches.find((c) => !isCommercialPhoneNumberId(c.phoneNumberId) && !c.id.includes('__')) ??
-    matches[0]
-  );
-}
-
 interface WhatsAppLayoutProps {
   phoneNumberId?: string;
   wabaId?: string;
   lineFilter?: WhatsAppLineFilter;
-  onLineFilterChange?: (filter: WhatsAppLineFilter) => void;
+  onOpenCommercialConversation?: (conversationId?: string) => void;
   focusPhone?: string;
   /** Llamar al cerrar el chat que coincidía con `focusPhone` (p. ej. quitar el query de la URL). */
   onClearFocusPhone?: () => void;
@@ -181,7 +179,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   phoneNumberId,
   wabaId,
   lineFilter = 'bot',
-  onLineFilterChange,
+  onOpenCommercialConversation,
   focusPhone,
   onClearFocusPhone,
   focusConversation,
@@ -243,7 +241,10 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
 
   const notifyAudioRef = useRef<HTMLAudioElement | null>(null);
   const inboundBaselineReadyRef = useRef(false);
-  const inboundPrevSnapshotRef = useRef<Map<string, { at: number }>>(new Map());
+  const inboundPrevSnapshotRef = useRef<Map<string, number>>(new Map());
+  const siblingInboundBaselineReadyRef = useRef(false);
+  const siblingInboundPrevSnapshotRef = useRef<Map<string, number>>(new Map());
+  const [siblingAlertConversations, setSiblingAlertConversations] = useState<WhatsAppConversation[]>([]);
   const focusRefetchAttemptedRef = useRef<string | null>(null);
   /** Token del deep-link ya aplicado (evita re-seleccionar mientras se limpia la URL). */
   const appliedDeepLinkTokenRef = useRef<string | null>(null);
@@ -277,6 +278,9 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   useEffect(() => {
     inboundBaselineReadyRef.current = false;
     inboundPrevSnapshotRef.current = new Map();
+    siblingInboundBaselineReadyRef.current = false;
+    siblingInboundPrevSnapshotRef.current = new Map();
+    setSiblingAlertConversations([]);
     clearAllComposerDrafts();
     setSelectedConversation(null);
   }, [phoneNumberId, lineFilter]);
@@ -356,6 +360,21 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   }, [listPhoneNumberId, listFetchOptions, session?.access_token, authLoading, subscriptionKey]);
 
   useEffect(() => {
+    if (authLoading || !session?.access_token || lineFilter === 'all') {
+      setSiblingAlertConversations([]);
+      return;
+    }
+    const siblingFilter = lineFilter === 'commercial' ? 'bot' : 'commercial';
+    const siblingPhoneNumberId = phoneNumberIdForFilter(siblingFilter);
+    return subscribeToConversations(
+      setSiblingAlertConversations,
+      siblingPhoneNumberId,
+      undefined,
+      { includeOrphans: siblingFilter !== 'commercial' },
+    );
+  }, [authLoading, session?.access_token, lineFilter]);
+
+  useEffect(() => {
     if (authLoading || !session?.access_token) return;
 
     const handleVisibilityChange = () => {
@@ -421,49 +440,9 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     void loadSnippets();
   }, [loadSnippets]);
 
-  useEffect(() => {
-    if (loading) return;
-
-    const nextMap = new Map<string, { at: number }>();
-    for (const c of conversations) {
-      nextMap.set(c.id, { at: c.lastMessageAt?.getTime() ?? 0 });
-    }
-
-    if (!inboundBaselineReadyRef.current) {
-      inboundBaselineReadyRef.current = true;
-      inboundPrevSnapshotRef.current = nextMap;
-      return;
-    }
-
-    const candidates: WhatsAppConversation[] = [];
-    const now = Date.now();
-    const newConvMaxAgeMs = 120_000;
-
-    for (const c of conversations) {
-      if (c.lastMessageDirection !== 'inbound') continue;
-      const at = c.lastMessageAt?.getTime() ?? 0;
-      if (at === 0) continue;
-      const prev = inboundPrevSnapshotRef.current.get(c.id);
-      if (!prev) {
-        const age = now - at;
-        if (age >= 0 && age < newConvMaxAgeMs) candidates.push(c);
-      } else if (at > prev.at) {
-        candidates.push(c);
-      }
-    }
-
-    inboundPrevSnapshotRef.current = nextMap;
-
-    if (candidates.length === 0) return;
-
-    const best = candidates.reduce((a, b) => {
-      const ta = a.lastMessageAt?.getTime() ?? 0;
-      const tb = b.lastMessageAt?.getTime() ?? 0;
-      return ta >= tb ? a : b;
-    });
-
+  const announceInbound = useCallback((best: WhatsAppConversation, opts?: { snackbar?: boolean }) => {
     const contactLabel = conversationShortLabel(best);
-    const focusPhone = best.contactPhone || best.phone || '';
+    const notifyPhone = best.contactPhone || best.phone || '';
 
     if (areSoundsEnabled()) {
       const audio = notifyAudioRef.current;
@@ -479,11 +458,12 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
         title: 'Nuevo mensaje de WhatsApp',
         body: contactLabel,
         conversationId: best.id,
-        phone: focusPhone,
+        phone: notifyPhone,
+        phoneNumberId: best.phoneNumberId,
       });
     }
 
-    if (!document.hidden) {
+    if (!document.hidden && opts?.snackbar !== false) {
       setInboundAlert({
         message: `Nuevo mensaje en ${contactLabel}`,
         conversationId: best.id,
@@ -491,7 +471,45 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     }
     setInboundPulse(true);
     window.setTimeout(() => setInboundPulse(false), 1400);
-  }, [conversations, loading]);
+  }, []);
+
+  useEffect(() => {
+    if (loading) return;
+
+    const { nextSnapshot, candidates } = detectNewInboundConversations(
+      conversations,
+      inboundPrevSnapshotRef.current,
+    );
+
+    if (!inboundBaselineReadyRef.current) {
+      inboundBaselineReadyRef.current = true;
+      inboundPrevSnapshotRef.current = nextSnapshot;
+      return;
+    }
+
+    inboundPrevSnapshotRef.current = nextSnapshot;
+    const best = pickLatestInbound(candidates);
+    if (best) announceInbound(best);
+  }, [announceInbound, conversations, loading]);
+
+  useEffect(() => {
+    if (lineFilter === 'all') return;
+
+    const { nextSnapshot, candidates } = detectNewInboundConversations(
+      siblingAlertConversations,
+      siblingInboundPrevSnapshotRef.current,
+    );
+
+    if (!siblingInboundBaselineReadyRef.current) {
+      siblingInboundBaselineReadyRef.current = true;
+      siblingInboundPrevSnapshotRef.current = nextSnapshot;
+      return;
+    }
+
+    siblingInboundPrevSnapshotRef.current = nextSnapshot;
+    const best = pickLatestInbound(candidates);
+    if (best) announceInbound(best, { snackbar: false });
+  }, [announceInbound, lineFilter, siblingAlertConversations]);
 
   useEffect(() => {
     if (selectedConversation) {
@@ -567,7 +585,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
         (Boolean(focusConversation) && conversationMatchesFocusKey(focusConversation, c)) ||
         (Boolean(focusPhone) && conversationMatchesFocusPhone(focusPhone, c)),
     );
-    const match = exact ?? preferBotConversation(matches);
+    const match = exact ?? preferConversationForFilter(matches, lineFilter);
 
     if (match) {
       appliedDeepLinkTokenRef.current = focusToken;
@@ -594,6 +612,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     focusConversation,
     focusPhone,
     conversations,
+    lineFilter,
     listPhoneNumberId,
     listFetchOptions,
     onClearFocusDeepLink,
@@ -699,12 +718,21 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
         onClearFocusConversation?.();
       }
     }
-    const c = conversations.find((x) => x.id === inboundAlert.conversationId);
-    if (c) setSelectedConversation(c);
+    const inCurrentList = conversations.find((x) => x.id === inboundAlert.conversationId);
+    if (inCurrentList) {
+      setSelectedConversation(inCurrentList);
+    } else {
+      const sibling = siblingAlertConversations.find((x) => x.id === inboundAlert.conversationId);
+      if (sibling && isCommercialPhoneNumberId(sibling.phoneNumberId)) {
+        onOpenCommercialConversation?.(sibling.id);
+      }
+    }
     setInboundAlert(null);
   }, [
     inboundAlert,
     conversations,
+    siblingAlertConversations,
+    onOpenCommercialConversation,
     focusPhone,
     focusConversation,
     onClearFocusDeepLink,
@@ -967,34 +995,17 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
             minHeight: 0,
           }}
         >
-          {onLineFilterChange && (
-            <ToggleButtonGroup
-              exclusive
-              size="small"
-              fullWidth
-              value={lineFilter}
-              onChange={(_, value: WhatsAppLineFilter | null) => {
-                if (value) onLineFilterChange(value);
-              }}
-              sx={{ px: 1, pt: 1, flexShrink: 0 }}
-              aria-label="Línea WhatsApp"
-            >
-              <ToggleButton value="bot">Citas 312</ToggleButton>
-              <ToggleButton value="commercial">Comercial 311</ToggleButton>
-              <ToggleButton value="all">Todas</ToggleButton>
-            </ToggleButtonGroup>
-          )}
           {siblingCommercialHint && (
             <Alert
               severity="warning"
               sx={{ m: 1, flexShrink: 0 }}
               action={
-                onLineFilterChange ? (
+                onOpenCommercialConversation ? (
                   <Button
                     color="inherit"
                     size="small"
                     onClick={() => {
-                      onLineFilterChange('commercial');
+                      onOpenCommercialConversation(siblingCommercialHint.conversationId);
                       setSelectedConversation(null);
                     }}
                   >

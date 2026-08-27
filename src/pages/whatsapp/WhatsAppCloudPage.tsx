@@ -8,8 +8,10 @@ import WhatsAppBulkSendDialog from '@/components/whatsapp/bulk/WhatsAppBulkSendD
 import MetricsTab, {
   PURGE_WHATSAPP_LOG_CONFIRM_PHRASE,
 } from '@/components/whatsapp/metrics/MetricsTab';
-import { WHATSAPP_CLOUD_PRODUCTION } from '@/constants/whatsappCloudAccounts';
-import type { WhatsAppLineFilter } from '@/utils/whatsappLines';
+import {
+  WHATSAPP_CLOUD_COMMERCIAL,
+  WHATSAPP_CLOUD_PRODUCTION,
+} from '@/constants/whatsappCloudAccounts';
 import useSoundEffects from '@/hooks/useSoundEffects';
 import { ensureWhatsAppConversationFromLead } from '@/services/whatsappService';
 import { directoryService } from '@/services/directoryService';
@@ -21,6 +23,16 @@ import {
   isNotificationSupported,
   type WhatsAppFocusChatDetail,
 } from '@/utils/desktopNotifications';
+import {
+  applyWhatsAppFocusChat,
+  applyWhatsAppTab,
+  normalizeWhatsAppSearchParams,
+  resolveWhatsAppLineFilter,
+  resolveWhatsAppTabKey,
+  whatsappTabFromIndex,
+  whatsappTabIndex,
+  type WhatsAppTabKey,
+} from '@/utils/whatsappTabs';
 
 export { PURGE_WHATSAPP_LOG_CONFIRM_PHRASE };
 
@@ -36,22 +48,13 @@ const WhatsAppCloudPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const { playNavigation } = useSoundEffects();
   const { registerTabController, unregisterTabController } = useAdminTour();
-  const tabParam = searchParams.get('tab');
+  const activeTab = resolveWhatsAppTabKey(searchParams);
+  const lineFilter = resolveWhatsAppLineFilter(searchParams);
   const broadcastJobParam = searchParams.get('broadcastJob');
-  const activeTab =
-    tabParam === 'metrics'
-      ? 1
-      : tabParam === 'leads'
-        ? 2
-        : tabParam === 'discounts'
-          ? 3
-          : tabParam === 'settings'
-            ? 4
-            : tabParam === 'monitoreo'
-              ? 5
-              : tabParam === 'automations'
-                ? 6
-                : 0;
+  const isInboxSurface = activeTab === 'inbox' || activeTab === 'commercial';
+  const inboxPhoneNumberId =
+    lineFilter === 'commercial' ? WHATSAPP_CLOUD_COMMERCIAL.phoneNumberId : phoneNumberId;
+  const inboxWabaId = lineFilter === 'commercial' ? WHATSAPP_CLOUD_COMMERCIAL.wabaId : wabaId;
 
   const clearBroadcastJobParam = useCallback(() => {
     setSearchParams(
@@ -64,34 +67,35 @@ const WhatsAppCloudPage: React.FC = () => {
     );
   }, [setSearchParams]);
 
-  const handleMainTabChange = (_: React.SyntheticEvent, value: number) => {
+  const handleMainTabChange = (_: React.SyntheticEvent, value: WhatsAppTabKey) => {
     playNavigation();
-    const next = new URLSearchParams(searchParams);
-    if (value === 0) next.delete('tab');
-    else if (value === 1) next.set('tab', 'metrics');
-    else if (value === 2) next.set('tab', 'leads');
-    else if (value === 3) next.set('tab', 'discounts');
-    else if (value === 4) next.set('tab', 'settings');
-    else if (value === 5) next.set('tab', 'monitoreo');
-    else next.set('tab', 'automations');
-    setSearchParams(next, { replace: true });
+    setSearchParams(
+      (prev) => {
+        const next = applyWhatsAppTab(prev, value);
+        if (value === 'inbox' || value === 'commercial') {
+          next.delete('focusPhone');
+          next.delete('conversation');
+        }
+        return next;
+      },
+      { replace: true },
+    );
   };
 
   useEffect(() => {
-    const tabLabels = ['', 'metrics', 'leads', 'discounts', 'settings', 'monitoreo', 'automations'] as const;
+    const { next, changed } = normalizeWhatsAppSearchParams(searchParams);
+    if (changed) setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
     registerTabController('/whatsapp-cloud', {
       setTab: (index: number) => {
         setSearchParams(
-          (prev) => {
-            const next = new URLSearchParams(prev);
-            if (index === 0) next.delete('tab');
-            else next.set('tab', tabLabels[index] || 'metrics');
-            return next;
-          },
+          (prev) => applyWhatsAppTab(prev, whatsappTabFromIndex(index)),
           { replace: true },
         );
       },
-      getTab: () => activeTab,
+      getTab: () => whatsappTabIndex(activeTab),
     });
     return () => unregisterTabController('/whatsapp-cloud');
   }, [registerTabController, unregisterTabController, activeTab, setSearchParams]);
@@ -107,21 +111,6 @@ const WhatsAppCloudPage: React.FC = () => {
 
   const focusPhone = searchParams.get('focusPhone') || undefined;
   const focusConversation = searchParams.get('conversation') || undefined;
-  const lineParam = searchParams.get('line');
-  const lineFilter: WhatsAppLineFilter =
-    lineParam === 'commercial' || lineParam === 'all' ? lineParam : 'bot';
-
-  const handleLineFilterChange = useCallback((filter: WhatsAppLineFilter) => {
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        if (filter === 'bot') next.delete('line');
-        else next.set('line', filter);
-        return next;
-      },
-      { replace: true },
-    );
-  }, [setSearchParams]);
 
   const handleOpenLeadInInbox = useCallback(async (phone: string, name?: string) => {
     let conversationId: string | undefined;
@@ -135,51 +124,82 @@ const WhatsAppCloudPage: React.FC = () => {
     } catch (err) {
       console.error('Error ensuring conversation:', err);
     }
-    const next = new URLSearchParams(searchParams);
-    next.delete('tab');
-    next.set('focusPhone', phone);
-    next.set('conversation', conversationId || phone.replace(/\D/g, '') || phone);
-    setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams]);
+    setSearchParams(
+      (prev) => {
+        const next = applyWhatsAppTab(prev, 'inbox');
+        next.set('focusPhone', phone);
+        next.set('conversation', conversationId || phone.replace(/\D/g, '') || phone);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
 
   const handleClearFocusPhone = useCallback(() => {
-    const next = new URLSearchParams(searchParams);
-    next.delete('focusPhone');
-    setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams]);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('focusPhone');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
 
   const handleClearFocusConversation = useCallback(() => {
-    const next = new URLSearchParams(searchParams);
-    next.delete('conversation');
-    setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams]);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('conversation');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
 
   const handleClearFocusDeepLink = useCallback(() => {
-    const next = new URLSearchParams(searchParams);
-    const hadFocus = next.has('focusPhone') || next.has('conversation');
-    if (!hadFocus) return;
-    next.delete('focusPhone');
-    next.delete('conversation');
-    setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams]);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        const hadFocus = next.has('focusPhone') || next.has('conversation');
+        if (!hadFocus) return prev;
+        next.delete('focusPhone');
+        next.delete('conversation');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
 
   const handleFocusChatFromNotification = useCallback(
-    (phone: string) => {
-      const next = new URLSearchParams(searchParams);
-      next.delete('tab');
-      next.set('focusPhone', phone);
-      next.set('conversation', phone.replace(/\D/g, '') || phone);
-      setSearchParams(next, { replace: true });
+    (detail: WhatsAppFocusChatDetail) => {
+      setSearchParams(
+        (prev) => applyWhatsAppFocusChat(prev, detail),
+        { replace: true },
+      );
       window.focus();
     },
-    [searchParams, setSearchParams],
+    [setSearchParams],
   );
+
+  const handleOpenCommercialConversation = useCallback((conversationId?: string) => {
+    setSearchParams(
+      (prev) => {
+        const next = applyWhatsAppTab(prev, 'commercial');
+        if (conversationId) next.set('conversation', conversationId);
+        else next.delete('conversation');
+        next.delete('focusPhone');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
 
   useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<WhatsAppFocusChatDetail>).detail;
-      if (!detail?.phone) return;
-      handleFocusChatFromNotification(detail.phone);
+      if (!detail?.phone && !detail?.conversationId) return;
+      handleFocusChatFromNotification(detail);
     };
     window.addEventListener(WHATSAPP_FOCUS_CHAT_EVENT, handler);
     return () => window.removeEventListener(WHATSAPP_FOCUS_CHAT_EVENT, handler);
@@ -192,10 +212,11 @@ const WhatsAppCloudPage: React.FC = () => {
 
   const handleGoToNotificationSettings = useCallback(() => {
     handleDismissNotificationsOnboarding();
-    const next = new URLSearchParams(searchParams);
-    next.set('tab', 'settings');
-    setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams, handleDismissNotificationsOnboarding]);
+    setSearchParams(
+      (prev) => applyWhatsAppTab(prev, 'settings'),
+      { replace: true },
+    );
+  }, [setSearchParams, handleDismissNotificationsOnboarding]);
 
   const fetchDirectoryStats = useCallback(async () => {
     try {
@@ -217,6 +238,7 @@ const WhatsAppCloudPage: React.FC = () => {
         onTabChange={handleMainTabChange}
         directoryTotalContacts={directoryTotalContacts}
         onOpenBulk={() => setBulkOpen(true)}
+        showBulk={activeTab === 'inbox'}
       />
 
       {showNotificationsOnboarding && (
@@ -237,14 +259,14 @@ const WhatsAppCloudPage: React.FC = () => {
 
       <Box sx={{ px: { xs: 0.5, sm: 0 } }}>
         <Box
-          data-tour="whatsapp-tab-inbox"
-          sx={{ display: activeTab === 0 ? 'block' : 'none' }}
+          data-tour={activeTab === 'commercial' ? 'whatsapp-tab-commercial' : 'whatsapp-tab-inbox'}
+          sx={{ display: isInboxSurface ? 'block' : 'none' }}
         >
           <WhatsAppLayout
-            phoneNumberId={phoneNumberId}
-            wabaId={wabaId}
+            phoneNumberId={inboxPhoneNumberId}
+            wabaId={inboxWabaId}
             lineFilter={lineFilter}
-            onLineFilterChange={handleLineFilterChange}
+            onOpenCommercialConversation={handleOpenCommercialConversation}
             focusPhone={focusPhone}
             onClearFocusPhone={handleClearFocusPhone}
             focusConversation={focusConversation}
@@ -253,14 +275,14 @@ const WhatsAppCloudPage: React.FC = () => {
           />
         </Box>
 
-        {activeTab === 1 && (
+        {activeTab === 'metrics' && (
           <MetricsTab
             broadcastJobParam={broadcastJobParam}
             onClearBroadcastJobParam={clearBroadcastJobParam}
           />
         )}
 
-        {activeTab === 2 && (
+        {activeTab === 'leads' && (
           <div data-tour="whatsapp-tab-leads">
             <Suspense
               fallback={
@@ -274,7 +296,7 @@ const WhatsAppCloudPage: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 3 && (
+        {activeTab === 'discounts' && (
           <div data-tour="whatsapp-tab-discounts">
             <Suspense
               fallback={
@@ -288,7 +310,7 @@ const WhatsAppCloudPage: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 4 && (
+        {activeTab === 'settings' && (
           <div data-tour="whatsapp-tab-settings">
             <Suspense
               fallback={
@@ -302,7 +324,7 @@ const WhatsAppCloudPage: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 5 && (
+        {activeTab === 'monitoreo' && (
           <div data-tour="whatsapp-tab-monitoreo">
             <Suspense
               fallback={
@@ -316,7 +338,7 @@ const WhatsAppCloudPage: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 6 && (
+        {activeTab === 'automations' && (
           <div data-tour="whatsapp-tab-automations">
             <Suspense
               fallback={
@@ -331,26 +353,27 @@ const WhatsAppCloudPage: React.FC = () => {
         )}
       </Box>
 
-      <WhatsAppBulkSendDialog
-        open={bulkOpen}
-        onClose={() => setBulkOpen(false)}
-        wabaId={wabaId}
-        phoneNumberId={phoneNumberId}
-        botLabel={botLabel}
-        phoneDisplay={phoneDisplay}
-        onViewJobInMetrics={(jobId) => {
-          setBulkOpen(false);
-          setSearchParams(
-            (prev) => {
-              const next = new URLSearchParams(prev);
-              next.set('tab', 'metrics');
-              next.set('broadcastJob', jobId);
-              return next;
-            },
-            { replace: true },
-          );
-        }}
-      />
+      {activeTab === 'inbox' && (
+        <WhatsAppBulkSendDialog
+          open={bulkOpen}
+          onClose={() => setBulkOpen(false)}
+          wabaId={wabaId}
+          phoneNumberId={phoneNumberId}
+          botLabel={botLabel}
+          phoneDisplay={phoneDisplay}
+          onViewJobInMetrics={(jobId) => {
+            setBulkOpen(false);
+            setSearchParams(
+              (prev) => {
+                const next = applyWhatsAppTab(prev, 'metrics');
+                next.set('broadcastJob', jobId);
+                return next;
+              },
+              { replace: true },
+            );
+          }}
+        />
+      )}
 
     </>
   );

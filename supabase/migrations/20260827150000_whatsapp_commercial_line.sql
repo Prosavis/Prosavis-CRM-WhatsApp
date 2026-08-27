@@ -14,7 +14,97 @@ ALTER TABLE public.whatsapp_message_log
   CHECK (sender_type IN ('bot', 'agent', 'system', 'user', 'app'));
 
 DO $$
+DECLARE
+  r record;
+  keep_key text;
+  drop_key text;
 BEGIN
+  FOR r IN
+    SELECT phone_key, phone_number_id
+    FROM public.whatsapp_conversations
+    WHERE phone_key IS NOT NULL
+      AND phone_number_id IS NOT NULL
+    GROUP BY phone_key, phone_number_id
+    HAVING count(*) > 1
+  LOOP
+    SELECT c.stable_key
+    INTO keep_key
+    FROM public.whatsapp_conversations c
+    WHERE c.phone_key = r.phone_key
+      AND c.phone_number_id = r.phone_number_id
+    ORDER BY
+      (c.last_message_at IS NOT NULL) DESC,
+      length(c.stable_key) DESC,
+      c.created_at ASC
+    LIMIT 1;
+
+    FOR drop_key IN
+      SELECT c.stable_key
+      FROM public.whatsapp_conversations c
+      WHERE c.phone_key = r.phone_key
+        AND c.phone_number_id = r.phone_number_id
+        AND c.stable_key <> keep_key
+    LOOP
+      IF EXISTS (
+        SELECT 1
+        FROM public.whatsapp_message_log
+        WHERE conversation_stable_key = drop_key
+      ) OR EXISTS (
+        SELECT 1
+        FROM public.whatsapp_media_assets
+        WHERE conversation_stable_key = drop_key
+      ) OR EXISTS (
+        SELECT 1
+        FROM public.whatsapp_conversations
+        WHERE stable_key = drop_key
+          AND last_message_at IS NOT NULL
+      ) THEN
+        RAISE EXCEPTION
+          'No se puede crear uq_whatsapp_conversations_phone_key_line: el hilo duplicado % tiene actividad (keep=%)',
+          drop_key,
+          keep_key;
+      END IF;
+
+      UPDATE public.crm_directory
+      SET whatsapp_conversation_id = keep_key,
+          updated_at = now()
+      WHERE whatsapp_conversation_id = drop_key;
+
+      UPDATE public.reminder_batch_items
+      SET conversation_stable_key = keep_key
+      WHERE conversation_stable_key = drop_key;
+
+      UPDATE public.whatsapp_admin_presence
+      SET conversation_stable_key = keep_key
+      WHERE conversation_stable_key = drop_key;
+
+      UPDATE public.whatsapp_ai_suggestion_log
+      SET stable_key = keep_key
+      WHERE stable_key = drop_key;
+
+      UPDATE public.whatsapp_blocklist
+      SET stable_key = keep_key
+      WHERE stable_key = drop_key
+        AND NOT EXISTS (
+          SELECT 1
+          FROM public.whatsapp_blocklist b
+          WHERE b.stable_key = keep_key
+        );
+
+      UPDATE public.whatsapp_conversation_ai_memory
+      SET stable_key = keep_key
+      WHERE stable_key = drop_key
+        AND NOT EXISTS (
+          SELECT 1
+          FROM public.whatsapp_conversation_ai_memory m
+          WHERE m.stable_key = keep_key
+        );
+
+      DELETE FROM public.whatsapp_conversations
+      WHERE stable_key = drop_key;
+    END LOOP;
+  END LOOP;
+
   IF EXISTS (
     SELECT 1
     FROM public.whatsapp_conversations

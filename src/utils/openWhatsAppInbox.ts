@@ -1,6 +1,7 @@
 import type { NavigateFunction } from 'react-router-dom';
 import { ensureWhatsAppConversationFromLead } from '@/services/whatsappService';
 import { WHATSAPP_CLOUD_PRODUCTION } from '@/constants/whatsappCloudAccounts';
+import { whatsappInboxHref } from '@/utils/whatsappTabs';
 
 export interface OpenWhatsAppInboxParams {
   navigate: NavigateFunction;
@@ -11,8 +12,8 @@ export interface OpenWhatsAppInboxParams {
 }
 
 /**
- * Asegura la conversación (si hay teléfono) y navega al Inbox con
- * `conversation` + `focusPhone`, sin tab secundaria.
+ * Asegura la conversación (si hay teléfono) y navega al inbox correcto:
+ * Citas 312 por defecto, Comercial 311 si el hilo o phoneNumberId es comercial.
  */
 export async function openWhatsAppInbox(params: OpenWhatsAppInboxParams): Promise<boolean> {
   const phone = params.phone?.trim() || null;
@@ -40,9 +41,10 @@ export async function openWhatsAppInbox(params: OpenWhatsAppInboxParams): Promis
   }
   if (!conversationKey) return false;
 
-  const search = new URLSearchParams();
-  search.set('conversation', conversationKey);
-  if (phone) search.set('focusPhone', phone);
-  params.navigate(`/whatsapp?${search.toString()}`);
+  params.navigate(whatsappInboxHref({
+    conversationId: conversationKey,
+    phone,
+    phoneNumberId: params.phoneNumberId,
+  }));
   return true;
 }
