@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import {
+  Avatar,
   Box,
   Button,
-  Chip,
   Divider,
+  IconButton,
   ListItemIcon,
   ListItemText,
   Menu,
@@ -11,6 +12,8 @@ import {
   Stack,
   Tab,
   Tabs,
+  Tooltip,
+  Typography,
   useMediaQuery,
 } from '@mui/material';
 import { alpha, useTheme as useMuiTheme, type Theme } from '@mui/material/styles';
@@ -24,9 +27,11 @@ import {
   MonitorHeart as MonitorHeartIcon,
   AutoAwesome as AutoAwesomeIcon,
   AdminPanelSettings as AdminPanelSettingsIcon,
+  Brightness4 as DarkModeIcon,
+  Brightness7 as LightModeIcon,
   Logout as LogoutIcon,
 } from '@mui/icons-material';
-import ThemeToggle from '@/components/common/ThemeToggle';
+import { playThemeTransitionSound } from '@/components/common/ThemeToggle';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/hooks/useAuth';
 import { getProsavisLogoSrc } from '@/utils/prosavisBrand';
@@ -130,13 +135,17 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
   onTabChange,
   directoryTotalContacts,
 }) => {
-  const { mode } = useTheme();
+  const { mode, toggleMode } = useTheme();
   const { profile, signOut } = useAuth();
   const muiTheme = useMuiTheme();
   const compactTabs = useMediaQuery(muiTheme.breakpoints.down('sm'));
   const [adminAnchor, setAdminAnchor] = useState<null | HTMLElement>(null);
+  const [accountAnchor, setAccountAnchor] = useState<null | HTMLElement>(null);
   const adminOpen = Boolean(adminAnchor);
+  const accountOpen = Boolean(accountAnchor);
   const adminActive = isWhatsAppAdminTab(activeTab);
+  const accountEmail = profile?.email ?? 'Admin';
+  const accountInitial = (profile?.displayName?.trim()?.[0] || accountEmail[0] || 'A').toUpperCase();
 
   const tabItems = useMemo(() => {
     const bot = inboxLineNavMeta('bot');
@@ -296,7 +305,7 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
           }}
         >
           <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
-            Administradores
+            Admin
           </Box>
         </Button>
         <Menu
@@ -324,27 +333,68 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
         <CompanyHandbookBook />
         <CrmTutorialPlaceholder />
 
-        <ThemeToggle size="small" />
-
-        <Chip
-          label={profile?.email ?? 'Admin'}
-          size="small"
-          variant="outlined"
-          sx={{ display: { xs: 'none', md: 'inline-flex' }, maxWidth: 180 }}
-        />
-
-        <Button
-          variant="text"
-          color="inherit"
-          size="small"
-          startIcon={<LogoutIcon />}
-          onClick={() => void signOut()}
-          sx={{ minWidth: { xs: 36, sm: 'auto' }, px: { xs: 0.75, sm: 1.5 } }}
+        <Tooltip title="Cuenta">
+          <IconButton
+            size="small"
+            aria-label="Cuenta"
+            aria-haspopup="true"
+            aria-expanded={accountOpen ? 'true' : undefined}
+            onClick={(event) => setAccountAnchor(event.currentTarget)}
+            sx={{ width: 36, height: 36 }}
+          >
+            <Avatar
+              sx={{
+                width: 28,
+                height: 28,
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                bgcolor: 'primary.main',
+              }}
+            >
+              {accountInitial}
+            </Avatar>
+          </IconButton>
+        </Tooltip>
+        <Menu
+          anchorEl={accountAnchor}
+          open={accountOpen}
+          onClose={() => setAccountAnchor(null)}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+          transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+          slotProps={{ paper: { sx: { minWidth: 220 } } }}
         >
-          <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
-            Salir
+          <Box sx={{ px: 2, py: 1.25, maxWidth: 260 }}>
+            <Typography variant="caption" color="text.secondary">
+              Cuenta
+            </Typography>
+            <Typography variant="body2" noWrap fontWeight={600}>
+              {accountEmail}
+            </Typography>
           </Box>
-        </Button>
+          <Divider />
+          <MenuItem
+            onClick={() => {
+              playThemeTransitionSound();
+              toggleMode();
+            }}
+          >
+            <ListItemIcon>
+              {mode === 'light' ? <DarkModeIcon fontSize="small" /> : <LightModeIcon fontSize="small" />}
+            </ListItemIcon>
+            <ListItemText>{mode === 'light' ? 'Modo oscuro' : 'Modo claro'}</ListItemText>
+          </MenuItem>
+          <MenuItem
+            onClick={() => {
+              setAccountAnchor(null);
+              void signOut();
+            }}
+          >
+            <ListItemIcon>
+              <LogoutIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Salir</ListItemText>
+          </MenuItem>
+        </Menu>
       </Stack>
     </Box>
   );

@@ -14,7 +14,7 @@ const CrmTutorialPlaceholder: React.FC = () => {
           onClick={(event) => setAnchorEl(event.currentTarget)}
           aria-label="Tutorial del CRM"
           aria-expanded={open}
-          sx={{ color: 'text.secondary' }}
+          sx={{ width: 36, height: 36, color: 'text.secondary' }}
         >
           <InfoOutlinedIcon fontSize="small" />
         </IconButton>

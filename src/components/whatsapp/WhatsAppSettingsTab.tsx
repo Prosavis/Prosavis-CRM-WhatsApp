@@ -535,7 +535,7 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
                 </Typography>
                 <Divider />
                 <Typography variant="subtitle2" fontWeight={600}>
-                  Avisos de WhatsApp
+                  Sonidos de WhatsApp
                 </Typography>
                 <FormControlLabel
                   control={
@@ -548,10 +548,10 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
                       }}
                     />
                   }
-                  label="Notificaciones Inbox Bot"
+                  label="Sonido Inbox Bot"
                 />
                 <Typography variant="caption" color="text.secondary">
-                  Sonido al enviar y al recibir en la línea de citas (312). El de llegada es el que ya conoces.
+                  Timbre al enviar y al recibir en la línea de citas (312). El de llegada es el que ya conoces.
                 </Typography>
                 <FormControlLabel
                   control={
@@ -564,7 +564,7 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
                       }}
                     />
                   }
-                  label="Notificaciones Inbox Comercial"
+                  label="Sonido Inbox Comercial"
                 />
                 <Typography variant="caption" color="text.secondary">
                   Otros timbres, para no confundirlo con el Inbox Bot. Envío y llegada suenan distinto.

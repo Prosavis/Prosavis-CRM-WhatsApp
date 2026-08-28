@@ -10,20 +10,23 @@ interface ThemeToggleProps {
   size?: 'small' | 'medium' | 'large';
 }
 
+export function playThemeTransitionSound() {
+  if (typeof window === 'undefined' || !('Audio' in window) || !areSoundsEnabled()) return;
+  try {
+    const audio = new Audio('/assets/audio/transition.mp3');
+    audio.volume = PLAYBACK_VOLUME;
+    void audio.play().catch(() => {});
+  } catch {
+    // Sin archivo de transición: el cambio de tema sigue funcionando.
+  }
+}
+
 const ThemeToggle: React.FC<ThemeToggleProps> = ({ size = 'medium' }) => {
   const { mode, toggleMode } = useTheme();
   const muiTheme = useMuiTheme();
 
   const handleToggle = () => {
-    if (typeof window !== 'undefined' && 'Audio' in window && areSoundsEnabled()) {
-      try {
-        const audio = new Audio('/assets/audio/transition.mp3');
-        audio.volume = PLAYBACK_VOLUME;
-        void audio.play().catch(() => {});
-      } catch {
-        // Sin archivo de transición: el cambio de tema sigue funcionando.
-      }
-    }
+    playThemeTransitionSound();
     toggleMode();
   };
 
