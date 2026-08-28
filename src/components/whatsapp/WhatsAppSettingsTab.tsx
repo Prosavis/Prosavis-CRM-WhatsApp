@@ -24,7 +24,6 @@ import {
   Chip,
   FormControlLabel,
   Switch,
-  Slider,
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -51,9 +50,11 @@ import {
 import { getTemplateDisplayName } from '@/components/whatsapp/templates/templateDisplayNames';
 import useSoundEffects from '@/hooks/useSoundEffects';
 import {
+  areInboxSoundsEnabled,
   areSoundsEnabled,
-  getSoundVolume,
+  setInboxSoundsEnabled,
 } from '@/utils/soundPreferences';
+import { playInboxSound } from '@/utils/inboxSounds';
 import {
   areDesktopNotificationsEnabled,
   getNotificationPermission,
@@ -95,9 +96,12 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
   const [presetsLoading, setPresetsLoading] = useState(true);
   const [presetsError, setPresetsError] = useState<string | null>(null);
 
-  const { setEnabled: setSoundsEnabled, setVolume: setSoundVolume, playClick } = useSoundEffects();
+  const { setEnabled: setSoundsEnabled, playClick } = useSoundEffects();
   const [soundsOn, setSoundsOn] = useState(() => areSoundsEnabled());
-  const [volumePercent, setVolumePercent] = useState(() => Math.round(getSoundVolume() * 100));
+  const [botInboxSoundsOn, setBotInboxSoundsOn] = useState(() => areInboxSoundsEnabled('bot'));
+  const [commercialInboxSoundsOn, setCommercialInboxSoundsOn] = useState(() =>
+    areInboxSoundsEnabled('commercial'),
+  );
   const [desktopNotificationsOn, setDesktopNotificationsOn] = useState(() =>
     areDesktopNotificationsEnabled(),
   );
@@ -526,27 +530,44 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
                   }
                   label="Sonidos de la interfaz"
                 />
-                <Box sx={{ px: 1 }}>
-                  <Typography variant="body2" color="text.secondary" gutterBottom>
-                    Volumen ({volumePercent}%)
-                  </Typography>
-                  <Slider
-                    value={volumePercent}
-                    min={0}
-                    max={100}
-                    disabled={!soundsOn}
-                    onChange={(_, value) => {
-                      const pct = Array.isArray(value) ? value[0] : value;
-                      setVolumePercent(pct);
-                      setSoundVolume(pct / 100);
-                    }}
-                    onChangeCommitted={() => {
-                      if (soundsOn) playClick();
-                    }}
-                  />
-                </Box>
                 <Typography variant="caption" color="text.secondary">
-                  Incluye notificaciones de mensajes entrantes y efectos al enviar o cambiar de pestaña.
+                  Clics, cambio de pestaña y tema. No incluye los avisos de WhatsApp.
+                </Typography>
+                <Divider />
+                <Typography variant="subtitle2" fontWeight={600}>
+                  Avisos de WhatsApp
+                </Typography>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={botInboxSoundsOn}
+                      onChange={(_, checked) => {
+                        setBotInboxSoundsOn(checked);
+                        setInboxSoundsEnabled('bot', checked);
+                        if (checked) playInboxSound('bot', 'inbound');
+                      }}
+                    />
+                  }
+                  label="Notificaciones Inbox Bot"
+                />
+                <Typography variant="caption" color="text.secondary">
+                  Sonido al enviar y al recibir en la línea de citas (312). El de llegada es el que ya conoces.
+                </Typography>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={commercialInboxSoundsOn}
+                      onChange={(_, checked) => {
+                        setCommercialInboxSoundsOn(checked);
+                        setInboxSoundsEnabled('commercial', checked);
+                        if (checked) playInboxSound('commercial', 'inbound');
+                      }}
+                    />
+                  }
+                  label="Notificaciones Inbox Comercial"
+                />
+                <Typography variant="caption" color="text.secondary">
+                  Otros timbres, para no confundirlo con el Inbox Bot. Envío y llegada suenan distinto.
                 </Typography>
                 <Divider />
                 <FormControlLabel
@@ -575,10 +596,10 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
                   {!desktopNotificationsSupported
                     ? 'Tu navegador no soporta notificaciones de escritorio.'
                     : notificationPermission === 'granted'
-                      ? 'Cuando el CRM está en segundo plano, el sistema te alertará con sonido y podrás volver al chat con un clic.'
+                      ? 'Conviene dejarlas activas. Apágalas solo si molestan demasiado. Con el CRM en segundo plano avisan y al clic vuelves al chat.'
                       : notificationPermission === 'denied'
                         ? 'Las notificaciones están bloqueadas. Habilítalas en la configuración del navegador para este sitio.'
-                        : 'Activa el interruptor para permitir alertas cuando uses otra pestaña u otra aplicación.'}
+                        : 'Actívalas para que avisen cuando uses otra pestaña u otra aplicación. Conviene dejarlas encendidas.'}
                 </Typography>
               </Stack>
             </CardContent>

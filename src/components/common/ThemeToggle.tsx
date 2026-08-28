@@ -4,7 +4,7 @@ import { Brightness4 as DarkModeIcon, Brightness7 as LightModeIcon } from '@mui/
 import { motion } from 'framer-motion';
 import { useTheme } from '@/context/ThemeContext';
 import { DesignTokens } from '@/constants/designSystem';
-import { areSoundsEnabled, getSoundVolume } from '@/utils/soundPreferences';
+import { PLAYBACK_VOLUME, areSoundsEnabled } from '@/utils/soundPreferences';
 
 interface ThemeToggleProps {
   size?: 'small' | 'medium' | 'large';
@@ -18,7 +18,7 @@ const ThemeToggle: React.FC<ThemeToggleProps> = ({ size = 'medium' }) => {
     if (typeof window !== 'undefined' && 'Audio' in window && areSoundsEnabled()) {
       try {
         const audio = new Audio('/assets/audio/transition.mp3');
-        audio.volume = getSoundVolume();
+        audio.volume = PLAYBACK_VOLUME;
         void audio.play().catch(() => {});
       } catch {
         // Sin archivo de transición: el cambio de tema sigue funcionando.

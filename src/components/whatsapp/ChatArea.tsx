@@ -115,7 +115,7 @@ import {
 import { coloredChipSx } from '@/utils/coloredChipStyles';
 import { prepareWhatsAppSticker } from '@/utils/prepareWhatsAppSticker';
 import { summarizePeerPresences } from '@/utils/whatsappAdminPresence';
-import { customerPhoneFromStableKey, isLidStableKey } from '@/utils/whatsappLines';
+import { customerPhoneFromStableKey, isLidStableKey, resolveWhatsAppLine } from '@/utils/whatsappLines';
 import {
   getDirectoryMetaForConversation,
   useDirectoryContactMeta,
@@ -1667,6 +1667,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             onRefreshStickers={loadStickers}
             onUploadSticker={handleUploadSticker}
             onSendSticker={handleSendSticker}
+            inboxLine={resolveWhatsAppLine(sendPhoneNumberId)}
           />
         </>
       )}

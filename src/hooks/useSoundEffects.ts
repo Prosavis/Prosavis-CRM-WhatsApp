@@ -1,13 +1,11 @@
 import { useCallback, useRef, useEffect } from 'react';
 import {
+  PLAYBACK_VOLUME,
   areSoundsEnabled,
-  getSoundVolume,
   setSoundsEnabled,
-  setSoundVolume,
 } from '@/utils/soundPreferences';
 
 interface SoundEffectsOptions {
-  volume?: number;
   enabled?: boolean;
 }
 
@@ -18,15 +16,13 @@ interface SoundEffects {
   playError: () => void;
   playNotification: () => void;
   setEnabled: (enabled: boolean) => void;
-  setVolume: (volume: number) => void;
 }
 
 const useSoundEffects = (options: SoundEffectsOptions = {}): SoundEffects => {
-  const { volume: initialVolume = getSoundVolume(), enabled: initialEnabled = areSoundsEnabled() } =
-    options;
+  const { enabled: initialEnabled = areSoundsEnabled() } = options;
 
   const audioContextRef = useRef<AudioContext | null>(null);
-  const volumeRef = useRef(initialVolume);
+  const volumeRef = useRef(PLAYBACK_VOLUME);
   const enabledRef = useRef(initialEnabled);
 
   const getAudioContext = useCallback(() => {
@@ -75,7 +71,7 @@ const useSoundEffects = (options: SoundEffectsOptions = {}): SoundEffects => {
 
     try {
       const audio = new Audio(`/assets/audio/${filename}`);
-      audio.volume = volumeRef.current;
+      audio.volume = PLAYBACK_VOLUME;
       void audio.play().catch(() => {});
     } catch {
       // Ignorar errores de reproducción.
@@ -112,14 +108,9 @@ const useSoundEffects = (options: SoundEffectsOptions = {}): SoundEffects => {
     setSoundsEnabled(enabled);
   }, []);
 
-  const setVolume = useCallback((volume: number) => {
-    volumeRef.current = Math.max(0, Math.min(1, volume));
-    setSoundVolume(volumeRef.current);
-  }, []);
-
   useEffect(() => {
     enabledRef.current = areSoundsEnabled();
-    volumeRef.current = getSoundVolume();
+    volumeRef.current = PLAYBACK_VOLUME;
   }, []);
 
   useEffect(() => {
@@ -135,7 +126,6 @@ const useSoundEffects = (options: SoundEffectsOptions = {}): SoundEffects => {
     playError,
     playNotification,
     setEnabled,
-    setVolume,
   };
 };
 

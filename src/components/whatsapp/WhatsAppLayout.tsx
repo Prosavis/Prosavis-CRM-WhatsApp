@@ -43,15 +43,13 @@ import {
 } from '@/utils/whatsappInboxStats';
 import { dedupePresencesByUid } from '@/utils/whatsappAdminPresence';
 import { clearAllComposerDrafts } from '@/utils/messageComposerDraftStore';
-import { areSoundsEnabled, getSoundVolume } from '@/utils/soundPreferences';
+import { playInboxSound } from '@/utils/inboxSounds';
 import {
   canShowDesktopNotifications,
   showInboundMessageNotification,
 } from '@/utils/desktopNotifications';
 import type { LoadedConversationInbound } from '@/utils/whatsappTemplateSuggestions';
 import useSoundEffects from '@/hooks/useSoundEffects';
-
-const INBOUND_NOTIFY_AUDIO = `${import.meta.env.BASE_URL}assets/audio/WhatsAppSound.mp3`;
 
 function resolveAdminDisplayName(
   adminName: string | undefined,
@@ -74,6 +72,7 @@ import {
   customerPhoneFromStableKey,
   isCommercialPhoneNumberId,
   phoneNumberIdForFilter,
+  resolveWhatsAppLine,
   siblingConversationStableKey,
   wabaIdForLine,
   type WhatsAppLineFilter,
@@ -245,7 +244,6 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     conversationId: string;
   } | null>(null);
 
-  const notifyAudioRef = useRef<HTMLAudioElement | null>(null);
   const inboundBaselineReadyRef = useRef(false);
   const inboundPrevSnapshotRef = useRef<Map<string, number>>(new Map());
   const siblingInboundBaselineReadyRef = useRef(false);
@@ -274,12 +272,6 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   useEffect(() => {
     onInboxMetrics?.(inboxMetrics);
   }, [inboxMetrics, onInboxMetrics]);
-
-  useEffect(() => {
-    const audio = new Audio(INBOUND_NOTIFY_AUDIO);
-    audio.volume = getSoundVolume();
-    notifyAudioRef.current = audio;
-  }, []);
 
   useEffect(() => {
     inboundBaselineReadyRef.current = false;
@@ -452,19 +444,13 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   const announceInbound = useCallback((best: WhatsAppConversation, opts?: { snackbar?: boolean }) => {
     const contactLabel = conversationShortLabel(best);
     const notifyPhone = best.contactPhone || best.phone || '';
+    const line = resolveWhatsAppLine(best.phoneNumberId);
 
-    if (areSoundsEnabled()) {
-      const audio = notifyAudioRef.current;
-      if (audio) {
-        audio.volume = getSoundVolume();
-        audio.currentTime = 0;
-        void audio.play().catch(() => {});
-      }
-    }
+    playInboxSound(line, 'inbound');
 
     if (document.hidden && canShowDesktopNotifications()) {
       showInboundMessageNotification({
-        title: 'Nuevo mensaje de WhatsApp',
+        title: line === 'commercial' ? 'Inbox Comercial' : 'Inbox Bot',
         body: contactLabel,
         conversationId: best.id,
         phone: notifyPhone,

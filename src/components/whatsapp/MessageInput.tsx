@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import useSoundEffects from '@/hooks/useSoundEffects';
+import { playInboxSound } from '@/utils/inboxSounds';
+import type { InboxSoundLine } from '@/utils/soundPreferences';
 import {
   Alert,
   Box,
@@ -113,6 +115,8 @@ interface MessageInputProps {
     options: { name: string; folderId: string | null },
   ) => Promise<void>;
   onSendSticker?: (sticker: WhatsAppSticker) => Promise<void>;
+  /** Línea del inbox para el sonido de envío (Bot vs Comercial). */
+  inboxLine?: InboxSoundLine;
 }
 
 const TYPING_START_DEBOUNCE_MS = 300;
@@ -190,8 +194,9 @@ const MessageInput: React.FC<MessageInputProps> = ({
   onRefreshStickers,
   onUploadSticker,
   onSendSticker,
+  inboxLine = 'bot',
 }) => {
-  const { playSuccess, playError } = useSoundEffects();
+  const { playError } = useSoundEffects();
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -389,13 +394,14 @@ const MessageInput: React.FC<MessageInputProps> = ({
       await onSendSticker(sticker);
       setStickerAnchorEl(null);
       lexicalEditorRef.current?.focus();
+      playInboxSound(inboxLine, 'outbound');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'No se pudo enviar el sticker';
       setSendError(message);
     } finally {
       setSending(false);
     }
-  }, [onSendSticker, sending, stopTypingNow]);
+  }, [onSendSticker, sending, stopTypingNow, inboxLine]);
 
   useEffect(() => {
     if (draftText !== undefined && draftText !== '') {
@@ -555,7 +561,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
             textRef.current = '';
             clearComposerDraft(conversationKey);
             clearPendingFile();
-            playSuccess();
+            playInboxSound(inboxLine, 'outbound');
           }
         } else if (onSendMedia && pendingFiles[0]) {
           const first = pendingFiles[0];
@@ -564,7 +570,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
           textRef.current = '';
           clearComposerDraft(conversationKey);
           clearPendingFile(first.id);
-          playSuccess();
+          playInboxSound(inboxLine, 'outbound');
         }
         lexicalEditorRef.current?.focus();
       } catch (e: unknown) {
@@ -588,7 +594,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
       textRef.current = '';
       clearComposerDraft(conversationKey);
       lexicalEditorRef.current?.focus();
-      playSuccess();
+      playInboxSound(inboxLine, 'outbound');
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'No se pudo enviar el mensaje';
       setSendError(msg);
@@ -597,7 +603,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
     } finally {
       setSending(false);
     }
-  }, [text, sending, onSend, onSendMedia, onSendMediaBatch, pendingFiles, clearPendingFile, conversationKey, stopTypingNow, playSuccess, playError]);
+  }, [text, sending, onSend, onSendMedia, onSendMediaBatch, pendingFiles, clearPendingFile, conversationKey, stopTypingNow, inboxLine, playError]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
