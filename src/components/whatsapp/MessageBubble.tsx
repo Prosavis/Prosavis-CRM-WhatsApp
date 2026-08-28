@@ -19,6 +19,7 @@ import {
   Button,
   TextField,
   Chip,
+  Tooltip,
 } from '@mui/material';
 import { alpha, useTheme } from '@mui/material/styles';
 import DoneIcon from '@mui/icons-material/Done';
@@ -34,9 +35,9 @@ import PersonIcon from '@mui/icons-material/Person';
 import PhoneIcon from '@mui/icons-material/Phone';
 import BusinessIcon from '@mui/icons-material/Business';
 import DownloadIcon from '@mui/icons-material/Download';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
-import MoreVertIcon from '@mui/icons-material/MoreVert';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ZoomInIcon from '@mui/icons-material/ZoomIn';
 import CloseIcon from '@mui/icons-material/Close';
@@ -190,6 +191,25 @@ const MediaErrorPlaceholder: React.FC<MediaErrorPlaceholderProps> = ({
   </Box>
 );
 
+/** Acciones de la burbuja (responder, reenviar, copiar). No usa tres puntos para no chocar con el menu nativo del audio. */
+const MessageActionsButton: React.FC<{
+  onClick: (anchor: HTMLElement) => void;
+}> = ({ onClick }) => (
+  <Tooltip title="Más acciones del mensaje">
+    <IconButton
+      className="msg-menu-btn"
+      size="small"
+      aria-label="Más acciones del mensaje"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick(e.currentTarget);
+      }}
+    >
+      <InfoOutlinedIcon sx={{ fontSize: 18 }} />
+    </IconButton>
+  </Tooltip>
+);
+
 const getContactDisplayName = (contact: WhatsAppContact) =>
   contact.name?.formatted_name ||
   [contact.name?.first_name, contact.name?.last_name].filter(Boolean).join(' ') ||
@@ -323,7 +343,11 @@ function useMediaPrefetch(message: WhatsAppMessage) {
   return { effectiveUrl, effectiveMime, loading, error, errorMessage, permanentError, resolveMedia };
 }
 
-const MediaContent: React.FC<{ message: WhatsAppMessage; onOpenLightbox?: (url: string) => void }> = ({ message, onOpenLightbox }) => {
+const MediaContent: React.FC<{
+  message: WhatsAppMessage;
+  onOpenLightbox?: (url: string) => void;
+  onOpenMessageMenu?: (anchor: HTMLElement) => void;
+}> = ({ message, onOpenLightbox, onOpenMessageMenu }) => {
   const { effectiveUrl, effectiveMime, loading, error, errorMessage, permanentError, resolveMedia } = useMediaPrefetch(message);
   const [transcript, setTranscript] = useState(message.voiceTranscription || '');
   const [transcribing, setTranscribing] = useState(false);
@@ -569,6 +593,9 @@ const MediaContent: React.FC<{ message: WhatsAppMessage; onOpenLightbox?: (url: 
   }
 
   if (message.mediaType === 'audio') {
+    const audioMessageMenu = onOpenMessageMenu ? (
+      <MessageActionsButton onClick={onOpenMessageMenu} />
+    ) : null;
     if (effectiveUrl) {
       return (
         <Box sx={{ mb: 0.5, minWidth: 240 }}>
@@ -576,7 +603,7 @@ const MediaContent: React.FC<{ message: WhatsAppMessage; onOpenLightbox?: (url: 
             <audio controls style={{ flex: 1, height: 36 }} preload="metadata">
               <source src={effectiveUrl} type={effectiveMime || undefined} />
             </audio>
-            <IconButton size="small" onClick={handleDownload}><DownloadIcon fontSize="small" /></IconButton>
+            {audioMessageMenu}
           </Box>
           {transcriptionControls}
         </Box>
@@ -584,16 +611,21 @@ const MediaContent: React.FC<{ message: WhatsAppMessage; onOpenLightbox?: (url: 
     }
     return (
       <Box sx={{ mb: 0.5, minWidth: 240 }}>
-        <MediaErrorPlaceholder
-          icon={<PlayArrowIcon sx={{ color: '#667781' }} />}
-          label={`${message.isVoiceNote ? 'Nota de voz' : 'Audio'} — toca para reproducir`}
-          loading={loading}
-          error={error}
-          errorMessage={errorMessage || 'No se pudo cargar el audio'}
-          permanentError={permanentError}
-          canResolve={Boolean(message.mediaId)}
-          onResolve={resolveMedia}
-        />
+        <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5 }}>
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <MediaErrorPlaceholder
+              icon={<PlayArrowIcon sx={{ color: '#667781' }} />}
+              label={`${message.isVoiceNote ? 'Nota de voz' : 'Audio'} — toca para reproducir`}
+              loading={loading}
+              error={error}
+              errorMessage={errorMessage || 'No se pudo cargar el audio'}
+              permanentError={permanentError}
+              canResolve={Boolean(message.mediaId)}
+              onResolve={resolveMedia}
+            />
+          </Box>
+          {audioMessageMenu}
+        </Box>
         {transcriptionControls}
       </Box>
     );
@@ -825,15 +857,13 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
             '&:hover .msg-menu-btn': { opacity: 1 },
           }}
         >
-          {!selectionMode && (
-            <IconButton
+          {!selectionMode && message.mediaType !== 'audio' && (
+            <Box
               className="msg-menu-btn"
-              size="small"
-              onClick={(e) => setMenuAnchor(e.currentTarget)}
-              sx={{ position: 'absolute', top: 2, right: 2, opacity: 0, transition: 'opacity 0.15s', p: 0.25, bgcolor: isOutbound ? 'rgba(0,0,0,0.04)' : 'rgba(0,0,0,0.04)' }}
+              sx={{ position: 'absolute', top: 2, right: 2, opacity: 0, transition: 'opacity 0.15s' }}
             >
-              <MoreVertIcon sx={{ fontSize: 16 }} />
-            </IconButton>
+              <MessageActionsButton onClick={setMenuAnchor} />
+            </Box>
           )}
 
           {message.replyToWaMessageId && (() => {
@@ -882,7 +912,13 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
             </Box>
           )}
 
-          {hasMedia && <MediaContent message={message} onOpenLightbox={setLightboxUrl} />}
+          {hasMedia && (
+            <MediaContent
+              message={message}
+              onOpenLightbox={setLightboxUrl}
+              onOpenMessageMenu={selectionMode ? undefined : setMenuAnchor}
+            />
+          )}
           {hasLocation && <LocationContent message={message} />}
           {hasContacts && <ContactsContent message={message} />}
 

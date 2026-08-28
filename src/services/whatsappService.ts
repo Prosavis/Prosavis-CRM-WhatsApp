@@ -1921,6 +1921,8 @@ const MIME_TO_EXT: Record<string, string> = {
 };
 
 export function getExtensionFromMime(mime: string): string {
+  // Sin MIME conocido cae a .bin. Por eso las burbujas de audio no usan
+  // downloadMediaBlob: el operador baja el archivo desde el reproductor nativo.
   return MIME_TO_EXT[mime] || 'bin';
 }
 
