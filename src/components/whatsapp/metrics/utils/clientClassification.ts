@@ -176,11 +176,8 @@ export function getClassificationLabel(classification?: string | null): string {
   if (!classification) return 'Usuario';
 
   const tags = classification.split(',').map((t) => t.trim()).filter(Boolean);
-  if (tags.length > 1) {
-    return classification;
-  }
-
-  const lower = classification.toLowerCase().trim();
+  const primary = tags[0] ?? classification;
+  const lower = primary.toLowerCase().trim();
 
   if (isEmpresasToken(lower)) return 'Empresa';
   if (lower === 'lead') return DIRECTORY_LEGACY_LABELS.lead;
@@ -188,5 +185,5 @@ export function getClassificationLabel(classification?: string | null): string {
   if (lower === 'unknown') return DIRECTORY_LEGACY_LABELS.unknown;
   if (lower === 'agendado') return DIRECTORY_LEGACY_LABELS.agendado;
 
-  return classification;
+  return primary;
 }

@@ -36,14 +36,16 @@ export function directoryDisplayTags(params: {
     labels.push(tag);
   }
 
+  if (labels.length > 0) return labels;
+
   const classification = params.classification?.trim() ?? '';
   if (
-    classification &&
-    !HIDDEN_CLASSIFICATIONS.has(classification.toLowerCase()) &&
-    !seen.has(classification.toLowerCase())
+    !classification ||
+    classification.includes(',') ||
+    HIDDEN_CLASSIFICATIONS.has(classification.toLowerCase())
   ) {
-    labels.push(classification);
+    return labels;
   }
 
-  return labels;
+  return [classification];
 }

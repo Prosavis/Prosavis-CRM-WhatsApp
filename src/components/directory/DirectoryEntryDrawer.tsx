@@ -237,12 +237,18 @@ const DirectoryEntryDrawer: React.FC<DirectoryEntryDrawerProps> = ({
         </Typography>
 
         <Stack direction="row" spacing={1} flexWrap="wrap" justifyContent="center" useFlexGap>
-          <Chip
-            label={getClassificationLabel(entry.classification)}
-            size="small"
-            color={entry.classification === 'user' ? 'primary' : 'default'}
-            variant={entry.classification === 'user' ? 'filled' : 'outlined'}
-          />
+          {(entry.tags.length > 0
+            ? entry.tags
+            : [getClassificationLabel(entry.classification)]
+          ).map((tag) => (
+            <Chip
+              key={tag}
+              label={tag}
+              size="small"
+              color={tag.toLowerCase() === 'user' ? 'primary' : 'default'}
+              variant={tag.toLowerCase() === 'user' ? 'filled' : 'outlined'}
+            />
+          ))}
           <Chip
             label={qualityLabels[entry.qualityTag] ?? entry.qualityTag}
             size="small"
@@ -354,7 +360,14 @@ const DirectoryEntryDrawer: React.FC<DirectoryEntryDrawerProps> = ({
 
         {/* 3. CRM */}
         <Section title="CRM">
-          <Field label="Clasificación" value={getClassificationLabel(entry.classification)} />
+          <Field
+            label="Clasificación"
+            value={
+              entry.tags.length > 0
+                ? entry.tags.join(' · ')
+                : getClassificationLabel(entry.classification)
+            }
+          />
           <Field label="Calidad" value={qualityLabels[entry.qualityTag] ?? entry.qualityTag} />
           <Field label="Estado" value={statusLabels[entry.status] ?? entry.status} />
           <Field label="Origen" value={fmtNullable(entry.source)} />

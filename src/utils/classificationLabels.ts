@@ -17,10 +17,9 @@ export function getClassificationLabel(classification?: string | null): string {
   if (!classification) return 'Sin clasificar';
 
   const tags = classification.split(',').map((t) => t.trim()).filter(Boolean);
-  if (tags.length > 1) return classification;
-
-  const lower = classification.toLowerCase().trim();
-  return LEGACY_LABELS[lower] ?? classification;
+  const primary = tags[0] ?? classification;
+  const lower = primary.toLowerCase().trim();
+  return LEGACY_LABELS[lower] ?? primary;
 }
 
 export function tagNamesToIds(

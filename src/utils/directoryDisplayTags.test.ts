@@ -13,11 +13,18 @@ describe('directoryDisplayTags', () => {
     })).toEqual(['Auxiliares']);
   });
 
-  it('adds classification when it is not already a tag', () => {
+  it('does not append a second selected tag as classification', () => {
     expect(directoryDisplayTags({
       tags: ['TEST'],
       classification: 'Agendado',
-    })).toEqual(['TEST', 'Agendado']);
+    })).toEqual(['TEST']);
+  });
+
+  it('does not render the joined classification conglomerate', () => {
+    expect(directoryDisplayTags({
+      tags: ['Agendado', 'Cliente Problemática'],
+      classification: 'Agendado, Cliente Problemática',
+    })).toEqual(['Agendado', 'Cliente Problemática']);
   });
 
   it('ignores unknown classification and empty tags', () => {
@@ -25,6 +32,13 @@ describe('directoryDisplayTags', () => {
       tags: ['', '  '],
       classification: 'unknown',
     })).toEqual([]);
+  });
+
+  it('falls back to a single legacy classification when there are no tags', () => {
+    expect(directoryDisplayTags({
+      tags: [],
+      classification: 'Agendado',
+    })).toEqual(['Agendado']);
   });
 });
 
