@@ -61,6 +61,8 @@ import {
   useDirectoryContactMeta,
 } from '@/hooks/useDirectoryContactMeta';
 import { pickContactPhotoUrl } from '@/utils/contactAvatar';
+import { inboxLineHex, inboxLineMuiColor } from '@/utils/inboxLineVisual';
+import { resolveWhatsAppLine } from '@/utils/whatsappLines';
 import { resolveContactDisplayName, shouldSyncContactNameFromDirectory } from '@/utils/contactDisplayName';
 import { catalogColorByTagName, directoryDisplayTags, directoryTagColor } from '@/utils/directoryDisplayTags';
 import { patchWhatsAppConversationAdmin } from '@/services/whatsappService';
@@ -214,6 +216,8 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
 }) => {
   const theme = useTheme();
   const longPress = useLongPress({ onLongPress: onEnterSelection });
+  const inboxLine = resolveWhatsAppLine(conv.phoneNumberId);
+  const inboxColor = inboxLineHex(inboxLine);
 
   const handleClick = () => {
     if (longPress.shouldSuppressClick()) return;
@@ -255,7 +259,7 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
       <ListItemAvatar>
         <Badge
           badgeContent={conv.crmForceUnread && conv.unreadCount === 0 ? ' ' : conv.unreadCount}
-          color="success"
+          color={inboxLineMuiColor(inboxLine)}
           max={99}
           invisible={!isUnread}
           variant={conv.crmForceUnread && conv.unreadCount === 0 ? 'dot' : 'standard'}
@@ -281,7 +285,7 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
             </Box>
             <Typography
               variant="caption"
-              sx={{ color: isUnread ? 'success.main' : 'text.secondary', whiteSpace: 'nowrap', ml: 1 }}
+              sx={{ color: isUnread ? inboxColor : 'text.secondary', whiteSpace: 'nowrap', ml: 1 }}
             >
               {formatRelativeTime(conv.lastMessageAt)}
             </Typography>

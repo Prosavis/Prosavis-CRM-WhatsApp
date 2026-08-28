@@ -3,6 +3,7 @@ import {
   Avatar,
   Box,
   Button,
+  ButtonBase,
   Divider,
   IconButton,
   ListItemIcon,
@@ -10,8 +11,6 @@ import {
   Menu,
   MenuItem,
   Stack,
-  Tab,
-  Tabs,
   Tooltip,
   Typography,
   useMediaQuery,
@@ -35,6 +34,7 @@ import { playThemeTransitionSound } from '@/components/common/ThemeToggle';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/hooks/useAuth';
 import { getProsavisLogoSrc } from '@/utils/prosavisBrand';
+import { DIRECTORY_SHELL_HEX } from '@/utils/inboxLineVisual';
 import { directoryNavMeta, inboxLineNavMeta } from '@/utils/whatsappInboxNav';
 import { isWhatsAppAdminTab, type WhatsAppTabKey } from '@/utils/whatsappTabs';
 import CompanyHandbookBook from './CompanyHandbookBook';
@@ -105,28 +105,33 @@ function SpecialTabLabel({
   );
 }
 
-function specialTabSx(kind: 'bot' | 'commercial' | 'directory') {
+function specialTabSx(kind: 'bot' | 'commercial', selected: boolean) {
   const paletteKey = kind === 'commercial' ? 'secondary' : 'primary';
-  const idleAlpha = kind === 'directory' ? 0.16 : kind === 'bot' ? 0.08 : 0.12;
-  const borderAlpha = kind === 'directory' ? 0.55 : kind === 'bot' ? 0.38 : 0.5;
+  const idleAlpha = kind === 'bot' ? 0.08 : 0.12;
+  const borderAlpha = kind === 'bot' ? 0.38 : 0.5;
   return {
-    minHeight: 56,
-    mx: 0.25,
+    minHeight: 48,
+    minWidth: 0,
     px: { xs: 1, sm: 1.35 },
     py: 0.6,
-    mr: kind === 'directory' ? 1.25 : 0.25,
     borderRadius: 2,
-    border: 1,
+    border: '1px solid',
+    display: 'inline-flex',
     alignItems: 'center',
+    gap: 0.75,
     fontWeight: 800,
-    bgcolor: (theme: Theme) => alpha(theme.palette[paletteKey].main, idleAlpha),
-    color: kind === 'commercial' ? 'secondary.dark' : 'primary.main',
-    borderColor: (theme: Theme) => alpha(theme.palette[paletteKey].main, borderAlpha),
-    '&.Mui-selected': {
-      bgcolor: `${paletteKey}.main`,
-      color: `${paletteKey}.contrastText`,
-      borderColor: `${paletteKey}.main`,
-    },
+    textTransform: 'none' as const,
+    bgcolor: selected
+      ? `${paletteKey}.main`
+      : (theme: Theme) => alpha(theme.palette[paletteKey].main, idleAlpha),
+    color: selected
+      ? `${paletteKey}.contrastText`
+      : kind === 'commercial'
+        ? 'secondary.dark'
+        : 'primary.main',
+    borderColor: selected
+      ? `${paletteKey}.main`
+      : (theme: Theme) => alpha(theme.palette[paletteKey].main, borderAlpha),
   };
 }
 
@@ -147,47 +152,16 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
   const accountEmail = profile?.email ?? 'Admin';
   const accountInitial = (profile?.displayName?.trim()?.[0] || accountEmail[0] || 'A').toUpperCase();
 
-  const tabItems = useMemo(() => {
-    const bot = inboxLineNavMeta('bot');
-    const commercial = inboxLineNavMeta('commercial');
-    const directory = directoryNavMeta(directoryTotalContacts);
-    return [
-      {
-        key: 'inbox' as const,
-        icon: <InboxIcon fontSize="small" />,
-        title: bot.title,
-        subtitle: bot.phone,
-        ariaLabel: bot.ariaLabel,
-        kind: 'bot' as const,
-      },
-      {
-        key: 'commercial' as const,
-        icon: <StorefrontIcon fontSize="small" />,
-        title: commercial.title,
-        subtitle: commercial.phone,
-        ariaLabel: commercial.ariaLabel,
-        kind: 'commercial' as const,
-      },
-      {
-        key: 'leads' as const,
-        icon: <ContactPhoneIcon fontSize="small" />,
-        title: directory.title,
-        subtitle: directory.count,
-        ariaLabel: directory.ariaLabel,
-        kind: 'directory' as const,
-      },
-      {
-        key: 'discounts' as const,
-        icon: <ConfirmationNumberIcon fontSize="small" />,
-        title: 'Descuentos',
-        subtitle: '',
-        ariaLabel: 'Descuentos',
-        kind: null,
-      },
-    ];
-  }, [directoryTotalContacts]);
-
-  const tabsValue = adminActive ? false : activeTab;
+  const bot = useMemo(() => inboxLineNavMeta('bot'), []);
+  const commercial = useMemo(() => inboxLineNavMeta('commercial'), []);
+  const directory = useMemo(
+    () => directoryNavMeta(directoryTotalContacts),
+    [directoryTotalContacts],
+  );
+  const directorySelected = activeTab === 'leads';
+  const botSelected = activeTab === 'inbox';
+  const commercialSelected = activeTab === 'commercial';
+  const discountsSelected = activeTab === 'discounts';
 
   return (
     <Box
@@ -219,58 +193,110 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
         }}
       />
 
-      <Tabs
-        value={tabsValue}
-        onChange={onTabChange}
+      <Stack
+        direction="row"
+        spacing={1}
         data-tour="whatsapp-tabs"
-        variant="scrollable"
-        scrollButtons="auto"
-        allowScrollButtonsMobile
         sx={{
           flex: '1 1 280px',
           minWidth: 0,
-          minHeight: 56,
-          '& .MuiTabs-indicator': { height: 3, borderRadius: '3px 3px 0 0' },
-          '& .MuiTab-root': {
-            minHeight: 40,
-            py: 0.5,
-            px: { xs: 1, sm: 1.5 },
-            textTransform: 'none',
-            fontWeight: 600,
-            fontSize: '0.8125rem',
-          },
+          alignItems: 'center',
+          flexWrap: 'wrap',
         }}
       >
-        {tabItems.map((item) => {
-          const isSpecial = item.kind != null;
-          return (
-            <Tab
-              key={item.key}
-              value={item.key}
-              icon={item.icon}
-              iconPosition="start"
-              label={
-                isSpecial ? (
-                  <SpecialTabLabel
-                    title={item.title}
-                    subtitle={item.subtitle}
-                    compact={compactTabs}
-                  />
-                ) : compactTabs ? undefined : (
-                  item.title
-                )
-              }
-              aria-label={item.ariaLabel}
-              sx={{
-                '& .MuiTab-iconWrapper': {
-                  mr: compactTabs && !isSpecial ? 0 : 0.75,
-                },
-                ...(item.kind ? specialTabSx(item.kind) : null),
-              }}
+        <Box
+          sx={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 0.75,
+            pl: 0.75,
+            pr: 0.75,
+            py: 0.5,
+            minHeight: 56,
+            width: 'max-content',
+            maxWidth: '100%',
+            borderRadius: 2,
+            border: '1px solid',
+            borderColor: alpha(DIRECTORY_SHELL_HEX, 0.42),
+            bgcolor: (theme) => alpha(DIRECTORY_SHELL_HEX, theme.palette.mode === 'dark' ? 0.22 : 0.1),
+            flexWrap: 'wrap',
+          }}
+        >
+          <ButtonBase
+            onClick={(event) => onTabChange(event, 'leads')}
+            aria-label={directory.ariaLabel}
+            aria-pressed={directorySelected}
+            sx={{
+              borderRadius: 1.5,
+              px: { xs: 1, sm: 1.25 },
+              py: 0.6,
+              minHeight: 48,
+              gap: 0.75,
+              fontWeight: 800,
+              color: directorySelected ? 'primary.contrastText' : 'primary.main',
+              bgcolor: directorySelected
+                ? 'primary.main'
+                : (theme) => alpha(theme.palette.primary.main, 0.04),
+            }}
+          >
+            <ContactPhoneIcon fontSize="small" />
+            <SpecialTabLabel
+              title={directory.title}
+              subtitle={directory.count}
+              compact={compactTabs}
             />
-          );
-        })}
-      </Tabs>
+          </ButtonBase>
+          <ButtonBase
+            onClick={(event) => {
+              event.stopPropagation();
+              onTabChange(event, 'inbox');
+            }}
+            aria-label={bot.ariaLabel}
+            aria-pressed={botSelected}
+            sx={specialTabSx('bot', botSelected)}
+          >
+            <InboxIcon fontSize="small" />
+            <SpecialTabLabel title={bot.title} subtitle={bot.phone} compact={compactTabs} />
+          </ButtonBase>
+          <ButtonBase
+            onClick={(event) => {
+              event.stopPropagation();
+              onTabChange(event, 'commercial');
+            }}
+            aria-label={commercial.ariaLabel}
+            aria-pressed={commercialSelected}
+            sx={specialTabSx('commercial', commercialSelected)}
+          >
+            <StorefrontIcon fontSize="small" />
+            <SpecialTabLabel
+              title={commercial.title}
+              subtitle={commercial.phone}
+              compact={compactTabs}
+            />
+          </ButtonBase>
+        </Box>
+
+        <ButtonBase
+          onClick={(event) => onTabChange(event, 'discounts')}
+          aria-label="Descuentos"
+          aria-pressed={discountsSelected}
+          sx={{
+            minHeight: 40,
+            px: { xs: 1, sm: 1.5 },
+            py: 0.5,
+            borderRadius: 2,
+            gap: 0.75,
+            fontWeight: 600,
+            fontSize: '0.8125rem',
+            textTransform: 'none',
+            color: discountsSelected ? 'primary.main' : 'text.primary',
+            bgcolor: discountsSelected ? (theme) => alpha(theme.palette.primary.main, 0.1) : 'transparent',
+          }}
+        >
+          <ConfirmationNumberIcon fontSize="small" />
+          {compactTabs ? null : 'Descuentos'}
+        </ButtonBase>
+      </Stack>
 
       <Divider
         orientation="vertical"

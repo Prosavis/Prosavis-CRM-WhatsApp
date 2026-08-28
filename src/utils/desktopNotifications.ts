@@ -1,3 +1,5 @@
+import { inboxNotificationIcon } from './inboxLineVisual';
+
 export const DESKTOP_NOTIFICATIONS_ENABLED_KEY = 'prosavis-crm-desktop-notifications-enabled';
 export const DESKTOP_NOTIFICATIONS_ONBOARDING_DISMISSED_KEY =
   'prosavis-crm-desktop-notifications-onboarding-dismissed';
@@ -17,6 +19,7 @@ export interface InboundMessageNotificationParams {
   phone: string;
   phoneNumberId?: string;
   icon?: string;
+  line?: 'bot' | 'commercial';
 }
 
 export function isNotificationSupported(): boolean {
@@ -75,8 +78,11 @@ export function canShowDesktopNotifications(): boolean {
 export function showInboundMessageNotification(params: InboundMessageNotificationParams): void {
   if (!canShowDesktopNotifications()) return;
 
+  const line = params.line ?? (params.title.includes('Comercial') ? 'commercial' : 'bot');
   const icon =
-    params.icon ?? `${import.meta.env.BASE_URL}assets/icons/iconoProsavisClean.png`;
+    params.icon ??
+    inboxNotificationIcon(line) ??
+    `${import.meta.env.BASE_URL}assets/icons/iconoProsavisClean.png`;
 
   const notification = new Notification(params.title, {
     body: params.body,

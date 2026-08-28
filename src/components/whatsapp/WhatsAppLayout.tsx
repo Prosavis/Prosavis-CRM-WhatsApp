@@ -44,6 +44,7 @@ import {
 import { dedupePresencesByUid } from '@/utils/whatsappAdminPresence';
 import { clearAllComposerDrafts } from '@/utils/messageComposerDraftStore';
 import { playInboxSound } from '@/utils/inboxSounds';
+import { inboxLineHex, inboxLineLabel } from '@/utils/inboxLineVisual';
 import {
   canShowDesktopNotifications,
   showInboundMessageNotification,
@@ -211,8 +212,12 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   const [outOfCoverageDialogOpen, setOutOfCoverageDialogOpen] = useState(false);
   const [categoryTagOverrides, setCategoryTagOverrides] = useState<CategoryTagIdOverrides>({});
 
-  const [inboundAlert, setInboundAlert] = useState<{ message: string; conversationId: string } | null>(null);
-  const [inboundPulse, setInboundPulse] = useState(false);
+  const [inboundAlert, setInboundAlert] = useState<{
+    message: string;
+    conversationId: string;
+    line: 'bot' | 'commercial';
+  } | null>(null);
+  const [inboundPulseLine, setInboundPulseLine] = useState<'bot' | 'commercial' | null>(null);
   const [actionSnack, setActionSnack] = useState<{
     open: boolean;
     message: string;
@@ -455,6 +460,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
         conversationId: best.id,
         phone: notifyPhone,
         phoneNumberId: best.phoneNumberId,
+        line,
       });
     }
 
@@ -462,10 +468,11 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
       setInboundAlert({
         message: `Nuevo mensaje en ${contactLabel}`,
         conversationId: best.id,
+        line,
       });
     }
-    setInboundPulse(true);
-    window.setTimeout(() => setInboundPulse(false), 1400);
+    setInboundPulseLine(line);
+    window.setTimeout(() => setInboundPulseLine(null), 1400);
   }, []);
 
   useEffect(() => {
@@ -966,16 +973,16 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
         height: 'calc(100vh - 96px)',
         '@keyframes waInboundPulse': {
           '0%': {
-            boxShadow: `0 0 0 0 ${alpha(theme.palette.primary.main, 0.35)}`,
+            boxShadow: `0 0 0 0 ${alpha(inboundPulseLine ? inboxLineHex(inboundPulseLine) : theme.palette.primary.main, 0.4)}`,
           },
           '70%': {
-            boxShadow: `0 0 0 12px ${alpha(theme.palette.primary.main, 0)}`,
+            boxShadow: `0 0 0 12px ${alpha(inboundPulseLine ? inboxLineHex(inboundPulseLine) : theme.palette.primary.main, 0)}`,
           },
           '100%': {
-            boxShadow: `0 0 0 0 ${alpha(theme.palette.primary.main, 0)}`,
+            boxShadow: `0 0 0 0 ${alpha(inboundPulseLine ? inboxLineHex(inboundPulseLine) : theme.palette.primary.main, 0)}`,
           },
         },
-        animation: inboundPulse ? 'waInboundPulse 1.2s ease-out' : 'none',
+        animation: inboundPulseLine ? 'waInboundPulse 1.2s ease-out' : 'none',
       }}
     >
       <Box
@@ -1135,13 +1142,24 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
           severity="info"
           variant="filled"
           onClose={() => setInboundAlert(null)}
+          sx={
+            inboundAlert
+              ? {
+                  bgcolor: inboxLineHex(inboundAlert.line),
+                  color: '#ffffff',
+                  '& .MuiAlert-icon': { color: '#ffffff' },
+                }
+              : undefined
+          }
           action={
             <Button color="inherit" size="small" onClick={handleOpenInboundChat}>
               Ver chat
             </Button>
           }
         >
-          {inboundAlert?.message}
+          {inboundAlert
+            ? `${inboxLineLabel(inboundAlert.line)} · ${inboundAlert.message}`
+            : null}
         </Alert>
       </Snackbar>
 

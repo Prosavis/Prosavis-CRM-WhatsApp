@@ -43,6 +43,17 @@ export const DesignTokens = {
     },
   },
 
+  /**
+   * ADN de líneas WhatsApp del CRM. No inventar otros hex para Bot/Comercial.
+   * Bot = navy de marca. Comercial = naranja de marca. Directorio = cápsula
+   * (navy más saturado) que envuelve a los dos inboxes en la barra.
+   */
+  inboxLines: {
+    bot: '#002446',
+    commercial: '#FF7700',
+    directory: '#003D73',
+  },
+
   // Colores semánticos (estados)
   semantic: {
     success: '#4caf50',
