@@ -1,5 +1,5 @@
-export const INBOX_LIST_WIDTH_MIN = 260;
-export const INBOX_LIST_WIDTH_MAX = 480;
+export const INBOX_LIST_WIDTH_MIN = 200;
+export const INBOX_LIST_WIDTH_MAX = 640;
 export const INBOX_LIST_WIDTH_DEFAULT = 320;
 export const INBOX_LIST_WIDTH_KEY = 'whatsapp-inbox-list-width';
 

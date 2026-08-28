@@ -13,13 +13,17 @@ describe('companyHandbook', () => {
     expect(ids).toEqual(['whatsapp', 'emails', 'web', 'social', 'house']);
   });
 
-  it('lists the three WhatsApp lines and the bot link', () => {
+  it('lists Bot and Comercial as one row each with number and link', () => {
     const chapter = getHandbookChapter('whatsapp');
-    const copies = chapter?.entries.map((entry) => entry.copyText).join(' ') ?? '';
-    expect(copies).toMatch(/312/);
-    expect(copies).toMatch(/311/);
-    expect(copies).toMatch(/324/);
-    expect(chapter?.entries.some((entry) => entry.copyText.includes('wa.me'))).toBe(true);
+    expect(chapter?.entries).toHaveLength(3);
+    const bot = chapter?.entries.find((entry) => entry.id === 'wa-bot');
+    const commercial = chapter?.entries.find((entry) => entry.id === 'wa-commercial');
+    expect(bot?.label).toBe('Bot');
+    expect(bot?.copyText).toMatch(/312/);
+    expect(bot?.linkCopyText).toContain('wa.me');
+    expect(commercial?.label).toBe('Comercial');
+    expect(commercial?.copyText).toMatch(/311/);
+    expect(commercial?.linkCopyText).toContain('wa.me');
   });
 
   it('lists the official emails', () => {
@@ -30,9 +34,10 @@ describe('companyHandbook', () => {
 
   it('lists social handles from the brand channels', () => {
     const social = getHandbookChapter('social');
-    expect(social?.entries.find((entry) => entry.id === 'social-ig')?.description).toBe(
+    expect(social?.entries.find((entry) => entry.id === 'social-ig')?.handle).toBe(
       '@prosavis.app',
     );
+    expect(social?.entries.every((entry) => Boolean(entry.iconSrc))).toBe(true);
     expect(social?.entries.map((entry) => entry.label)).toEqual([
       'Instagram',
       'TikTok',

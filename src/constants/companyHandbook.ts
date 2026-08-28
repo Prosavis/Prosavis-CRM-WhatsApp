@@ -21,6 +21,10 @@ export interface HandbookEntry {
   copyText: string;
   kind: HandbookEntryKind;
   openUrl?: string;
+  /** wa.me u otra URL para el segundo botón Copiar link. */
+  linkCopyText?: string;
+  handle?: string;
+  iconSrc?: string;
 }
 
 export interface HandbookChapter {
@@ -40,37 +44,32 @@ export function getCompanyHandbookChapters(): HandbookChapter[] {
     {
       id: 'whatsapp',
       title: 'WhatsApp',
-      summary: 'Líneas para citar, vender y dar soporte.',
+      summary: 'Líneas para vender y dar soporte.',
       entries: [
         {
           id: 'wa-bot',
-          label: 'Bot / citas',
-          description: 'Inbox Bot. Número Cloud API para agendar limpieza.',
+          label: 'Bot',
+          description: 'Inbox Bot. Número Cloud API.',
           copyText: WHATSAPP_BOT_PHONE_DISPLAY,
+          linkCopyText: `https://wa.me/${BOT_DIGITS}`,
           kind: 'phone',
-          openUrl: `https://wa.me/${BOT_DIGITS}`,
-        },
-        {
-          id: 'wa-bot-link',
-          label: 'Link directo al bot',
-          description: 'Para que el cliente abra el chat de citas.',
-          copyText: `https://wa.me/${BOT_DIGITS}`,
-          kind: 'link',
           openUrl: `https://wa.me/${BOT_DIGITS}`,
         },
         {
           id: 'wa-commercial',
           label: 'Comercial',
-          description: 'Francy / Inbox Comercial. Trabajo y propuestas.',
+          description: 'Francy / Inbox Comercial.',
           copyText: WHATSAPP_COMMERCIAL_PHONE_DISPLAY,
+          linkCopyText: `https://wa.me/${COMMERCIAL_DIGITS}`,
           kind: 'phone',
           openUrl: `https://wa.me/${COMMERCIAL_DIGITS}`,
         },
         {
           id: 'wa-support',
-          label: 'Soporte del aplicativo',
+          label: 'Soporte',
           description: 'Línea de soporte de la app.',
           copyText: SUPPORT_PHONE_DISPLAY,
+          linkCopyText: `https://wa.me/${SUPPORT_DIGITS}`,
           kind: 'phone',
           openUrl: `https://wa.me/${SUPPORT_DIGITS}`,
         },
@@ -145,49 +144,61 @@ export function getCompanyHandbookChapters(): HandbookChapter[] {
           id: 'social-ig',
           label: 'Instagram',
           description: '@prosavis.app',
+          handle: '@prosavis.app',
           copyText: 'https://www.instagram.com/prosavis.app/',
           kind: 'link',
           openUrl: 'https://www.instagram.com/prosavis.app/',
+          iconSrc: '/icons/social/instagram.webp',
         },
         {
           id: 'social-tt',
           label: 'TikTok',
           description: '@prosavis',
+          handle: '@prosavis',
           copyText: 'https://tiktok.com/@prosavis',
           kind: 'link',
           openUrl: 'https://tiktok.com/@prosavis',
+          iconSrc: '/icons/social/tiktok.png',
         },
         {
           id: 'social-fb',
           label: 'Facebook',
           description: 'Prosavis',
+          handle: 'Prosavis',
           copyText: 'https://www.facebook.com/profile.php?id=61581754336778',
           kind: 'link',
           openUrl: 'https://www.facebook.com/profile.php?id=61581754336778',
+          iconSrc: '/icons/social/facebook.png',
         },
         {
           id: 'social-x',
           label: 'X',
           description: '@prosavis',
+          handle: '@prosavis',
           copyText: 'https://x.com/prosavis',
           kind: 'link',
           openUrl: 'https://x.com/prosavis',
+          iconSrc: '/icons/social/x.png',
         },
         {
           id: 'social-yt',
           label: 'YouTube',
           description: '@Prosavis8',
+          handle: '@Prosavis8',
           copyText: 'https://www.youtube.com/@Prosavis8',
           kind: 'link',
           openUrl: 'https://www.youtube.com/@Prosavis8',
+          iconSrc: '/icons/social/Youtube_logo.png',
         },
         {
           id: 'social-li',
           label: 'LinkedIn',
           description: 'company/prosavis',
+          handle: 'company/prosavis',
           copyText: 'https://www.linkedin.com/company/prosavis',
           kind: 'link',
           openUrl: 'https://www.linkedin.com/company/prosavis',
+          iconSrc: '/icons/social/LinkedIn.png',
         },
       ],
     },
