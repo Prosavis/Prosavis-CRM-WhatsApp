@@ -392,7 +392,20 @@ export interface Database {
       };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      crm_directory_meta_by_phones: {
+        Args: { p_phones: string[] };
+        Returns: Array<{
+          phone: string | null;
+          phone_key: string | null;
+          photo_url: string | null;
+          display_name: string | null;
+          full_name: string | null;
+          tags: string[] | null;
+          classification: string | null;
+        }>;
+      };
+    };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
   };

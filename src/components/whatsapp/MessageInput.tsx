@@ -320,6 +320,9 @@ const MessageInput: React.FC<MessageInputProps> = ({
       stopTypingNow();
       applyComposerText(getComposerDraft(conversationKey));
       conversationKeyRef.current = conversationKey;
+      requestAnimationFrame(() => {
+        lexicalEditorRef.current?.focus();
+      });
     }
   }, [conversationKey, applyComposerText, flushDraftPersist, stopTypingNow]);
 

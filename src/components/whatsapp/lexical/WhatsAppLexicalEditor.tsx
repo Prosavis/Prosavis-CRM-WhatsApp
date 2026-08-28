@@ -200,6 +200,7 @@ const EditorBridge = forwardRef<WhatsAppLexicalEditorHandle, WhatsAppLexicalEdit
       ref,
       () => ({
         focus: () => {
+          contentEditableRef.current?.focus({ preventScroll: true });
           editor.focus();
         },
         getWhatsAppText: () => readWhatsAppPlainText(editor),

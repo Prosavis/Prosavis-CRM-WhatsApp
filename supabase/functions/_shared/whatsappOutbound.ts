@@ -77,6 +77,7 @@ export interface SendMediaOutboundParams {
   isAnimatedSticker?: boolean;
   phoneNumberId?: string;
   agentUid: string;
+  clientRequestId?: string;
 }
 
 export interface SendMediaOutboundResult {
@@ -647,6 +648,7 @@ export async function sendWhatsAppMediaOutbound(
     mime_type: params.mimeType ?? null,
     size_bytes: typeof params.sizeBytes === 'number' ? params.sizeBytes : null,
     is_animated_sticker: params.isAnimatedSticker === true,
+    client_request_id: params.clientRequestId ?? null,
   };
 
   const persisted = await persistOutboundLog(supabase, insertRow, params.agentUid);
@@ -691,6 +693,7 @@ export async function sendTextOutbound(
     campaignType?: string;
     templateName?: string;
     contactName?: string | null;
+    clientRequestId?: string;
   },
 ): Promise<SendMediaOutboundResult> {
   assertMetaSendEnabled();
@@ -735,6 +738,7 @@ export async function sendTextOutbound(
     phone_number_id: graph.phoneNumberId,
     error_message: metaResult.errorMessage ?? null,
     raw_payload: metaResult.payload,
+    client_request_id: params.clientRequestId ?? null,
   };
 
   const persisted = await persistOutboundLog(supabase, insertRow, params.agentUid);

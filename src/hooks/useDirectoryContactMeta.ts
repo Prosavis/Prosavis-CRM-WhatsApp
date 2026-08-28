@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/config/supabase';
+import { inboxQueryKeys } from '@/hooks/inboxQueryKeys';
 import {
   directoryPhoneKey,
   directoryPhoneLookupVariants,
@@ -18,16 +20,6 @@ export interface DirectoryContactMetaResult {
   metaByPhoneKey: Map<string, DirectoryContactMeta>;
   /** False hasta que el fetch del directorio termina (éxito o error). */
   ready: boolean;
-}
-
-const CHUNK_SIZE = 80;
-
-function chunkArray<T>(items: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < items.length; i += size) {
-    chunks.push(items.slice(i, i + size));
-  }
-  return chunks;
 }
 
 function conversationPhone(conv: WhatsAppConversation): string | null {
@@ -55,24 +47,17 @@ export function useDirectoryContactMeta(
     return buildLookupVariants(conversations).join('|');
   }, [conversations]);
 
-  const [metaByPhoneKey, setMetaByPhoneKey] = useState<
-    Map<string, DirectoryContactMeta>
-  >(() => new Map());
-  const [ready, setReady] = useState(() => !lookupSignature);
-
-  useEffect(() => {
-    if (!lookupSignature) {
-      setMetaByPhoneKey(new Map());
-      setReady(true);
-      return;
-    }
-
-    const variants = lookupSignature.split('|');
-    let cancelled = false;
-    setReady(false);
-
-    const load = async () => {
-      const rows: Array<{
+  const query = useQuery({
+    queryKey: inboxQueryKeys.directoryMeta(lookupSignature),
+    enabled: Boolean(lookupSignature),
+    staleTime: 30_000,
+    queryFn: async () => {
+      const variants = lookupSignature.split('|');
+      const { data, error } = await supabase.rpc('crm_directory_meta_by_phones', {
+        p_phones: variants,
+      });
+      if (error) throw error;
+      const rows = (data ?? []) as Array<{
         phone: string | null;
         phone_key: string | null;
         photo_url: string | null;
@@ -80,48 +65,26 @@ export function useDirectoryContactMeta(
         full_name: string | null;
         tags: string[] | null;
         classification: string | null;
-      }> = [];
-
-      for (const chunk of chunkArray(variants, CHUNK_SIZE)) {
-        const { data, error } = await supabase
-          .from('crm_directory')
-          .select('phone, phone_key, photo_url, display_name, full_name, tags, classification')
-          .in('phone', chunk);
-
-        if (error) throw error;
-        if (data) rows.push(...data);
-      }
-
+      }>;
       const next = new Map<string, DirectoryContactMeta>();
-
       for (const row of rows) {
-        const key =
-          row.phone_key?.trim() ||
-          directoryPhoneKey(row.phone) ||
-          null;
+        const key = row.phone_key?.trim() || directoryPhoneKey(row.phone) || null;
         if (!key) continue;
-
-        const displayName =
-          row.display_name?.trim() ||
-          row.full_name?.trim() ||
-          undefined;
+        const displayName = row.display_name?.trim() || row.full_name?.trim() || undefined;
         const photoUrl = row.photo_url?.trim() || undefined;
         const tags = (row.tags ?? []).map((tag) => tag.trim()).filter(Boolean);
         const classification = row.classification?.trim() || undefined;
         const existing = next.get(key);
-
         if (!existing) {
           next.set(key, { displayName, photoUrl, tags, classification });
           continue;
         }
-
         const mergedTags = [...existing.tags];
         for (const tag of tags) {
           if (!mergedTags.some((item) => item.toLowerCase() === tag.toLowerCase())) {
             mergedTags.push(tag);
           }
         }
-
         next.set(key, {
           displayName: existing.displayName || displayName,
           photoUrl: existing.photoUrl || photoUrl,
@@ -129,26 +92,14 @@ export function useDirectoryContactMeta(
           classification: existing.classification || classification,
         });
       }
+      return next;
+    },
+  });
 
-      if (!cancelled) {
-        setMetaByPhoneKey(next);
-        setReady(true);
-      }
-    };
-
-    void load().catch(() => {
-      if (!cancelled) {
-        setMetaByPhoneKey(new Map());
-        setReady(true);
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [lookupSignature]);
-
-  return { metaByPhoneKey, ready };
+  return {
+    metaByPhoneKey: query.data ?? new Map<string, DirectoryContactMeta>(),
+    ready: !lookupSignature || query.isFetched || query.isError,
+  };
 }
 
 export function getDirectoryMetaForConversation(

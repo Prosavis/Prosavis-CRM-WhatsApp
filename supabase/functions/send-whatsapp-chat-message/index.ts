@@ -30,6 +30,7 @@ Deno.serve(async (req) => {
     const mimeType = body.mimeType ? String(body.mimeType).trim() : undefined;
     const sizeBytes = typeof body.sizeBytes === 'number' ? body.sizeBytes : undefined;
     const isAnimatedSticker = body.isAnimatedSticker === true;
+    const clientRequestId = body.clientRequestId ? String(body.clientRequestId).trim() : undefined;
 
     if (!to) return jsonResponse({ error: 'Se requiere destinatario (to).' }, 400);
 
@@ -59,6 +60,7 @@ Deno.serve(async (req) => {
           sizeBytes,
           isAnimatedSticker,
           agentUid: user.id,
+          clientRequestId,
         })
       : await sendTextOutbound(supabase, {
           to,
@@ -66,6 +68,7 @@ Deno.serve(async (req) => {
           phoneNumberId,
           replyToWaMessageId,
           agentUid: user.id,
+          clientRequestId,
         });
 
     return jsonResponse({
