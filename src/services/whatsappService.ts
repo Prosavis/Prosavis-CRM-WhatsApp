@@ -1,5 +1,11 @@
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '@/config/supabase';
+import {
+  INBOX_CONVERSATION_SELECT,
+  type InboxConversationRowLike,
+} from '@/utils/inboxConversationCache';
+import { subscribeInboxConversations, subscribeInboxMessages } from '@/utils/inboxRealtimeSync';
+import { getCachedMediaUrl, mediaUrlCacheKey, setCachedMediaUrl } from '@/utils/mediaUrlCache';
 import type { Database } from '@/types/database';
 import type { WhatsAppMetrics } from '@/types/whatsapp';
 import type { NormalizedBookingContext } from '../../supabase/functions/_shared/bookingContext';
@@ -48,8 +54,15 @@ function formatInvokeError(raw: unknown, fallback: string): string {
   return fallback;
 }
 
-async function invokeFn<T>(name: string, body?: Record<string, unknown>): Promise<T> {
-  const { data, error } = await supabase.functions.invoke<T>(name, { body });
+async function invokeFn<T>(
+  name: string,
+  body?: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<T> {
+  const { data, error } = await supabase.functions.invoke<T>(name, {
+    body,
+    ...(signal ? { signal } : {}),
+  });
   if (error) {
     // Prefer parsed body when present (response stream may already be consumed).
     if (data && typeof data === 'object') {
@@ -97,34 +110,54 @@ function toDate(value: string | null | undefined): Date | undefined {
   return value ? new Date(value) : undefined;
 }
 
-function mapConversationRow(row: ConversationRow): WhatsAppConversation {
+function asOptionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function asBoolean(value: unknown, fallback = false): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+export function mapConversationRow(
+  row: InboxConversationRowLike | ConversationRow,
+): WhatsAppConversation {
+  const record = row as InboxConversationRowLike;
+  const stableKey = String(record.stable_key ?? '').trim();
+  const tagIds = Array.isArray(record.tag_ids)
+    ? record.tag_ids.filter((id): id is string => typeof id === 'string')
+    : [];
+  const state = record.state === 'escalated' || record.state === 'resolved' ? record.state : 'active';
   return {
-    id: row.stable_key,
-    phone: row.phone ?? undefined,
-    bsuid: row.bsuid ?? undefined,
-    state: row.state,
-    lastMessageText: row.last_message_text ?? undefined,
-    lastMessageAt: toDate(row.last_message_at),
-    lastMessageDirection: row.last_message_direction ?? undefined,
-    lastMessageOutboundStatus: row.last_message_outbound_status ?? undefined,
-    unreadCount: row.unread_count,
-    contactName: row.contact_name ?? undefined,
-    contactPhone: row.contact_phone ?? undefined,
-    contactPhotoUrl: row.contact_photo_url ?? undefined,
-    whatsappProfileName: row.whatsapp_profile_name ?? undefined,
-    contactNameLocked: row.contact_name_locked === true,
-    adminNotes: row.admin_notes ?? undefined,
-    assignedTo: row.assigned_to ?? undefined,
-    lastIntent: row.last_intent ?? undefined,
-    userId: row.user_id ?? undefined,
-    phoneNumberId: row.phone_number_id ?? undefined,
-    automatedInboundDisabled: row.automated_inbound_disabled,
-    tagIds: row.tag_ids ?? [],
-    isArchived: row.is_archived,
-    archivedAt: toDate(row.archived_at),
-    isPinned: row.is_pinned,
-    pinnedAt: toDate(row.pinned_at),
-    crmForceUnread: row.crm_force_unread,
+    id: stableKey,
+    rowId: record.id ? String(record.id) : undefined,
+    phone: asOptionalString(record.phone),
+    bsuid: asOptionalString(record.bsuid),
+    state,
+    lastMessageText: asOptionalString(record.last_message_text),
+    lastMessageAt: toDate(asOptionalString(record.last_message_at)),
+    lastMessageDirection:
+      record.last_message_direction === 'inbound' || record.last_message_direction === 'outbound'
+        ? record.last_message_direction
+        : undefined,
+    lastMessageOutboundStatus: asOptionalString(record.last_message_outbound_status),
+    unreadCount: Number(record.unread_count ?? 0),
+    contactName: asOptionalString(record.contact_name),
+    contactPhone: asOptionalString(record.contact_phone),
+    contactPhotoUrl: asOptionalString(record.contact_photo_url),
+    whatsappProfileName: asOptionalString(record.whatsapp_profile_name),
+    contactNameLocked: record.contact_name_locked === true,
+    adminNotes: asOptionalString(record.admin_notes),
+    assignedTo: asOptionalString(record.assigned_to),
+    lastIntent: asOptionalString(record.last_intent),
+    userId: asOptionalString(record.user_id),
+    phoneNumberId: asOptionalString(record.phone_number_id),
+    automatedInboundDisabled: asBoolean(record.automated_inbound_disabled),
+    tagIds,
+    isArchived: asBoolean(record.is_archived),
+    archivedAt: toDate(asOptionalString(record.archived_at)),
+    isPinned: asBoolean(record.is_pinned),
+    pinnedAt: toDate(asOptionalString(record.pinned_at)),
+    crmForceUnread: asBoolean(record.crm_force_unread),
   };
 }
 
@@ -197,6 +230,8 @@ function mapMessageRow(row: MessageRow): WhatsAppMessage {
 
 export interface WhatsAppConversation {
   id: string;
+  /** UUID de `whatsapp_conversations.id` (Realtime DELETE solo manda PK). */
+  rowId?: string;
   phone?: string;
   bsuid?: string;
   state: 'active' | 'escalated' | 'resolved';
@@ -369,13 +404,15 @@ function dedupeWhatsAppMessagesByWaMessageId(
 
 export type FetchConversationsOptions = {
   includeOrphans?: boolean;
+  skipInitialLoad?: boolean;
+  getSnapshot?: () => WhatsAppConversation[];
 };
 
 async function fetchConversations(
   phoneNumberId?: string,
   options?: FetchConversationsOptions,
 ): Promise<WhatsAppConversation[]> {
-  const allRows: ConversationRow[] = [];
+  const allRows: InboxConversationRowLike[] = [];
   const includeOrphans = options?.includeOrphans !== false;
 
   for (let page = 0; page < CONVERSATIONS_MAX_PAGES; page += 1) {
@@ -384,7 +421,7 @@ async function fetchConversations(
 
     let query = supabase
       .from('whatsapp_conversations')
-      .select('*')
+      .select(INBOX_CONVERSATION_SELECT as '*')
       .order('is_pinned', { ascending: false })
       .order('last_message_at', { ascending: false, nullsFirst: false })
       .range(from, to);
@@ -399,7 +436,7 @@ async function fetchConversations(
     const { data, error } = await query;
     if (error) throw error;
 
-    const batch = data ?? [];
+    const batch = (data ?? []) as unknown as InboxConversationRowLike[];
     allRows.push(...batch);
 
     if (batch.length < CONVERSATIONS_PAGE_SIZE) break;
@@ -422,11 +459,11 @@ export async function fetchConversationByStableKey(
   if (!key) return null;
   const { data, error } = await supabase
     .from('whatsapp_conversations')
-    .select('*')
+    .select(INBOX_CONVERSATION_SELECT as '*')
     .eq('stable_key', key)
     .maybeSingle();
   if (error) throw error;
-  return data ? mapConversationRow(data) : null;
+  return data ? mapConversationRow(data as unknown as InboxConversationRowLike) : null;
 }
 
 export function subscribeToConversations(
@@ -435,48 +472,20 @@ export function subscribeToConversations(
   onError?: (error: Error) => void,
   options?: FetchConversationsOptions,
 ): Unsubscribe {
-  let disposed = false;
-  let channel: RealtimeChannel | null = null;
-  let retryTimer: ReturnType<typeof setTimeout> | null = null;
-
-  const load = async () => {
-    if (disposed) return;
-    try {
-      callback(await fetchConversations(phoneNumberId, options));
-    } catch (error) {
-      onError?.(error instanceof Error ? error : new Error(String(error)));
-    }
-  };
-
-  const scheduleRetry = () => {
-    if (disposed || retryTimer) return;
-    retryTimer = setTimeout(() => {
-      retryTimer = null;
-      void load();
-    }, 2000);
-  };
-
-  void load();
-  channel = supabase
-    .channel(
-      `whatsapp-conversations:${phoneNumberId ?? 'all'}:${options?.includeOrphans === false ? 'strict' : 'orphans'}`,
-    )
-    .on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'whatsapp_conversations' },
-      () => void load(),
-    )
-    .subscribe((status) => {
-      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-        scheduleRetry();
-      }
-    });
-
-  return () => {
-    disposed = true;
-    if (retryTimer) clearTimeout(retryTimer);
-    if (channel) void supabase.removeChannel(channel);
-  };
+  return subscribeInboxConversations({
+    supabase,
+    fetchAll: () => fetchConversations(phoneNumberId, options),
+    mapRow: mapConversationRow,
+    callback,
+    onError,
+    filter: {
+      phoneNumberId,
+      includeOrphans: options?.includeOrphans,
+    },
+    channelName: `whatsapp-conversations:${phoneNumberId ?? 'all'}:${options?.includeOrphans === false ? 'strict' : 'orphans'}`,
+    skipInitialLoad: options?.skipInitialLoad,
+    getSnapshot: options?.getSnapshot,
+  });
 }
 
 /** Números únicos (solo dígitos, 10–15) de conversaciones de la línea, para envío masivo. */
@@ -495,17 +504,28 @@ export async function fetchConversationPhoneNumbersForBulk(
   return [...set];
 }
 
-async function fetchMessages(stableKey: string): Promise<WhatsAppMessage[]> {
-  const { data, error } = await supabase
+export async function fetchConversationMessages(
+  stableKey: string,
+  options?: { limit?: number; before?: Date | string },
+): Promise<WhatsAppMessage[]> {
+  const limit = options?.limit ?? DEFAULT_MESSAGE_LIMIT;
+  let query = supabase
     .from('whatsapp_message_log')
     .select('*')
     .eq('conversation_stable_key', stableKey)
     .eq('hidden_from_panel', false)
-    .order('created_at', { ascending: true })
-    .limit(DEFAULT_MESSAGE_LIMIT);
+    .order('created_at', { ascending: false })
+    .limit(limit);
 
+  if (options?.before) {
+    const before =
+      options.before instanceof Date ? options.before.toISOString() : options.before;
+    query = query.lt('created_at', before);
+  }
+
+  const { data, error } = await query;
   if (error) throw error;
-  return dedupeWhatsAppMessagesByWaMessageId((data ?? []).map(mapMessageRow));
+  return dedupeWhatsAppMessagesByWaMessageId((data ?? []).map(mapMessageRow).reverse());
 }
 
 export function subscribeToMessages(
@@ -513,34 +533,14 @@ export function subscribeToMessages(
   callback: (messages: WhatsAppMessage[]) => void,
   onError?: (error: Error) => void,
 ): Unsubscribe {
-  let channel: RealtimeChannel | null = null;
-
-  const load = async () => {
-    try {
-      callback(await fetchMessages(stableKey));
-    } catch (error) {
-      onError?.(error instanceof Error ? error : new Error(String(error)));
-    }
-  };
-
-  void load();
-  channel = supabase
-    .channel(`whatsapp-messages:${stableKey}`)
-    .on(
-      'postgres_changes',
-      {
-        event: '*',
-        schema: 'public',
-        table: 'whatsapp_message_log',
-        filter: `conversation_stable_key=eq.${stableKey}`,
-      },
-      () => void load(),
-    )
-    .subscribe();
-
-  return () => {
-    if (channel) void supabase.removeChannel(channel);
-  };
+  return subscribeInboxMessages({
+    supabase,
+    fetchAll: () => fetchConversationMessages(stableKey, { limit: DEFAULT_MESSAGE_LIMIT }),
+    mapRow: (row) => mapMessageRow(row as MessageRow),
+    stableKey,
+    callback,
+    onError,
+  });
 }
 
 export async function patchWhatsAppConversationAdmin(params: {
@@ -587,17 +587,25 @@ export async function sendMessage(
   text: string,
   phoneNumberId?: string,
   replyToWaMessageId?: string,
+  clientRequestId?: string,
+  signal?: AbortSignal,
 ) {
   const data = await invokeFn<{
     success: boolean;
     waMessageId?: string;
+    messageId?: string;
     error?: string;
-  }>('send-whatsapp-chat-message', {
-    to,
-    text,
-    ...(phoneNumberId ? { phoneNumberId } : {}),
-    ...(replyToWaMessageId ? { replyToWaMessageId } : {}),
-  });
+  }>(
+    'send-whatsapp-chat-message',
+    {
+      to,
+      text,
+      ...(phoneNumberId ? { phoneNumberId } : {}),
+      ...(replyToWaMessageId ? { replyToWaMessageId } : {}),
+      ...(clientRequestId ? { clientRequestId } : {}),
+    },
+    signal,
+  );
   if (!data.success) {
     throw new Error(data.error ?? 'No se pudo enviar el mensaje por WhatsApp.');
   }
@@ -782,14 +790,29 @@ export async function getMediaUrl(
     mimeType?: string;
   },
 ) {
+  const cacheKey = mediaUrlCacheKey({
+    mediaId,
+    storagePath: options?.storagePath,
+    mediaAssetId: options?.mediaAssetId,
+  });
+  const cached = getCachedMediaUrl(cacheKey);
+  if (cached) {
+    return { url: cached.url, mimeType: cached.mimeType, fileSize: cached.fileSize };
+  }
+
+  const remember = (value: { url: string; mimeType: string; fileSize: number }) => {
+    setCachedMediaUrl(cacheKey, value);
+    return value;
+  };
+
   if (options?.storagePath) {
     try {
       const signed = await getWhatsAppMediaSignedUrl({ storagePath: options.storagePath });
-      return {
+      return remember({
         url: signed,
         mimeType: options.mimeType ?? 'application/octet-stream',
         fileSize: 0,
-      };
+      });
     } catch {
       // Continúa con la Edge Function (backfill / persistencia).
     }
@@ -809,11 +832,11 @@ export async function getMediaUrl(
   });
 
   if (data.signedUrl && !isMetaHostedMediaUrl(data.signedUrl)) {
-    return { url: data.signedUrl, mimeType: data.mimeType, fileSize: data.fileSize };
+    return remember({ url: data.signedUrl, mimeType: data.mimeType, fileSize: data.fileSize });
   }
   if (data.storagePath) {
     const signed = await getWhatsAppMediaSignedUrl({ storagePath: data.storagePath });
-    return { url: signed, mimeType: data.mimeType, fileSize: data.fileSize };
+    return remember({ url: signed, mimeType: data.mimeType, fileSize: data.fileSize });
   }
   throw new Error('No se pudo resolver URL del medio.');
 }
@@ -2119,7 +2142,7 @@ export function subscribeToWhatsAppAdminPresence(
       updatedAt: new Date().toISOString(),
     };
     current.lastPayload = refreshed;
-    void current.channel.track(refreshed).catch((trackErr) => {
+    void current.channel.track(refreshed).catch((trackErr: unknown) => {
       onError?.(trackErr instanceof Error ? trackErr : new Error(String(trackErr)));
     });
   };

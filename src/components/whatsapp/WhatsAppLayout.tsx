@@ -9,9 +9,9 @@ import TemplatesSidePanel from './TemplatesSidePanel';
 import WhatsAppContactSidePanel from './WhatsAppContactSidePanel';
 import { useWhatsAppContactContext } from '@/hooks/useWhatsAppContactContext';
 import { useAuth } from '@/hooks/useAuth';
+import { useInboxConversations } from '@/hooks/useInboxConversations';
 import {
   subscribeToConversations,
-  refetchConversations,
   subscribeToWhatsAppAdminPresence,
   clearMyWhatsAppPresence,
   listWhatsAppTags,
@@ -195,13 +195,9 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
 }) => {
   const theme = useTheme();
   const { user, profile, session, loading: authLoading } = useAuth();
-  const [conversations, setConversations] = useState<WhatsAppConversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<WhatsAppConversation | null>(null);
   const [loadedConversationInbound, setLoadedConversationInbound] =
     useState<LoadedConversationInbound | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [inboxError, setInboxError] = useState<string | null>(null);
-  const [subscriptionKey, setSubscriptionKey] = useState(0);
   const [rightPanel, setRightPanel] = useState<RightPanelMode>('none');
   const [composerDraft, setComposerDraft] = useState('');
   const [tags, setTags] = useState<WhatsAppTag[]>([]);
@@ -227,6 +223,14 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     () => ({ includeOrphans: lineFilter !== 'commercial' }),
     [lineFilter],
   );
+  const inboxQuery = useInboxConversations(
+    listPhoneNumberId,
+    listFetchOptions,
+    Boolean(!authLoading && session?.access_token),
+  );
+  const conversations = inboxQuery.conversations;
+  const loading = inboxQuery.loading;
+  const inboxError = inboxQuery.error?.message ?? null;
   const botPhoneNumberId = phoneNumberId || BOT_PHONE_NUMBER_ID;
   const [siblingCommercialHint, setSiblingCommercialHint] = useState<{
     unreadCount: number;
@@ -269,16 +273,16 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     siblingInboundBaselineReadyRef.current = false;
     siblingInboundPrevSnapshotRef.current = new Map();
     setSiblingAlertConversations([]);
-    setConversations([]);
     appliedDeepLinkTokenRef.current = null;
     focusRefetchAttemptedRef.current = null;
     clearAllComposerDrafts();
     setSelectedConversation(null);
   }, [phoneNumberId, lineFilter]);
 
+  const refetchInbox = inboxQuery.refetch;
   const handleRetryInbox = useCallback(() => {
-    setSubscriptionKey((key) => key + 1);
-  }, []);
+    void refetchInbox();
+  }, [refetchInbox]);
 
   useEffect(() => {
     if (authLoading || !session?.access_token || !botPhoneNumberId || lineFilter === 'commercial') return;
@@ -305,8 +309,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
           });
           if (cancelled) return;
           if (result.updatedCount > 0) {
-            const convs = await refetchConversations(listPhoneNumberId, listFetchOptions);
-            if (!cancelled) setConversations(convs);
+            await refetchInbox();
           }
         }
         try {
@@ -322,33 +325,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [authLoading, session?.access_token, botPhoneNumberId, lineFilter, listPhoneNumberId, listFetchOptions]);
-
-  useEffect(() => {
-    if (authLoading || !session?.access_token) {
-      return;
-    }
-
-    setLoading(true);
-    setInboxError(null);
-
-    const unsub = subscribeToConversations(
-      (convs) => {
-        setConversations(convs);
-        setLoading(false);
-        setInboxError(null);
-      },
-      listPhoneNumberId,
-      (error) => {
-        console.error('Error en listener de conversaciones:', error);
-        setInboxError(error.message || 'No se pudieron cargar las conversaciones');
-        setLoading(false);
-      },
-      listFetchOptions,
-    );
-
-    return () => unsub();
-  }, [listPhoneNumberId, listFetchOptions, session?.access_token, authLoading, subscriptionKey]);
+  }, [authLoading, session?.access_token, botPhoneNumberId, lineFilter, refetchInbox]);
 
   useEffect(() => {
     if (authLoading || !session?.access_token || lineFilter === 'all') {
@@ -364,27 +341,6 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
       { includeOrphans: siblingFilter !== 'commercial' },
     );
   }, [authLoading, session?.access_token, lineFilter]);
-
-  useEffect(() => {
-    if (authLoading || !session?.access_token) return;
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState !== 'visible') return;
-      void refetchConversations(listPhoneNumberId, listFetchOptions)
-        .then((convs) => {
-          setConversations(convs);
-          setInboxError(null);
-        })
-        .catch((error: unknown) => {
-          const message =
-            error instanceof Error ? error.message : 'No se pudieron recargar las conversaciones';
-          setInboxError(message);
-        });
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [listPhoneNumberId, listFetchOptions, session?.access_token, authLoading]);
 
   const loadTags = useCallback(async () => {
     try {
@@ -625,18 +581,13 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     // Sin match aún: un refetch único (chat recién creado / backfill de línea).
     if (focusRefetchAttemptedRef.current === focusToken) return;
     focusRefetchAttemptedRef.current = focusToken;
-    void refetchConversations(listPhoneNumberId, listFetchOptions)
-      .then((convs) => setConversations(convs))
-      .catch(() => {
-        /* ignore */
-      });
+    void refetchInbox();
   }, [
     focusConversation,
     focusPhone,
     conversations,
     lineFilter,
-    listPhoneNumberId,
-    listFetchOptions,
+    refetchInbox,
     onClearFocusDeepLink,
     onClearFocusPhone,
     onClearFocusConversation,
@@ -981,6 +932,8 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
       >
         <Box
           data-tour="whatsapp-inbox-list"
+          data-testid="inbox-conversation-pane"
+          data-inbox-ready={loading ? 'false' : 'true'}
           sx={{
             width: { xs: '100%', sm: 'auto' },
             minWidth: 0,
