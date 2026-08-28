@@ -22,3 +22,17 @@ export function inboxLineNavMeta(line: WhatsAppInboxLineNav) {
   const phone = WHATSAPP_BOT_PHONE_DISPLAY;
   return { title, phone, ariaLabel: `${title} ${phone}` };
 }
+
+export function formatDirectoryContactCount(total: number): string {
+  return total.toLocaleString('es-CO');
+}
+
+export function directoryNavMeta(total: number | null) {
+  const title = 'Directorio';
+  const count = total == null ? '' : formatDirectoryContactCount(total);
+  return {
+    title,
+    count,
+    ariaLabel: count ? `${title} ${count} contactos` : title,
+  };
+}

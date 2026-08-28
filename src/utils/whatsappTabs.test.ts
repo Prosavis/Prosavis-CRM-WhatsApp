@@ -5,6 +5,7 @@ import {
   applyWhatsAppTab,
   buildWhatsAppInboxSearch,
   conversationBelongsToLineFilter,
+  isWhatsAppAdminTab,
   normalizeWhatsAppSearchParams,
   preferConversationForFilter,
   resolveWhatsAppLineFilter,
@@ -105,5 +106,15 @@ describe('whatsappTabs', () => {
     expect(changed).toBe(true);
     expect(next.get('tab')).toBe('commercial');
     expect(resolveWhatsAppTabKey(next)).toBe('commercial');
+  });
+
+  it('keeps metrics, monitoreo, automations and settings as admin tabs', () => {
+    expect(isWhatsAppAdminTab('metrics')).toBe(true);
+    expect(isWhatsAppAdminTab('monitoreo')).toBe(true);
+    expect(isWhatsAppAdminTab('automations')).toBe(true);
+    expect(isWhatsAppAdminTab('settings')).toBe(true);
+    expect(isWhatsAppAdminTab('leads')).toBe(false);
+    expect(isWhatsAppAdminTab('discounts')).toBe(false);
+    expect(isWhatsAppAdminTab('inbox')).toBe(false);
   });
 });

@@ -17,6 +17,19 @@ export const WHATSAPP_TAB_KEYS = [
 
 export type WhatsAppTabKey = (typeof WHATSAPP_TAB_KEYS)[number];
 
+export const WHATSAPP_ADMIN_TAB_KEYS = [
+  'metrics',
+  'settings',
+  'monitoreo',
+  'automations',
+] as const;
+
+export type WhatsAppAdminTabKey = (typeof WHATSAPP_ADMIN_TAB_KEYS)[number];
+
+export function isWhatsAppAdminTab(tab: WhatsAppTabKey): tab is WhatsAppAdminTabKey {
+  return (WHATSAPP_ADMIN_TAB_KEYS as readonly string[]).includes(tab);
+}
+
 export const WHATSAPP_INBOX_PATH = '/whatsapp';
 
 const TAB_QUERY_VALUES = new Set<WhatsAppTabKey>(WHATSAPP_TAB_KEYS);

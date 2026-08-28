@@ -1,9 +1,13 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Box,
   Button,
   Chip,
   Divider,
+  ListItemIcon,
+  ListItemText,
+  Menu,
+  MenuItem,
   Stack,
   Tab,
   Tabs,
@@ -19,14 +23,15 @@ import {
   Settings as SettingsIcon,
   MonitorHeart as MonitorHeartIcon,
   AutoAwesome as AutoAwesomeIcon,
+  AdminPanelSettings as AdminPanelSettingsIcon,
   Logout as LogoutIcon,
 } from '@mui/icons-material';
 import ThemeToggle from '@/components/common/ThemeToggle';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/hooks/useAuth';
 import { getProsavisLogoSrc } from '@/utils/prosavisBrand';
-import { inboxLineNavMeta } from '@/utils/whatsappInboxNav';
-import type { WhatsAppTabKey } from '@/utils/whatsappTabs';
+import { directoryNavMeta, inboxLineNavMeta } from '@/utils/whatsappInboxNav';
+import { isWhatsAppAdminTab, type WhatsAppTabKey } from '@/utils/whatsappTabs';
 import CompanyHandbookBook from './CompanyHandbookBook';
 import CrmTutorialPlaceholder from './CrmTutorialPlaceholder';
 
@@ -36,13 +41,24 @@ export interface WhatsAppTopBarProps {
   directoryTotalContacts: number | null;
 }
 
-function InboxLineTabLabel({
+const ADMIN_MENU_ITEMS: Array<{
+  key: Extract<WhatsAppTabKey, 'metrics' | 'monitoreo' | 'automations' | 'settings'>;
+  label: string;
+  icon: React.ReactElement;
+}> = [
+  { key: 'metrics', label: 'Métricas', icon: <BarChartIcon fontSize="small" /> },
+  { key: 'monitoreo', label: 'Monitoreo', icon: <MonitorHeartIcon fontSize="small" /> },
+  { key: 'automations', label: 'Automatizaciones', icon: <AutoAwesomeIcon fontSize="small" /> },
+  { key: 'settings', label: 'Configuración', icon: <SettingsIcon fontSize="small" /> },
+];
+
+function SpecialTabLabel({
   title,
-  phone,
+  subtitle,
   compact,
 }: {
   title: string;
-  phone: string;
+  subtitle: string;
   compact: boolean;
 }) {
   return (
@@ -65,78 +81,46 @@ function InboxLineTabLabel({
       >
         {compact ? title.replace(/^Inbox\s+/i, '') : title}
       </Box>
-      <Box
-        component="span"
-        sx={{
-          mt: 0.25,
-          fontSize: compact ? '0.62rem' : '0.7rem',
-          fontWeight: 700,
-          fontVariantNumeric: 'tabular-nums',
-          letterSpacing: 0.2,
-          opacity: 0.92,
-        }}
-      >
-        {phone}
-      </Box>
+      {subtitle ? (
+        <Box
+          component="span"
+          sx={{
+            mt: 0.25,
+            fontSize: compact ? '0.62rem' : '0.7rem',
+            fontWeight: 700,
+            fontVariantNumeric: 'tabular-nums',
+            letterSpacing: 0.2,
+            opacity: 0.92,
+          }}
+        >
+          {subtitle}
+        </Box>
+      ) : null}
     </Box>
   );
 }
 
-function buildTabItems(directoryTotalContacts: number | null) {
-  const directoryLabel =
-    directoryTotalContacts != null
-      ? `Directorio (${directoryTotalContacts.toLocaleString('es-CO')})`
-      : 'Directorio';
-  const bot = inboxLineNavMeta('bot');
-  const commercial = inboxLineNavMeta('commercial');
-
-  return [
-    {
-      key: 'inbox' as const,
-      icon: <InboxIcon fontSize="small" />,
-      label: bot.title,
-      phone: bot.phone,
-      ariaLabel: bot.ariaLabel,
-      line: 'bot' as const,
-    },
-    {
-      key: 'commercial' as const,
-      icon: <StorefrontIcon fontSize="small" />,
-      label: commercial.title,
-      phone: commercial.phone,
-      ariaLabel: commercial.ariaLabel,
-      line: 'commercial' as const,
-    },
-    { key: 'metrics' as const, icon: <BarChartIcon fontSize="small" />, label: 'Métricas' },
-    { key: 'leads' as const, icon: <ContactPhoneIcon fontSize="small" />, label: directoryLabel },
-    { key: 'discounts' as const, icon: <ConfirmationNumberIcon fontSize="small" />, label: 'Descuentos' },
-    { key: 'settings' as const, icon: <SettingsIcon fontSize="small" />, label: 'Configuración' },
-    { key: 'monitoreo' as const, icon: <MonitorHeartIcon fontSize="small" />, label: 'Monitoreo' },
-    { key: 'automations' as const, icon: <AutoAwesomeIcon fontSize="small" />, label: 'Automatizaciones' },
-  ];
-}
-
-function inboxLineTabSx(line: 'bot' | 'commercial') {
-  const isBot = line === 'bot';
+function specialTabSx(kind: 'bot' | 'commercial' | 'directory') {
+  const paletteKey = kind === 'commercial' ? 'secondary' : 'primary';
+  const idleAlpha = kind === 'directory' ? 0.16 : kind === 'bot' ? 0.08 : 0.12;
+  const borderAlpha = kind === 'directory' ? 0.55 : kind === 'bot' ? 0.38 : 0.5;
   return {
     minHeight: 56,
     mx: 0.25,
     px: { xs: 1, sm: 1.35 },
     py: 0.6,
-    mr: isBot ? 0.25 : 1.25,
+    mr: kind === 'directory' ? 1.25 : 0.25,
     borderRadius: 2,
     border: 1,
     alignItems: 'center',
     fontWeight: 800,
-    bgcolor: (theme: Theme) =>
-      alpha(isBot ? theme.palette.primary.main : theme.palette.secondary.main, isBot ? 0.08 : 0.12),
-    color: isBot ? 'primary.main' : 'secondary.dark',
-    borderColor: (theme: Theme) =>
-      alpha(isBot ? theme.palette.primary.main : theme.palette.secondary.main, isBot ? 0.38 : 0.5),
+    bgcolor: (theme: Theme) => alpha(theme.palette[paletteKey].main, idleAlpha),
+    color: kind === 'commercial' ? 'secondary.dark' : 'primary.main',
+    borderColor: (theme: Theme) => alpha(theme.palette[paletteKey].main, borderAlpha),
     '&.Mui-selected': {
-      bgcolor: isBot ? 'primary.main' : 'secondary.main',
-      color: isBot ? 'primary.contrastText' : 'secondary.contrastText',
-      borderColor: isBot ? 'primary.main' : 'secondary.main',
+      bgcolor: `${paletteKey}.main`,
+      color: `${paletteKey}.contrastText`,
+      borderColor: `${paletteKey}.main`,
     },
   };
 }
@@ -150,10 +134,51 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
   const { profile, signOut } = useAuth();
   const muiTheme = useMuiTheme();
   const compactTabs = useMediaQuery(muiTheme.breakpoints.down('sm'));
-  const tabItems = useMemo(
-    () => buildTabItems(directoryTotalContacts),
-    [directoryTotalContacts],
-  );
+  const [adminAnchor, setAdminAnchor] = useState<null | HTMLElement>(null);
+  const adminOpen = Boolean(adminAnchor);
+  const adminActive = isWhatsAppAdminTab(activeTab);
+
+  const tabItems = useMemo(() => {
+    const bot = inboxLineNavMeta('bot');
+    const commercial = inboxLineNavMeta('commercial');
+    const directory = directoryNavMeta(directoryTotalContacts);
+    return [
+      {
+        key: 'inbox' as const,
+        icon: <InboxIcon fontSize="small" />,
+        title: bot.title,
+        subtitle: bot.phone,
+        ariaLabel: bot.ariaLabel,
+        kind: 'bot' as const,
+      },
+      {
+        key: 'commercial' as const,
+        icon: <StorefrontIcon fontSize="small" />,
+        title: commercial.title,
+        subtitle: commercial.phone,
+        ariaLabel: commercial.ariaLabel,
+        kind: 'commercial' as const,
+      },
+      {
+        key: 'leads' as const,
+        icon: <ContactPhoneIcon fontSize="small" />,
+        title: directory.title,
+        subtitle: directory.count,
+        ariaLabel: directory.ariaLabel,
+        kind: 'directory' as const,
+      },
+      {
+        key: 'discounts' as const,
+        icon: <ConfirmationNumberIcon fontSize="small" />,
+        title: 'Descuentos',
+        subtitle: '',
+        ariaLabel: 'Descuentos',
+        kind: null,
+      },
+    ];
+  }, [directoryTotalContacts]);
+
+  const tabsValue = adminActive ? false : activeTab;
 
   return (
     <Box
@@ -186,7 +211,7 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
       />
 
       <Tabs
-        value={activeTab}
+        value={tabsValue}
         onChange={onTabChange}
         data-tour="whatsapp-tabs"
         variant="scrollable"
@@ -208,7 +233,7 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
         }}
       >
         {tabItems.map((item) => {
-          const isInboxLine = item.key === 'inbox' || item.key === 'commercial';
+          const isSpecial = item.kind != null;
           return (
             <Tab
               key={item.key}
@@ -216,22 +241,22 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
               icon={item.icon}
               iconPosition="start"
               label={
-                isInboxLine ? (
-                  <InboxLineTabLabel
-                    title={item.label}
-                    phone={item.phone ?? ''}
+                isSpecial ? (
+                  <SpecialTabLabel
+                    title={item.title}
+                    subtitle={item.subtitle}
                     compact={compactTabs}
                   />
                 ) : compactTabs ? undefined : (
-                  item.label
+                  item.title
                 )
               }
-              aria-label={item.ariaLabel ?? item.label}
+              aria-label={item.ariaLabel}
               sx={{
                 '& .MuiTab-iconWrapper': {
-                  mr: compactTabs && !isInboxLine ? 0 : 0.75,
+                  mr: compactTabs && !isSpecial ? 0 : 0.75,
                 },
-                ...(isInboxLine && item.line ? inboxLineTabSx(item.line) : null),
+                ...(item.kind ? specialTabSx(item.kind) : null),
               }}
             />
           );
@@ -255,6 +280,47 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
           ml: { xs: 0, lg: 'auto' },
         }}
       >
+        <Button
+          variant={adminActive ? 'contained' : 'outlined'}
+          color="primary"
+          size="small"
+          startIcon={<AdminPanelSettingsIcon />}
+          aria-label="Administradores"
+          aria-haspopup="true"
+          aria-expanded={adminOpen ? 'true' : undefined}
+          onClick={(event) => setAdminAnchor(event.currentTarget)}
+          sx={{
+            textTransform: 'none',
+            fontWeight: 700,
+            minHeight: 36,
+          }}
+        >
+          <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
+            Administradores
+          </Box>
+        </Button>
+        <Menu
+          anchorEl={adminAnchor}
+          open={adminOpen}
+          onClose={() => setAdminAnchor(null)}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+          transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+        >
+          {ADMIN_MENU_ITEMS.map((item) => (
+            <MenuItem
+              key={item.key}
+              selected={activeTab === item.key}
+              onClick={(event) => {
+                setAdminAnchor(null);
+                onTabChange(event, item.key);
+              }}
+            >
+              <ListItemIcon>{item.icon}</ListItemIcon>
+              <ListItemText>{item.label}</ListItemText>
+            </MenuItem>
+          ))}
+        </Menu>
+
         <CompanyHandbookBook />
         <CrmTutorialPlaceholder />
 
