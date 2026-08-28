@@ -1,5 +1,5 @@
 import AddIcon from '@mui/icons-material/Add';
-import FilterListIcon from '@mui/icons-material/FilterList';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
 import PeopleIcon from '@mui/icons-material/People';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SearchIcon from '@mui/icons-material/Search';
@@ -11,26 +11,25 @@ import Alert from '@mui/material/Alert';
 import Badge from '@mui/material/Badge';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
-import Card from '@mui/material/Card';
-import CardActionArea from '@mui/material/CardActionArea';
 import Checkbox from '@mui/material/Checkbox';
-import CardContent from '@mui/material/CardContent';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Dialog from '@mui/material/Dialog';
 import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
+import DialogContentText from '@mui/material/DialogContentText';
 import DialogTitle from '@mui/material/DialogTitle';
 import FormControl from '@mui/material/FormControl';
 import FormControlLabel from '@mui/material/FormControlLabel';
-import Grid from '@mui/material/Grid';
 import IconButton from '@mui/material/IconButton';
 import InputAdornment from '@mui/material/InputAdornment';
 import InputLabel from '@mui/material/InputLabel';
+import Menu from '@mui/material/Menu';
 import MenuItem from '@mui/material/MenuItem';
 import Pagination from '@mui/material/Pagination';
 import Paper from '@mui/material/Paper';
 import Select from '@mui/material/Select';
+import Skeleton from '@mui/material/Skeleton';
 import Snackbar from '@mui/material/Snackbar';
 import Stack from '@mui/material/Stack';
 import Switch from '@mui/material/Switch';
@@ -53,6 +52,11 @@ import DirectoryMonitorPanel from '@/components/directory/DirectoryMonitorPanel'
 import type { DirectoryEntry, DirectorySource } from '@/types/lead';
 import DirectoryClassificationTagPicker from '@/components/directory/DirectoryClassificationTagPicker';
 import { ContactAvatar } from '@/components/common/ContactAvatar';
+import {
+  DIRECTORY_DEFAULT_PAGE_SIZE,
+  DIRECTORY_PAGE_SIZE_OPTIONS,
+  directoryPagingAfterFilterChange,
+} from '@/utils/directoryListPaging';
 
 const STATUS_CHIP_COLORS: Record<string, 'default' | 'success' | 'error' | 'warning'> = {
   active: 'success',
@@ -67,13 +71,18 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const SOURCE_LABELS: Record<string, string> = {
-  APP_USER: 'App User',
-  WHATSAPP_INBOUND: 'WhatsApp Inbound',
+  APP_USER: 'App',
+  WHATSAPP_INBOUND: 'WhatsApp',
   META_ADS: 'Meta Ads',
   REFERIDO: 'Referido',
   ORGANICO: 'Orgánico',
-  BROADCAST: 'Broadcast',
+  BROADCAST: 'Masivo',
   PANEL: 'Panel',
+};
+
+const CHANNEL_LABELS: Record<string, string> = {
+  WHATSAPP: 'WhatsApp',
+  IN_APP: 'App',
 };
 
 const CHANNEL_COLORS: Record<string, 'primary' | 'success'> = {
@@ -95,6 +104,32 @@ type SortField = 'full_name' | 'email' | 'status' | 'source' | 'messages_count' 
 type SortDirection = 'asc' | 'desc';
 
 const SEARCH_DEBOUNCE_MS = 400;
+const fmtCount = (value: number) => value.toLocaleString('es-CO');
+
+const kpiChipSx = (active: boolean) => ({
+  appearance: 'none' as const,
+  border: '1px solid',
+  borderColor: active ? 'transparent' : 'divider',
+  bgcolor: active ? 'primary.main' : 'background.paper',
+  color: active ? 'primary.contrastText' : 'text.primary',
+  borderRadius: 2,
+  px: 1.75,
+  py: 1,
+  minWidth: 92,
+  cursor: 'pointer',
+  textAlign: 'left' as const,
+  transition: 'background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease',
+  boxShadow: active ? '0 8px 20px rgba(0, 36, 70, 0.16)' : 'none',
+  '&:hover': {
+    borderColor: active ? 'transparent' : 'primary.main',
+    bgcolor: active ? 'primary.dark' : 'action.hover',
+  },
+  '&:focus-visible': {
+    outline: '2px solid',
+    outlineColor: 'secondary.main',
+    outlineOffset: 2,
+  },
+});
 
 export interface LeadsPageProps {
   /** Cuando es true, se omite el título principal (p. ej. dentro de WhatsApp Cloud). */
@@ -121,14 +156,16 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, 
   const [phoneNull, setPhoneNull] = useState<boolean>(false);
   const [emailNull, setEmailNull] = useState<boolean>(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [seedDialogOpen, setSeedDialogOpen] = useState(false);
   const [seedLoading, setSeedLoading] = useState(false);
+  const [moreAnchor, setMoreAnchor] = useState<null | HTMLElement>(null);
   const [selectedEntry, setSelectedEntry] = useState<DirectoryEntry | null>(null);
   const [editEntry, setEditEntry] = useState<DirectoryEntry | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
 
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(100);
+  const [rowsPerPage, setRowsPerPage] = useState(DIRECTORY_DEFAULT_PAGE_SIZE);
   const [totalCount, setTotalCount] = useState(0);
   const [stats, setStats] = useState<DirectoryStats>({
     total: 0,
@@ -156,6 +193,12 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, 
     email: '',
     source: 'PANEL' as string,
   });
+
+  const resetListPaging = useCallback(() => {
+    const next = directoryPagingAfterFilterChange();
+    setPage(next.page);
+    setRowsPerPage(next.rowsPerPage);
+  }, []);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -221,13 +264,13 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, 
         status: 'active',
         channels: ['WHATSAPP'],
       });
-      setSnackbar({ open: true, message: 'Entrada creada exitosamente en el directorio', severity: 'success' });
+      setSnackbar({ open: true, message: 'Cliente agregado al directorio', severity: 'success' });
       setCreateDialogOpen(false);
       setNewEntry({ phone: '', fullName: '', email: '', source: 'PANEL' });
       fetchEntries();
       fetchStats();
     } catch {
-      setSnackbar({ open: true, message: 'Error al crear entrada', severity: 'error' });
+      setSnackbar({ open: true, message: 'No se pudo agregar el cliente', severity: 'error' });
     }
   };
 
@@ -237,13 +280,14 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, 
       const result = await directoryService.seedAllUsersAsEntries();
       setSnackbar({
         open: true,
-        message: `Seed completado: ${result.created} creados, ${result.skipped} omitidos, ${result.errors} errores`,
+        message: `Importación lista: ${result.created} creados, ${result.skipped} ya estaban, ${result.errors} errores`,
         severity: result.errors > 0 ? 'error' : 'success',
       });
+      setSeedDialogOpen(false);
       fetchEntries();
       fetchStats();
     } catch {
-      setSnackbar({ open: true, message: 'Error al ejecutar seed', severity: 'error' });
+      setSnackbar({ open: true, message: 'No se pudieron importar los usuarios de la app', severity: 'error' });
     } finally {
       setSeedLoading(false);
     }
@@ -269,7 +313,7 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, 
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       setSearchTerm(value.trim());
-      setPage(0);
+      resetListPaging();
     }, SEARCH_DEBOUNCE_MS);
   };
 
@@ -291,8 +335,9 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, 
   };
 
   const selectedEntries = entries.filter((e) => selectedIds.has(e.id));
-
-  const totalPages = Math.ceil(totalCount / rowsPerPage);
+  const selectedInboxCount = selectedEntries.filter((e) => e.phone && e.status !== 'opt_out').length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / rowsPerPage));
+  const columnCount = onOpenInInbox ? 12 : 11;
 
   const handlePageChange = (_: React.ChangeEvent<unknown>, value: number) => {
     setPage(value - 1);
@@ -301,63 +346,57 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, 
   const kpis: Array<{
     label: string;
     value: number;
-    color: string;
     active?: boolean;
     onClick?: () => void;
   }> = [
     {
       label: 'Total',
       value: stats.total,
-      color: 'primary.main',
       active: !blacklistedFilter && !statusFilter,
       onClick: () => {
         setBlacklistedFilter(false);
         setStatusFilter('');
         setClassificationFilter('');
-        setPage(0);
+        resetListPaging();
         setShowMonitor(false);
       },
     },
     {
       label: 'Activos',
       value: stats.active,
-      color: 'success.main',
       active: statusFilter === 'active' && !blacklistedFilter,
       onClick: () => {
         setBlacklistedFilter(false);
         setStatusFilter('active');
-        setPage(0);
+        resetListPaging();
         setShowMonitor(false);
       },
     },
     {
       label: 'Inactivos',
       value: stats.inactive,
-      color: 'text.secondary',
       active: statusFilter === 'inactive' && !blacklistedFilter,
       onClick: () => {
         setBlacklistedFilter(false);
         setStatusFilter('inactive');
-        setPage(0);
+        resetListPaging();
         setShowMonitor(false);
       },
     },
     {
       label: 'Opt-out',
       value: stats.optOut,
-      color: 'error.main',
       active: statusFilter === 'opt_out' && !blacklistedFilter,
       onClick: () => {
         setBlacklistedFilter(false);
         setStatusFilter('opt_out');
-        setPage(0);
+        resetListPaging();
         setShowMonitor(false);
       },
     },
     {
       label: 'Bloqueados',
       value: stats.blacklisted,
-      color: 'error.dark',
       active: blacklistedFilter,
       onClick: () => {
         const next = !blacklistedFilter;
@@ -366,7 +405,7 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, 
           setStatusFilter('');
           setClassificationFilter('');
         }
-        setPage(0);
+        resetListPaging();
         setShowMonitor(false);
       },
     },
@@ -376,20 +415,25 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, 
   const to = Math.min((page + 1) * rowsPerPage, totalCount);
 
   return (
-    <Box sx={{ p: embedded ? 0 : { xs: 1, sm: 2, md: 3 } }}>
+    <Box sx={{ p: embedded ? { xs: 1.5, sm: 2 } : { xs: 1, sm: 2, md: 3 } }}>
       <Stack
-        direction="row"
-        justifyContent={embedded ? 'flex-end' : 'space-between'}
-        alignItems="center"
-        mb={embedded ? 2 : 3}
+        direction={{ xs: 'column', md: 'row' }}
+        justifyContent="space-between"
+        alignItems={{ xs: 'stretch', md: 'flex-start' }}
+        spacing={2}
+        mb={2.5}
       >
-        {!embedded && (
-          <Typography variant="h4" fontWeight={700}>
+        <Box>
+          <Typography variant={embedded ? 'h5' : 'h4'} fontWeight={700} letterSpacing="-0.02em">
             Directorio
           </Typography>
-        )}
-        <Stack direction="row" spacing={1}>
-          {onOpenInInbox && selectedEntries.length > 0 && (
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, maxWidth: 520 }}>
+            Clientes y leads para crecer. Empieza en {DIRECTORY_DEFAULT_PAGE_SIZE} por página;
+            puedes subir a 25, 50 o 100 si lo necesitas.
+          </Typography>
+        </Box>
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap justifyContent={{ xs: 'flex-start', md: 'flex-end' }}>
+          {onOpenInInbox && selectedInboxCount > 0 && (
             <Button
               variant="outlined"
               color="success"
@@ -403,90 +447,106 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, 
                 }
               }}
             >
-              Abrir en inbox ({selectedEntries.filter((e) => e.phone && e.status !== 'opt_out').length})
+              Abrir en inbox ({selectedInboxCount})
             </Button>
           )}
           {onOpenBulk && (
-            <Button
-              variant="outlined"
-              startIcon={<SendIcon />}
-              onClick={onOpenBulk}
-              size="small"
-            >
-              Enviar masivo
-            </Button>
+            <Tooltip title="Envía un WhatsApp a varios clientes por la línea de citas (312).">
+              <Button
+                variant="outlined"
+                startIcon={<SendIcon />}
+                onClick={onOpenBulk}
+                size="small"
+              >
+                Enviar WhatsApp masivo
+              </Button>
+            </Tooltip>
           )}
-          <Tooltip title="Seed: convertir todos los usuarios de la app al directorio">
-            <Button
-              variant="outlined"
-              startIcon={seedLoading ? <CircularProgress size={18} /> : <AddIcon />}
-              onClick={handleSeedAllUsers}
-              disabled={seedLoading}
-              size="small"
-            >
-              Seed
-            </Button>
-          </Tooltip>
           <Button
             variant="contained"
             startIcon={<AddIcon />}
             onClick={() => setCreateDialogOpen(true)}
             size="small"
           >
-            Nueva entrada
+            Nuevo cliente
           </Button>
+          <Tooltip title="Más acciones">
+            <IconButton
+              size="small"
+              aria-label="Más acciones del directorio"
+              aria-haspopup="true"
+              onClick={(event) => setMoreAnchor(event.currentTarget)}
+            >
+              <MoreVertIcon />
+            </IconButton>
+          </Tooltip>
+          <Menu
+            anchorEl={moreAnchor}
+            open={Boolean(moreAnchor)}
+            onClose={() => setMoreAnchor(null)}
+          >
+            <MenuItem
+              disabled={seedLoading}
+              onClick={() => {
+                setMoreAnchor(null);
+                setSeedDialogOpen(true);
+              }}
+            >
+              Importar usuarios de la app
+            </MenuItem>
+          </Menu>
         </Stack>
       </Stack>
 
-      <Grid container spacing={2} mb={3}>
+      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap mb={2} role="tablist" aria-label="Filtros del directorio">
         {kpis.map((kpi) => (
-          <Grid item xs={6} sm={4} md={2} key={kpi.label}>
-            <Card
-              sx={{
-                height: '100%',
-                border: 1,
-                borderColor: kpi.active ? 'primary.main' : 'divider',
-                bgcolor: kpi.active ? 'action.selected' : undefined,
-              }}
-            >
-              <CardActionArea onClick={kpi.onClick} sx={{ height: '100%' }}>
-                <CardContent sx={{ textAlign: 'center', py: 1.5 }}>
-                  <Typography variant="h5" fontWeight={700} color={kpi.color}>
-                    {kpi.value}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {kpi.label}
-                  </Typography>
-                </CardContent>
-              </CardActionArea>
-            </Card>
-          </Grid>
-        ))}
-        <Grid item xs={12} sm={4} md={2}>
-          <Card
-            sx={{
-              height: '100%',
-              border: 1,
-              borderColor: showMonitor ? 'warning.main' : 'divider',
-              bgcolor: showMonitor ? 'warning.50' : undefined,
-            }}
+          <Box
+            key={kpi.label}
+            component="button"
+            type="button"
+            role="tab"
+            aria-selected={Boolean(kpi.active)}
+            onClick={kpi.onClick}
+            sx={kpiChipSx(Boolean(kpi.active))}
           >
-            <CardActionArea
-              onClick={() => setShowMonitor((prev) => !prev)}
-              sx={{ height: '100%' }}
+            <Typography
+              variant="h6"
+              fontWeight={700}
+              lineHeight={1.15}
+              color="inherit"
             >
-              <CardContent sx={{ textAlign: 'center', py: 1.5 }}>
-                <Badge badgeContent={issueOpenTotal} color="error" max={999}>
-                  <TroubleshootIcon color={showMonitor ? 'warning' : 'action'} />
-                </Badge>
-                <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
-                  Monitoreo del contacto
-                </Typography>
-              </CardContent>
-            </CardActionArea>
-          </Card>
-        </Grid>
-      </Grid>
+              {fmtCount(kpi.value)}
+            </Typography>
+            <Typography variant="caption" color="inherit" sx={{ opacity: 0.78 }}>
+              {kpi.label}
+            </Typography>
+          </Box>
+        ))}
+        <Box
+          component="button"
+          type="button"
+          role="tab"
+          aria-selected={showMonitor}
+          onClick={() => setShowMonitor((prev) => !prev)}
+          sx={{
+            ...kpiChipSx(showMonitor),
+            minWidth: 120,
+            bgcolor: showMonitor ? 'warning.main' : 'background.paper',
+            color: showMonitor ? 'warning.contrastText' : 'text.primary',
+            '&:hover': {
+              borderColor: showMonitor ? 'transparent' : 'warning.main',
+              bgcolor: showMonitor ? 'warning.dark' : 'action.hover',
+            },
+          }}
+        >
+          <Badge badgeContent={issueOpenTotal} color="error" max={999}>
+            <TroubleshootIcon fontSize="small" color={showMonitor ? 'inherit' : 'action'} />
+          </Badge>
+          <Typography variant="caption" color="inherit" sx={{ display: 'block', mt: 0.5, opacity: 0.78 }}>
+            Monitoreo
+          </Typography>
+        </Box>
+      </Stack>
 
       {showMonitor && (
         <DirectoryMonitorPanel
@@ -499,104 +559,118 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, 
 
       {!showMonitor && (
       <>
-      <Paper sx={{ p: 2, mb: 2 }}>
-        <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
-          <TextField
-            size="small"
-            placeholder="Buscar por nombre, teléfono o email…"
-            value={searchInput}
-            onChange={(e) => handleSearchChange(e.target.value)}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon color="action" />
-                </InputAdornment>
-              ),
+      <Box
+        sx={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 1.5,
+          alignItems: 'center',
+          mb: 2,
+          px: 2,
+          py: 1.5,
+          borderRadius: 2,
+          border: '1px solid',
+          borderColor: 'divider',
+          bgcolor: (theme) =>
+            theme.palette.mode === 'light' ? 'rgba(0, 36, 70, 0.03)' : 'rgba(255, 255, 255, 0.03)',
+        }}
+      >
+        <TextField
+          size="small"
+          placeholder="Buscar por nombre, teléfono o email…"
+          value={searchInput}
+          onChange={(e) => handleSearchChange(e.target.value)}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon color="action" />
+              </InputAdornment>
+            ),
+          }}
+          sx={{ minWidth: 260, flex: { xs: '1 1 100%', md: '1 1 280px' }, maxWidth: 420 }}
+        />
+        <FormControl size="small" sx={{ minWidth: 140 }}>
+          <InputLabel>Estado</InputLabel>
+          <Select
+            value={statusFilter}
+            label="Estado"
+            onChange={(e) => {
+              setStatusFilter(e.target.value);
+              resetListPaging();
             }}
-            sx={{ minWidth: 260, flex: { xs: '1 1 100%', sm: '0 1 auto' } }}
-          />
-          <FilterListIcon color="action" />
-          <FormControl size="small" sx={{ minWidth: 150 }}>
-            <InputLabel>Estado</InputLabel>
-            <Select
-              value={statusFilter}
-              label="Estado"
-              onChange={(e) => {
-                setStatusFilter(e.target.value);
-                setPage(0);
-              }}
-            >
-              <MenuItem value="">Todos</MenuItem>
-              <MenuItem value="active">Activo</MenuItem>
-              <MenuItem value="inactive">Inactivo</MenuItem>
-              <MenuItem value="opt_out">Opt-out</MenuItem>
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 150 }}>
-            <InputLabel>Clasificación</InputLabel>
-            <Select
-              value={blacklistedFilter ? 'Bloqueado' : classificationFilter}
-              label="Clasificación"
-              onChange={(e) => {
-                const value = e.target.value;
-                setClassificationFilter(value === 'Bloqueado' ? '' : value);
-                setBlacklistedFilter(value === 'Bloqueado');
-                setPage(0);
-              }}
-            >
-              <MenuItem value="">Todas</MenuItem>
-              <MenuItem value="user">Usuario</MenuItem>
-              <MenuItem value="Empresas">Empresas</MenuItem>
-              <MenuItem value="lead">Lead</MenuItem>
-              <MenuItem value="Bloqueado">Bloqueado</MenuItem>
-              <MenuItem value="unknown">Desconocido</MenuItem>
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 150 }}>
-            <InputLabel>Fuente</InputLabel>
-            <Select
-              value={sourceFilter}
-              label="Fuente"
-              onChange={(e) => {
-                setSourceFilter(e.target.value);
-                setPage(0);
-              }}
-            >
-              <MenuItem value="">Todas</MenuItem>
-              <MenuItem value="APP_USER">App User</MenuItem>
-              <MenuItem value="WHATSAPP_INBOUND">WhatsApp Inbound</MenuItem>
-              <MenuItem value="META_ADS">Meta Ads</MenuItem>
-              <MenuItem value="PANEL">Panel</MenuItem>
-              <MenuItem value="REFERIDO">Referido</MenuItem>
-              <MenuItem value="ORGANICO">Orgánico</MenuItem>
-              <MenuItem value="BROADCAST">Broadcast</MenuItem>
-            </Select>
-          </FormControl>
-          <FormControlLabel
-            control={
-              <Switch
-                size="small"
-                checked={phoneNull}
-                onChange={(e) => { setPhoneNull(e.target.checked); setPage(0); }}
-              />
-            }
-            label="Sin teléfono"
-          />
-          <FormControlLabel
-            control={
-              <Switch
-                size="small"
-                checked={emailNull}
-                onChange={(e) => { setEmailNull(e.target.checked); setPage(0); }}
-              />
-            }
-            label="Sin email"
-          />
-          <IconButton onClick={() => { fetchEntries(); fetchStats(); }}>
+          >
+            <MenuItem value="">Todos</MenuItem>
+            <MenuItem value="active">Activo</MenuItem>
+            <MenuItem value="inactive">Inactivo</MenuItem>
+            <MenuItem value="opt_out">Opt-out</MenuItem>
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 150 }}>
+          <InputLabel>Clasificación</InputLabel>
+          <Select
+            value={blacklistedFilter ? 'Bloqueado' : classificationFilter}
+            label="Clasificación"
+            onChange={(e) => {
+              const value = e.target.value;
+              setClassificationFilter(value === 'Bloqueado' ? '' : value);
+              setBlacklistedFilter(value === 'Bloqueado');
+              resetListPaging();
+            }}
+          >
+            <MenuItem value="">Todas</MenuItem>
+            <MenuItem value="user">Usuario</MenuItem>
+            <MenuItem value="Empresas">Empresas</MenuItem>
+            <MenuItem value="lead">Lead</MenuItem>
+            <MenuItem value="Bloqueado">Bloqueado</MenuItem>
+            <MenuItem value="unknown">Desconocido</MenuItem>
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 150 }}>
+          <InputLabel>Fuente</InputLabel>
+          <Select
+            value={sourceFilter}
+            label="Fuente"
+            onChange={(e) => {
+              setSourceFilter(e.target.value);
+              resetListPaging();
+            }}
+          >
+            <MenuItem value="">Todas</MenuItem>
+            <MenuItem value="APP_USER">App</MenuItem>
+            <MenuItem value="WHATSAPP_INBOUND">WhatsApp</MenuItem>
+            <MenuItem value="META_ADS">Meta Ads</MenuItem>
+            <MenuItem value="PANEL">Panel</MenuItem>
+            <MenuItem value="REFERIDO">Referido</MenuItem>
+            <MenuItem value="ORGANICO">Orgánico</MenuItem>
+            <MenuItem value="BROADCAST">Masivo</MenuItem>
+          </Select>
+        </FormControl>
+        <FormControlLabel
+          control={
+            <Switch
+              size="small"
+              checked={phoneNull}
+              onChange={(e) => { setPhoneNull(e.target.checked); resetListPaging(); }}
+            />
+          }
+          label="Sin teléfono"
+        />
+        <FormControlLabel
+          control={
+            <Switch
+              size="small"
+              checked={emailNull}
+              onChange={(e) => { setEmailNull(e.target.checked); resetListPaging(); }}
+            />
+          }
+          label="Sin email"
+        />
+        <Tooltip title="Actualizar lista">
+          <IconButton onClick={() => { fetchEntries(); fetchStats(); }} aria-label="Actualizar directorio">
             <RefreshIcon />
           </IconButton>
-        </Stack>
-      </Paper>
+        </Tooltip>
+      </Box>
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
@@ -604,312 +678,371 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, 
         </Alert>
       )}
 
-      {loading ? (
-        <Box display="flex" justifyContent="center" py={6}>
-          <CircularProgress />
-        </Box>
-      ) : (
-        <Paper>
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell padding="checkbox">
-                    <Checkbox
-                      indeterminate={selectedIds.size > 0 && selectedIds.size < entries.length}
-                      checked={entries.length > 0 && selectedIds.size === entries.length}
-                      onChange={toggleSelectAll}
-                      size="small"
-                    />
+      <Paper
+        elevation={0}
+        sx={{
+          border: '1px solid',
+          borderColor: 'divider',
+          borderRadius: 2,
+          overflow: 'hidden',
+        }}
+      >
+        <TableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell padding="checkbox">
+                  <Checkbox
+                    indeterminate={selectedIds.size > 0 && selectedIds.size < entries.length}
+                    checked={entries.length > 0 && selectedIds.size === entries.length}
+                    onChange={toggleSelectAll}
+                    size="small"
+                  />
+                </TableCell>
+                <TableCell>
+                  <TableSortLabel
+                    active={sortField === 'full_name'}
+                    direction={sortField === 'full_name' ? sortDirection : 'asc'}
+                    onClick={() => handleSort('full_name')}
+                  >
+                    Cliente
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell>
+                  <TableSortLabel
+                    active={sortField === 'email'}
+                    direction={sortField === 'email' ? sortDirection : 'asc'}
+                    onClick={() => handleSort('email')}
+                  >
+                    Email
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell>
+                  <TableSortLabel
+                    active={sortField === 'classification'}
+                    direction={sortField === 'classification' ? sortDirection : 'asc'}
+                    onClick={() => handleSort('classification')}
+                  >
+                    Clasificación
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell>
+                  <TableSortLabel
+                    active={sortField === 'source'}
+                    direction={sortField === 'source' ? sortDirection : 'asc'}
+                    onClick={() => handleSort('source')}
+                  >
+                    Fuente
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell>
+                  <TableSortLabel
+                    active={sortField === 'status'}
+                    direction={sortField === 'status' ? sortDirection : 'asc'}
+                    onClick={() => handleSort('status')}
+                  >
+                    Estado
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell>Canales</TableCell>
+                <TableCell>Secuencia</TableCell>
+                <TableCell>
+                  <TableSortLabel
+                    active={sortField === 'messages_count'}
+                    direction={sortField === 'messages_count' ? sortDirection : 'desc'}
+                    onClick={() => handleSort('messages_count')}
+                  >
+                    Mensajes
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell>Tags</TableCell>
+                <TableCell>Último contacto</TableCell>
+                {onOpenInInbox && (
+                  <TableCell align="center" sx={{ minWidth: 64 }}>
+                    Acciones
                   </TableCell>
-                  <TableCell>
-                    <TableSortLabel
-                      active={sortField === 'full_name'}
-                      direction={sortField === 'full_name' ? sortDirection : 'asc'}
-                      onClick={() => handleSort('full_name')}
-                    >
-                      Cliente
-                    </TableSortLabel>
-                  </TableCell>
-                  <TableCell>Teléfono</TableCell>
-                  <TableCell>Email</TableCell>
-                  <TableCell>
-                    <TableSortLabel
-                      active={sortField === 'classification'}
-                      direction={sortField === 'classification' ? sortDirection : 'asc'}
-                      onClick={() => handleSort('classification')}
-                    >
-                      Clasificación
-                    </TableSortLabel>
-                  </TableCell>
-                  <TableCell>
-                    <TableSortLabel
-                      active={sortField === 'source'}
-                      direction={sortField === 'source' ? sortDirection : 'asc'}
-                      onClick={() => handleSort('source')}
-                    >
-                      Fuente
-                    </TableSortLabel>
-                  </TableCell>
-                  <TableCell>
-                    <TableSortLabel
-                      active={sortField === 'status'}
-                      direction={sortField === 'status' ? sortDirection : 'asc'}
-                      onClick={() => handleSort('status')}
-                    >
-                      Estado
-                    </TableSortLabel>
-                  </TableCell>
-                  <TableCell>Canales</TableCell>
-                  <TableCell>Secuencia</TableCell>
-                  <TableCell>
-                    <TableSortLabel
-                      active={sortField === 'messages_count'}
-                      direction={sortField === 'messages_count' ? sortDirection : 'desc'}
-                      onClick={() => handleSort('messages_count')}
-                    >
-                      Mensajes
-                    </TableSortLabel>
-                  </TableCell>
-                  <TableCell>Tags</TableCell>
-                  <TableCell>Último contacto</TableCell>
-                  {onOpenInInbox && (
-                    <TableCell align="center" sx={{ minWidth: 64 }}>
-                      Acciones
-                    </TableCell>
-                  )}
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {entries.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={onOpenInInbox ? 13 : 12} align="center">
-                      <Stack alignItems="center" spacing={1} py={4}>
-                        <PeopleIcon sx={{ fontSize: 48, color: 'text.disabled' }} />
-                        <Typography color="text.secondary">
-                          {searchTerm ? 'No se encontraron resultados en el directorio' : 'No hay entradas en el directorio'}
-                        </Typography>
+                )}
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {loading ? (
+                Array.from({ length: DIRECTORY_DEFAULT_PAGE_SIZE }, (_, index) => (
+                  <TableRow key={`skeleton-${index}`}>
+                    <TableCell padding="checkbox"><Skeleton variant="rounded" width={18} height={18} /></TableCell>
+                    <TableCell>
+                      <Stack direction="row" spacing={1.5} alignItems="center">
+                        <Skeleton variant="circular" width={40} height={40} />
+                        <Box sx={{ flex: 1 }}>
+                          <Skeleton width="58%" />
+                          <Skeleton width="40%" />
+                        </Box>
                       </Stack>
                     </TableCell>
+                    {Array.from({ length: columnCount - 2 }, (__, cell) => (
+                      <TableCell key={cell}><Skeleton width="70%" /></TableCell>
+                    ))}
                   </TableRow>
-                ) : (
-                  entries.map((entry) => (
-                    <TableRow
-                      key={entry.id}
-                      hover
-                      sx={{ cursor: 'pointer' }}
-                      onDoubleClick={() => {
-                        setSelectedEntry(entry);
-                        setDrawerOpen(true);
-                      }}
-                    >
-                      <TableCell padding="checkbox">
-                        <Checkbox
-                          checked={selectedIds.has(entry.id)}
-                          onChange={() => toggleSelect(entry.id)}
+                ))
+              ) : entries.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={columnCount} align="center">
+                    <Stack alignItems="center" spacing={1.25} py={6}>
+                      <PeopleIcon sx={{ fontSize: 44, color: 'text.disabled' }} />
+                      <Typography fontWeight={600}>
+                        {searchTerm ? 'Nadie coincide con esa búsqueda' : 'Todavía no hay clientes aquí'}
+                      </Typography>
+                      <Typography color="text.secondary" variant="body2" sx={{ maxWidth: 360 }}>
+                        {searchTerm
+                          ? 'Prueba otro nombre, teléfono o email, o limpia los filtros.'
+                          : 'Agrega un cliente para tenerlo a mano cuando entre por WhatsApp.'}
+                      </Typography>
+                      {!searchTerm && (
+                        <Button
+                          variant="contained"
                           size="small"
-                          disabled={!entry.phone || entry.status === 'opt_out'}
+                          startIcon={<AddIcon />}
+                          onClick={() => setCreateDialogOpen(true)}
+                        >
+                          Nuevo cliente
+                        </Button>
+                      )}
+                    </Stack>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                entries.map((entry) => (
+                  <TableRow
+                    key={entry.id}
+                    hover
+                    sx={{
+                      cursor: 'pointer',
+                      '& td': { py: 1.25 },
+                    }}
+                    onDoubleClick={() => {
+                      setSelectedEntry(entry);
+                      setDrawerOpen(true);
+                    }}
+                  >
+                    <TableCell padding="checkbox">
+                      <Checkbox
+                        checked={selectedIds.has(entry.id)}
+                        onChange={() => toggleSelect(entry.id)}
+                        size="small"
+                        disabled={!entry.phone || entry.status === 'opt_out'}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Stack direction="row" spacing={1.5} alignItems="center">
+                        <ContactAvatar
+                          displayName={entry.fullName}
+                          phone={entry.phone}
+                          photoUrl={entry.photoUrl}
+                          size={40}
                         />
-                      </TableCell>
-                      <TableCell>
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <ContactAvatar
-                            displayName={entry.fullName}
-                            phone={entry.phone}
-                            photoUrl={entry.photoUrl}
-                            size={32}
-                          />
-                          <Typography variant="body2" fontWeight={500}>
-                            {entry.fullName || '—'}
+                        <Box minWidth={0}>
+                          <Typography variant="body2" fontWeight={600} noWrap>
+                            {entry.fullName || 'Sin nombre'}
                           </Typography>
-                        </Stack>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: 13 }}>
-                          {entry.phone || '—'}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2">{entry.email || '—'}</Typography>
-                      </TableCell>
-                      <TableCell onClick={(e) => e.stopPropagation()}>
-                        <DirectoryClassificationTagPicker
-                          entry={entry}
-                          compact
-                          autoSave
-                          onSaved={(updated) => {
-                            setEntries((prev) =>
-                              prev.map((row) => (row.id === updated.id ? updated : row))
-                            );
-                          }}
-                        />
-                      </TableCell>
-                      <TableCell>
+                          <Typography
+                            variant="caption"
+                            color={entry.phone ? 'text.secondary' : 'text.disabled'}
+                            sx={{ fontFamily: entry.phone ? 'ui-monospace, SFMono-Regular, Menlo, monospace' : 'inherit' }}
+                            noWrap
+                          >
+                            {entry.phone || 'Sin teléfono'}
+                          </Typography>
+                        </Box>
+                      </Stack>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" color={entry.email ? 'text.primary' : 'text.disabled'} noWrap>
+                        {entry.email || '—'}
+                      </Typography>
+                    </TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <DirectoryClassificationTagPicker
+                        entry={entry}
+                        compact
+                        autoSave
+                        onSaved={(updated) => {
+                          setEntries((prev) =>
+                            prev.map((row) => (row.id === updated.id ? updated : row))
+                          );
+                        }}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        label={SOURCE_LABELS[entry.source as string] || entry.source || '—'}
+                        size="small"
+                        variant="outlined"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        label={STATUS_LABELS[entry.status] || entry.status}
+                        color={STATUS_CHIP_COLORS[entry.status] || 'default'}
+                        size="small"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Stack direction="row" spacing={0.5}>
+                        {entry.channels?.map((ch) => (
+                          <Chip
+                            key={ch}
+                            label={CHANNEL_LABELS[ch] || ch}
+                            size="small"
+                            variant="outlined"
+                            color={CHANNEL_COLORS[ch] || 'default'}
+                          />
+                        ))}
+                        {(!entry.channels || entry.channels.length === 0) && '—'}
+                      </Stack>
+                    </TableCell>
+                    <TableCell>
+                      {entry.activeSequence !== 'NINGUNA' ? (
                         <Chip
-                          label={SOURCE_LABELS[entry.source as string] || entry.source || '—'}
+                          label={`${entry.activeSequence} (${entry.sequenceStep})`}
                           size="small"
+                          color="info"
                           variant="outlined"
                         />
-                      </TableCell>
-                      <TableCell>
-                        <Chip
-                          label={STATUS_LABELS[entry.status] || entry.status}
-                          color={STATUS_CHIP_COLORS[entry.status] || 'default'}
-                          size="small"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Stack direction="row" spacing={0.5}>
-                          {entry.channels?.map((ch) => (
-                            <Chip
-                              key={ch}
-                              label={ch}
-                              size="small"
-                              variant="outlined"
-                              color={CHANNEL_COLORS[ch] || 'default'}
-                            />
-                          ))}
-                          {(!entry.channels || entry.channels.length === 0) && '—'}
-                        </Stack>
-                      </TableCell>
-                      <TableCell>
-                        {entry.activeSequence !== 'NINGUNA' ? (
-                          <Chip
-                            label={`${entry.activeSequence} (${entry.sequenceStep})`}
-                            size="small"
-                            color="info"
-                            variant="outlined"
-                          />
-                        ) : (
-                          '—'
-                        )}
-                      </TableCell>
-                      <TableCell>{entry.messagesCount}</TableCell>
-                      <TableCell>
-                        {entry.tags && entry.tags.length > 0 ? (
-                          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                            {entry.tags.slice(0, 3).map((tag) => (
-                              <Chip key={tag} label={tag} size="small" variant="outlined" sx={{ height: 22 }} />
-                            ))}
-                            {entry.tags.length > 3 && (
-                              <Typography variant="caption" color="text.secondary" sx={{ lineHeight: '22px' }}>
-                                +{entry.tags.length - 3}
-                              </Typography>
-                            )}
-                          </Stack>
-                        ) : (
-                          <Typography variant="caption" color="text.disabled">
-                            —
-                          </Typography>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {entry.lastContactAt
-                          ? new Date(entry.lastContactAt).toLocaleDateString('es-CO', {
-                              day: '2-digit',
-                              month: 'short',
-                            })
-                          : '—'}
-                      </TableCell>
-                      {onOpenInInbox && (
-                        <TableCell align="center" onClick={(e) => e.stopPropagation()}>
-                          <Tooltip
-                            title={
-                              !entry.phone
-                                ? 'Sin teléfono'
-                                : entry.status === 'opt_out'
-                                  ? 'Contacto con opt-out'
-                                  : 'Abrir en Inbox'
-                            }
-                          >
-                            <span>
-                              <IconButton
-                                size="small"
-                                color="success"
-                                disabled={!entry.phone || entry.status === 'opt_out'}
-                                aria-label={`Abrir en inbox: ${entry.fullName || entry.phone || 'contacto'}`}
-                                onClick={() => {
-                                  if (!entry.phone || entry.status === 'opt_out') return;
-                                  onOpenInInbox(
-                                    entry.phone,
-                                    entry.fullName || entry.displayName || undefined,
-                                  );
-                                }}
-                              >
-                                <WhatsAppIcon fontSize="small" />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                        </TableCell>
+                      ) : (
+                        '—'
                       )}
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </TableContainer>
+                    </TableCell>
+                    <TableCell>{entry.messagesCount}</TableCell>
+                    <TableCell>
+                      {entry.tags && entry.tags.length > 0 ? (
+                        <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                          {entry.tags.slice(0, 3).map((tag) => (
+                            <Chip key={tag} label={tag} size="small" variant="outlined" sx={{ height: 22 }} />
+                          ))}
+                          {entry.tags.length > 3 && (
+                            <Typography variant="caption" color="text.secondary" sx={{ lineHeight: '22px' }}>
+                              +{entry.tags.length - 3}
+                            </Typography>
+                          )}
+                        </Stack>
+                      ) : (
+                        <Typography variant="caption" color="text.disabled">
+                          —
+                        </Typography>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {entry.lastContactAt
+                        ? new Date(entry.lastContactAt).toLocaleDateString('es-CO', {
+                            day: '2-digit',
+                            month: 'short',
+                          })
+                        : '—'}
+                    </TableCell>
+                    {onOpenInInbox && (
+                      <TableCell align="center" onClick={(e) => e.stopPropagation()}>
+                        <Tooltip
+                          title={
+                            !entry.phone
+                              ? 'Sin teléfono'
+                              : entry.status === 'opt_out'
+                                ? 'Contacto con opt-out'
+                                : 'Abrir en Inbox'
+                          }
+                        >
+                          <span>
+                            <IconButton
+                              size="small"
+                              color="success"
+                              disabled={!entry.phone || entry.status === 'opt_out'}
+                              aria-label={`Abrir en inbox: ${entry.fullName || entry.phone || 'contacto'}`}
+                              onClick={() => {
+                                if (!entry.phone || entry.status === 'opt_out') return;
+                                onOpenInInbox(
+                                  entry.phone,
+                                  entry.fullName || entry.displayName || undefined,
+                                );
+                              }}
+                            >
+                              <WhatsAppIcon fontSize="small" />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                      </TableCell>
+                    )}
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
 
-          <Box
-            sx={{
-              display: 'flex',
-              flexDirection: { xs: 'column', sm: 'row' },
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 2,
-              py: 2,
-              px: 2,
-              borderTop: 1,
-              borderColor: 'divider',
-            }}
-          >
-            <FormControl size="small" sx={{ minWidth: 180 }}>
-              <InputLabel>Filas por página</InputLabel>
-              <Select
-                value={rowsPerPage}
-                label="Filas por página"
-                onChange={(e) => {
-                  setRowsPerPage(Number(e.target.value));
-                  setPage(0);
-                }}
-              >
-                <MenuItem value={10}>10</MenuItem>
-                <MenuItem value={25}>25</MenuItem>
-                <MenuItem value={50}>50</MenuItem>
-                <MenuItem value={100}>100</MenuItem>
-              </Select>
-            </FormControl>
+        <Box
+          sx={{
+            display: 'flex',
+            flexDirection: { xs: 'column', sm: 'row' },
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 2,
+            py: 1.75,
+            px: 2,
+            borderTop: 1,
+            borderColor: 'divider',
+            bgcolor: (theme) =>
+              theme.palette.mode === 'light' ? 'rgba(0, 36, 70, 0.02)' : 'rgba(255, 255, 255, 0.02)',
+          }}
+        >
+          <FormControl size="small" sx={{ minWidth: 160 }}>
+            <InputLabel>Filas por página</InputLabel>
+            <Select
+              value={rowsPerPage}
+              label="Filas por página"
+              onChange={(e) => {
+                setRowsPerPage(Number(e.target.value));
+                setPage(0);
+              }}
+            >
+              {DIRECTORY_PAGE_SIZE_OPTIONS.map((size) => (
+                <MenuItem key={size} value={size}>
+                  {size}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
 
-            <Stack alignItems="center" spacing={0.5}>
-              <Pagination
-                count={totalPages}
-                page={page + 1}
-                onChange={handlePageChange}
-                color="primary"
-                shape="rounded"
-                showFirstButton
-                showLastButton
-                siblingCount={2}
-                boundaryCount={1}
-              />
-              <Typography variant="caption" color="text.secondary">
-                {from}–{to} de {totalCount} entradas
-              </Typography>
-            </Stack>
-          </Box>
-        </Paper>
-      )}
+          <Stack alignItems="center" spacing={0.5}>
+            <Pagination
+              count={totalPages}
+              page={page + 1}
+              onChange={handlePageChange}
+              color="primary"
+              shape="rounded"
+              showFirstButton
+              showLastButton
+              siblingCount={1}
+              boundaryCount={1}
+            />
+            <Typography variant="caption" color="text.secondary">
+              {from}–{to} de {fmtCount(totalCount)} clientes
+            </Typography>
+          </Stack>
+        </Box>
+      </Paper>
       </>
       )}
 
       <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Nueva entrada en el directorio</DialogTitle>
+        <DialogTitle>Nuevo cliente</DialogTitle>
         <DialogContent>
-          <Stack spacing={2} mt={1}>
+          <DialogContentText sx={{ mb: 2 }}>
+            Lo agregas al directorio para poder escribirle o incluirlo en un envío masivo.
+          </DialogContentText>
+          <Stack spacing={2}>
             <TextField
               label="Nombre completo"
               value={newEntry.fullName}
               onChange={(e) => setNewEntry({ ...newEntry, fullName: e.target.value })}
               fullWidth
+              autoFocus
             />
             <TextField
               label="Teléfono"
@@ -942,7 +1075,35 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, 
         <DialogActions>
           <Button onClick={() => setCreateDialogOpen(false)}>Cancelar</Button>
           <Button variant="contained" onClick={handleCreateEntry}>
-            Crear
+            Guardar cliente
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={seedDialogOpen}
+        onClose={() => !seedLoading && setSeedDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Importar usuarios de la app</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Copia al directorio a todas las personas que ya tienen cuenta en la app Prosavis.
+            No borra contactos existentes: si ya están, los omite. Puede tardar unos segundos.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSeedDialogOpen(false)} disabled={seedLoading}>
+            Cancelar
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleSeedAllUsers}
+            disabled={seedLoading}
+            startIcon={seedLoading ? <CircularProgress size={16} color="inherit" /> : undefined}
+          >
+            {seedLoading ? 'Importando…' : 'Importar'}
           </Button>
         </DialogActions>
       </Dialog>
