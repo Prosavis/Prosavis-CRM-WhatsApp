@@ -232,8 +232,6 @@ const WhatsAppCloudPage: React.FC = () => {
         activeTab={activeTab}
         onTabChange={handleMainTabChange}
         directoryTotalContacts={directoryTotalContacts}
-        onOpenBulk={() => setBulkOpen(true)}
-        showBulk={activeTab === 'inbox'}
       />
 
       {showNotificationsOnboarding && (
@@ -286,7 +284,11 @@ const WhatsAppCloudPage: React.FC = () => {
                 </Box>
               }
             >
-              <LeadsPage embedded onOpenInInbox={handleOpenLeadInInbox} />
+              <LeadsPage
+                embedded
+                onOpenInInbox={handleOpenLeadInInbox}
+                onOpenBulk={() => setBulkOpen(true)}
+              />
             </Suspense>
           </div>
         )}
@@ -348,27 +350,25 @@ const WhatsAppCloudPage: React.FC = () => {
         )}
       </Box>
 
-      {activeTab === 'inbox' && (
-        <WhatsAppBulkSendDialog
-          open={bulkOpen}
-          onClose={() => setBulkOpen(false)}
-          wabaId={wabaId}
-          phoneNumberId={phoneNumberId}
-          botLabel={botLabel}
-          phoneDisplay={phoneDisplay}
-          onViewJobInMetrics={(jobId) => {
-            setBulkOpen(false);
-            setSearchParams(
-              (prev) => {
-                const next = applyWhatsAppTab(prev, 'metrics');
-                next.set('broadcastJob', jobId);
-                return next;
-              },
-              { replace: true },
-            );
-          }}
-        />
-      )}
+      <WhatsAppBulkSendDialog
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        wabaId={wabaId}
+        phoneNumberId={phoneNumberId}
+        botLabel={botLabel}
+        phoneDisplay={phoneDisplay}
+        onViewJobInMetrics={(jobId) => {
+          setBulkOpen(false);
+          setSearchParams(
+            (prev) => {
+              const next = applyWhatsAppTab(prev, 'metrics');
+              next.set('broadcastJob', jobId);
+              return next;
+            },
+            { replace: true },
+          );
+        }}
+      />
 
     </>
   );

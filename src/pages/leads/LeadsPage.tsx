@@ -4,6 +4,7 @@ import PeopleIcon from '@mui/icons-material/People';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SearchIcon from '@mui/icons-material/Search';
 import TroubleshootIcon from '@mui/icons-material/Troubleshoot';
+import SendIcon from '@mui/icons-material/Send';
 import WhatsAppIcon from '@mui/icons-material/WhatsApp';
 
 import Alert from '@mui/material/Alert';
@@ -99,9 +100,10 @@ export interface LeadsPageProps {
   /** Cuando es true, se omite el título principal (p. ej. dentro de WhatsApp Cloud). */
   embedded?: boolean;
   onOpenInInbox?: (phone: string, name?: string) => void;
+  onOpenBulk?: () => void;
 }
 
-const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }) => {
+const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, onOpenBulk }) => {
   const [entries, setEntries] = useState<DirectoryEntry[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -402,6 +404,16 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox }
               }}
             >
               Abrir en inbox ({selectedEntries.filter((e) => e.phone && e.status !== 'opt_out').length})
+            </Button>
+          )}
+          {onOpenBulk && (
+            <Button
+              variant="outlined"
+              startIcon={<SendIcon />}
+              onClick={onOpenBulk}
+              size="small"
+            >
+              Enviar masivo
             </Button>
           )}
           <Tooltip title="Seed: convertir todos los usuarios de la app al directorio">

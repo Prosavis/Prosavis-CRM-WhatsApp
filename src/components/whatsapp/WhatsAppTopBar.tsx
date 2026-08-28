@@ -7,7 +7,6 @@ import {
   Stack,
   Tab,
   Tabs,
-  Tooltip,
   useMediaQuery,
 } from '@mui/material';
 import { alpha, useTheme as useMuiTheme, type Theme } from '@mui/material/styles';
@@ -20,7 +19,6 @@ import {
   Settings as SettingsIcon,
   MonitorHeart as MonitorHeartIcon,
   AutoAwesome as AutoAwesomeIcon,
-  Send as SendIcon,
   Logout as LogoutIcon,
 } from '@mui/icons-material';
 import ThemeToggle from '@/components/common/ThemeToggle';
@@ -29,14 +27,13 @@ import { useAuth } from '@/hooks/useAuth';
 import { getProsavisLogoSrc } from '@/utils/prosavisBrand';
 import { inboxLineNavMeta } from '@/utils/whatsappInboxNav';
 import type { WhatsAppTabKey } from '@/utils/whatsappTabs';
-import WhatsAppInternalContactsButton from './WhatsAppInternalContactsButton';
+import CompanyHandbookBook from './CompanyHandbookBook';
+import CrmTutorialPlaceholder from './CrmTutorialPlaceholder';
 
 export interface WhatsAppTopBarProps {
   activeTab: WhatsAppTabKey;
   onTabChange: (_: React.SyntheticEvent, value: WhatsAppTabKey) => void;
   directoryTotalContacts: number | null;
-  onOpenBulk: () => void;
-  showBulk?: boolean;
 }
 
 function InboxLineTabLabel({
@@ -148,8 +145,6 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
   activeTab,
   onTabChange,
   directoryTotalContacts,
-  onOpenBulk,
-  showBulk = true,
 }) => {
   const { mode } = useTheme();
   const { profile, signOut } = useAuth();
@@ -260,23 +255,8 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
           ml: { xs: 0, lg: 'auto' },
         }}
       >
-        <WhatsAppInternalContactsButton />
-
-        {showBulk && (
-          <Tooltip title="Envío masivo WhatsApp">
-            <Button
-              variant="outlined"
-              size="small"
-              startIcon={<SendIcon />}
-              onClick={onOpenBulk}
-              sx={{ textTransform: 'none' }}
-            >
-              <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
-                Masivo
-              </Box>
-            </Button>
-          </Tooltip>
-        )}
+        <CompanyHandbookBook />
+        <CrmTutorialPlaceholder />
 
         <ThemeToggle size="small" />
 
