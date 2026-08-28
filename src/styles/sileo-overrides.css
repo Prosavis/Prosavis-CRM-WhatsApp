@@ -1,0 +1,53 @@
+/**
+ * Sileo: stacking por encima de layout MUI (Drawer/Modal ~1300, Snackbar ~1400).
+ * El paquete usa z-index 50; 2000 queda sobre drawers y diálogos del CRM.
+ *
+ * Contraste: el CSS inyectado de Sileo pone título/descripcion claros sobre fill
+ * claro en light — ilegible. Se corrige por tema, igual que UserConsole.
+ */
+
+[data-sileo-viewport] {
+  z-index: 2000;
+}
+
+[data-sileo-viewport][data-theme='light'] {
+  --sileo-state-success: oklch(0.42 0.14 145);
+  --sileo-state-error: oklch(0.48 0.19 25);
+  --sileo-state-warning: oklch(0.44 0.14 75);
+  --sileo-state-info: oklch(0.44 0.14 250);
+  --sileo-state-action: oklch(0.44 0.16 265);
+  --sileo-state-loading: oklch(0.38 0 0);
+}
+
+[data-sileo-viewport][data-theme='dark'] {
+  --sileo-state-success: oklch(0.78 0.16 145);
+  --sileo-state-error: oklch(0.75 0.18 25);
+  --sileo-state-warning: oklch(0.82 0.15 85);
+  --sileo-state-info: oklch(0.78 0.14 250);
+  --sileo-state-action: oklch(0.76 0.15 265);
+  --sileo-state-loading: oklch(0.72 0 0);
+}
+
+[data-sileo-viewport][data-theme='light'] [data-sileo-title] {
+  color: rgba(15, 23, 42, 0.95) !important;
+}
+
+[data-sileo-viewport][data-theme='dark'] [data-sileo-title] {
+  color: rgba(248, 250, 252, 0.96) !important;
+}
+
+[data-sileo-viewport][data-theme='light'] [data-sileo-description] {
+  color: rgba(15, 23, 42, 0.88) !important;
+}
+
+[data-sileo-viewport][data-theme='dark'] [data-sileo-description] {
+  color: rgba(226, 232, 240, 0.9) !important;
+}
+
+[data-sileo-viewport][data-theme='light'] [data-sileo-button] {
+  color: rgba(15, 23, 42, 0.92) !important;
+}
+
+[data-sileo-viewport][data-theme='dark'] [data-sileo-button] {
+  color: rgba(248, 250, 252, 0.94) !important;
+}

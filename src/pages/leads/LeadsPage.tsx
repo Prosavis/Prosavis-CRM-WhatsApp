@@ -30,7 +30,6 @@ import Pagination from '@mui/material/Pagination';
 import Paper from '@mui/material/Paper';
 import Select from '@mui/material/Select';
 import Skeleton from '@mui/material/Skeleton';
-import Snackbar from '@mui/material/Snackbar';
 import Stack from '@mui/material/Stack';
 import Switch from '@mui/material/Switch';
 import Table from '@mui/material/Table';
@@ -57,6 +56,7 @@ import {
   DIRECTORY_PAGE_SIZE_OPTIONS,
   directoryPagingAfterFilterChange,
 } from '@/utils/directoryListPaging';
+import { crmToast } from '@/utils/crmToast';
 
 const STATUS_CHIP_COLORS: Record<string, 'default' | 'success' | 'error' | 'warning'> = {
   active: 'success',
@@ -143,11 +143,16 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
-    open: false,
-    message: '',
-    severity: 'success',
-  });
+  const setSnackbar = ({
+    message,
+    severity,
+  }: {
+    open?: boolean;
+    message: string;
+    severity: 'success' | 'error';
+  }) => {
+    crmToast.show(severity, message);
+  };
 
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [classificationFilter, setClassificationFilter] = useState<string>('');
@@ -1107,16 +1112,6 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, 
           </Button>
         </DialogActions>
       </Dialog>
-
-      <Snackbar
-        open={snackbar.open}
-        autoHideDuration={4000}
-        onClose={() => setSnackbar({ ...snackbar, open: false })}
-      >
-        <Alert severity={snackbar.severity} onClose={() => setSnackbar({ ...snackbar, open: false })}>
-          {snackbar.message}
-        </Alert>
-      </Snackbar>
 
       {selectedEntry && (
         <DirectoryEntryDrawer

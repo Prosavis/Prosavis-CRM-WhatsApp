@@ -1,11 +1,9 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  Alert,
   Box,
   Button,
   Dialog,
   IconButton,
-  Snackbar,
   Tooltip,
   Typography,
   useMediaQuery,
@@ -17,6 +15,7 @@ import LinkIcon from '@mui/icons-material/Link';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { DesignTokens } from '@/constants/designSystem';
+import { crmToast } from '@/utils/crmToast';
 import {
   getCompanyHandbookChapters,
   getHandbookChapter,
@@ -358,16 +357,15 @@ const CompanyHandbookBook: React.FC = () => {
   const [coverOpen, setCoverOpen] = useState(false);
   const [chapterId, setChapterId] = useState<HandbookChapterId>('whatsapp');
   const [pageDirection, setPageDirection] = useState(1);
-  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
   const chapter = getHandbookChapter(chapterId) ?? chapters[0];
   const chapterIndex = chapters.findIndex((item) => item.id === chapterId);
 
   const handleCopy = useCallback(async (text: string, label: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      setCopyFeedback(`Copiado: ${label}`);
+      crmToast.success(`Copiado: ${label}`);
     } catch {
-      setCopyFeedback('No se pudo copiar al portapapeles');
+      crmToast.error('No se pudo copiar al portapapeles');
     }
   }, []);
 
@@ -623,16 +621,6 @@ const CompanyHandbookBook: React.FC = () => {
         </Box>
       </Dialog>
 
-      <Snackbar open={Boolean(copyFeedback)} autoHideDuration={2500} onClose={() => setCopyFeedback(null)}>
-        <Alert
-          severity={copyFeedback?.startsWith('Copiado') ? 'success' : 'error'}
-          variant="filled"
-          onClose={() => setCopyFeedback(null)}
-          sx={{ width: '100%' }}
-        >
-          {copyFeedback}
-        </Alert>
-      </Snackbar>
     </>
   );
 };

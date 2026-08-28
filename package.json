@@ -35,9 +35,9 @@
     "opus-recorder": "^8.0.5",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "react-hot-toast": "^2.6.0",
     "react-router-dom": "^7.15.1",
-    "recharts": "^3.9.2"
+    "recharts": "^3.9.2",
+    "sileo": "^0.1.5"
   },
   "devDependencies": {
     "@emotion/babel-plugin": "^11.13.5",

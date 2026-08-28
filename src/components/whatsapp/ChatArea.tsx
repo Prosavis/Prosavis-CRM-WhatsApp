@@ -20,7 +20,6 @@ import {
   DialogContentText,
   DialogActions,
   Button,
-  Snackbar,
   Alert,
   Popover,
   TextField,
@@ -46,6 +45,7 @@ import PushPinOutlinedIcon from '@mui/icons-material/PushPinOutlined';
 import MarkChatUnreadIcon from '@mui/icons-material/MarkChatUnread';
 import ReplyIcon from '@mui/icons-material/Reply';
 import ForwardIcon from '@mui/icons-material/Forward';
+import { crmToast } from '@/utils/crmToast';
 import MessageBubble, { type MessageReaction } from './MessageBubble';
 import ForwardMessageDialog from './ForwardMessageDialog';
 import MessageInput, {
@@ -285,7 +285,16 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [snack, setSnack] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({ open: false, message: '', severity: 'success' });
+  const setSnack = ({
+    message,
+    severity,
+  }: {
+    open?: boolean;
+    message: string;
+    severity: 'success' | 'error';
+  }) => {
+    crmToast.show(severity, message);
+  };
 
   const [tagAnchor, setTagAnchor] = useState<HTMLElement | null>(null);
   const [tagSaving, setTagSaving] = useState(false);
@@ -1929,17 +1938,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         onForwarded={handleForwarded}
       />
 
-      {/* Snackbar */}
-      <Snackbar
-        open={snack.open}
-        autoHideDuration={4000}
-        onClose={() => setSnack((s) => ({ ...s, open: false }))}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert severity={snack.severity} onClose={() => setSnack((s) => ({ ...s, open: false }))} variant="filled">
-          {snack.message}
-        </Alert>
-      </Snackbar>
     </Box>
   );
 };

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import toast from 'react-hot-toast';
+import { crmToast } from '@/utils/crmToast';
 import useSoundEffects from '@/hooks/useSoundEffects';
 import { playInboxSound } from '@/utils/inboxSounds';
 import type { InboxSoundLine } from '@/utils/soundPreferences';
@@ -555,7 +555,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
             }));
             setSendError('Algunos adjuntos no se enviaron. Revisa los marcados en rojo e intenta de nuevo.');
             playError();
-            toast.error('Algunos adjuntos no se enviaron');
+            crmToast.error('Algunos adjuntos no se enviaron');
           } else {
             lexicalEditorRef.current?.setWhatsAppText('');
             textRef.current = '';
@@ -577,7 +577,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
         const msg = e instanceof Error ? e.message : 'No se pudo enviar el archivo';
         setSendError(msg);
         playError();
-        toast.error(msg);
+        crmToast.error(msg);
       } finally {
         setSending(false);
       }
@@ -599,7 +599,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
       const msg = e instanceof Error ? e.message : 'No se pudo enviar el mensaje';
       setSendError(msg);
       playError();
-      toast.error(msg);
+      crmToast.error(msg);
     } finally {
       setSending(false);
     }

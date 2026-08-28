@@ -14,8 +14,6 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  Snackbar,
-  Alert,
   Button,
   TextField,
   Chip,
@@ -58,6 +56,7 @@ import {
 } from '@/services/whatsappService';
 import ClientDateText from '@/components/common/ClientDateText';
 import { WhatsAppFormattedText } from '@/utils/whatsappTextFormatting';
+import { crmToast } from '@/utils/crmToast';
 import { COLOMBIA_TIME_ZONE } from '@/utils/colombiaTime';
 import {
   isCommercialOrphanStatusStub,
@@ -779,20 +778,14 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
     return '';
   })().trim();
 
-  const [snack, setSnack] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
-    open: false,
-    message: '',
-    severity: 'success',
-  });
-
   const handleCopyText = useCallback(async () => {
     setMenuAnchor(null);
     if (!copyablePlainText) return;
     try {
       await navigator.clipboard.writeText(copyablePlainText);
-      setSnack({ open: true, message: 'Copiado al portapapeles', severity: 'success' });
+      crmToast.success('Copiado al portapapeles');
     } catch {
-      setSnack({ open: true, message: 'No se pudo copiar', severity: 'error' });
+      crmToast.error('No se pudo copiar');
     }
   }, [copyablePlainText]);
 
@@ -1087,17 +1080,6 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
           </Button>
         </DialogActions>
       </Dialog>
-
-      <Snackbar
-        open={snack.open}
-        autoHideDuration={3000}
-        onClose={() => setSnack((s) => ({ ...s, open: false }))}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert severity={snack.severity} variant="filled" onClose={() => setSnack((s) => ({ ...s, open: false }))}>
-          {snack.message}
-        </Alert>
-      </Snackbar>
 
       {/* Lightbox */}
       <Dialog open={Boolean(lightboxUrl)} onClose={() => setLightboxUrl(null)} maxWidth="lg" PaperProps={{ sx: { bgcolor: 'transparent', boxShadow: 'none', overflow: 'visible' } }}>

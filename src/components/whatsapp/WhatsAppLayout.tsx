@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import toast from 'react-hot-toast';
-import { Box, Snackbar, Alert, Button } from '@mui/material';
+import { Alert, Box, Button } from '@mui/material';
+import { crmToast } from '@/utils/crmToast';
 import { alpha, useTheme } from '@mui/material/styles';
 import ConversationList from './ConversationList';
 import ChatArea from './ChatArea';
@@ -212,29 +212,14 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   const [outOfCoverageDialogOpen, setOutOfCoverageDialogOpen] = useState(false);
   const [categoryTagOverrides, setCategoryTagOverrides] = useState<CategoryTagIdOverrides>({});
 
-  const [inboundAlert, setInboundAlert] = useState<{
-    message: string;
-    conversationId: string;
-    line: 'bot' | 'commercial';
-  } | null>(null);
   const [inboundPulseLine, setInboundPulseLine] = useState<'bot' | 'commercial' | null>(null);
-  const [actionSnack, setActionSnack] = useState<{
-    open: boolean;
-    message: string;
-    severity: 'success' | 'error';
-  }>({ open: false, message: '', severity: 'success' });
 
   const { playSuccess, playError } = useSoundEffects();
 
   const notifyAction = useCallback((message: string, severity: 'success' | 'error') => {
-    setActionSnack({ open: true, message, severity });
-    if (severity === 'success') {
-      toast.success(message);
-      playSuccess();
-    } else {
-      toast.error(message);
-      playError();
-    }
+    crmToast.show(severity, message);
+    if (severity === 'success') playSuccess();
+    else playError();
   }, [playSuccess, playError]);
 
   const listPhoneNumberId = lineFilter === 'all' ? undefined : phoneNumberIdForFilter(lineFilter);
@@ -446,6 +431,37 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     void loadSnippets();
   }, [loadSnippets]);
 
+  const openInboundConversation = useCallback((conversationId: string) => {
+    if (focusPhone || focusConversation) {
+      if (onClearFocusDeepLink) onClearFocusDeepLink();
+      else {
+        onClearFocusPhone?.();
+        onClearFocusConversation?.();
+      }
+    }
+    const inCurrentList = conversations.find((x) => x.id === conversationId);
+    const sibling = siblingAlertConversations.find((x) => x.id === conversationId);
+    const target = inCurrentList ?? sibling;
+    if (target && onOpenConversation) {
+      onOpenConversation({
+        conversationId: target.id,
+        phone: target.contactPhone || target.phone,
+        phoneNumberId: target.phoneNumberId,
+      });
+    } else if (inCurrentList) {
+      setSelectedConversation(inCurrentList);
+    }
+  }, [
+    conversations,
+    siblingAlertConversations,
+    onOpenConversation,
+    focusPhone,
+    focusConversation,
+    onClearFocusDeepLink,
+    onClearFocusPhone,
+    onClearFocusConversation,
+  ]);
+
   const announceInbound = useCallback((best: WhatsAppConversation, opts?: { snackbar?: boolean }) => {
     const contactLabel = conversationShortLabel(best);
     const notifyPhone = best.contactPhone || best.phone || '';
@@ -465,15 +481,16 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     }
 
     if (!document.hidden && opts?.snackbar !== false) {
-      setInboundAlert({
-        message: `Nuevo mensaje en ${contactLabel}`,
-        conversationId: best.id,
+      crmToast.inbound({
         line,
+        title: `${inboxLineLabel(line)} · Nuevo mensaje`,
+        description: contactLabel,
+        onView: () => openInboundConversation(best.id),
       });
     }
     setInboundPulseLine(line);
     window.setTimeout(() => setInboundPulseLine(null), 1400);
-  }, []);
+  }, [openInboundConversation]);
 
   useEffect(() => {
     if (loading) return;
@@ -720,40 +737,6 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
       cancelled = true;
     };
   }, [selectedConversation]);
-
-  const handleOpenInboundChat = useCallback(() => {
-    if (!inboundAlert) return;
-    if (focusPhone || focusConversation) {
-      if (onClearFocusDeepLink) onClearFocusDeepLink();
-      else {
-        onClearFocusPhone?.();
-        onClearFocusConversation?.();
-      }
-    }
-    const inCurrentList = conversations.find((x) => x.id === inboundAlert.conversationId);
-    const sibling = siblingAlertConversations.find((x) => x.id === inboundAlert.conversationId);
-    const target = inCurrentList ?? sibling;
-    if (target && onOpenConversation) {
-      onOpenConversation({
-        conversationId: target.id,
-        phone: target.contactPhone || target.phone,
-        phoneNumberId: target.phoneNumberId,
-      });
-    } else if (inCurrentList) {
-      setSelectedConversation(inCurrentList);
-    }
-    setInboundAlert(null);
-  }, [
-    inboundAlert,
-    conversations,
-    siblingAlertConversations,
-    onOpenConversation,
-    focusPhone,
-    focusConversation,
-    onClearFocusDeepLink,
-    onClearFocusPhone,
-    onClearFocusConversation,
-  ]);
 
   const handleConversationSelect = useCallback(
     (conversation: WhatsAppConversation) => {
@@ -1131,52 +1114,6 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
           />
         )}
       </Box>
-
-      <Snackbar
-        open={Boolean(inboundAlert)}
-        autoHideDuration={6000}
-        onClose={() => setInboundAlert(null)}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert
-          severity="info"
-          variant="filled"
-          onClose={() => setInboundAlert(null)}
-          sx={
-            inboundAlert
-              ? {
-                  bgcolor: inboxLineHex(inboundAlert.line),
-                  color: '#ffffff',
-                  '& .MuiAlert-icon': { color: '#ffffff' },
-                }
-              : undefined
-          }
-          action={
-            <Button color="inherit" size="small" onClick={handleOpenInboundChat}>
-              Ver chat
-            </Button>
-          }
-        >
-          {inboundAlert
-            ? `${inboxLineLabel(inboundAlert.line)} · ${inboundAlert.message}`
-            : null}
-        </Alert>
-      </Snackbar>
-
-      <Snackbar
-        open={actionSnack.open}
-        autoHideDuration={3500}
-        onClose={() => setActionSnack((prev) => ({ ...prev, open: false }))}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert
-          severity={actionSnack.severity}
-          variant="filled"
-          onClose={() => setActionSnack((prev) => ({ ...prev, open: false }))}
-        >
-          {actionSnack.message}
-        </Alert>
-      </Snackbar>
 
       <NewContactDialog
         open={newContactOpen}

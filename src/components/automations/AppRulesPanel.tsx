@@ -17,7 +17,7 @@ import {
   AutoFixHigh as AutoFixHighIcon,
   Refresh as RefreshIcon,
 } from '@mui/icons-material';
-import toast from 'react-hot-toast';
+import { crmToast } from '@/utils/crmToast';
 import { DesignTokens } from '@/constants/designSystem';
 import { useAppAutomations } from '@/hooks/useAppAutomations';
 import type { AutomationRule, CreateAutomationPayload } from '@/types/automations';
@@ -51,15 +51,15 @@ const AppRulesPanel: React.FC = () => {
     try {
       if (editingRule) {
         await updateAutomation(editingRule.id, payload);
-        toast.success('Regla actualizada');
+        crmToast.success('Regla actualizada');
       } else {
         await createAutomation(payload);
-        toast.success('Regla creada');
+        crmToast.success('Regla creada');
       }
       setDialogOpen(false);
       setEditingRule(null);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'No se pudo guardar');
+      crmToast.error(err instanceof Error ? err.message : 'No se pudo guardar');
       throw err;
     }
   };
@@ -67,9 +67,9 @@ const AppRulesPanel: React.FC = () => {
   const handleDelete = async (ruleId: string) => {
     try {
       await deleteAutomation(ruleId);
-      toast.success('Regla eliminada');
+      crmToast.success('Regla eliminada');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'No se pudo eliminar');
+      crmToast.error(err instanceof Error ? err.message : 'No se pudo eliminar');
     }
   };
 
@@ -77,7 +77,7 @@ const AppRulesPanel: React.FC = () => {
     try {
       await toggleAutomation(ruleId, isActive);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'No se pudo actualizar');
+      crmToast.error(err instanceof Error ? err.message : 'No se pudo actualizar');
     }
   };
 

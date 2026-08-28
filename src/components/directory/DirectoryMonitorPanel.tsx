@@ -32,7 +32,6 @@ import Paper from '@mui/material/Paper';
 import Radio from '@mui/material/Radio';
 import RadioGroup from '@mui/material/RadioGroup';
 import Select from '@mui/material/Select';
-import Snackbar from '@mui/material/Snackbar';
 import Stack from '@mui/material/Stack';
 import Table from '@mui/material/Table';
 import TableBody from '@mui/material/TableBody';
@@ -60,6 +59,7 @@ import type {
   DirectoryIssueStatus,
   DirectoryIssueType,
 } from '@/types/lead';
+import { crmToast } from '@/utils/crmToast';
 
 interface CategoryMeta {
   type: DirectoryIssueType;
@@ -151,11 +151,6 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [totalCount, setTotalCount] = useState(0);
 
-  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
-    open: false,
-    message: '',
-    severity: 'success',
-  });
 
   const [drawerEntry, setDrawerEntry] = useState<DirectoryEntry | null>(null);
   const [editEntry, setEditEntry] = useState<DirectoryEntry | null>(null);
@@ -188,7 +183,7 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
   const [backfillApplying, setBackfillApplying] = useState(false);
 
   const notify = (message: string, severity: 'success' | 'error') =>
-    setSnackbar({ open: true, message, severity });
+    crmToast.show(severity, message);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -1255,15 +1250,6 @@ const DirectoryMonitorPanel: React.FC<DirectoryMonitorPanelProps> = ({ onDirecto
         />
       )}
 
-      <Snackbar
-        open={snackbar.open}
-        autoHideDuration={4000}
-        onClose={() => setSnackbar({ ...snackbar, open: false })}
-      >
-        <Alert severity={snackbar.severity} onClose={() => setSnackbar({ ...snackbar, open: false })}>
-          {snackbar.message}
-        </Alert>
-      </Snackbar>
     </Box>
   );
 };
