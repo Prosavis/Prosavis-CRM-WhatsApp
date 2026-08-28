@@ -86,3 +86,5 @@ Corrida: `npm run audit` (ENABLE_META_SEND=false). **No se fingió verde.**
 | P-sql-rls | **null** (db lint no corrido; migración `20260828153100` envuelve `auth.uid()`) |
 
 `npm run audit` sale 1 por lint. `scripts/audit/compare.mjs` trata `null` como no-regresión.
+
+`graphify update .` desde `GitHub/` (2026-08-28): 48458 nodos · 100778 edges · 1783 comunidades. `graphify-out/` es local (gitignore).
