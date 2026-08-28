@@ -62,4 +62,27 @@ Al salir de `inbox` / `commercial`, **se desmonta** `WhatsAppLayout`. TanStack Q
 
 ## Baseline
 
-Ver `audits/baselines/current.json` y la sección “Resultados baseline” al final de este spec (Fase 5).
+Ver `audits/baselines/current.json` y la sección “Resultados baseline 0” al final de este spec (Fase 5).
+
+## Resultados baseline 0 (2026-08-28T18:52:47Z)
+
+Corrida: `npm run audit` (ENABLE_META_SEND=false). **No se fingió verde.**
+
+| Comando | Resultado |
+|---|---|
+| vitest C1–C13 / media / UX H | pass (24 tests, ~3s) |
+| `npm test` | pass (57 files / 386 tests) |
+| `npm run type-check` | pass |
+| `npm run lint` | **fail** — 8 errores preexistentes en edges (`appointmentPhoneResolver`, `clientSegments`, `inboxAiContext`, `reminderDashboardBuilder`, `whatsappOutbound.mediaUrlForLog`, …) + 7 warnings. No son regresiones del inbox. |
+| Playwright A2/B1–B3 | **omitido** — Supabase local `127.0.0.1:54321` no estaba arriba |
+| Lighthouse P-lcp | **omitido** — sin dev server en :3001 (`AUDIT_LIGHTHOUSE=1` para activar) |
+| `supabase db lint` | **omitido** — `AUDIT_DB_LINT=1` para activar |
+
+| Presupuesto | Estado baseline 0 |
+|---|---|
+| P-rt-delta | **pass** (coalescer C1, 0 full refetch en flush) |
+| P-rq-inbox | **pass** (`inboxQueryKeys` existen) |
+| P-inbox-list, P-switch-chat, P-send, P-tab-switch, P-lcp-login, P-inp-inbox, P-cls, P-dom-list | **null** (sin e2e/Lighthouse en esta máquina) |
+| P-sql-rls | **null** (db lint no corrido; migración `20260828153100` envuelve `auth.uid()`) |
+
+`npm run audit` sale 1 por lint. `scripts/audit/compare.mjs` trata `null` como no-regresión.

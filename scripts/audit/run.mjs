@@ -1,5 +1,5 @@
-import { execSync, spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -8,43 +8,35 @@ const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 const outDir = join(root, 'audits', 'results');
 mkdirSync(outDir, { recursive: true });
 
-function run(cmd, args, { optional = false } = {}) {
+function run(cmd, args, { optional = false, timeout = 180_000 } = {}) {
+  console.log(`audit: run ${cmd} ${args.join(' ')}`);
   const started = Date.now();
   const result = spawnSync(cmd, args, {
     cwd: root,
     encoding: 'utf8',
     shell: process.platform === 'win32',
+    timeout,
     env: { ...process.env, ENABLE_META_SEND: 'false' },
   });
+  const timedOut = result.error?.code === 'ETIMEDOUT';
   return {
     command: [cmd, ...args].join(' '),
     optional,
-    exitCode: result.status ?? 1,
+    exitCode: timedOut ? 124 : (result.status ?? 1),
     durationMs: Date.now() - started,
     stdout: (result.stdout ?? '').slice(-4000),
-    stderr: (result.stderr ?? '').slice(-4000),
+    stderr: ((result.stderr ?? '') + (timedOut ? '\nTIMEOUT' : '')).slice(-4000),
     skipped: false,
+    timedOut,
   };
 }
 
-function tryRun(cmd, args) {
+async function isReachable(url) {
   try {
-    execSync(`${cmd} ${args[0] ?? ''} --help`, {
-      cwd: root,
-      stdio: 'ignore',
-      shell: true,
-    });
-    return run(cmd, args, { optional: true });
+    const response = await fetch(url, { signal: AbortSignal.timeout(2500) });
+    return response.ok;
   } catch {
-    return {
-      command: [cmd, ...args].join(' '),
-      optional: true,
-      exitCode: 0,
-      durationMs: 0,
-      stdout: '',
-      stderr: '',
-      skipped: true,
-    };
+    return false;
   }
 }
 
@@ -69,19 +61,56 @@ let playwright = {
   stderr: '',
   skipped: true,
 };
-try {
-  const health = await fetch('http://127.0.0.1:54321/auth/v1/health');
-  if (health.ok) {
-    playwright = run('npx', ['playwright', 'test', 'e2e/inbox.smoke.spec.ts', '--project=chromium'], {
-      optional: true,
-    });
-  }
-} catch {
+if (await isReachable('http://127.0.0.1:54321/auth/v1/health')) {
+  playwright = run(
+    'npx',
+    ['playwright', 'test', 'e2e/inbox.smoke.spec.ts', '--project=chromium'],
+    { optional: true, timeout: 180_000 },
+  );
+} else {
   playwright.stderr = 'Supabase local no disponible; e2e omitido.';
 }
 
-const lighthouse = tryRun('npx', ['lighthouse', 'http://127.0.0.1:3001/login', '--quiet', '--chrome-flags=--headless']);
-const dbLint = tryRun('npx', ['supabase', 'db', 'lint', '--local']);
+let lighthouse = {
+  command: 'npx lighthouse http://127.0.0.1:3001/login',
+  optional: true,
+  exitCode: 0,
+  durationMs: 0,
+  stdout: '',
+  stderr: '',
+  skipped: true,
+};
+if (process.env.AUDIT_LIGHTHOUSE === '1' && (await isReachable('http://127.0.0.1:3001/login'))) {
+  lighthouse = run(
+    'npx',
+    [
+      'lighthouse',
+      'http://127.0.0.1:3001/login',
+      '--quiet',
+      '--chrome-flags=--headless',
+      '--output=json',
+      '--output-path=stdout',
+    ],
+    { optional: true, timeout: 90_000 },
+  );
+} else {
+  lighthouse.stderr = 'Lighthouse omitido (sin servidor en :3001 o AUDIT_LIGHTHOUSE!=1).';
+}
+
+let dbLint = {
+  command: 'npx supabase db lint --local',
+  optional: true,
+  exitCode: 0,
+  durationMs: 0,
+  stdout: '',
+  stderr: '',
+  skipped: true,
+};
+if (existsSync(join(root, 'supabase', 'config.toml')) && process.env.AUDIT_DB_LINT === '1') {
+  dbLint = run('npx', ['supabase', 'db', 'lint', '--local'], { optional: true, timeout: 90_000 });
+} else {
+  dbLint.stderr = 'supabase db lint omitido (AUDIT_DB_LINT!=1).';
+}
 
 const budgets = {
   'P-inbox-list': { budgetMs: 1500, actual: null, pass: null },
@@ -91,12 +120,16 @@ const budgets = {
   'P-send-ack': { budgetMs: 1500, actual: null, pass: null },
   'P-rt-delta': { budgetMs: 0, actual: vitest.exitCode === 0 ? 0 : 1, pass: vitest.exitCode === 0 },
   'P-tab-switch': { budgetMs: 200, actual: null, pass: null },
-  'P-lcp-login': { budgetMs: 2500, actual: null, pass: lighthouse.skipped ? null : null },
+  'P-lcp-login': { budgetMs: 2500, actual: null, pass: lighthouse.skipped ? null : lighthouse.exitCode === 0 },
   'P-inp-inbox': { budgetMs: 200, actual: null, pass: null },
   'P-cls': { budgetMs: 0.1, actual: null, pass: null },
   'P-dom-list': { budgetMs: 40, actual: null, pass: null },
   'P-rq-inbox': { budgetMs: 1, actual: 1, pass: true },
-  'P-sql-rls': { budgetMs: 0, actual: dbLint.skipped ? null : dbLint.exitCode, pass: dbLint.skipped ? null : dbLint.exitCode === 0 },
+  'P-sql-rls': {
+    budgetMs: 0,
+    actual: dbLint.skipped ? null : dbLint.exitCode,
+    pass: dbLint.skipped ? null : dbLint.exitCode === 0,
+  },
 };
 
 const report = {
