@@ -114,6 +114,16 @@ describe('resolveOutboundContactName', () => {
     ).toBe('Linda Guzman');
   });
 
+  it('fills WhatsApp push name when the stored name is only a phone number', () => {
+    expect(
+      resolveOutboundContactName({
+        incomingName: 'Nati',
+        existingContactName: '573116838597',
+        contactNameLocked: false,
+      }),
+    ).toBe('Nati');
+  });
+
   it('rejects unusable incoming names', () => {
     expect(
       resolveOutboundContactName({

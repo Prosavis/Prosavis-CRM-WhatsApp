@@ -40,6 +40,8 @@ import {
   normalizeDirectoryPhoneE164,
 } from '@/utils/directoryPhone';
 import { isUsableName } from '@/utils/contactDisplayName';
+import { ContactAvatar } from '@/components/common/ContactAvatar';
+import { uploadCrmContactPhoto } from '@/services/storageService';
 
 const ENTRY_STATUSES = ['active', 'inactive', 'opt_out'];
 const QUALITY_TAGS = ['good', 'standard', 'bad'];
@@ -243,6 +245,8 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [aptsLoading, setAptsLoading] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
 
   const setField = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) => {
@@ -451,6 +455,26 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
       return { ...prev, displayName: name, whatsappProfileName: name };
     });
   }, []);
+
+  const handlePhotoSelected = useCallback(async (file: File | undefined) => {
+    if (!file) return;
+    const phone = form.phone.trim() || conversation.contactPhone || conversation.phone || '';
+    if (!directoryPhoneKey(phone)) {
+      setError('Necesitamos un teléfono válido para guardar la foto del contacto.');
+      return;
+    }
+    setUploadingPhoto(true);
+    setError(null);
+    try {
+      const uploaded = await uploadCrmContactPhoto(file, phone);
+      setField('photoUrl', uploaded.photoRef);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo subir la foto.');
+    } finally {
+      setUploadingPhoto(false);
+      if (photoInputRef.current) photoInputRef.current.value = '';
+    }
+  }, [conversation.contactPhone, conversation.phone, form.phone, setField]);
 
   const handleSave = useCallback(async () => {
     if (!entry) return;
@@ -696,13 +720,40 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
                 onChange={(e) => setField('email', e.target.value)}
                 fullWidth
               />
-              <TextField
-                label="Foto URL"
-                size="small"
-                value={form.photoUrl}
-                onChange={(e) => setField('photoUrl', e.target.value)}
-                fullWidth
-              />
+              <Stack direction="row" spacing={1.5} alignItems="center">
+                <ContactAvatar
+                  displayName={form.displayName || form.fullName}
+                  phone={form.phone}
+                  photoUrl={form.photoUrl}
+                  size={48}
+                />
+                <Stack spacing={0.75} sx={{ flex: 1, minWidth: 0 }}>
+                  <input
+                    ref={photoInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    hidden
+                    onChange={(e) => void handlePhotoSelected(e.target.files?.[0])}
+                  />
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    disabled={uploadingPhoto || !entry}
+                    onClick={() => photoInputRef.current?.click()}
+                    sx={{ alignSelf: 'flex-start', textTransform: 'none' }}
+                  >
+                    {uploadingPhoto ? 'Subiendo…' : 'Subir foto'}
+                  </Button>
+                  <TextField
+                    label="Foto URL"
+                    size="small"
+                    value={form.photoUrl}
+                    onChange={(e) => setField('photoUrl', e.target.value)}
+                    fullWidth
+                    helperText="Si WhatsApp no envía foto, súbela aquí. Queda fija hasta que la cambies."
+                  />
+                </Stack>
+              </Stack>
               <TextField
                 label="Bio / Notas"
                 size="small"

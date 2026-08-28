@@ -350,7 +350,7 @@ const MediaContent: React.FC<{ message: WhatsAppMessage; onOpenLightbox?: (url: 
   }, [effectiveUrl, effectiveMime, message.filename, message.mediaId]);
 
   const handleTranscribe = useCallback(async (force = false) => {
-    if (!message.mediaId) return;
+    if (!message.id || (!message.mediaId && !message.storagePath)) return;
     setTranscribing(true);
     setTranscriptionError('');
     try {
@@ -362,7 +362,7 @@ const MediaContent: React.FC<{ message: WhatsAppMessage; onOpenLightbox?: (url: 
     } finally {
       setTranscribing(false);
     }
-  }, [message.id, message.mediaId]);
+  }, [message.id, message.mediaId, message.storagePath]);
 
   const handleAnalyzeImage = useCallback(async (force = false) => {
     setAnalyzingImage(true);
@@ -381,7 +381,7 @@ const MediaContent: React.FC<{ message: WhatsAppMessage; onOpenLightbox?: (url: 
   const autoTranscribing = message.voiceTranscriptionStatus === 'pending' && !transcript;
 
   const transcriptionControls =
-    message.mediaType === 'audio' && message.direction === 'inbound' && message.mediaId ? (
+    message.mediaType === 'audio' && Boolean(message.mediaId || message.storagePath) ? (
       <Box sx={{ mt: 0.75 }}>
         {transcript ? (
           <Box sx={{ p: 1, borderRadius: 1, bgcolor: 'rgba(37, 211, 102, 0.08)' }}>

@@ -1,6 +1,7 @@
 // deno-lint-ignore-file no-explicit-any
 import { getGeminiApiKey, geminiTranscribeAudio, resolveGeminiModel, DEFAULT_GEMINI_MODEL } from './geminiClient.ts';
 import {
+  canTranscribePersistedAudio,
   isVoiceTranscriptionFeatureEnabled,
   MAX_STT_AUDIO_BYTES,
 } from './inboxAiMediaLimits.ts';
@@ -91,8 +92,8 @@ export async function transcribeInboundAudioById(
     return { ok: false, error: formatUnknownError(readError), status: 500 };
   }
 
-  if (row.direction !== 'inbound' || row.media_type !== 'audio' || !row.media_id) {
-    return { ok: false, error: 'Solo se pueden transcribir audios inbound con mediaId.', status: 400 };
+  if (!canTranscribePersistedAudio(row)) {
+    return { ok: false, error: 'Solo se pueden transcribir audios con mediaId o storage_path.', status: 400 };
   }
 
   if (row.voice_transcription && !options?.force) {
@@ -140,4 +141,47 @@ export async function transcribeInboundAudioById(
     }).eq('id', messageLogId);
     return { ok: false, error: message, status: 500 };
   }
+}
+
+export async function backfillUntranscribedPersistedAudio(
+  supabase: SupabaseClient,
+  options?: { limit?: number },
+): Promise<{ attempted: number; completed: number; failed: number; cached: number; errors: string[] }> {
+  const limit = Math.min(Math.max(options?.limit ?? 25, 1), 50);
+  const { data: rows, error } = await supabase
+    .from('whatsapp_message_log')
+    .select('id, media_type, media_id, storage_path, voice_transcription')
+    .eq('media_type', 'audio')
+    .is('voice_transcription', null)
+    .order('created_at', { ascending: false })
+    .limit(limit * 3);
+
+  if (error) {
+    return { attempted: 0, completed: 0, failed: 1, cached: 0, errors: [formatUnknownError(error)] };
+  }
+
+  const candidates = (rows ?? [])
+    .filter((row: { media_type?: unknown; media_id?: unknown; storage_path?: unknown }) =>
+      canTranscribePersistedAudio(row)
+    )
+    .slice(0, limit);
+
+  let completed = 0;
+  let failed = 0;
+  let cached = 0;
+  const errors: string[] = [];
+
+  for (const row of candidates) {
+    const result = await transcribeInboundAudioById(supabase, String(row.id));
+    if (result.ok && result.cached) {
+      cached += 1;
+    } else if (result.ok) {
+      completed += 1;
+    } else {
+      failed += 1;
+      errors.push(`${row.id}: ${result.error}`);
+    }
+  }
+
+  return { attempted: candidates.length, completed, failed, cached, errors };
 }

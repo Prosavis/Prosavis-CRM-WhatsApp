@@ -725,6 +725,25 @@ export async function transcribeWhatsAppInboundAudio(
   return data as { success: boolean; transcript: string; cached?: boolean };
 }
 
+export async function backfillWhatsAppAudioTranscriptions(limit = 25): Promise<{
+  success: boolean;
+  attempted: number;
+  completed: number;
+  failed: number;
+  cached: number;
+  errors: string[];
+}> {
+  const data = await invokeFn('transcribe-whatsapp-inbound-audio', { backfill: true, limit });
+  return data as {
+    success: boolean;
+    attempted: number;
+    completed: number;
+    failed: number;
+    cached: number;
+    errors: string[];
+  };
+}
+
 export async function analyzeWhatsAppInboundImage(
   messageLogId: string,
   force = false,

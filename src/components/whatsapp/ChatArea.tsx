@@ -1228,12 +1228,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     }
   }, [loadedConversationInbound, onLoadedConversationInbound]);
   const inboundAudioStats = useMemo(() => {
-    const inboundAudios = visibleMessages.filter(
-      (message) => message.direction === 'inbound' && message.mediaType === 'audio',
-    );
+    const audios = visibleMessages.filter((message) => message.mediaType === 'audio');
     return {
-      pending: inboundAudios.filter((message) => message.voiceTranscriptionStatus === 'pending').length,
-      missing: inboundAudios.filter(
+      pending: audios.filter((message) => message.voiceTranscriptionStatus === 'pending').length,
+      missing: audios.filter(
         (message) =>
           message.voiceTranscriptionStatus !== 'completed' &&
           message.voiceTranscriptionStatus !== 'pending',

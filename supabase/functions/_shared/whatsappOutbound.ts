@@ -23,6 +23,7 @@ import {
   customerPhoneFromStableKey,
   resolveWhatsAppLine,
 } from './whatsappLines.ts';
+import { queuePersistedAudioTranscription } from './whatsappMediaHydrate.ts';
 
 export type { MediaType };
 export { buildOutboundMediaPayload, defaultMimeForMediaType };
@@ -641,6 +642,7 @@ export async function sendWhatsAppMediaOutbound(
     batch_id: params.batchId ?? null,
     batch_index: typeof params.batchIndex === 'number' ? params.batchIndex : null,
     client_attachment_id: params.clientAttachmentId ?? null,
+    media_id: mediaId ?? null,
     storage_path: params.storagePath ?? null,
     mime_type: params.mimeType ?? null,
     size_bytes: typeof params.sizeBytes === 'number' ? params.sizeBytes : null,
@@ -664,6 +666,10 @@ export async function sendWhatsAppMediaOutbound(
       messageId: persisted.messageId,
       error: metaResult.errorMessage ?? 'Error al enviar con Meta.',
     };
+  }
+
+  if (params.mediaType === 'audio' && persisted.messageId) {
+    await queuePersistedAudioTranscription(supabase, persisted.messageId);
   }
 
   return {

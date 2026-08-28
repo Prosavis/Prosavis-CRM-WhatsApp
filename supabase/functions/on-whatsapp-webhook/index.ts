@@ -1,5 +1,5 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
-import { isUsableName } from '../_shared/contactDisplayName.ts';
+import { resolveOutboundContactName } from '../_shared/contactDisplayName.ts';
 import { clientFromApiKey, getServiceClient } from '../_shared/supabase.ts';
 import { hydratePersistedMessageMedia } from '../_shared/whatsappMediaHydrate.ts';
 import { getMessageContent } from '../_shared/whatsappMessageContent.ts';
@@ -287,7 +287,7 @@ async function processInboundMessage(params: {
 
   const { data: existingConversation, error: conversationReadError } = await params.supabase
     .from('whatsapp_conversations')
-    .select('unread_count, contact_name_locked, metadata')
+    .select('unread_count, contact_name, contact_name_locked, metadata')
     .eq('stable_key', stableKey)
     .maybeSingle();
 
@@ -298,7 +298,7 @@ async function processInboundMessage(params: {
 
   // Nombre CRM (`contact_name`):
   // - Si está locked (p. ej. Auxiliares), NUNCA lo pisa el push name de Meta.
-  // - Si Meta manda un nombre no usable (solo emoji/símbolos), tampoco pisa contact_name.
+  // - Si ya hay un nombre usable, se queda. WhatsApp solo rellena vacío / número.
   // `whatsapp_profile_name` sí refleja el push name de Meta (incluso emoji) para diagnóstico.
   const isNameLocked = existingConversation?.contact_name_locked === true;
   const nextMetadata: JsonRecord = { ...asRecord(existingConversation?.metadata) };
@@ -325,8 +325,13 @@ async function processInboundMessage(params: {
 
   if (contactName !== null) {
     conversationPatch.whatsapp_profile_name = contactName;
-    if (!isNameLocked && isUsableName(contactName)) {
-      conversationPatch.contact_name = contactName;
+    const nextContactName = resolveOutboundContactName({
+      incomingName: contactName,
+      existingContactName: existingConversation?.contact_name as string | null | undefined,
+      contactNameLocked: isNameLocked,
+    });
+    if (nextContactName) {
+      conversationPatch.contact_name = nextContactName;
     }
   }
 

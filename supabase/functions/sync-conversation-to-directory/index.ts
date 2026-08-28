@@ -156,14 +156,18 @@ Deno.serve(async (req) => {
         throw upsertError;
       }
       if (commercialKey && upsertedId) {
+        const fillName = displayName && !isUsableName(safeString(existingEntry?.display_name as string | undefined));
+        const fillFullName = displayName && !isUsableName(safeString(existingEntry?.full_name as string | undefined));
+        const commercialPatch: Record<string, unknown> = {
+          whatsapp_commercial_conversation_id: commercialKey,
+          updated_at: new Date().toISOString(),
+        };
+        if (fillName) commercialPatch.display_name = displayName;
+        if (fillFullName) commercialPatch.full_name = displayName;
         await supabase
           .from('crm_directory')
-          .update({
-            whatsapp_commercial_conversation_id: commercialKey,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', upsertedId)
-          .neq('whatsapp_commercial_conversation_id', commercialKey);
+          .update(commercialPatch)
+          .eq('id', upsertedId);
       }
       return new Response(JSON.stringify({ ok: true, directory_id: upsertedId, line: 'commercial' }), {
         status: 200,

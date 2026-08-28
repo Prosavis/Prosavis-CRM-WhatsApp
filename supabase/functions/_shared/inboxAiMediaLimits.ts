@@ -12,14 +12,30 @@ export function isVoiceTranscriptionFeatureEnabled(
   return !['0', 'false', 'off', 'no'].includes(envValue.trim().toLowerCase());
 }
 
+export function canTranscribePersistedAudio(row: {
+  media_type?: unknown;
+  media_id?: unknown;
+  storage_path?: unknown;
+}): boolean {
+  const mediaType = String(row.media_type ?? '').trim().toLowerCase();
+  if (mediaType !== 'audio') return false;
+  const mediaId = String(row.media_id ?? '').trim();
+  const storagePath = String(row.storage_path ?? '').trim();
+  return Boolean(mediaId || storagePath);
+}
+
 export function inboundAudioNeedsAutoTranscription(params: {
   mediaType?: string | null;
   messageLogId?: string | null;
   mediaId?: string | null;
+  storagePath?: string | null;
 }): boolean {
-  return params.mediaType === 'audio'
-    && Boolean(params.messageLogId)
-    && Boolean(params.mediaId);
+  return Boolean(params.messageLogId)
+    && canTranscribePersistedAudio({
+      media_type: params.mediaType,
+      media_id: params.mediaId,
+      storage_path: params.storagePath,
+    });
 }
 
 export function isAnalyzableInboundImage(row: {

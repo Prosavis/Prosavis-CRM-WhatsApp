@@ -63,6 +63,20 @@ export async function persistInboundMedia(params: {
   }
 }
 
+export async function queuePersistedAudioTranscription(
+  supabase: SupabaseClient,
+  messageLogId: string,
+): Promise<void> {
+  if (!isVoiceTranscriptionEnabled() || !messageLogId) return;
+  await supabase.from('whatsapp_message_log').update({
+    voice_transcription_status: 'pending',
+  }).eq('id', messageLogId);
+  scheduleBackgroundWork(
+    transcribeInboundAudioById(supabase, messageLogId),
+    'auto-stt',
+  );
+}
+
 export async function hydratePersistedMessageMedia(params: {
   supabase: SupabaseClient;
   messageLogId: string | null;
@@ -116,16 +130,10 @@ export async function hydratePersistedMessageMedia(params: {
       mediaType: params.mediaType,
       messageLogId: params.messageLogId,
       mediaId: params.mediaId,
+      storagePath: persisted.storagePath,
     }) &&
-    isVoiceTranscriptionEnabled() &&
-    getWhatsAppAccessToken()
+    isVoiceTranscriptionEnabled()
   ) {
-    await params.supabase.from('whatsapp_message_log').update({
-      voice_transcription_status: 'pending',
-    }).eq('id', params.messageLogId);
-    scheduleBackgroundWork(
-      transcribeInboundAudioById(params.supabase, params.messageLogId),
-      'auto-stt',
-    );
+    await queuePersistedAudioTranscription(params.supabase, params.messageLogId);
   }
 }

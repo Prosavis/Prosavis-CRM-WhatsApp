@@ -3,6 +3,7 @@ import {
   MAX_IMAGE_ANALYSES_PER_CONVERSATION_24H,
   MAX_IMAGE_ANALYSIS_BYTES,
   MAX_IMAGES_PER_ANALYSIS_REQUEST,
+  canTranscribePersistedAudio,
   countsTowardVisionQuota,
   inboundAudioNeedsAutoTranscription,
   isAnalyzableInboundImage,
@@ -22,11 +23,17 @@ describe('isVoiceTranscriptionFeatureEnabled', () => {
 });
 
 describe('inboundAudioNeedsAutoTranscription', () => {
-  it('requires inbound audio with message id and media id', () => {
+  it('accepts persisted audio with media id or storage path, any direction', () => {
     expect(inboundAudioNeedsAutoTranscription({
       mediaType: 'audio',
       messageLogId: 'm1',
       mediaId: 'wa1',
+    })).toBe(true);
+    expect(inboundAudioNeedsAutoTranscription({
+      mediaType: 'audio',
+      messageLogId: 'm1',
+      mediaId: null,
+      storagePath: '57311/audio.ogg',
     })).toBe(true);
     expect(inboundAudioNeedsAutoTranscription({
       mediaType: 'image',
@@ -37,6 +44,26 @@ describe('inboundAudioNeedsAutoTranscription', () => {
       mediaType: 'audio',
       messageLogId: 'm1',
       mediaId: null,
+    })).toBe(false);
+  });
+});
+
+describe('canTranscribePersistedAudio', () => {
+  it('allows outbound audio with only storage_path', () => {
+    expect(canTranscribePersistedAudio({
+      media_type: 'audio',
+      media_id: null,
+      storage_path: 'out/voice.ogg',
+    })).toBe(true);
+    expect(canTranscribePersistedAudio({
+      media_type: 'audio',
+      media_id: 'wa1',
+      storage_path: null,
+    })).toBe(true);
+    expect(canTranscribePersistedAudio({
+      media_type: 'audio',
+      media_id: null,
+      storage_path: null,
     })).toBe(false);
   });
 });

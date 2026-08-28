@@ -1,4 +1,10 @@
 import { supabase } from '@/config/supabase';
+import {
+  CRM_CONTACT_PHOTOS_BUCKET,
+  assertCrmContactPhotoFile,
+  buildCrmContactPhotoPath,
+  toCrmContactPhotoRef,
+} from '@/utils/contactPhotoStorage';
 
 export interface UploadResult {
   storagePath: string;
@@ -18,6 +24,39 @@ export function formatStorageUploadError(error: unknown): string {
     if (parts.length) return parts.join(' — ');
   }
   return 'No se pudo subir el archivo a Storage.';
+}
+
+export async function uploadCrmContactPhoto(
+  file: File,
+  phone: string,
+): Promise<{ photoRef: string; previewUrl: string }> {
+  assertCrmContactPhotoFile(file);
+  await supabase.auth.refreshSession().catch(() => undefined);
+
+  const storagePath = buildCrmContactPhotoPath(phone, file);
+  const { data, error } = await supabase.storage
+    .from(CRM_CONTACT_PHOTOS_BUCKET)
+    .upload(storagePath, file, {
+      upsert: false,
+      contentType: file.type || 'image/jpeg',
+      cacheControl: '3600',
+    });
+  if (error) throw new Error(formatStorageUploadError(error));
+
+  let previewUrl = '';
+  try {
+    const { data: signed } = await supabase.storage
+      .from(CRM_CONTACT_PHOTOS_BUCKET)
+      .createSignedUrl(data.path, 60 * 60 * 24 * 7);
+    if (signed?.signedUrl) previewUrl = signed.signedUrl;
+  } catch {
+    // La UI resuelve el ref persistente en ContactAvatar.
+  }
+
+  return {
+    photoRef: toCrmContactPhotoRef(data.path),
+    previewUrl,
+  };
 }
 
 export async function uploadWhatsAppStorageFile(
