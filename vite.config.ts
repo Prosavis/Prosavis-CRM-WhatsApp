@@ -1,7 +1,8 @@
 /// <reference types="vitest/config" />
 import { resolve } from 'node:path';
-import { defineConfig } from 'vite';
+import { defineConfig, type PluginOption } from 'vite';
 import react from '@vitejs/plugin-react';
+import { visualizer } from 'rollup-plugin-visualizer';
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -12,7 +13,10 @@ export default defineConfig({
         plugins: ['@emotion/babel-plugin'],
       },
     }),
-  ],
+    process.env.ANALYZE
+      ? visualizer({ filename: 'dist/stats.html', gzipSize: true, open: false })
+      : null,
+  ].filter(Boolean) as PluginOption[],
   resolve: {
     alias: {
       '@': resolve(__dirname, './src'),
@@ -21,7 +25,8 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    environmentMatchGlobs: [['src/**/*.test.tsx', 'jsdom']],
   },
   optimizeDeps: {
     include: [
@@ -52,7 +57,8 @@ export default defineConfig({
       output: {
         manualChunks: {
           'vendor-react': ['react', 'react-dom'],
-          'vendor-mui': ['@mui/material', '@mui/icons-material', '@emotion/react', '@emotion/styled'],
+          'vendor-mui': ['@mui/material', '@emotion/react', '@emotion/styled'],
+          'vendor-mui-icons': ['@mui/icons-material'],
           'vendor-supabase': ['@supabase/supabase-js'],
           'vendor-firebase': ['firebase/app', 'firebase/functions'],
         },

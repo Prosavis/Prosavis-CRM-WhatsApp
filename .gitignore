@@ -53,6 +53,10 @@ scripts/firebase-export/secrets/
 scripts/firebase-export/output/
 scripts/firebase-export/node_modules/
 seed.sql
+!supabase/seed.sql
+playwright-report/
+test-results/
+e2e/.auth/
 
 # opencode config
 opencode.json

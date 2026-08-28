@@ -16,6 +16,8 @@ export interface AuthContextValue {
   loading: boolean;
   isAdmin: boolean;
   signInWithGoogle: () => Promise<void>;
+  /** Solo harness local / e2e. Nunca Google OAuth ni allowlist de prod. */
+  signInWithPassword: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 

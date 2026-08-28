@@ -1,0 +1,70 @@
+name: CRM quality
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'supabase/**'
+      - 'e2e/**'
+      - 'scripts/audit/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.ts'
+      - '.github/workflows/crm-quality.yml'
+  push:
+    branches: [main, master]
+    paths:
+      - 'src/**'
+      - 'supabase/**'
+      - 'e2e/**'
+      - 'scripts/audit/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.ts'
+      - '.github/workflows/crm-quality.yml'
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run type-check
+      - run: npm run lint
+      - name: Playwright e2e (solo si hay supabase local)
+        if: ${{ hashFiles('supabase/config.toml') != '' && false }}
+        run: npx playwright test --project=chromium
+        env:
+          ENABLE_META_SEND: 'false'
+
+  crm-audit:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Smoke audit (A2, B1–B3, C1, I1, I4)
+        run: |
+          npx vitest run src/utils/inboxConversationCache.test.ts src/utils/inboxMessageCache.test.ts src/utils/mediaUrlCache.test.ts
+          npm run type-check
+        env:
+          ENABLE_META_SEND: 'false'
+      - name: Nightly full audit
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: npm run audit
+        env:
+          ENABLE_META_SEND: 'false'

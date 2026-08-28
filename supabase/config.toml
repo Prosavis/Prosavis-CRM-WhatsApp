@@ -34,6 +34,9 @@ enable_anonymous_sign_ins = false
 [auth.email]
 enable_signup = false
 enable_confirmations = false
+# E2E local: e2e@prosavis.local / e2e-local-only (Playwright Admin API + admin_profiles).
+# Nunca Google OAuth ni allowlist de producción.
+# Harness / audit: ENABLE_META_SEND=false (scripts/audit y CI). No enviar a Meta.
 
 [auth.external.google]
 enabled = true

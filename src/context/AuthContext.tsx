@@ -120,6 +120,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
     };
   }, [refreshProfile]);
 
+  const signInWithPassword = useCallback(async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+  }, []);
+
   const signInWithGoogle = useCallback(async () => {
     const redirectTo = `${window.location.origin}/login`;
     const { error } = await supabase.auth.signInWithOAuth({
@@ -147,9 +152,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
       loading,
       isAdmin: !!profile && ['admin', 'super_admin'].includes(profile.role),
       signInWithGoogle,
+      signInWithPassword,
       signOut,
     }),
-    [loading, profile, session, signInWithGoogle, signOut],
+    [loading, profile, session, signInWithGoogle, signInWithPassword, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

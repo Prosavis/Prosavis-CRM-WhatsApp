@@ -8,6 +8,7 @@ import {
   CircularProgress,
   Container,
   Stack,
+  TextField,
   Typography,
 } from '@mui/material';
 import { Google as GoogleIcon } from '@mui/icons-material';
@@ -25,10 +26,14 @@ interface LoginPageProps {
 }
 
 export default function LoginPage({ unauthorized = false }: LoginPageProps) {
-  const { signInWithGoogle, user, isAdmin, loading } = useAuth();
+  const { signInWithGoogle, signInWithPassword, user, isAdmin, loading } = useAuth();
   const { mode } = useTheme();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [e2eEmail, setE2eEmail] = useState('e2e@prosavis.local');
+  const [e2ePassword, setE2ePassword] = useState('');
+  const showLocalEmailLogin =
+    import.meta.env.DEV || import.meta.env.VITE_E2E_EMAIL_LOGIN === 'true';
 
   if (!loading && user && isAdmin) {
     return <Navigate to="/whatsapp" replace />;
@@ -235,6 +240,48 @@ export default function LoginPage({ unauthorized = false }: LoginPageProps) {
                       )}
 
                       {error && <Alert severity="error">{error}</Alert>}
+
+                      {showLocalEmailLogin && (
+                        <Stack spacing={1.5} data-testid="e2e-email-login-form">
+                          <TextField
+                            label="Correo e2e"
+                            type="email"
+                            value={e2eEmail}
+                            onChange={(event) => setE2eEmail(event.target.value)}
+                            autoComplete="username"
+                            size="small"
+                          />
+                          <TextField
+                            label="Contraseña e2e"
+                            type="password"
+                            value={e2ePassword}
+                            onChange={(event) => setE2ePassword(event.target.value)}
+                            autoComplete="current-password"
+                            size="small"
+                          />
+                          <Button
+                            data-testid="e2e-email-login"
+                            variant="outlined"
+                            disabled={submitting || loading}
+                            onClick={async () => {
+                              setSubmitting(true);
+                              setError(null);
+                              try {
+                                await signInWithPassword(e2eEmail, e2ePassword);
+                              } catch (err) {
+                                setError(
+                                  err instanceof Error
+                                    ? err.message
+                                    : 'No se pudo iniciar sesión con email local.',
+                                );
+                                setSubmitting(false);
+                              }
+                            }}
+                          >
+                            Entrar (solo local / e2e)
+                          </Button>
+                        </Stack>
+                      )}
 
                       <Button
                         fullWidth
