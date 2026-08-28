@@ -6,11 +6,13 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   Box,
   Typography,
   IconButton,
   CircularProgress,
+  Skeleton,
   Chip,
   Tooltip,
   Divider,
@@ -46,6 +48,13 @@ import MarkChatUnreadIcon from '@mui/icons-material/MarkChatUnread';
 import ReplyIcon from '@mui/icons-material/Reply';
 import ForwardIcon from '@mui/icons-material/Forward';
 import { crmToast } from '@/utils/crmToast';
+import {
+  hasMoreMessages,
+  markOptimisticFailed,
+  mergeInboxMessages,
+  prependOlderMessages,
+} from '@/utils/inboxMessageCache';
+import { INBOX_PERF_MARKS, markInboxPerf } from '@/utils/inboxPerfMarks';
 import MessageBubble, { type MessageReaction } from './MessageBubble';
 import ForwardMessageDialog from './ForwardMessageDialog';
 import MessageInput, {
@@ -55,6 +64,7 @@ import MessageInput, {
 import { uploadWhatsAppStorageFile } from '@/services/storageService';
 import {
   subscribeToMessages,
+  fetchConversationMessages,
   sendMessage,
   sendMedia,
   sendMediaBatch,
@@ -159,16 +169,6 @@ interface ChatAreaProps {
   onLoadedConversationInbound?: (inbound: LoadedConversationInbound) => void;
 }
 
-function groupMessagesByDate(messages: WhatsAppMessage[]): Map<string, WhatsAppMessage[]> {
-  const groups = new Map<string, WhatsAppMessage[]>();
-  for (const msg of messages) {
-    const dateKey = formatColombiaDateLabel(msg.createdAt);
-    if (!groups.has(dateKey)) groups.set(dateKey, []);
-    groups.get(dateKey)!.push(msg);
-  }
-  return groups;
-}
-
 function reactionActorKey(message: Pick<WhatsAppMessage, 'direction' | 'agentUid' | 'senderType'>): string {
   if (message.direction === 'inbound') return 'customer';
   return `agent:${message.agentUid || message.senderType || 'agent'}`;
@@ -255,6 +255,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       0,
     ),
   );
+  const [olderMessages, setOlderMessages] = useState<WhatsAppMessage[]>([]);
+  const [optimisticMessages, setOptimisticMessages] = useState<WhatsAppMessage[]>([]);
+  const [hasOlder, setHasOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const sendAbortRef = useRef<AbortController | null>(null);
+  const pinToBottomRef = useRef(true);
   const [suggestionDraft, setSuggestionDraft] = useState('');
   const [suggestionLoading, setSuggestionLoading] = useState(false);
   const [suggestionHint, setSuggestionHint] = useState<string | null>(null);
@@ -320,12 +326,14 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const isLidThread = isLidStableKey(stableKey);
   const messages = useMemo(
     () =>
-      selectConversationMessages(
-        messageHistory,
-        conversation.id,
-        stableKey,
+      mergeInboxMessages(
+        prependOlderMessages(
+          olderMessages,
+          selectConversationMessages(messageHistory, conversation.id, stableKey),
+        ),
+        optimisticMessages,
       ),
-    [conversation.id, messageHistory, stableKey],
+    [conversation.id, messageHistory, olderMessages, optimisticMessages, stableKey],
   );
   const loading = isConversationMessageHistoryLoading(
     messageHistory,
@@ -357,6 +365,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       historyKey,
       subscriptionId,
     });
+    setOlderMessages([]);
+    setOptimisticMessages([]);
+    setHasOlder(false);
     setSelectionMode(false);
     setSelectedIds(new Set());
 
@@ -370,6 +381,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           subscriptionId,
           messages: msgs,
         });
+        setHasOlder(hasMoreMessages(msgs.length));
+        markInboxPerf(INBOX_PERF_MARKS.chatReady);
       },
       (error) => {
         console.error('Error en listener de mensajes:', error);
@@ -472,7 +485,18 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   }, [externalDraft, onExternalDraftConsumed]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    sendAbortRef.current?.abort();
+    sendAbortRef.current = new AbortController();
+    return () => {
+      sendAbortRef.current?.abort();
+    };
+  }, [conversation.id]);
+
+  useEffect(() => {
+    if (!pinToBottomRef.current) return;
+    const node = scrollContainerRef.current;
+    if (!node) return;
+    node.scrollTop = node.scrollHeight;
   }, [messages]);
 
   // === Presencia: track/untrack en canal Realtime (sin heartbeat SQL) ===
@@ -541,7 +565,40 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     async (text: string) => {
       const replyId = replyToMessage?.waMessageId;
       setReplyToMessage(null);
-      await sendMessage(customerPhone, text, sendPhoneNumberId, replyId);
+      const clientRequestId =
+        typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `req_${Date.now()}`;
+      const optimisticId = `opt_${clientRequestId}`;
+      const optimistic: WhatsAppMessage = {
+        id: optimisticId,
+        direction: 'outbound',
+        senderType: 'agent',
+        messageBody: text,
+        status: 'pending',
+        createdAt: new Date(),
+        clientRequestId,
+        replyToWaMessageId: replyId,
+        phoneNumberId: sendPhoneNumberId,
+      };
+      pinToBottomRef.current = true;
+      setOptimisticMessages((current) => mergeInboxMessages(current, [optimistic]));
+      markInboxPerf(INBOX_PERF_MARKS.sendOptimistic);
+      try {
+        await sendMessage(
+          customerPhone,
+          text,
+          sendPhoneNumberId,
+          replyId,
+          clientRequestId,
+          sendAbortRef.current?.signal,
+        );
+        markInboxPerf(INBOX_PERF_MARKS.sendAck);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'No se pudo enviar el mensaje';
+        setOptimisticMessages((current) => markOptimisticFailed(current, optimisticId, message));
+        throw error;
+      }
 
       const openLogId = suggestionLogIdRef.current;
       if (openLogId && text.trim()) {
@@ -563,6 +620,28 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     },
     [customerPhone, sendPhoneNumberId, replyToMessage],
   );
+
+  const handleLoadOlder = useCallback(async () => {
+    const oldest = messages[0];
+    if (!oldest || loadingOlder) return;
+    setLoadingOlder(true);
+    pinToBottomRef.current = false;
+    try {
+      const older = await fetchConversationMessages(stableKey, {
+        limit: 200,
+        before: oldest.createdAt,
+      });
+      setOlderMessages((current) => prependOlderMessages(current, older));
+      setHasOlder(hasMoreMessages(older.length));
+    } catch (error) {
+      crmToast.show(
+        'error',
+        error instanceof Error ? error.message : 'No se pudo cargar el historial',
+      );
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [loadingOlder, messages, stableKey]);
 
   const handleSendMedia = useCallback(
     async (
@@ -1261,7 +1340,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     return map;
   }, [myUid, reactionsByTarget]);
 
-  const groupedMessages = groupMessagesByDate(visibleMessages);
+  const messageVirtualizer = useVirtualizer({
+    count: visibleMessages.length,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: () => 88,
+    overscan: 12,
+    getItemKey: (index) => visibleMessages[index]?.id ?? index,
+  });
   const { metaByPhoneKey: directoryMetaByPhoneKey, ready: directoryMetaReady } =
     useDirectoryContactMeta([conversation]);
   const directoryTags = directoryMetaReady
@@ -1478,6 +1563,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       {/* Messages */}
       <Box
         ref={scrollContainerRef}
+        data-testid={!loading ? 'inbox-chat-ready' : undefined}
+        onScroll={(event) => {
+          const node = event.currentTarget;
+          pinToBottomRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
+        }}
         sx={{
           flex: 1,
           overflow: 'auto',
@@ -1489,49 +1579,88 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           py: 1,
         }}
       >
+        {hasOlder && !loading && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 1 }}>
+            <Button
+              data-testid="inbox-load-older"
+              size="small"
+              variant="outlined"
+              disabled={loadingOlder}
+              onClick={() => void handleLoadOlder()}
+            >
+              {loadingOlder ? 'Cargando…' : 'Cargar mensajes anteriores'}
+            </Button>
+          </Box>
+        )}
         {loading ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-            <CircularProgress />
+          <Box sx={{ px: 2, py: 2 }}>
+            {Array.from({ length: 6 }, (_, index) => (
+              <Skeleton
+                key={index}
+                variant="rounded"
+                height={48}
+                sx={{ mb: 1, maxWidth: index % 2 === 0 ? '70%' : '55%', ml: index % 2 === 0 ? 0 : 'auto' }}
+              />
+            ))}
           </Box>
         ) : visibleMessages.length === 0 ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
             <Typography variant="body2" color="text.secondary">No hay mensajes en esta conversación</Typography>
           </Box>
         ) : (
-          Array.from(groupedMessages.entries()).map(([dateLabel, dayMessages]) => (
-            <React.Fragment key={dateLabel}>
-              <Box sx={{ display: 'flex', justifyContent: 'center', my: 1 }}>
-                <Chip
-                  label={dateLabel}
-                  size="small"
-                  sx={{
-                    bgcolor: (t) =>
-                      t.palette.mode === 'dark' ? alpha(t.palette.info.main, 0.2) : '#e1f2fb',
-                    color: 'text.secondary',
-                    fontWeight: 500,
-                    fontSize: '0.75rem',
-                  }}
-                />
-              </Box>
-              {dayMessages.map((msg) => (
-                <MessageBubble
+          <Box sx={{ height: messageVirtualizer.getTotalSize(), position: 'relative' }}>
+            {messageVirtualizer.getVirtualItems().map((virtualRow) => {
+              const msg = visibleMessages[virtualRow.index];
+              if (!msg) return null;
+              const prev = visibleMessages[virtualRow.index - 1];
+              const dateLabel = formatColombiaDateLabel(msg.createdAt);
+              const showDate = !prev || formatColombiaDateLabel(prev.createdAt) !== dateLabel;
+              return (
+                <Box
                   key={msg.id}
-                  message={msg}
-                  allMessages={messages}
-                  selectionMode={selectionMode}
-                  selected={selectedIds.has(msg.id)}
-                  onToggleSelect={handleToggleSelect}
-                  onDelete={handleDeleteSingle}
-                  onReply={handleReply}
-                  onForward={handleForwardSingle}
-                  reactions={msg.waMessageId ? reactionsByTarget.get(msg.waMessageId) || [] : []}
-                  currentAgentReactionEmoji={msg.waMessageId ? currentAgentReactionByTarget.get(msg.waMessageId) : undefined}
-                  reacting={msg.waMessageId ? Boolean(pendingReactions[msg.waMessageId]) : false}
-                  onReact={handleReact}
-                />
-              ))}
-            </React.Fragment>
-          ))
+                  data-index={virtualRow.index}
+                  ref={messageVirtualizer.measureElement}
+                  sx={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
+                >
+                  {showDate && (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', my: 1 }}>
+                      <Chip
+                        label={dateLabel}
+                        size="small"
+                        sx={{
+                          bgcolor: (t) =>
+                            t.palette.mode === 'dark' ? alpha(t.palette.info.main, 0.2) : '#e1f2fb',
+                          color: 'text.secondary',
+                          fontWeight: 500,
+                          fontSize: '0.75rem',
+                        }}
+                      />
+                    </Box>
+                  )}
+                  <MessageBubble
+                    message={msg}
+                    allMessages={messages}
+                    selectionMode={selectionMode}
+                    selected={selectedIds.has(msg.id)}
+                    onToggleSelect={handleToggleSelect}
+                    onDelete={handleDeleteSingle}
+                    onReply={handleReply}
+                    onForward={handleForwardSingle}
+                    reactions={msg.waMessageId ? reactionsByTarget.get(msg.waMessageId) || [] : []}
+                    currentAgentReactionEmoji={msg.waMessageId ? currentAgentReactionByTarget.get(msg.waMessageId) : undefined}
+                    reacting={msg.waMessageId ? Boolean(pendingReactions[msg.waMessageId]) : false}
+                    onReact={handleReact}
+                  />
+                </Box>
+              );
+            })}
+          </Box>
         )}
         <div ref={messagesEndRef} />
       </Box>

@@ -16,20 +16,18 @@ import {
   useMediaQuery,
 } from '@mui/material';
 import { alpha, useTheme as useMuiTheme, type Theme } from '@mui/material/styles';
-import {
-  Inbox as InboxIcon,
-  Storefront as StorefrontIcon,
-  BarChart as BarChartIcon,
-  ContactPhone as ContactPhoneIcon,
-  ConfirmationNumber as ConfirmationNumberIcon,
-  Settings as SettingsIcon,
-  MonitorHeart as MonitorHeartIcon,
-  AutoAwesome as AutoAwesomeIcon,
-  AdminPanelSettings as AdminPanelSettingsIcon,
-  Brightness4 as DarkModeIcon,
-  Brightness7 as LightModeIcon,
-  Logout as LogoutIcon,
-} from '@mui/icons-material';
+import InboxIcon from '@mui/icons-material/Inbox';
+import StorefrontIcon from '@mui/icons-material/Storefront';
+import BarChartIcon from '@mui/icons-material/BarChart';
+import ContactPhoneIcon from '@mui/icons-material/ContactPhone';
+import ConfirmationNumberIcon from '@mui/icons-material/ConfirmationNumber';
+import SettingsIcon from '@mui/icons-material/Settings';
+import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
+import DarkModeIcon from '@mui/icons-material/Brightness4';
+import LightModeIcon from '@mui/icons-material/Brightness7';
+import LogoutIcon from '@mui/icons-material/Logout';
 import { playThemeTransitionSound } from '@/components/common/ThemeToggle';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/hooks/useAuth';

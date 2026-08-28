@@ -5,9 +5,7 @@ import { Box, CircularProgress, Alert, Button } from '@mui/material';
 import WhatsAppLayout from '@/components/whatsapp/WhatsAppLayout';
 import WhatsAppTopBar from '@/components/whatsapp/WhatsAppTopBar';
 import WhatsAppBulkSendDialog from '@/components/whatsapp/bulk/WhatsAppBulkSendDialog';
-import MetricsTab, {
-  PURGE_WHATSAPP_LOG_CONFIRM_PHRASE,
-} from '@/components/whatsapp/metrics/MetricsTab';
+import { PURGE_WHATSAPP_LOG_CONFIRM_PHRASE } from '@/components/whatsapp/metrics/metricsConstants';
 import {
   WHATSAPP_CLOUD_COMMERCIAL,
   WHATSAPP_CLOUD_PRODUCTION,
@@ -36,6 +34,7 @@ import {
 
 export { PURGE_WHATSAPP_LOG_CONFIRM_PHRASE };
 
+const MetricsTab = lazy(() => import('@/components/whatsapp/metrics/MetricsTab'));
 const LeadsPage = lazy(() => import('../leads/LeadsPage'));
 const DiscountCodesTab = lazy(() => import('@/components/whatsapp/DiscountCodesTab'));
 const WhatsAppSettingsTab = lazy(() => import('@/components/whatsapp/WhatsAppSettingsTab'));
@@ -251,28 +250,37 @@ const WhatsAppCloudPage: React.FC = () => {
       )}
 
       <Box sx={{ px: { xs: 0.5, sm: 0 } }}>
-        <Box
-          data-tour={activeTab === 'commercial' ? 'whatsapp-tab-commercial' : 'whatsapp-tab-inbox'}
-          sx={{ display: isInboxSurface ? 'block' : 'none' }}
-        >
-          <WhatsAppLayout
-            phoneNumberId={inboxPhoneNumberId}
-            wabaId={inboxWabaId}
-            lineFilter={lineFilter}
-            onOpenConversation={handleOpenConversation}
-            focusPhone={focusPhone}
-            onClearFocusPhone={handleClearFocusPhone}
-            focusConversation={focusConversation}
-            onClearFocusConversation={handleClearFocusConversation}
-            onClearFocusDeepLink={handleClearFocusDeepLink}
-          />
-        </Box>
+        {isInboxSurface ? (
+          <Box
+            data-tour={activeTab === 'commercial' ? 'whatsapp-tab-commercial' : 'whatsapp-tab-inbox'}
+          >
+            <WhatsAppLayout
+              phoneNumberId={inboxPhoneNumberId}
+              wabaId={inboxWabaId}
+              lineFilter={lineFilter}
+              onOpenConversation={handleOpenConversation}
+              focusPhone={focusPhone}
+              onClearFocusPhone={handleClearFocusPhone}
+              focusConversation={focusConversation}
+              onClearFocusConversation={handleClearFocusConversation}
+              onClearFocusDeepLink={handleClearFocusDeepLink}
+            />
+          </Box>
+        ) : null}
 
         {activeTab === 'metrics' && (
-          <MetricsTab
-            broadcastJobParam={broadcastJobParam}
-            onClearBroadcastJobParam={clearBroadcastJobParam}
-          />
+          <Suspense
+            fallback={
+              <Box display="flex" justifyContent="center" alignItems="center" minHeight={240}>
+                <CircularProgress />
+              </Box>
+            }
+          >
+            <MetricsTab
+              broadcastJobParam={broadcastJobParam}
+              onClearBroadcastJobParam={clearBroadcastJobParam}
+            />
+          </Suspense>
         )}
 
         {activeTab === 'leads' && (

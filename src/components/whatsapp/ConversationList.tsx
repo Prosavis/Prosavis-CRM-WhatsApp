@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   Box,
   TextField,
@@ -18,6 +19,7 @@ import {
   Tooltip,
   Checkbox,
   CircularProgress,
+  Skeleton,
   Button,
   Dialog,
   DialogTitle,
@@ -196,7 +198,7 @@ interface ConversationRowProps {
   onContextMenu: (event: React.MouseEvent) => void;
 }
 
-const ConversationRow: React.FC<ConversationRowProps> = ({
+const ConversationRow: React.FC<ConversationRowProps> = React.memo(({
   conv,
   rowName,
   rowPhone,
@@ -230,6 +232,7 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
 
   return (
     <ListItemButton
+      data-testid="inbox-conversation-row"
       selected={selectionMode ? bulkSelected : chatSelected}
       onClick={handleClick}
       onContextMenu={selectionMode ? undefined : onContextMenu}
@@ -371,7 +374,7 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
       />
     </ListItemButton>
   );
-};
+});
 
 const ConversationList: React.FC<ConversationListProps> = ({
   conversations,
@@ -647,6 +650,31 @@ const ConversationList: React.FC<ConversationListProps> = ({
 
   const allFilteredSelected = filtered.length > 0
     && filtered.every((c) => selectedIds.has(c.id));
+
+  const listParentRef = useRef<HTMLDivElement | null>(null);
+  const conversationVirtualizer = useVirtualizer({
+    count: filtered.length,
+    getScrollElement: () => listParentRef.current,
+    estimateSize: () => 76,
+    overscan: 10,
+    getItemKey: (index) => filtered[index]?.id ?? index,
+  });
+
+  const moveConversationSelection = useCallback(
+    (delta: number) => {
+      if (filtered.length === 0) return;
+      const current = selectedId ? filtered.findIndex((c) => c.id === selectedId) : -1;
+      const nextIndex = Math.min(
+        filtered.length - 1,
+        Math.max(0, (current < 0 ? 0 : current) + delta),
+      );
+      const next = filtered[nextIndex];
+      if (!next) return;
+      onSelect(next);
+      conversationVirtualizer.scrollToIndex(nextIndex, { align: 'auto' });
+    },
+    [conversationVirtualizer, filtered, onSelect, selectedId],
+  );
 
   const allSelectedArchived = selectedConversations.length > 0
     && selectedConversations.every((c) => c.isArchived);
@@ -1180,81 +1208,29 @@ const ConversationList: React.FC<ConversationListProps> = ({
         </DialogActions>
       </Dialog>
 
-      <List sx={{ flex: 1, overflow: 'auto', py: 0 }}>
-        {filtered.map((conv) => {
-          const dirMeta = getDirectoryMetaForConversation(conv, directoryMetaByPhoneKey);
-          const rowPhone = conv.contactPhone || conv.phone;
-          const rowName = resolveContactDisplayName({
-            directoryDisplayName: directoryMetaReady ? dirMeta?.displayName : undefined,
-            // Mientras hidrata el directorio, no usar contact_name suelto (emoji / nombre de cliente).
-            // Si está locked (DETEKTOR, etc.) sí se usa de inmediato.
-            contactName:
-              !directoryMetaReady && !conv.contactNameLocked
-                ? undefined
-                : conv.contactName,
-            whatsappProfileName: conv.whatsappProfileName,
-            phone: rowPhone,
-            conversationId: conv.id,
-            contactNameLocked: conv.contactNameLocked,
-          });
-          const rowPhoto = pickContactPhotoUrl(
-            directoryMetaReady ? dirMeta?.photoUrl : undefined,
-            conv.contactPhotoUrl,
-          );
-          const directoryTags = directoryMetaReady
-            ? directoryDisplayTags({
-              tags: dirMeta?.tags,
-              classification: dirMeta?.classification,
-            })
-            : [];
-          const directoryTagKeys = new Set(directoryTags.map((tag) => tag.toLowerCase()));
-          const convTags = (conv.tagIds || [])
-            .map((id) => tagMap.get(id))
-            .filter((tag): tag is WhatsAppTag => {
-              if (!tag) return false;
-              return !directoryTagKeys.has(tag.name.toLowerCase());
-            });
-          const isUnread = Boolean(conv.unreadCount > 0 || conv.crmForceUnread);
-          const peers = presenceByConversationId?.[conv.id] || [];
-          const peerSummary = summarizePeerPresences(peers);
-
-          return (
-            <ConversationRow
-              key={conv.id}
-              conv={conv}
-              rowName={rowName}
-              rowPhone={rowPhone}
-              rowPhoto={rowPhoto}
-              convTags={convTags}
-              directoryTags={directoryTags}
-              tagColorByName={tagColorByName}
-              isUnread={isUnread}
-              peerSummary={peerSummary}
-              selectionMode={selectionMode}
-              bulkSelected={selectedIds.has(conv.id)}
-              chatSelected={conv.id === selectedId}
-              onOpenChat={() => onSelect(conv)}
-              onEnterSelection={() => enterSelectionMode(conv.id)}
-              onToggleBulkSelect={() => toggleSelectedId(conv.id)}
-              onContextMenu={(event) => {
-                event.preventDefault();
-                setContextMenu(
-                  contextMenu === null
-                    ? {
-                        mouseX: event.clientX + 2,
-                        mouseY: event.clientY - 6,
-                        conversation: conv,
-                      }
-                    : null,
-                );
-              }}
-            />
-          );
-        })}
-
-        {loading && (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-            <CircularProgress size={28} />
+      <Box
+        ref={listParentRef}
+        data-testid="inbox-conversation-list"
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown' || event.key === 'j') {
+            event.preventDefault();
+            moveConversationSelection(1);
+          } else if (event.key === 'ArrowUp' || event.key === 'k') {
+            event.preventDefault();
+            moveConversationSelection(-1);
+          } else if (event.key === 'Enter' && selectedId) {
+            const current = filtered.find((c) => c.id === selectedId);
+            if (current) onSelect(current);
+          }
+        }}
+        sx={{ flex: 1, overflow: 'auto', py: 0, outline: 'none' }}
+      >
+        {loading && filtered.length === 0 && (
+          <Box sx={{ px: 2, py: 1 }}>
+            {Array.from({ length: 8 }, (_, index) => (
+              <Skeleton key={index} variant="rounded" height={64} sx={{ mb: 1 }} />
+            ))}
           </Box>
         )}
 
@@ -1286,7 +1262,94 @@ const ConversationList: React.FC<ConversationListProps> = ({
             )}
           </Box>
         )}
-      </List>
+
+        {filtered.length > 0 && (
+          <Box sx={{ height: conversationVirtualizer.getTotalSize(), position: 'relative' }}>
+            {conversationVirtualizer.getVirtualItems().map((virtualRow) => {
+              const conv = filtered[virtualRow.index];
+              if (!conv) return null;
+              const dirMeta = getDirectoryMetaForConversation(conv, directoryMetaByPhoneKey);
+              const rowPhone = conv.contactPhone || conv.phone;
+              const rowName = resolveContactDisplayName({
+                directoryDisplayName: directoryMetaReady ? dirMeta?.displayName : undefined,
+                contactName:
+                  !directoryMetaReady && !conv.contactNameLocked
+                    ? undefined
+                    : conv.contactName,
+                whatsappProfileName: conv.whatsappProfileName,
+                phone: rowPhone,
+                conversationId: conv.id,
+                contactNameLocked: conv.contactNameLocked,
+              });
+              const rowPhoto = pickContactPhotoUrl(
+                directoryMetaReady ? dirMeta?.photoUrl : undefined,
+                conv.contactPhotoUrl,
+              );
+              const directoryTags = directoryMetaReady
+                ? directoryDisplayTags({
+                  tags: dirMeta?.tags,
+                  classification: dirMeta?.classification,
+                })
+                : [];
+              const directoryTagKeys = new Set(directoryTags.map((tag) => tag.toLowerCase()));
+              const convTags = (conv.tagIds || [])
+                .map((id) => tagMap.get(id))
+                .filter((tag): tag is WhatsAppTag => {
+                  if (!tag) return false;
+                  return !directoryTagKeys.has(tag.name.toLowerCase());
+                });
+              const isUnread = Boolean(conv.unreadCount > 0 || conv.crmForceUnread);
+              const peers = presenceByConversationId?.[conv.id] || [];
+              const peerSummary = summarizePeerPresences(peers);
+
+              return (
+                <Box
+                  key={conv.id}
+                  data-index={virtualRow.index}
+                  ref={conversationVirtualizer.measureElement}
+                  sx={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
+                >
+                  <ConversationRow
+                    conv={conv}
+                    rowName={rowName}
+                    rowPhone={rowPhone}
+                    rowPhoto={rowPhoto}
+                    convTags={convTags}
+                    directoryTags={directoryTags}
+                    tagColorByName={tagColorByName}
+                    isUnread={isUnread}
+                    peerSummary={peerSummary}
+                    selectionMode={selectionMode}
+                    bulkSelected={selectedIds.has(conv.id)}
+                    chatSelected={conv.id === selectedId}
+                    onOpenChat={() => onSelect(conv)}
+                    onEnterSelection={() => enterSelectionMode(conv.id)}
+                    onToggleBulkSelect={() => toggleSelectedId(conv.id)}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setContextMenu(
+                        contextMenu === null
+                          ? {
+                              mouseX: event.clientX + 2,
+                              mouseY: event.clientY - 6,
+                              conversation: conv,
+                            }
+                          : null,
+                      );
+                    }}
+                  />
+                </Box>
+              );
+            })}
+          </Box>
+        )}
+      </Box>
       {!compactList && (
         <Box
           role="separator"
