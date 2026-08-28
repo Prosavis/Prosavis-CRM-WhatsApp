@@ -1006,9 +1006,8 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
         <Box
           data-tour="whatsapp-inbox-list"
           sx={{
-            width: { xs: '100%', sm: 520, md: 600 },
-            minWidth: 320,
-            maxWidth: 720,
+            width: { xs: '100%', sm: 'auto' },
+            minWidth: 0,
             borderRight: 1,
             borderColor: 'divider',
             flexShrink: 0,

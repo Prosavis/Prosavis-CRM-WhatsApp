@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Box,
   TextField,
@@ -23,6 +23,7 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  useMediaQuery,
   useTheme,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
@@ -82,6 +83,14 @@ import { useLongPress } from '@/hooks/useLongPress';
 import { coloredChipSx } from '@/utils/coloredChipStyles';
 import { formatRelativeColombiaTime } from '@/utils/colombiaTime';
 import { conversationPreviewText } from '@/utils/whatsappCoexStub';
+import {
+  clampInboxListWidth,
+  INBOX_LIST_WIDTH_DEFAULT,
+  INBOX_LIST_WIDTH_KEY,
+  INBOX_LIST_WIDTH_MAX,
+  INBOX_LIST_WIDTH_MIN,
+  readStoredInboxListWidth,
+} from '@/utils/whatsappInboxListWidth';
 
 /** Diff applied to each selected conversation: add new tags, remove deselected common tags. */
 export type BulkTagChanges = {
@@ -388,9 +397,13 @@ const ConversationList: React.FC<ConversationListProps> = ({
   onConfigureOutOfCoverage,
 }) => {
   const theme = useTheme();
+  const compactList = useMediaQuery(theme.breakpoints.down('sm'));
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<InboxCategoryId>(readStoredInboxFilter);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readStoredSidebarCollapsed);
+  const [listWidth, setListWidth] = useState(readStoredInboxListWidth);
+  const [resizingList, setResizingList] = useState(false);
+  const listDragRef = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -421,6 +434,56 @@ const ConversationList: React.FC<ConversationListProps> = ({
       // localStorage puede estar bloqueado
     }
   }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(INBOX_LIST_WIDTH_KEY, String(listWidth));
+    } catch {
+      // localStorage puede estar bloqueado
+    }
+  }, [listWidth]);
+
+  useEffect(() => {
+    if (!resizingList) return;
+    const previousCursor = document.body.style.cursor;
+    const previousSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    return () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousSelect;
+    };
+  }, [resizingList]);
+
+  const handleListResizePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    listDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startWidth: listWidth,
+    };
+    setResizingList(true);
+  }, [listWidth]);
+
+  const handleListResizePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = listDragRef.current;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    setListWidth(clampInboxListWidth(drag.startWidth + (event.clientX - drag.startX)));
+  }, []);
+
+  const handleListResizePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (listDragRef.current?.pointerId !== event.pointerId) return;
+    listDragRef.current = null;
+    setResizingList(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }, []);
+
+  const handleListResizeDoubleClick = useCallback(() => {
+    setListWidth(INBOX_LIST_WIDTH_DEFAULT);
+  }, []);
 
   const directoryMeta = useDirectoryContactMeta(conversations);
   const { metaByPhoneKey: directoryMetaByPhoneKey, ready: directoryMetaReady } = directoryMeta;
@@ -664,7 +727,15 @@ const ConversationList: React.FC<ConversationListProps> = ({
   }, [selectedConversations]);
 
   return (
-    <Box sx={{ display: 'flex', height: '100%', bgcolor: 'background.paper', minHeight: 0 }}>
+    <Box
+      sx={{
+        display: 'flex',
+        height: '100%',
+        bgcolor: 'background.paper',
+        minHeight: 0,
+        width: compactList ? '100%' : 'auto',
+      }}
+    >
       <InboxCategorySidebar
         category={filter}
         onCategoryChange={handleCategoryChange}
@@ -679,7 +750,17 @@ const ConversationList: React.FC<ConversationListProps> = ({
         tagCountsById={filter === 'archived' ? archivedTagCountsById : tagCountsById}
       />
 
-      <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0 }}>
+      <Box
+        sx={{
+          display: 'flex',
+          flexDirection: 'column',
+          position: 'relative',
+          flex: compactList ? 1 : '0 0 auto',
+          width: compactList ? '100%' : listWidth,
+          minWidth: compactList ? 0 : listWidth,
+          minHeight: 0,
+        }}
+      >
       <Box sx={{ p: 1.5, borderBottom: 1, borderColor: 'divider' }}>
         <Box sx={{ display: 'flex', gap: 0.5, mb: 1 }}>
           <TextField
@@ -1202,6 +1283,35 @@ const ConversationList: React.FC<ConversationListProps> = ({
           </Box>
         )}
       </List>
+      {!compactList && (
+        <Box
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Ancho de la lista de chats"
+          aria-valuemin={INBOX_LIST_WIDTH_MIN}
+          aria-valuemax={INBOX_LIST_WIDTH_MAX}
+          aria-valuenow={listWidth}
+          onPointerDown={handleListResizePointerDown}
+          onPointerMove={handleListResizePointerMove}
+          onPointerUp={handleListResizePointerUp}
+          onPointerCancel={handleListResizePointerUp}
+          onDoubleClick={handleListResizeDoubleClick}
+          sx={{
+            position: 'absolute',
+            top: 0,
+            right: 0,
+            width: 8,
+            height: '100%',
+            cursor: 'col-resize',
+            touchAction: 'none',
+            zIndex: 2,
+            bgcolor: resizingList ? (t) => alpha(t.palette.primary.main, 0.28) : 'transparent',
+            '&:hover': {
+              bgcolor: (t) => alpha(t.palette.primary.main, 0.18),
+            },
+          }}
+        />
+      )}
       </Box>
     </Box>
   );

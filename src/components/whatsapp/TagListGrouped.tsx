@@ -15,7 +15,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import FolderOutlinedIcon from '@mui/icons-material/FolderOutlined';
 import type { WhatsAppTag } from '@/services/whatsappService';
 import type { WhatsAppTagFolder } from '@/types/whatsapp';
-import { buildTagFolderDisplayItems } from '@/utils/tagFolders';
+import { buildTagFolderDisplayItems, isInboxTagFolderExpanded } from '@/utils/tagFolders';
 
 export interface TagListGroupedProps {
   tags: WhatsAppTag[];
@@ -28,7 +28,7 @@ export interface TagListGroupedProps {
   getCount?: (tagId: string) => number | string | undefined;
   emptyMessage?: string;
   dense?: boolean;
-  /** Carpetas arrancan expandidas (default true). */
+  /** Carpetas arrancan contraídas salvo que se pida lo contrario. */
   defaultExpanded?: boolean;
 }
 
@@ -41,24 +41,26 @@ const TagListGrouped: React.FC<TagListGroupedProps> = ({
   getCount,
   emptyMessage = 'No hay tags',
   dense = true,
-  defaultExpanded = true,
+  defaultExpanded = false,
 }) => {
   const items = useMemo(
     () => buildTagFolderDisplayItems(tags, folders),
     [tags, folders],
   );
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [folderOpened, setFolderOpened] = useState<Record<string, boolean>>({});
 
-  const isFolderExpanded = (folderId: string) => {
-    if (collapsed[folderId] === undefined) return defaultExpanded;
-    return !collapsed[folderId];
-  };
-
-  const toggleFolder = (folderId: string) => {
-    setCollapsed((prev) => {
-      const currentlyExpanded = isFolderExpanded(folderId);
-      return { ...prev, [folderId]: currentlyExpanded };
+  const isFolderExpanded = (folderId: string, hasSelectedTag: boolean) =>
+    isInboxTagFolderExpanded({
+      userOpened: folderOpened[folderId],
+      hasSelectedTag,
+      defaultExpanded,
     });
+
+  const toggleFolder = (folderId: string, hasSelectedTag: boolean) => {
+    setFolderOpened((prev) => ({
+      ...prev,
+      [folderId]: !isFolderExpanded(folderId, hasSelectedTag),
+    }));
   };
 
   const renderTagRow = (tag: WhatsAppTag, indent = false) => {
@@ -124,11 +126,12 @@ const TagListGrouped: React.FC<TagListGroupedProps> = ({
         if (item.type === 'tag') {
           return renderTagRow(item.tag);
         }
-        const expanded = isFolderExpanded(item.folder.id);
+        const hasSelectedTag = item.tags.some((tag) => isChecked?.(tag.id) === true);
+        const expanded = isFolderExpanded(item.folder.id, hasSelectedTag);
         return (
           <Box key={`folder-${item.folder.id}`}>
             <ListItemButton
-              onClick={() => toggleFolder(item.folder.id)}
+              onClick={() => toggleFolder(item.folder.id, hasSelectedTag)}
               dense={dense}
               sx={{ pl: 1.5 }}
             >

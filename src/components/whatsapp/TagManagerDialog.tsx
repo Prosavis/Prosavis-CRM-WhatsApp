@@ -87,7 +87,7 @@ const TagManagerDialog: React.FC<TagManagerDialogProps> = ({
   const [colorAnchor, setColorAnchor] = useState<HTMLElement | null>(null);
   const [colorTarget, setColorTarget] = useState<'new' | 'edit'>('new');
 
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [folderOpened, setFolderOpened] = useState<Record<string, boolean>>({});
 
   const displayItems = useMemo(
     () => buildTagFolderDisplayItems(tags, folders),
@@ -221,7 +221,7 @@ const TagManagerDialog: React.FC<TagManagerDialogProps> = ({
     else setEditColor(color);
   };
 
-  const isFolderExpanded = (folderId: string) => collapsed[folderId] !== true;
+  const isFolderExpanded = (folderId: string) => folderOpened[folderId] === true;
 
   const renderTagRow = (tag: WhatsAppTag, indent = false) => (
     <ListItem key={tag.id} sx={{ pl: indent ? 3 : 0 }}>
@@ -421,7 +421,7 @@ const TagManagerDialog: React.FC<TagManagerDialogProps> = ({
                       </Box>
                     ) : (
                       <>
-                        <IconButton size="small" onClick={() => setCollapsed((p) => ({ ...p, [folder.id]: expanded }))}>
+                        <IconButton size="small" onClick={() => setFolderOpened((p) => ({ ...p, [folder.id]: !expanded }))}>
                           {expanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
                         </IconButton>
                         <FolderOutlinedIcon fontSize="small" color="action" sx={{ mr: 1 }} />

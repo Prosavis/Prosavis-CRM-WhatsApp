@@ -37,7 +37,7 @@ import {
 } from '@/utils/whatsappInboxStats';
 import type { WhatsAppTag } from '@/services/whatsappService';
 import type { WhatsAppTagFolder } from '@/types/whatsapp';
-import { buildTagFolderDisplayItems } from '@/utils/tagFolders';
+import { buildTagFolderDisplayItems, isInboxTagFolderExpanded } from '@/utils/tagFolders';
 
 const CATEGORY_ICONS: Record<InboxCategoryId, React.ReactNode> = {
   last24h: <AccessTimeIcon fontSize="small" />,
@@ -79,7 +79,7 @@ const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
   tagCountsById,
 }) => {
   const theme = useTheme();
-  const [folderCollapsed, setFolderCollapsed] = useState<Record<string, boolean>>({});
+  const [folderOpened, setFolderOpened] = useState<Record<string, boolean>>({});
   const tagItems = useMemo(
     () => buildTagFolderDisplayItems(tags, tagFolders),
     [tags, tagFolders],
@@ -320,15 +320,19 @@ const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
                 );
               }
 
-              const expanded = folderCollapsed[item.folder.id] !== true;
+              const hasSelectedTag = item.tags.some((tag) => selectedTagIds.includes(tag.id));
+              const expanded = isInboxTagFolderExpanded({
+                userOpened: folderOpened[item.folder.id],
+                hasSelectedTag,
+              });
               return (
                 <Box key={`folder-${item.folder.id}`}>
                   <ListItemButton
                     dense
                     onClick={() =>
-                      setFolderCollapsed((prev) => ({
+                      setFolderOpened((prev) => ({
                         ...prev,
-                        [item.folder.id]: expanded,
+                        [item.folder.id]: !expanded,
                       }))
                     }
                     sx={{ mx: 0.75, my: 0.1, borderRadius: 1.5, minHeight: 34 }}

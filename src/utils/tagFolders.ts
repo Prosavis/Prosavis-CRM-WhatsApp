@@ -52,6 +52,18 @@ export function buildTagFolderDisplayItems(
   return items;
 }
 
+/** Default: closed. Open if the operator opened it or a tag inside is filtered. */
+export function isInboxTagFolderExpanded(options: {
+  userOpened?: boolean;
+  hasSelectedTag?: boolean;
+  defaultExpanded?: boolean;
+}): boolean {
+  if (options.userOpened === true) return true;
+  if (options.hasSelectedTag) return true;
+  if (options.userOpened === false) return false;
+  return options.defaultExpanded === true;
+}
+
 export function normalizeHexColor(input: string): string | null {
   const raw = input.trim();
   if (!raw) return null;
