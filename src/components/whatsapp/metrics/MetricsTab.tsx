@@ -1,4 +1,7 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { inboxQueryKeys } from '@/hooks/inboxQueryKeys';
+import { PURGE_WHATSAPP_LOG_CONFIRM_PHRASE } from './metricsConstants';
 import {
   Alert,
   Button,
@@ -23,25 +26,20 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import {
-  DeleteSweep as DeleteSweepIcon,
-  MoreVert as MoreVertIcon,
-} from '@mui/icons-material';
+import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
 import { WHATSAPP_CLOUD_PRODUCTION } from '@/constants/whatsappCloudAccounts';
 import {
   getWhatsAppMetrics,
   listWhatsAppMessageLog,
   purgeWhatsAppMessageLog,
 } from '@/services/whatsappService';
-import type { WhatsAppMetrics } from '@/types/whatsapp';
 import ClientSegmentsSection from './ClientSegmentsSection';
 import InboundActivitySection from './InboundActivitySection';
 import CompletedServicesSection from './CompletedServicesSection';
 import OutboundPerformanceSection, {
   type MessageLogRow,
 } from './OutboundPerformanceSection';
-
-export const PURGE_WHATSAPP_LOG_CONFIRM_PHRASE = 'BORRAR_LOGS_WHATSAPP';
 
 const { phoneNumberId, phoneDisplay, botLabel } = WHATSAPP_CLOUD_PRODUCTION;
 
@@ -54,11 +52,7 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
   broadcastJobParam,
   onClearBroadcastJobParam,
 }) => {
-  const [metrics, setMetrics] = useState<WhatsAppMetrics | null>(null);
-  const [metricsLoading, setMetricsLoading] = useState(true);
-  const [metricsError, setMetricsError] = useState<string | null>(null);
-  const [logs, setLogs] = useState<MessageLogRow[]>([]);
-  const [logsLoading, setLogsLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [days, setDays] = useState(30);
   const [logsFetchWarning, setLogsFetchWarning] = useState<string | null>(null);
   const [purgeDialogOpen, setPurgeDialogOpen] = useState(false);
@@ -68,56 +62,48 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
   const [purgeError, setPurgeError] = useState<string | null>(null);
   const [advancedMenuAnchor, setAdvancedMenuAnchor] = useState<null | HTMLElement>(null);
 
-  const loadMetrics = useCallback(async () => {
-    setMetricsLoading(true);
-    setMetricsError(null);
-    try {
-      const data = await getWhatsAppMetrics(days, phoneNumberId);
-      setMetrics(data);
-    } catch (err: unknown) {
-      setMetricsError(err instanceof Error ? err.message : 'Error cargando métricas');
-    } finally {
-      setMetricsLoading(false);
-    }
-  }, [days]);
-
-  const loadLogs = useCallback(async () => {
-    setLogsLoading(true);
-    setLogsFetchWarning(null);
-    try {
+  const metricsQuery = useQuery({
+    queryKey: inboxQueryKeys.metrics(days, phoneNumberId),
+    queryFn: () => getWhatsAppMetrics(days, phoneNumberId),
+    staleTime: 30_000,
+  });
+  const logsQuery = useQuery({
+    queryKey: inboxQueryKeys.metricsLogs(days, phoneNumberId),
+    queryFn: async () => {
       const rows = await listWhatsAppMessageLog({ days, phoneNumberId, limit: 500 });
-      setLogs(
-        rows.map((row) => ({
-          id: row.id,
-          phoneNumberId: row.phoneNumberId,
-          recipientPhone: row.recipientPhone,
-          recipientBsuid: row.recipientBsuid,
-          templateName: row.templateName,
-          messageBody: row.messageBody,
-          status: row.status,
-          direction: row.direction,
-          intent: row.intent,
-          createdAt: row.createdAt,
-          waMessageId: row.waMessageId,
-          errorMessage: row.errorMessage,
-          campaignType: row.campaignType,
-        })),
-      );
-    } catch (err: unknown) {
-      console.error('Error cargando logs:', err);
-      setLogs([]);
-      setLogsFetchWarning(
-        (err as Error)?.message || 'No se pudieron cargar los logs.',
-      );
-    } finally {
-      setLogsLoading(false);
-    }
-  }, [days]);
+      return rows.map((row) => ({
+        id: row.id,
+        phoneNumberId: row.phoneNumberId,
+        recipientPhone: row.recipientPhone,
+        recipientBsuid: row.recipientBsuid,
+        templateName: row.templateName,
+        messageBody: row.messageBody,
+        status: row.status,
+        direction: row.direction,
+        intent: row.intent,
+        createdAt: row.createdAt,
+        waMessageId: row.waMessageId,
+        errorMessage: row.errorMessage,
+        campaignType: row.campaignType,
+      })) satisfies MessageLogRow[];
+    },
+    staleTime: 30_000,
+  });
 
-  useEffect(() => {
-    void loadMetrics();
-    void loadLogs();
-  }, [loadMetrics, loadLogs]);
+  const metrics = metricsQuery.data ?? null;
+  const metricsLoading = metricsQuery.isPending;
+  const metricsError = metricsQuery.error instanceof Error ? metricsQuery.error.message : null;
+  const logs = logsQuery.data ?? [];
+  const logsLoading = logsQuery.isPending;
+
+  const loadMetrics = () => metricsQuery.refetch();
+  const loadLogs = async () => {
+    setLogsFetchWarning(null);
+    const result = await logsQuery.refetch();
+    if (result.error) {
+      setLogsFetchWarning(result.error.message || 'No se pudieron cargar los logs.');
+    }
+  };
 
   const periodSelect = (
     <FormControl size="small" sx={{ minWidth: 130 }}>
@@ -252,6 +238,8 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
                 });
                 setPurgeDialogOpen(false);
                 setPurgeTypedPhrase('');
+                await queryClient.invalidateQueries({ queryKey: inboxQueryKeys.metrics(days, phoneNumberId) });
+                await queryClient.invalidateQueries({ queryKey: inboxQueryKeys.metricsLogs(days, phoneNumberId) });
                 await loadMetrics();
                 await loadLogs();
               } catch (err: unknown) {

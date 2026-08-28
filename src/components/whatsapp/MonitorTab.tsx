@@ -42,8 +42,19 @@ const MonitorTab: React.FC = () => {
   }, [loadData]);
 
   useEffect(() => {
-    const interval = setInterval(loadData, 30_000);
-    return () => clearInterval(interval);
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return;
+      void loadData();
+    };
+    const interval = setInterval(tick, 30_000);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void loadData();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, [loadData]);
 
   const storage = dashboard?.storage ?? null;

@@ -42,7 +42,9 @@ import TableSortLabel from '@mui/material/TableSortLabel';
 import TextField from '@mui/material/TextField';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { inboxQueryKeys } from '@/hooks/inboxQueryKeys';
 import { directoryService } from '@/services/directoryService';
 import { directoryMonitorService } from '@/services/directoryMonitorService';
 import DirectoryEntryDrawer from '@/components/directory/DirectoryEntryDrawer';
@@ -139,10 +141,7 @@ export interface LeadsPageProps {
 }
 
 const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, onOpenBulk }) => {
-  const [entries, setEntries] = useState<DirectoryEntry[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const setSnackbar = ({
     message,
     severity,
@@ -171,16 +170,6 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, 
 
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DIRECTORY_DEFAULT_PAGE_SIZE);
-  const [totalCount, setTotalCount] = useState(0);
-  const [stats, setStats] = useState<DirectoryStats>({
-    total: 0,
-    active: 0,
-    inactive: 0,
-    optOut: 0,
-    blacklisted: 0,
-    byClassification: {},
-    bySource: {},
-  });
 
   const [sortField, setSortField] = useState<SortField | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
@@ -205,58 +194,77 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, 
     setRowsPerPage(next.rowsPerPage);
   }, []);
 
+  const queryClient = useQueryClient();
+  const directoryFilters = useMemo(
+    () => ({
+      limit: rowsPerPage,
+      page,
+      status: statusFilter || undefined,
+      classification: classificationFilter || undefined,
+      source: sourceFilter || undefined,
+      blacklisted: blacklistedFilter || undefined,
+      phoneNull: phoneNull || undefined,
+      emailNull: emailNull || undefined,
+      searchTerm: searchTerm || undefined,
+      sortField: sortField || undefined,
+      sortDirection: sortField ? sortDirection : undefined,
+    }),
+    [
+      blacklistedFilter,
+      classificationFilter,
+      emailNull,
+      page,
+      phoneNull,
+      rowsPerPage,
+      searchTerm,
+      sortDirection,
+      sortField,
+      sourceFilter,
+      statusFilter,
+    ],
+  );
+
+  const entriesQuery = useQuery({
+    queryKey: inboxQueryKeys.directoryEntries(directoryFilters),
+    queryFn: () => directoryService.getEntries(directoryFilters),
+    staleTime: 15_000,
+  });
+  const statsQuery = useQuery({
+    queryKey: inboxQueryKeys.directoryStats,
+    queryFn: () => directoryService.getStats(),
+    staleTime: 30_000,
+  });
+  const issueStatsQuery = useQuery({
+    queryKey: ['directory', 'issue-stats'],
+    queryFn: () => directoryMonitorService.getIssueStats(),
+    staleTime: 30_000,
+  });
+
+  const entries = entriesQuery.data?.entries ?? [];
+  const totalCount = entriesQuery.data?.totalCount ?? 0;
+  const loading = entriesQuery.isPending;
+  const error = entriesQuery.error instanceof Error ? entriesQuery.error.message : null;
+  const stats: DirectoryStats = statsQuery.data ?? {
+    total: 0,
+    active: 0,
+    inactive: 0,
+    optOut: 0,
+    blacklisted: 0,
+    byClassification: {},
+    bySource: {},
+  };
+
   const fetchStats = useCallback(async () => {
-    try {
-      const result = await directoryService.getStats();
-      setStats(result);
-    } catch {
-      // Stats fallback silencioso
-    }
-    try {
-      const issueStats = await directoryMonitorService.getIssueStats();
-      setIssueOpenTotal(issueStats.openTotal);
-    } catch {
-      // Issue stats fallback silencioso
-    }
-  }, []);
+    await Promise.all([statsQuery.refetch(), issueStatsQuery.refetch()]);
+  }, [issueStatsQuery, statsQuery]);
 
   const fetchEntries = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const filters: Record<string, unknown> = {
-        limit: rowsPerPage,
-        page,
-      };
-      if (statusFilter) filters.status = statusFilter;
-      if (classificationFilter) filters.classification = classificationFilter;
-      if (sourceFilter) filters.source = sourceFilter;
-      if (blacklistedFilter) filters.blacklisted = true;
-      if (phoneNull) filters.phoneNull = true;
-      if (emailNull) filters.emailNull = true;
-      if (searchTerm) filters.searchTerm = searchTerm;
-      if (sortField) {
-        filters.sortField = sortField;
-        filters.sortDirection = sortDirection;
-      }
+    await entriesQuery.refetch();
+  }, [entriesQuery]);
 
-      const result = await directoryService.getEntries(filters as Parameters<typeof directoryService.getEntries>[0]);
-      setEntries(result.entries);
-      setTotalCount(result.totalCount);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al cargar el directorio');
-    } finally {
-      setLoading(false);
-    }
-  }, [statusFilter, classificationFilter, sourceFilter, blacklistedFilter, phoneNull, emailNull, page, rowsPerPage, searchTerm, sortField, sortDirection]);
-
-  useEffect(() => {
-    fetchStats();
-  }, [fetchStats]);
-
-  useEffect(() => {
-    fetchEntries();
-  }, [fetchEntries]);
+  React.useEffect(() => {
+    if (issueStatsQuery.data) setIssueOpenTotal(issueStatsQuery.data.openTotal);
+  }, [issueStatsQuery.data]);
 
   const handleCreateEntry = async () => {
     try {
@@ -870,8 +878,17 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, 
                         compact
                         autoSave
                         onSaved={(updated) => {
-                          setEntries((prev) =>
-                            prev.map((row) => (row.id === updated.id ? updated : row))
+                          queryClient.setQueryData(
+                            inboxQueryKeys.directoryEntries(directoryFilters),
+                            (prev: { entries?: DirectoryEntry[]; totalCount?: number } | undefined) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    entries: (prev.entries ?? []).map((row) =>
+                                      row.id === updated.id ? updated : row,
+                                    ),
+                                  }
+                                : prev,
                           );
                         }}
                       />
