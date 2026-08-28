@@ -10,7 +10,7 @@ import {
   Tooltip,
   useMediaQuery,
 } from '@mui/material';
-import { useTheme as useMuiTheme } from '@mui/material/styles';
+import { alpha, useTheme as useMuiTheme, type Theme } from '@mui/material/styles';
 import {
   Inbox as InboxIcon,
   Storefront as StorefrontIcon,
@@ -27,6 +27,7 @@ import ThemeToggle from '@/components/common/ThemeToggle';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/hooks/useAuth';
 import { getProsavisLogoSrc } from '@/utils/prosavisBrand';
+import { inboxLineNavMeta } from '@/utils/whatsappInboxNav';
 import type { WhatsAppTabKey } from '@/utils/whatsappTabs';
 import WhatsAppInternalContactsButton from './WhatsAppInternalContactsButton';
 
@@ -38,15 +39,77 @@ export interface WhatsAppTopBarProps {
   showBulk?: boolean;
 }
 
+function InboxLineTabLabel({
+  title,
+  phone,
+  compact,
+}: {
+  title: string;
+  phone: string;
+  compact: boolean;
+}) {
+  return (
+    <Box
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: compact ? 'center' : 'flex-start',
+        lineHeight: 1.15,
+        textAlign: compact ? 'center' : 'left',
+      }}
+    >
+      <Box
+        component="span"
+        sx={{
+          fontWeight: 800,
+          fontSize: compact ? '0.68rem' : '0.8125rem',
+          letterSpacing: 0.1,
+        }}
+      >
+        {compact ? title.replace(/^Inbox\s+/i, '') : title}
+      </Box>
+      <Box
+        component="span"
+        sx={{
+          mt: 0.25,
+          fontSize: compact ? '0.62rem' : '0.7rem',
+          fontWeight: 700,
+          fontVariantNumeric: 'tabular-nums',
+          letterSpacing: 0.2,
+          opacity: 0.92,
+        }}
+      >
+        {phone}
+      </Box>
+    </Box>
+  );
+}
+
 function buildTabItems(directoryTotalContacts: number | null) {
   const directoryLabel =
     directoryTotalContacts != null
       ? `Directorio (${directoryTotalContacts.toLocaleString('es-CO')})`
       : 'Directorio';
+  const bot = inboxLineNavMeta('bot');
+  const commercial = inboxLineNavMeta('commercial');
 
   return [
-    { key: 'inbox' as const, icon: <InboxIcon fontSize="small" />, label: 'Inbox Bot' },
-    { key: 'commercial' as const, icon: <StorefrontIcon fontSize="small" />, label: 'Inbox Comercial' },
+    {
+      key: 'inbox' as const,
+      icon: <InboxIcon fontSize="small" />,
+      label: bot.title,
+      phone: bot.phone,
+      ariaLabel: bot.ariaLabel,
+      line: 'bot' as const,
+    },
+    {
+      key: 'commercial' as const,
+      icon: <StorefrontIcon fontSize="small" />,
+      label: commercial.title,
+      phone: commercial.phone,
+      ariaLabel: commercial.ariaLabel,
+      line: 'commercial' as const,
+    },
     { key: 'metrics' as const, icon: <BarChartIcon fontSize="small" />, label: 'Métricas' },
     { key: 'leads' as const, icon: <ContactPhoneIcon fontSize="small" />, label: directoryLabel },
     { key: 'discounts' as const, icon: <ConfirmationNumberIcon fontSize="small" />, label: 'Descuentos' },
@@ -54,6 +117,31 @@ function buildTabItems(directoryTotalContacts: number | null) {
     { key: 'monitoreo' as const, icon: <MonitorHeartIcon fontSize="small" />, label: 'Monitoreo' },
     { key: 'automations' as const, icon: <AutoAwesomeIcon fontSize="small" />, label: 'Automatizaciones' },
   ];
+}
+
+function inboxLineTabSx(line: 'bot' | 'commercial') {
+  const isBot = line === 'bot';
+  return {
+    minHeight: 56,
+    mx: 0.25,
+    px: { xs: 1, sm: 1.35 },
+    py: 0.6,
+    mr: isBot ? 0.25 : 1.25,
+    borderRadius: 2,
+    border: 1,
+    alignItems: 'center',
+    fontWeight: 800,
+    bgcolor: (theme: Theme) =>
+      alpha(isBot ? theme.palette.primary.main : theme.palette.secondary.main, isBot ? 0.08 : 0.12),
+    color: isBot ? 'primary.main' : 'secondary.dark',
+    borderColor: (theme: Theme) =>
+      alpha(isBot ? theme.palette.primary.main : theme.palette.secondary.main, isBot ? 0.38 : 0.5),
+    '&.Mui-selected': {
+      bgcolor: isBot ? 'primary.main' : 'secondary.main',
+      color: isBot ? 'primary.contrastText' : 'secondary.contrastText',
+      borderColor: isBot ? 'primary.main' : 'secondary.main',
+    },
+  };
 }
 
 const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
@@ -112,7 +200,7 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
         sx={{
           flex: '1 1 280px',
           minWidth: 0,
-          minHeight: 40,
+          minHeight: 56,
           '& .MuiTabs-indicator': { height: 3, borderRadius: '3px 3px 0 0' },
           '& .MuiTab-root': {
             minHeight: 40,
@@ -124,19 +212,35 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
           },
         }}
       >
-        {tabItems.map(({ key, icon, label }) => (
-          <Tab
-            key={key}
-            value={key}
-            icon={icon}
-            iconPosition="start"
-            label={compactTabs ? undefined : label}
-            aria-label={label}
-            sx={{
-              '& .MuiTab-iconWrapper': { mr: compactTabs ? 0 : 0.75 },
-            }}
-          />
-        ))}
+        {tabItems.map((item) => {
+          const isInboxLine = item.key === 'inbox' || item.key === 'commercial';
+          return (
+            <Tab
+              key={item.key}
+              value={item.key}
+              icon={item.icon}
+              iconPosition="start"
+              label={
+                isInboxLine ? (
+                  <InboxLineTabLabel
+                    title={item.label}
+                    phone={item.phone ?? ''}
+                    compact={compactTabs}
+                  />
+                ) : compactTabs ? undefined : (
+                  item.label
+                )
+              }
+              aria-label={item.ariaLabel ?? item.label}
+              sx={{
+                '& .MuiTab-iconWrapper': {
+                  mr: compactTabs && !isInboxLine ? 0 : 0.75,
+                },
+                ...(isInboxLine && item.line ? inboxLineTabSx(item.line) : null),
+              }}
+            />
+          );
+        })}
       </Tabs>
 
       <Divider

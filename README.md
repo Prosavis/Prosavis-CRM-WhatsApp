@@ -18,6 +18,8 @@ Aplicativo independiente para operar Inbox, Métricas, Leads y Descuentos de Wha
 - [WHATSAPP_CRM_SUPABASE_ARQUITECTURA.md](../prosavis-firebase/docs/whatsapp/WHATSAPP_CRM_SUPABASE_ARQUITECTURA.md) — schema, Edge Functions, Storage
 - [crm-supabase-etl-runbook.md](../prosavis-firebase/docs/operacion-y-despliegue/crm-supabase-etl-runbook.md) — scripts ETL, validación, capacidad
 - [guia-operativa-meta-whatsapp.md](../prosavis-firebase/docs/operacion-y-despliegue/guia-operativa-meta-whatsapp.md) — webhook Meta, plantillas WABA, **coexistencia Coex (§J)**
+- [whatsapp-coex-no-historial.md](../prosavis-firebase/docs/context/whatsapp-coex-no-historial.md) — **no** importar historial/agenda Meta (decisión permanente)
+- [COEX_COMERCIAL_LINEA.md](../prosavis-firebase/docs/whatsapp/COEX_COMERCIAL_LINEA.md) — Inbox Bot 312 / Inbox Comercial 311
 
 Ruta local en monorepo: `prosavis-firebase/docs/whatsapp/` y `docs/operacion-y-despliegue/`.
 

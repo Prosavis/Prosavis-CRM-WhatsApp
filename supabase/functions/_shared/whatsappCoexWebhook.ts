@@ -6,6 +6,12 @@ import { getMessageContent, messageLogContentFields } from './whatsappMessageCon
 
 type JsonRecord = Record<string, unknown>;
 
+/**
+ * Coex handlers. Product decision (permanent): do NOT subscribe `history` or
+ * `smb_app_state_sync`, and do NOT call `smb_app_data`. These functions only
+ * swallow a stray Meta payload so the webhook does not 500.
+ * Canonical: prosavis-firebase/docs/context/whatsapp-coex-no-historial.md
+ */
 export interface CoexProcessResult {
   echoes: number;
   historyMessages: number;
