@@ -55,11 +55,13 @@ import {
   analyzeWhatsAppInboundImage,
 } from '@/services/whatsappService';
 import ClientDateText from '@/components/common/ClientDateText';
+import { AnalysisMarkdown } from '@/components/whatsapp/AnalysisMarkdown';
 import { WhatsAppFormattedText } from '@/utils/whatsappTextFormatting';
 import { crmToast } from '@/utils/crmToast';
 import { COLOMBIA_TIME_ZONE } from '@/utils/colombiaTime';
 import {
   isCommercialOrphanStatusStub,
+  isDeletedOrUnsupportedPreview,
   quotedMessagePreview,
 } from '@/utils/whatsappCoexStub';
 
@@ -412,6 +414,11 @@ const MediaContent: React.FC<{
               <SubtitlesIcon sx={{ fontSize: 14 }} />
               Transcripción
             </Typography>
+            {message.voiceTranscriptionStatus === 'partial' && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                Incompleta — se puede volver a transcribir para cerrarla.
+              </Typography>
+            )}
             <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', mt: 0.25 }}>
               {transcript}
             </Typography>
@@ -453,9 +460,7 @@ const MediaContent: React.FC<{
               <ImageIcon sx={{ fontSize: 14 }} />
               Análisis de imagen
             </Typography>
-            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', mt: 0.25 }}>
-              {imageAnalysis}
-            </Typography>
+            <AnalysisMarkdown text={imageAnalysis} />
             <Button
               size="small"
               variant="text"
@@ -761,8 +766,9 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
   const caption = message.caption || '';
   const body = message.messageBody || '';
   const missingCoexBody = isCommercialOrphanStatusStub(body);
-  const bodyIsMediaTag = body.startsWith('[');
-  const displayText = missingCoexBody
+  const deletedOrUnsupported = isDeletedOrUnsupportedPreview(body);
+  const bodyIsMediaTag = body.startsWith('[') && !deletedOrUnsupported;
+  const displayText = missingCoexBody || deletedOrUnsupported
     ? ''
     : hasMedia && caption
       ? caption
@@ -934,7 +940,16 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
             </Typography>
           )}
 
-          {!showTextBody && !missingCoexBody && !hasMedia && !hasLocation && !hasContacts && body && (
+          {deletedOrUnsupported && !hasMedia && !hasLocation && !hasContacts && (
+            <Typography
+              variant="caption"
+              sx={{ fontStyle: 'italic', color: 'text.secondary', display: 'block', lineHeight: 1.4 }}
+            >
+              Mensaje eliminado
+            </Typography>
+          )}
+
+          {!showTextBody && !missingCoexBody && !deletedOrUnsupported && !hasMedia && !hasLocation && !hasContacts && body && (
             <Typography
               variant="body2"
               sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'text.primary', lineHeight: 1.4 }}

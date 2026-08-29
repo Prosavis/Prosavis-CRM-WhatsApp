@@ -1,5 +1,6 @@
 // deno-lint-ignore-file no-explicit-any
-import { getGeminiApiKey, geminiTranscribeAudio, resolveGeminiModel, DEFAULT_GEMINI_MODEL } from './geminiClient.ts';
+import { getGeminiApiKey, geminiTranscribeAudioComplete, resolveGeminiModel, DEFAULT_GEMINI_MODEL } from './geminiClient.ts';
+import { shouldReuseCachedTranscript } from './transcriptContinuation.ts';
 import {
   canTranscribePersistedAudio,
   isVoiceTranscriptionFeatureEnabled,
@@ -96,7 +97,7 @@ export async function transcribeInboundAudioById(
     return { ok: false, error: 'Solo se pueden transcribir audios con mediaId o storage_path.', status: 400 };
   }
 
-  if (row.voice_transcription && !options?.force) {
+  if (shouldReuseCachedTranscript(row, options?.force)) {
     return { ok: true, cached: true, transcript: String(row.voice_transcription) };
   }
 
@@ -114,24 +115,24 @@ export async function transcribeInboundAudioById(
       return { ok: false, error: 'El audio supera el límite de 16 MB para transcripción.', status: 400 };
     }
 
-    const transcript = await withOneRetry(() => geminiTranscribeAudio({
+    const result = await withOneRetry(() => geminiTranscribeAudioComplete({
       apiKey,
       buffer: media.buffer,
       mimeType: media.mimeType,
     }));
 
     await supabase.from('whatsapp_message_log').update({
-      voice_transcription: transcript,
+      voice_transcription: result.text,
       voice_transcription_at: new Date().toISOString(),
       voice_transcription_model: resolveGeminiModel('GEMINI_MODEL_TRANSCRIBE', DEFAULT_GEMINI_MODEL),
       voice_transcription_mime_type: media.mimeType,
       voice_transcription_bytes: media.buffer.byteLength,
-      voice_transcription_status: 'completed',
-      voice_transcription_error: null,
+      voice_transcription_status: result.complete ? 'completed' : 'partial',
+      voice_transcription_error: result.complete ? null : 'Transcripción incompleta; se cortó por límite de tokens.',
       voice_transcription_failed_at: null,
     }).eq('id', messageLogId);
 
-    return { ok: true, cached: false, transcript };
+    return { ok: true, cached: false, transcript: result.text };
   } catch (error) {
     const message = formatUnknownError(error);
     await supabase.from('whatsapp_message_log').update({
@@ -150,9 +151,9 @@ export async function backfillUntranscribedPersistedAudio(
   const limit = Math.min(Math.max(options?.limit ?? 25, 1), 50);
   const { data: rows, error } = await supabase
     .from('whatsapp_message_log')
-    .select('id, media_type, media_id, storage_path, voice_transcription')
+    .select('id, media_type, media_id, storage_path, voice_transcription, voice_transcription_status')
     .eq('media_type', 'audio')
-    .is('voice_transcription', null)
+    .or('voice_transcription.is.null,voice_transcription_status.eq.partial')
     .order('created_at', { ascending: false })
     .limit(limit * 3);
 

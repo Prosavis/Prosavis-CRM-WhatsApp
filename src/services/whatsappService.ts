@@ -207,6 +207,7 @@ function mapMessageRow(row: MessageRow): WhatsAppMessage {
       | 'completed'
       | 'failed'
       | 'pending'
+      | 'partial'
       | undefined,
     voiceTranscriptionError: row.voice_transcription_error ?? undefined,
     voiceTranscriptionFailedAt: toDate(row.voice_transcription_failed_at),
@@ -313,7 +314,7 @@ export interface WhatsAppMessage {
   voiceTranscriptionModel?: string;
   voiceTranscriptionMimeType?: string;
   voiceTranscriptionBytes?: number;
-  voiceTranscriptionStatus?: 'completed' | 'failed' | 'pending';
+  voiceTranscriptionStatus?: 'completed' | 'failed' | 'pending' | 'partial';
   voiceTranscriptionError?: string;
   voiceTranscriptionFailedAt?: Date;
   mediaAnalysisText?: string;

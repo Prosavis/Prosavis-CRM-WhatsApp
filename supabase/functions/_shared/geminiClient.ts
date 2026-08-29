@@ -8,6 +8,13 @@
  *   https://ai.google.dev/gemini-api/docs/structured-output
  */
 
+import {
+  STT_MAX_CONTINUATIONS,
+  STT_MAX_OUTPUT_TOKENS,
+  stitchTranscriptContinuation,
+  transcriptContinuationAnchor,
+} from './transcriptContinuation.ts';
+
 export const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
 export const GEMINI_TIMEOUT_MS = 75000;
@@ -171,7 +178,10 @@ async function geminiRequest(params: {
   return data;
 }
 
-function extractTextFromResponse(data: GeminiGenerateContentResponse): string {
+export function extractTextResultFromResponse(data: GeminiGenerateContentResponse): {
+  text: string;
+  finishReason?: string;
+} {
   const candidate = data.candidates?.[0];
   if (!candidate) throw new Error('Gemini no devolvió candidatos');
 
@@ -190,7 +200,11 @@ function extractTextFromResponse(data: GeminiGenerateContentResponse): string {
   const text = parts.map((p) => p.text ?? '').join('').trim();
   if (!text) throw new Error('Gemini devolvió contenido vacío');
 
-  return text;
+  return { text, finishReason: candidate.finishReason };
+}
+
+function extractTextFromResponse(data: GeminiGenerateContentResponse): string {
+  return extractTextResultFromResponse(data).text;
 }
 
 /** Quita fences de markdown (```json ... ```) que algunos modelos añaden. */
@@ -407,16 +421,18 @@ export async function geminiTranscribeAudio(params: {
   buffer: Uint8Array;
   mimeType: string;
   model?: string;
-}): Promise<string> {
+  instruction?: string;
+  maxOutputTokens?: number;
+}): Promise<{ text: string; finishReason?: string }> {
   const model = params.model ??
     resolveGeminiModel('GEMINI_MODEL_TRANSCRIBE', DEFAULT_GEMINI_MODEL);
 
   const mime = audioMimeType(params.mimeType);
   const audioB64 = bytesToBase64(params.buffer);
 
-  const instruction =
-    'Transcribe este audio de WhatsApp en español de Colombia. ' +
-    'Devuelve solo el texto transcrito; si no se entiende, indica que no fue posible transcribir sin inventar.';
+  const instruction = params.instruction ??
+    ('Transcribe este audio de WhatsApp en español de Colombia. ' +
+      'Devuelve solo el texto transcrito; si no se entiende, indica que no fue posible transcribir sin inventar.');
 
   const data = await geminiRequest({
     apiKey: params.apiKey,
@@ -429,10 +445,42 @@ export async function geminiTranscribeAudio(params: {
       ],
     }],
     temperature: 0,
-    maxOutputTokens: 2048,
+    maxOutputTokens: params.maxOutputTokens ?? STT_MAX_OUTPUT_TOKENS,
   });
 
-  return extractTextFromResponse(data);
+  return extractTextResultFromResponse(data);
+}
+
+export async function geminiTranscribeAudioComplete(params: {
+  apiKey: string;
+  buffer: Uint8Array;
+  mimeType: string;
+  model?: string;
+}): Promise<{ text: string; complete: boolean }> {
+  let assembled = '';
+  let complete = false;
+
+  for (let pass = 0; pass <= STT_MAX_CONTINUATIONS; pass += 1) {
+    const instruction = assembled
+      ? (
+        'Continúa la transcripción de este audio de WhatsApp en español de Colombia. ' +
+        'El texto ya transcrito termina así:\n"""\n' +
+        `${transcriptContinuationAnchor(assembled)}\n"""\n` +
+        'Devuelve solo el texto nuevo que sigue, sin repetir lo anterior ni inventar.'
+      )
+      : undefined;
+    const result = await geminiTranscribeAudio({
+      ...params,
+      instruction,
+    });
+    assembled = stitchTranscriptContinuation(assembled, result.text);
+    if (result.finishReason !== 'MAX_TOKENS') {
+      complete = true;
+      break;
+    }
+  }
+
+  return { text: assembled, complete };
 }
 
 function imageMimeType(mimeType: string): string {

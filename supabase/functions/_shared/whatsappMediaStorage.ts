@@ -1,4 +1,5 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { isCompactJws, isInvalidCompactJwsError } from './whatsappMediaAuth.ts';
 
 export const WHATSAPP_MEDIA_BUCKET = 'whatsapp-media';
 export const WHATSAPP_MEDIA_BUCKET_LIMIT_BYTES = 104_857_600;
@@ -220,6 +221,12 @@ export function classifyStorageUploadError(
   }
 
   const message = error instanceof Error ? error.message : String(error);
+  if (isInvalidCompactJwsError(error)) {
+    return new WhatsAppMediaError(
+      'No se pudo guardar el archivo en Storage: la clave de servicio no es un JWT compacto. Usa el service_role legacy (eyJ…) en SUPABASE_SERVICE_ROLE_KEY.',
+      { statusCode: 502, code: 'storage' },
+    );
+  }
   return new WhatsAppMediaError(
     `No se pudo guardar el archivo en Storage: ${message}`,
     { statusCode: 502, code: 'storage' },
@@ -293,16 +300,32 @@ export async function uploadToWhatsAppBucket(
     );
   }
 
+  const uploadStandard = async () => {
+    const { error: uploadError } = await supabase.storage
+      .from(WHATSAPP_MEDIA_BUCKET)
+      .upload(storagePath, bytes, { upsert: true, contentType: mimeType });
+    if (uploadError) throw uploadError;
+  };
+
   try {
-    if (bytes.byteLength <= STORAGE_RESUMABLE_THRESHOLD_BYTES) {
-      const { error: uploadError } = await supabase.storage
-        .from(WHATSAPP_MEDIA_BUCKET)
-        .upload(storagePath, bytes, { upsert: true, contentType: mimeType });
-      if (uploadError) throw uploadError;
+    const canUseTus =
+      bytes.byteLength > STORAGE_RESUMABLE_THRESHOLD_BYTES &&
+      isCompactJws(getStorageCredentials().serviceRoleKey);
+
+    if (!canUseTus) {
+      await uploadStandard();
       return;
     }
 
-    await tusUploadToWhatsAppBucket(bytes, storagePath, mimeType);
+    try {
+      await tusUploadToWhatsAppBucket(bytes, storagePath, mimeType);
+    } catch (tusError) {
+      if (isInvalidCompactJwsError(tusError)) {
+        await uploadStandard();
+        return;
+      }
+      throw tusError;
+    }
   } catch (error) {
     throw classifyStorageUploadError(error, bytes.byteLength);
   }

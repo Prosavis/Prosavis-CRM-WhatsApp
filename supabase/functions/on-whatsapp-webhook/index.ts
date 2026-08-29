@@ -2,7 +2,12 @@ import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { resolveOutboundContactName } from '../_shared/contactDisplayName.ts';
 import { clientFromApiKey, getServiceClient } from '../_shared/supabase.ts';
 import { hydratePersistedMessageMedia } from '../_shared/whatsappMediaHydrate.ts';
-import { getMessageContent } from '../_shared/whatsappMessageContent.ts';
+import {
+  CLOUD_API_REVOKED_LABEL,
+  cloudApiUnsupportedDisposition,
+  getMessageContent,
+} from '../_shared/whatsappMessageContent.ts';
+import { recomputeWhatsAppConversationPreview } from '../_shared/recomputeConversationPreview.ts';
 import { UNARCHIVE_CONVERSATION_PATCH } from '../_shared/whatsappOutbound.ts';
 import { directoryPhoneKey } from '../_shared/directoryPhone.ts';
 import { REACTIVATION_SEQUENCE } from '../_shared/reactivationCadence.ts';
@@ -250,7 +255,7 @@ async function processInboundMessage(params: {
   message: JsonRecord;
   value: JsonRecord;
   contacts: unknown[];
-}): Promise<'inserted' | 'duplicate'> {
+}): Promise<'inserted' | 'duplicate' | 'skipped' | 'updated'> {
   const identity = resolveInboundCustomer(params.message, params.contacts);
   const waMessageId = getString(params.message.id);
   if (!identity || !waMessageId) {
@@ -281,6 +286,30 @@ async function processInboundMessage(params: {
   }
 
   const stableKey = conversationStableKey(customerKey, phoneNumberId);
+  const unsupported = cloudApiUnsupportedDisposition(params.message);
+  if (unsupported?.kind === 'revoke' && unsupported.originalMessageId) {
+    const createdAtForRevoke = getUnixDate(params.message.timestamp);
+    const { data: original, error: originalError } = await params.supabase
+      .from('whatsapp_message_log')
+      .select('id')
+      .eq('wa_message_id', unsupported.originalMessageId)
+      .maybeSingle();
+    if (originalError) throw originalError;
+    if (original?.id) {
+      const { error: revokeError } = await params.supabase
+        .from('whatsapp_message_log')
+        .update({
+          hidden_from_panel: false,
+          message_body: CLOUD_API_REVOKED_LABEL,
+          revoked_at: createdAtForRevoke,
+          revoked_reason: 'cloud_api',
+        })
+        .eq('id', original.id);
+      if (revokeError) throw revokeError;
+      await recomputeWhatsAppConversationPreview(params.supabase, stableKey);
+      return 'updated';
+    }
+  }
   const contactName = identity.profileName ?? getContactName(params.contacts, customerKey);
   const content = getMessageContent(params.message);
   const createdAt = getUnixDate(params.message.timestamp);
@@ -633,8 +662,8 @@ async function processPayload(
             contacts,
           });
 
-          if (processed === 'duplicate') result.skippedDuplicates += 1;
-          else result.inboundMessages += 1;
+          if (processed === 'duplicate' || processed === 'skipped') result.skippedDuplicates += 1;
+          else if (processed === 'inserted') result.inboundMessages += 1;
         } catch (error) {
           result.errors.push(`message: ${formatWebhookError(error)}`);
         }
