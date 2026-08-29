@@ -6,7 +6,7 @@ import {
   humanUnsupportedLabel,
 } from './whatsappMessageContent.ts';
 
-Deno.test('Cloud API revoke is a deleted message, not [unsupported]', () => {
+Deno.test('Cloud API revoke stays visible as Mensaje eliminado, not [unsupported]', () => {
   const message = {
     type: 'unsupported',
     errors: [{ code: 131051, title: 'Message type unknown' }],

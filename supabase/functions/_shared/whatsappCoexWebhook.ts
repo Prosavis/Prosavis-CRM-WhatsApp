@@ -2,7 +2,12 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { conversationStableKey, isCommercialPhoneNumberId } from './whatsappLines.ts';
 import { formatWebhookError } from './whatsappInboundIdentity.ts';
 import { hydratePersistedMessageMedia } from './whatsappMediaHydrate.ts';
-import { getMessageContent, messageLogContentFields } from './whatsappMessageContent.ts';
+import { recomputeWhatsAppConversationPreview } from './recomputeConversationPreview.ts';
+import {
+  CLOUD_API_REVOKED_LABEL,
+  getMessageContent,
+  messageLogContentFields,
+} from './whatsappMessageContent.ts';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -157,7 +162,7 @@ export async function persistCoexMessage(params: {
     if (!originalId) return 'skipped';
     const { data: original, error: originalError } = await params.supabase
       .from('whatsapp_message_log')
-      .select('id')
+      .select('id, conversation_stable_key')
       .eq('wa_message_id', originalId)
       .maybeSingle();
     if (originalError) throw originalError;
@@ -165,12 +170,19 @@ export async function persistCoexMessage(params: {
     const { error: revokeError } = await params.supabase
       .from('whatsapp_message_log')
       .update({
-        hidden_from_panel: true,
+        hidden_from_panel: false,
+        message_body: CLOUD_API_REVOKED_LABEL,
         revoked_at: createdAt,
         revoked_reason: 'coex_echo',
       })
       .eq('id', original.id);
     if (revokeError) throw revokeError;
+    if (original.conversation_stable_key) {
+      await recomputeWhatsAppConversationPreview(
+        params.supabase,
+        String(original.conversation_stable_key),
+      );
+    }
     return 'updated';
   }
 
