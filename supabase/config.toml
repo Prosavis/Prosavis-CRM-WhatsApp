@@ -118,6 +118,10 @@ verify_jwt = false
 [functions.run-app-user-cold-outreach]
 verify_jwt = false
 
+# Lote empresas (x-api-key). WhatsApp bot 312 + Gmail support@.
+[functions.run-empresas-outreach]
+verify_jwt = false
+
 [functions.ensure-whatsapp-conversation-from-lead]
 verify_jwt = false
 
