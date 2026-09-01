@@ -5,11 +5,19 @@
 import { formatError } from './errors.ts';
 import { jsonResponse } from './cors.ts';
 import {
+  isSentinelClientId,
   resolveClientPhoneForAppointment,
+  resolveDirectoryEntry,
   resolveProfessionalPhoneForAppointment,
 } from './appointmentPhoneResolver.ts';
 import { normalizeDirectoryPhoneE164 } from './directoryPhone.ts';
 import { resolveRecipientKey, type RecipientType } from './reminderRecipientKey.ts';
+import {
+  colombiaMidnightUtc,
+  formatColombiaDateKey,
+  reminderBatchStartUtcForScheduledDate,
+  resolveReminderDashboardWindows,
+} from './reminderDashboardWindows.ts';
 import {
   getFirestoreDocument,
   patchFirestoreDocument,
@@ -20,10 +28,15 @@ import { persistBatchSnapshot } from './reminderBatchSnapshot.ts';
 // deno-lint-ignore no-explicit-any
 type SupabaseClient = any;
 
-const COLOMBIA_UTC_OFFSET_HOURS = -5;
 const TIMEZONE = 'America/Bogota';
 const TEMPLATE_CLIENT = 'recordatorio_cita_24h';
 const TEMPLATE_PROFESSIONAL = 'recordatorio_profesional_24h';
+
+export {
+  colombiaMidnightUtc,
+  formatColombiaDateKey,
+  reminderBatchStartUtcForScheduledDate,
+};
 
 export type ReminderDeliveryStatus =
   | 'pending'
@@ -77,6 +90,8 @@ export interface ReminderAutomationsDashboard {
     upcomingServiceDate: string;
     lastRunServiceDate: string;
     beforeNextSchedulerRun: boolean;
+    upcomingDayOffset: number;
+    lastRunDayOffset: number;
   };
   clients: { upcoming: ReminderRow[]; lastRun: ReminderRow[] };
   professionals: { upcoming: ReminderRow[]; lastRun: ReminderRow[] };
@@ -163,57 +178,18 @@ function getRemindersEnabled(
   return prefs.get(key) ?? true;
 }
 
-function getColombiaDate(now: Date): { year: number; month: number; day: number } {
-  const colombiaOffsetMs = COLOMBIA_UTC_OFFSET_HOURS * 60 * 60 * 1000;
-  const colombiaMs = now.getTime() + now.getTimezoneOffset() * 60 * 1000 + colombiaOffsetMs;
-  const d = new Date(colombiaMs);
-  return { year: d.getUTCFullYear(), month: d.getUTCMonth(), day: d.getUTCDate() };
-}
-
-export function colombiaMidnightUtc(dayOffset: number, now = new Date()): Date {
-  const col = getColombiaDate(now);
-  return new Date(Date.UTC(col.year, col.month, col.day + dayOffset, 5, 0, 0, 0));
-}
-
-function colombiaSchedulerRunUtc(dayOffset: number, now = new Date()): Date {
-  const col = getColombiaDate(now);
-  return new Date(Date.UTC(col.year, col.month, col.day + dayOffset, 23, 0, 0, 0));
-}
-
-export function formatColombiaDateKey(date: Date): string {
-  const col = getColombiaDate(date);
-  const y = col.year;
-  const m = String(col.month + 1).padStart(2, '0');
-  const d = String(col.day).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-/** 6 PM Colombia del día anterior al servicio (inicio del batch 24h). */
-export function reminderBatchStartUtcForScheduledDate(scheduledDateIso: string): Date {
-  const col = getColombiaDate(new Date(scheduledDateIso));
-  return new Date(Date.UTC(col.year, col.month, col.day - 1, 23, 0, 0, 0));
-}
-
 function buildMeta(now = new Date()) {
-  const todayRun = colombiaSchedulerRunUtc(0, now);
-  const nowMs = now.getTime();
-  const beforeNextSchedulerRun = nowMs < todayRun.getTime();
-  const nextSchedulerRunAt = beforeNextSchedulerRun
-    ? todayRun
-    : colombiaSchedulerRunUtc(1, now);
-  const lastSchedulerRunAt = beforeNextSchedulerRun
-    ? colombiaSchedulerRunUtc(-1, now)
-    : todayRun;
-  const lastBatchRunAt = colombiaSchedulerRunUtc(-1, now);
-
+  const windows = resolveReminderDashboardWindows(now);
   return {
     timezone: TIMEZONE as typeof TIMEZONE,
-    nextSchedulerRunAt: nextSchedulerRunAt.toISOString(),
-    lastSchedulerRunAt: lastSchedulerRunAt.toISOString(),
-    lastBatchRunAt: lastBatchRunAt.toISOString(),
-    upcomingServiceDate: formatColombiaDateKey(colombiaMidnightUtc(1, now)),
-    lastRunServiceDate: formatColombiaDateKey(colombiaMidnightUtc(0, now)),
-    beforeNextSchedulerRun,
+    nextSchedulerRunAt: windows.nextSchedulerRunAt,
+    lastSchedulerRunAt: windows.lastSchedulerRunAt,
+    lastBatchRunAt: windows.lastBatchRunAt,
+    upcomingServiceDate: windows.upcomingServiceDate,
+    lastRunServiceDate: windows.lastRunServiceDate,
+    beforeNextSchedulerRun: windows.beforeNextSchedulerRun,
+    upcomingDayOffset: windows.upcomingDayOffset,
+    lastRunDayOffset: windows.lastRunDayOffset,
   };
 }
 
@@ -396,8 +372,6 @@ async function fetchReminderLogs(
 
   for (const row of (data ?? []) as (MessageLogRow & { recipient_phone?: string | null })[]) {
     const payload = row.raw_payload ?? {};
-    if (payload.source !== 'reminder_scheduler') continue;
-
     const appointmentId = String(payload.appointment_id ?? '').trim();
     const recipientType = payload.recipient_type as RecipientType | undefined;
     const memberId = String(payload.member_id ?? '').trim() || null;
@@ -692,8 +666,7 @@ async function buildReminderRow(
   const data = doc.data;
   const appointmentId = doc.id;
   const appointmentStatus = String(data.status ?? 'UNKNOWN');
-  const clientName = String(data.clientName ?? '').trim() || 'Cliente';
-  const primaryProfessionalName = String(data.providerName ?? '').trim() || 'Sin profesional asignado';
+  const clientName = await resolveClientDirectoryName(supabase, data);
   const professionalNamesDisplay = buildProfessionalNamesDisplay(data);
   const scheduledDate = parseTimestamp(data.scheduledDate);
   const templateName = recipientType === 'client' ? TEMPLATE_CLIENT : TEMPLATE_PROFESSIONAL;
@@ -724,7 +697,7 @@ async function buildReminderRow(
   // en la misma ventana de batch y el teléfono compartido puede atribuir a
   // esta fila el envío real de OTRA cita, mostrando "Enviado" sin serlo.
   const log = resolveLogForRow(appointmentId, recipientType, recipientMemberId, phone, logMaps, {
-    allowPhoneFallback: section !== 'upcoming' && !recipientMemberId,
+    allowPhoneFallback: recipientType === 'client' || (section !== 'upcoming' && !recipientMemberId),
   });
   const deliveryStatus = resolveDeliveryStatus({
     recipientType,
@@ -750,7 +723,7 @@ async function buildReminderRow(
   const memberDisplayName = memberOverride?.name?.trim() || 'Profesional';
   const recipientName = recipientType === 'client'
     ? clientName
-    : (memberOverride ? memberDisplayName : primaryProfessionalName);
+    : (memberOverride ? memberDisplayName : professionalNamesDisplay);
 
   return {
     appointmentId,
@@ -861,14 +834,32 @@ async function collectPrefsForDocs(
   return loadRecipientPreferences(supabase, keys);
 }
 
+async function resolveClientDirectoryName(
+  supabase: SupabaseClient,
+  data: Record<string, unknown>,
+): Promise<string> {
+  const fallback = String(data.clientName ?? '').trim() || 'Cliente';
+  const clientId = String(data.clientId ?? '').trim();
+  if (clientId && !isSentinelClientId(clientId)) {
+    try {
+      const entry = await resolveDirectoryEntry(supabase, clientId);
+      const name = entry?.full_name?.trim();
+      if (name) return name;
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
+}
+
 export async function buildDashboard(supabase: SupabaseClient): Promise<ReminderAutomationsDashboard> {
   const now = new Date();
   const meta = buildMeta(now);
 
-  const upcomingStart = colombiaMidnightUtc(1, now).toISOString();
-  const upcomingEnd = colombiaMidnightUtc(2, now).toISOString();
-  const lastRunStart = colombiaMidnightUtc(0, now).toISOString();
-  const lastRunEnd = colombiaMidnightUtc(1, now).toISOString();
+  const upcomingStart = colombiaMidnightUtc(meta.upcomingDayOffset, now).toISOString();
+  const upcomingEnd = colombiaMidnightUtc(meta.upcomingDayOffset + 1, now).toISOString();
+  const lastRunStart = colombiaMidnightUtc(meta.lastRunDayOffset, now).toISOString();
+  const lastRunEnd = colombiaMidnightUtc(meta.lastRunDayOffset + 1, now).toISOString();
 
   const logSince = new Date(
     new Date(meta.lastBatchRunAt).getTime() - 2 * 60 * 60 * 1000,

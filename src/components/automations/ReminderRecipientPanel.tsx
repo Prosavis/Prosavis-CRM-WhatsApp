@@ -11,12 +11,16 @@ export interface ReminderRecipientPanelProps {
   recipientType: ReminderRecipientType;
   upcoming: ReminderRow[];
   lastRun: ReminderRow[];
+  upcomingServiceDate?: string;
+  lastRunServiceDate?: string;
   onRefresh?: () => void;
 }
 
 const ReminderRecipientPanel: React.FC<ReminderRecipientPanelProps> = ({
   upcoming,
   lastRun,
+  upcomingServiceDate,
+  lastRunServiceDate,
   onRefresh,
 }) => {
   const queryClient = useQueryClient();
@@ -50,7 +54,8 @@ const ReminderRecipientPanel: React.FC<ReminderRecipientPanelProps> = ({
             Próximo envío
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Citas elegibles para el run de las 6 PM (servicio mañana) sin timestamp de envío.
+            Citas del próximo lote CRM 18:00
+            {upcomingServiceDate ? ` (servicio ${upcomingServiceDate})` : ''}.
           </Typography>
           <ReminderTrackingTable
             rows={upcoming}
@@ -67,7 +72,9 @@ const ReminderRecipientPanel: React.FC<ReminderRecipientPanelProps> = ({
             Último envío
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Citas de hoy — batch del run anterior cruzado con whatsapp_message_log.
+            Lote CRM que ya corrió
+            {lastRunServiceDate ? ` (servicio ${lastRunServiceDate})` : ''}, cruzado con
+            whatsapp_message_log.
           </Typography>
           <ReminderTrackingTable rows={lastRun} onViewDetail={setDetailRow} />
         </CardContent>

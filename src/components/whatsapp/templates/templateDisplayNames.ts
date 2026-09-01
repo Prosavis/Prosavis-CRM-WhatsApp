@@ -15,6 +15,7 @@ const TEMPLATE_DISPLAY_NAMES: Record<string, string> = {
   outreach_respuesta_si_quiere_precios: 'Respuesta precios',
   outreach_casa_limpieza: 'Outreach casa limpieza',
   outreach_empresas_limpieza_v2: 'Outreach empresas limpieza',
+  outreach_empresas_limpieza_v3: 'Outreach empresas limpieza v3',
   welcome_greeting: 'Bienvenida',
 };
 

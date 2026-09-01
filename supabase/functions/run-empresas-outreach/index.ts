@@ -1,5 +1,6 @@
 /**
- * Lote empresas: 50 WhatsApp (bot 312, outreach_empresas_limpieza_v2) + 50 correos.
+ * Lote empresas: WhatsApp hasta 50 enviados reales (relleno si fallan) + 50 intentos de correo.
+ * Plantilla WA: EMPRESAS_WA_TEMPLATE (v3 APPROVED).
  * Auth: x-api-key (REMINDER_API_KEY / REACTIVATION_API_KEY).
  */
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
@@ -23,12 +24,22 @@ import {
   EMPRESAS_WA_BODY,
   EMPRESAS_WA_CAMPAIGN,
   EMPRESAS_WA_TEMPLATE,
+  EMPRESAS_WA_TEMPLATE_V3,
+  EMPRESAS_WA_ATTEMPT_CAP,
+  EMPRESAS_OUTREACH_BATCH,
+  EMPRESAS_OUTREACH_PASS,
   EMAIL_ENVIADO_TAG,
   EMAIL_ENVIADO_TAG_ID,
   buildDirectoryUpsert,
   buildRfc822,
   composeEmpresasEmail,
+  composeEmpresasWhatsApp,
   e164FromPhoneKey,
+  nextWhatsAppNeed,
+  passLimit,
+  remainingForQuota,
+  resolveEmpresasSendWindow,
+  shouldContinueWhatsAppQuota,
   toBase64Url,
   type EmpresasLeadRow,
 } from '../_shared/empresasOutreach.ts';
@@ -44,9 +55,26 @@ function verifyApiKey(req: Request): boolean {
 
 const DELAY_WA_MS = 3_000;
 const DELAY_EMAIL_MS = 400;
-const TIME_BUDGET_MS = 380_000;
+const TIME_BUDGET_MS = 120_000;
 
 type SupabaseClient = ReturnType<typeof getServiceClient>;
+
+async function countSentInWindow(
+  supabase: SupabaseClient,
+  atField: 'last_wa_at' | 'last_email_at',
+  statusField: 'wa_status' | 'email_status',
+  startIso: string,
+  endIso: string,
+): Promise<number> {
+  const { count, error } = await supabase
+    .from('outreach_leads')
+    .select('id', { count: 'exact', head: true })
+    .eq(statusField, 'sent')
+    .gte(atField, startIso)
+    .lt(atField, endIso);
+  if (error) throw error;
+  return count ?? 0;
+}
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -139,12 +167,22 @@ async function sendWhatsAppOne(
   const phoneKey = row.phone_key || '';
   const phone = normalizePhone(e164FromPhoneKey(phoneKey));
   if (!phoneKey || phone.length < 10) {
+    await supabase.from('outreach_leads').update({
+      wa_status: 'failed',
+      last_wa_at: new Date().toISOString(),
+    }).eq('id', row.id);
     return { status: 'skipped', error: 'Teléfono inválido' };
   }
   if (await isRecipientBlocked(supabase, phone)) {
+    await supabase.from('outreach_leads').update({
+      wa_status: 'failed',
+      last_wa_at: new Date().toISOString(),
+    }).eq('id', row.id);
     return { status: 'skipped', error: 'Destinatario bloqueado' };
   }
   const directoryId = await promoteLead(supabase, row);
+  const useV3 = EMPRESAS_WA_TEMPLATE === EMPRESAS_WA_TEMPLATE_V3;
+  const wa = useV3 ? composeEmpresasWhatsApp(row) : null;
   let metaResult;
   try {
     metaResult = await sendToMeta({
@@ -153,7 +191,8 @@ async function sendWhatsAppOne(
       accessToken: graph.accessToken,
       templateName: EMPRESAS_WA_TEMPLATE,
       templateLanguage: 'es_CO',
-      messageBody: EMPRESAS_WA_BODY,
+      messageBody: wa?.body ?? EMPRESAS_WA_BODY,
+      templateComponents: wa?.components,
       requirePhone: true,
     });
   } catch (err) {
@@ -172,7 +211,7 @@ async function sendWhatsAppOne(
         recipient_bsuid: resolved.bsuid ?? null,
         direction: 'outbound',
         sender_type: 'system',
-        message_body: EMPRESAS_WA_BODY,
+        message_body: wa?.body ?? EMPRESAS_WA_BODY,
         status: metaResult.status,
         wa_message_id: metaResult.waMessageId,
         template_name: EMPRESAS_WA_TEMPLATE,
@@ -188,7 +227,7 @@ async function sendWhatsAppOne(
     await updateConversationPreview(
       supabase,
       stableKey,
-      EMPRESAS_WA_BODY,
+      wa?.body ?? EMPRESAS_WA_BODY,
       metaResult.status,
       persisted.createdAt ?? createdAt,
     );
@@ -287,26 +326,66 @@ Deno.serve(async (req) => {
     const doEmail = channel === 'email' || channel === 'both';
     const supabase = getServiceClient();
     const started = Date.now();
+    const sendWindow = resolveEmpresasSendWindow(new Date());
+    const waAlready = await countSentInWindow(
+      supabase,
+      'last_wa_at',
+      'wa_status',
+      sendWindow.startIso,
+      sendWindow.endIso,
+    );
+    const emailAlready = await countSentInWindow(
+      supabase,
+      'last_email_at',
+      'email_status',
+      sendWindow.startIso,
+      sendWindow.endIso,
+    );
+    const remainingWa = remainingForQuota(EMPRESAS_OUTREACH_BATCH, waAlready);
+    const remainingEmail = remainingForQuota(EMPRESAS_OUTREACH_BATCH, emailAlready);
+    const waTarget = doWa ? passLimit(remainingWa, limit, EMPRESAS_OUTREACH_PASS) : 0;
+    const emailTarget = doEmail
+      ? Math.min(remainingEmail, Math.max(0, limit), EMPRESAS_OUTREACH_BATCH)
+      : 0;
 
     const stats = {
       waSent: 0,
       waFailed: 0,
       waSkipped: 0,
+      waRounds: 0,
+      waAttempts: 0,
       emailSent: 0,
       emailFailed: 0,
       emailSkipped: 0,
       emailSkippedNoSecrets: 0,
     };
 
-    if (doWa) {
-      const { data, error } = await supabase.rpc('list_empresas_outreach_wa_eligible', {
-        p_limit: limit,
+    const requestedMet = (!doWa || remainingWa === 0) && (!doEmail || remainingEmail === 0);
+    if (!dryRun && requestedMet) {
+      return jsonResponse({
+        success: true,
+        skipped: 'quota_met',
+        dryRun,
+        channel,
+        limit,
+        window: sendWindow,
+        waSentInWindow: waAlready,
+        emailSentInWindow: emailAlready,
+        remainingWa,
+        remainingEmail,
+        stats,
+        schedulerName: body.schedulerName ?? null,
       });
-      if (error) throw error;
-      const rows = (data ?? []) as EmpresasLeadRow[];
+    }
+
+    if (doWa) {
       if (dryRun) {
-        stats.waSkipped = rows.length;
-      } else {
+        const { data, error } = await supabase.rpc('list_empresas_outreach_wa_eligible', {
+          p_limit: waTarget || limit,
+        });
+        if (error) throw error;
+        stats.waSkipped = ((data ?? []) as EmpresasLeadRow[]).length;
+      } else if (waTarget > 0) {
         try {
           assertMetaSendEnabled();
         } catch (err) {
@@ -314,47 +393,78 @@ Deno.serve(async (req) => {
         }
         const graph = getGraphCredentials(BOT_PHONE_NUMBER_ID);
         assertBotOnlyAutomation(graph.phoneNumberId);
-        for (const row of rows) {
-          if (Date.now() - started > TIME_BUDGET_MS) break;
-          const result = await sendWhatsAppOne(supabase, graph, row);
-          if (result.status === 'sent') stats.waSent += 1;
-          else if (result.status === 'failed') stats.waFailed += 1;
-          else stats.waSkipped += 1;
-          await sleep(DELAY_WA_MS);
-        }
-      }
-    }
-
-    if (doEmail) {
-      const { data, error } = await supabase.rpc('list_empresas_outreach_email_eligible', {
-        p_limit: limit,
-      });
-      if (error) throw error;
-      const rows = (data ?? []) as EmpresasLeadRow[];
-      if (dryRun) {
-        stats.emailSkipped = rows.length;
-      } else {
-        const gmail = await googleAccessToken();
-        if (!gmail) {
-          stats.emailSkippedNoSecrets = rows.length;
-        } else {
+        while (
+          shouldContinueWhatsAppQuota({
+            target: waTarget,
+            sent: stats.waSent,
+            attempts: stats.waAttempts,
+            maxAttempts: EMPRESAS_WA_ATTEMPT_CAP,
+          }) &&
+          Date.now() - started <= TIME_BUDGET_MS
+        ) {
+          const need = nextWhatsAppNeed(waTarget, stats.waSent);
+          const { data, error } = await supabase.rpc('list_empresas_outreach_wa_eligible', {
+            p_limit: need,
+          });
+          if (error) throw error;
+          const rows = (data ?? []) as EmpresasLeadRow[];
+          if (rows.length === 0) break;
+          stats.waRounds += 1;
           for (const row of rows) {
             if (Date.now() - started > TIME_BUDGET_MS) break;
-            const result = await sendEmailOne(supabase, gmail, row);
-            if (result.status === 'sent') stats.emailSent += 1;
-            else if (result.status === 'failed') stats.emailFailed += 1;
-            else stats.emailSkipped += 1;
-            await sleep(DELAY_EMAIL_MS);
+            if (stats.waAttempts >= EMPRESAS_WA_ATTEMPT_CAP) break;
+            const result = await sendWhatsAppOne(supabase, graph, row);
+            stats.waAttempts += 1;
+            if (result.status === 'sent') stats.waSent += 1;
+            else if (result.status === 'failed') stats.waFailed += 1;
+            else stats.waSkipped += 1;
+            await sleep(DELAY_WA_MS);
           }
         }
       }
     }
 
+    if (doEmail) {
+      const emailLimit = dryRun ? (emailTarget || limit) : emailTarget;
+      if (emailLimit > 0) {
+        const { data, error } = await supabase.rpc('list_empresas_outreach_email_eligible', {
+          p_limit: emailLimit,
+        });
+        if (error) throw error;
+        const rows = (data ?? []) as EmpresasLeadRow[];
+        if (dryRun) {
+          stats.emailSkipped = rows.length;
+        } else {
+          const gmail = await googleAccessToken();
+          if (!gmail) {
+            stats.emailSkippedNoSecrets = rows.length;
+          } else {
+            for (const row of rows) {
+              if (Date.now() - started > TIME_BUDGET_MS) break;
+              const result = await sendEmailOne(supabase, gmail, row);
+              if (result.status === 'sent') stats.emailSent += 1;
+              else if (result.status === 'failed') stats.emailFailed += 1;
+              else stats.emailSkipped += 1;
+              await sleep(DELAY_EMAIL_MS);
+            }
+          }
+        }
+      }
+    }
+
+    const waSentInWindow = waAlready + stats.waSent;
+    const emailSentInWindow = emailAlready + stats.emailSent;
     return jsonResponse({
       success: true,
       dryRun,
       channel,
       limit,
+      window: sendWindow,
+      waSentInWindow,
+      emailSentInWindow,
+      remainingWa: remainingForQuota(EMPRESAS_OUTREACH_BATCH, waSentInWindow),
+      remainingEmail: remainingForQuota(EMPRESAS_OUTREACH_BATCH, emailSentInWindow),
+      secretsOk: stats.emailSkippedNoSecrets === 0,
       stats,
       schedulerName: body.schedulerName ?? null,
     });
