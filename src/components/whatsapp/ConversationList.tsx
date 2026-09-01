@@ -63,7 +63,7 @@ import {
   useDirectoryContactMeta,
 } from '@/hooks/useDirectoryContactMeta';
 import { pickContactPhotoUrl } from '@/utils/contactAvatar';
-import { inboxLineHex, inboxLineMuiColor } from '@/utils/inboxLineVisual';
+import { inboxLineForeground, inboxLineMuiColor } from '@/utils/inboxLineVisual';
 import { resolveWhatsAppLine } from '@/utils/whatsappLines';
 import { resolveContactDisplayName, shouldSyncContactNameFromDirectory } from '@/utils/contactDisplayName';
 import { catalogColorByTagName, directoryDisplayTags, directoryTagColor } from '@/utils/directoryDisplayTags';
@@ -219,7 +219,6 @@ const ConversationRow: React.FC<ConversationRowProps> = React.memo(({
   const theme = useTheme();
   const longPress = useLongPress({ onLongPress: onEnterSelection });
   const inboxLine = resolveWhatsAppLine(conv.phoneNumberId);
-  const inboxColor = inboxLineHex(inboxLine);
 
   const handleClick = () => {
     if (longPress.shouldSuppressClick()) return;
@@ -288,7 +287,11 @@ const ConversationRow: React.FC<ConversationRowProps> = React.memo(({
             </Box>
             <Typography
               variant="caption"
-              sx={{ color: isUnread ? inboxColor : 'text.secondary', whiteSpace: 'nowrap', ml: 1 }}
+              sx={{
+                color: isUnread ? inboxLineForeground(theme, inboxLine) : 'text.secondary',
+                whiteSpace: 'nowrap',
+                ml: 1,
+              }}
             >
               {formatRelativeTime(conv.lastMessageAt)}
             </Typography>

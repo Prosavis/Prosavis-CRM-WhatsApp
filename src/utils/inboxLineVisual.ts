@@ -1,3 +1,4 @@
+import type { Theme } from '@mui/material/styles';
 import { DesignTokens } from '@/constants/designSystem';
 import type { WhatsAppLineId } from './whatsappLines';
 
@@ -28,6 +29,11 @@ export function inboxLineLabel(line: WhatsAppLineId): string {
 
 export function inboxLineMuiColor(line: WhatsAppLineId): 'primary' | 'secondary' {
   return line === 'commercial' ? 'secondary' : 'primary';
+}
+
+/** Color de texto de línea (hora no leída). `inboxLineHex` es ADN de relleno, no de texto. */
+export function inboxLineForeground(theme: Theme, line: WhatsAppLineId): string {
+  return theme.palette[inboxLineMuiColor(line)].main;
 }
 
 const iconCache: Partial<Record<WhatsAppLineId, string>> = {};
