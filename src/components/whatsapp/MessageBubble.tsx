@@ -195,8 +195,9 @@ const MediaErrorPlaceholder: React.FC<MediaErrorPlaceholderProps> = ({
 /** Acciones de la burbuja (responder, reenviar, copiar). No usa tres puntos para no chocar con el menu nativo del audio. */
 const MessageActionsButton: React.FC<{
   onClick: (anchor: HTMLElement) => void;
-}> = ({ onClick }) => (
-  <Tooltip title="Más acciones del mensaje">
+  tooltipPlacement?: 'left' | 'right';
+}> = ({ onClick, tooltipPlacement = 'right' }) => (
+  <Tooltip title="Más acciones del mensaje" placement={tooltipPlacement}>
     <IconButton
       className="msg-menu-btn"
       size="small"
@@ -853,15 +854,29 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
               t.palette.mode === 'dark'
                 ? '0 1px 2px rgba(0,0,0,0.35)'
                 : '0 1px 0.5px rgba(11,20,26,.13)',
-            '&:hover .msg-menu-btn': { opacity: 1 },
+            overflow: 'visible',
+            '&:hover .msg-menu-btn': { opacity: 1, pointerEvents: 'auto' },
           }}
         >
           {!selectionMode && message.mediaType !== 'audio' && (
             <Box
               className="msg-menu-btn"
-              sx={{ position: 'absolute', top: 2, right: 2, opacity: 0, transition: 'opacity 0.15s' }}
+              sx={{
+                position: 'absolute',
+                top: 4,
+                zIndex: 1,
+                opacity: 0,
+                pointerEvents: 'none',
+                transition: 'opacity 0.15s',
+                ...(isOutbound
+                  ? { left: 0, transform: 'translateX(-100%)' }
+                  : { right: 0, transform: 'translateX(100%)' }),
+              }}
             >
-              <MessageActionsButton onClick={setMenuAnchor} />
+              <MessageActionsButton
+                onClick={setMenuAnchor}
+                tooltipPlacement={isOutbound ? 'left' : 'right'}
+              />
             </Box>
           )}
 
