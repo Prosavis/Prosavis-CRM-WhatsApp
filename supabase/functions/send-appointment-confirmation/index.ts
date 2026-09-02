@@ -164,6 +164,7 @@ Deno.serve(async (req) => {
         },
       },
       uid,
+      'system',
     );
 
     const createdAt = persisted.createdAt ?? new Date().toISOString();

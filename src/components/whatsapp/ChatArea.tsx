@@ -56,6 +56,7 @@ import {
 } from '@/utils/inboxMessageCache';
 import { INBOX_PERF_MARKS, markInboxPerf } from '@/utils/inboxPerfMarks';
 import MessageBubble, { type MessageReaction } from './MessageBubble';
+import type { AdminSenderProfile } from '@/utils/outboundSenderLabel';
 import ForwardMessageDialog from './ForwardMessageDialog';
 import MessageInput, {
   type PendingAttachmentForSend,
@@ -170,6 +171,7 @@ interface ChatAreaProps {
   myDisplayName?: string;
   /** Otros admins (excluye al usuario actual) actualmente activos en este chat. */
   peerPresences?: WhatsAppAdminPresence[];
+  adminById?: ReadonlyMap<string, AdminSenderProfile>;
   onLoadedConversationInbound?: (inbound: LoadedConversationInbound) => void;
 }
 
@@ -247,6 +249,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   myUid,
   myDisplayName,
   peerPresences = [],
+  adminById,
   onLoadedConversationInbound,
 }) => {
   const theme = useTheme();
@@ -600,6 +603,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         id: optimisticId,
         direction: 'outbound',
         senderType: 'agent',
+        sentVia: 'crm',
+        agentUid: myUid ?? undefined,
         messageBody: text,
         status: 'pending',
         createdAt: new Date(),
@@ -644,7 +649,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         }
       }
     },
-    [customerPhone, sendPhoneNumberId, replyToMessage, sessionWindowClosed],
+    [customerPhone, sendPhoneNumberId, replyToMessage, sessionWindowClosed, myUid],
   );
 
   const handleLoadOlder = useCallback(async () => {
@@ -1685,6 +1690,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                     currentAgentReactionEmoji={msg.waMessageId ? currentAgentReactionByTarget.get(msg.waMessageId) : undefined}
                     reacting={msg.waMessageId ? Boolean(pendingReactions[msg.waMessageId]) : false}
                     onReact={handleReact}
+                    adminById={adminById}
                   />
                 </Box>
               );

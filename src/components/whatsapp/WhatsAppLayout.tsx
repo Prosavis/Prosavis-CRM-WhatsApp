@@ -17,6 +17,7 @@ import {
   listWhatsAppTags,
   listWhatsAppTagFolders,
   listWhatsAppSnippets,
+  listWhatsAppAdminSenderProfiles,
   assignWhatsAppTags,
   blockWhatsAppUser,
   deleteWhatsAppConversationPermanently,
@@ -249,6 +250,9 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
 
   // Presencia entre admins (otras pestañas / otros usuarios viendo el inbox).
   const [presenceEntries, setPresenceEntries] = useState<WhatsAppAdminPresence[]>([]);
+  const [adminById, setAdminById] = useState<ReadonlyMap<string, { email: string }>>(
+    () => new Map(),
+  );
 
   const myUid = user?.id ?? null;
   const myDisplayName = useMemo(
@@ -514,6 +518,21 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
       void clearMyWhatsAppPresence(myUid);
     };
   }, [myUid]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void listWhatsAppAdminSenderProfiles()
+      .then((rows) => {
+        if (cancelled) return;
+        setAdminById(new Map(rows.map((row) => [row.id, { email: row.email }])));
+      })
+      .catch((err) => {
+        console.warn('No se pudieron cargar admin_profiles para etiquetas de envío', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const livePeerPresences = useMemo(() => {
     const live = presenceEntries.filter((p) => {
@@ -1038,6 +1057,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
               myUid={myUid}
               myDisplayName={myDisplayName}
               peerPresences={peersInSelectedChat}
+              adminById={adminById}
               onLoadedConversationInbound={setLoadedConversationInbound}
             />
           ) : (

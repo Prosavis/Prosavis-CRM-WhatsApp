@@ -231,8 +231,8 @@ Deno.serve(async (req) => {
             reactivationStep: stepNumber,
           },
         },
-        // deno-lint-ignore no-explicit-any
-        null as any,
+        null,
+        'system',
       );
       const createdAt = persisted.createdAt ?? new Date().toISOString();
       await updateConversationPreview(

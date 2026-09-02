@@ -244,8 +244,8 @@ async function processRecipient(
         error_message: metaResult.errorMessage ?? null,
         raw_payload: metaResult.payload,
       },
-      // deno-lint-ignore no-explicit-any
-      agentUid as any,
+      agentUid ?? null,
+      'system',
     );
     createdAt = persisted.createdAt ?? createdAt;
   } catch (logErr) {

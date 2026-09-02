@@ -1006,6 +1006,7 @@ export type Database = {
           recipient_phone: string | null
           reply_to_wa_message_id: string | null
           sender_type: string | null
+          sent_via: string | null
           size_bytes: number | null
           status: string
           storage_path: string | null
@@ -1042,6 +1043,7 @@ export type Database = {
           recipient_phone?: string | null
           reply_to_wa_message_id?: string | null
           sender_type?: string | null
+          sent_via?: string | null
           size_bytes?: number | null
           status: string
           storage_path?: string | null
@@ -1078,6 +1080,7 @@ export type Database = {
           recipient_phone?: string | null
           reply_to_wa_message_id?: string | null
           sender_type?: string | null
+          sent_via?: string | null
           size_bytes?: number | null
           status?: string
           storage_path?: string | null

@@ -77,7 +77,8 @@ export interface Database {
           recipient_phone: string | null;
           recipient_bsuid: string | null;
           direction: 'inbound' | 'outbound';
-          sender_type: 'bot' | 'agent' | 'system' | 'user';
+          sender_type: 'bot' | 'agent' | 'system' | 'user' | 'app';
+          sent_via: 'crm' | 'grok' | 'app' | 'system' | null;
           agent_uid: string | null;
           message_body: string | null;
           media_type: 'image' | 'audio' | 'video' | 'document' | 'sticker' | null;

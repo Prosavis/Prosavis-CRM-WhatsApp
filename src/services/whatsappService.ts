@@ -21,6 +21,7 @@ import {
   presenceStateToEntries,
   type WhatsAppPresenceTrackPayload,
 } from '@/utils/whatsappAdminPresence';
+import { isOutboundSentVia, type OutboundSentVia } from '../../supabase/functions/_shared/outboundSentVia';
 
 export type { InboxAiProposedAction, ExecuteInboxAiActionResult, InboxAiPropertySummary };
 
@@ -171,6 +172,7 @@ function mapMessageRow(row: MessageRow): WhatsAppMessage {
     recipientBsuid: row.recipient_bsuid ?? undefined,
     direction: row.direction,
     senderType: row.sender_type,
+    sentVia: isOutboundSentVia(row.sent_via) ? row.sent_via : undefined,
     agentUid: row.agent_uid ?? undefined,
     messageBody: row.message_body ?? undefined,
     mediaType: row.media_type ?? undefined,
@@ -283,6 +285,7 @@ export interface WhatsAppMessage {
   recipientBsuid?: string;
   direction: 'inbound' | 'outbound';
   senderType: 'bot' | 'agent' | 'system' | 'user' | 'app';
+  sentVia?: OutboundSentVia;
   agentUid?: string;
   messageBody?: string;
   mediaType?: 'image' | 'audio' | 'video' | 'document' | 'sticker';
@@ -1504,6 +1507,14 @@ export async function reorderWhatsAppTagFolders(
     ),
   );
   return { success: true };
+}
+
+export async function listWhatsAppAdminSenderProfiles(): Promise<
+  Array<{ id: string; email: string }>
+> {
+  const { data, error } = await supabase.from('admin_profiles').select('id, email');
+  if (error) throw error;
+  return (data ?? []).map((row) => ({ id: row.id, email: row.email }));
 }
 
 export async function listWhatsAppTags(): Promise<WhatsAppTag[]> {

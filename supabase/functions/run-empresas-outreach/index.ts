@@ -220,9 +220,8 @@ async function sendWhatsAppOne(
         error_message: metaResult.errorMessage ?? null,
         raw_payload: metaResult.payload,
       },
-      // Worker CLI: sin agent_uid (FK retry pone null).
-      // deno-lint-ignore no-explicit-any
-      undefined as any,
+      null,
+      'system',
     );
     await updateConversationPreview(
       supabase,

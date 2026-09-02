@@ -34,6 +34,7 @@ export interface WhatsAppMessage {
   recipientBsuid?: string;
   direction: 'inbound' | 'outbound';
   senderType: 'bot' | 'agent' | 'system' | 'user' | 'app';
+  sentVia?: 'crm' | 'grok' | 'app' | 'system';
   agentUid?: string;
   messageBody?: string;
   mediaType?: 'image' | 'audio' | 'video' | 'document' | 'sticker';

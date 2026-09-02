@@ -86,6 +86,7 @@ Deno.serve(async (req) => {
         raw_payload: metaResult.payload,
       },
       user.id,
+      'crm',
     );
 
     if (metaResult.status === 'failed') {

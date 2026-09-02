@@ -359,9 +359,8 @@ async function sendReactivationTemplate(params: {
         reactivationStep: params.stepNumber,
       },
     },
-    // Igual que send-appointment-reminder: system jobs sin agent_uid.
-    // deno-lint-ignore no-explicit-any
-    null as any,
+    null,
+    'system',
   );
 
   const createdAt = persisted.createdAt ?? new Date().toISOString();

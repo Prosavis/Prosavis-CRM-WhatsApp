@@ -61,6 +61,7 @@ Deno.serve(async (req) => {
       recipient_phone: recipientPhone,
       direction: 'outbound',
       sender_type: 'system',
+      sent_via: 'system',
       message_body: displayMessageBody || templateName || '',
       status: 'sent',
       wa_message_id: waMessageId,

@@ -28,6 +28,8 @@ import ImageIcon from '@mui/icons-material/Image';
 import VideocamIcon from '@mui/icons-material/Videocam';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
+import SmartphoneIcon from '@mui/icons-material/Smartphone';
+import SettingsIcon from '@mui/icons-material/Settings';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import PersonIcon from '@mui/icons-material/Person';
 import PhoneIcon from '@mui/icons-material/Phone';
@@ -64,6 +66,11 @@ import {
   isDeletedOrUnsupportedPreview,
   quotedMessagePreview,
 } from '@/utils/whatsappCoexStub';
+import {
+  resolveOutboundSenderLabel,
+  type AdminSenderProfile,
+  type OutboundSentVia,
+} from '@/utils/outboundSenderLabel';
 
 export interface MessageReaction {
   actorKey: string;
@@ -85,6 +92,7 @@ interface MessageBubbleProps {
   currentAgentReactionEmoji?: string;
   reacting?: boolean;
   onReact?: (msg: WhatsAppMessage, emoji: string) => void;
+  adminById?: ReadonlyMap<string, AdminSenderProfile>;
 }
 
 const MEDIA_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -738,6 +746,24 @@ const ContactsContent: React.FC<{ message: WhatsAppMessage }> = ({ message }) =>
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
+function OutboundSenderIcon({ kind }: { kind: OutboundSentVia }) {
+  const sx = { fontSize: 14, color: '#667781', mr: 0.5 };
+  switch (kind) {
+    case 'crm':
+      return <PersonIcon sx={sx} />;
+    case 'grok':
+      return <SmartToyIcon sx={sx} />;
+    case 'app':
+      return <SmartphoneIcon sx={sx} />;
+    case 'system':
+      return <SettingsIcon sx={sx} />;
+    default: {
+      const _exhaustive: never = kind;
+      return _exhaustive;
+    }
+  }
+}
+
 const MessageBubble: React.FC<MessageBubbleProps> = ({
   message,
   allMessages = [],
@@ -751,6 +777,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
   currentAgentReactionEmoji,
   reacting,
   onReact,
+  adminById,
 }) => {
   const theme = useTheme();
   const isOutbound = message.direction === 'outbound';
@@ -904,7 +931,14 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
                 }}
               >
                 <Typography variant="caption" fontWeight={600} color={quoted.direction === 'inbound' ? '#06cf9c' : '#53bdeb'}>
-                  {quoted.direction === 'inbound' ? 'Cliente' : 'Tú'}
+                  {quoted.direction === 'inbound'
+                    ? 'Cliente'
+                    : resolveOutboundSenderLabel({
+                        sentVia: quoted.sentVia,
+                        senderType: quoted.senderType,
+                        agentUid: quoted.agentUid,
+                        adminById,
+                      })?.label ?? 'Tú'}
                 </Typography>
                 <Typography variant="caption" display="block" noWrap color="text.secondary">
                   {quotedText}
@@ -913,18 +947,23 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
             );
           })()}
 
-          {isOutbound && message.senderType !== 'agent' && (
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.25 }}>
-              <SmartToyIcon sx={{ fontSize: 14, color: '#667781', mr: 0.5 }} />
-              <Typography variant="caption" sx={{ color: '#667781', fontWeight: 500 }}>
-                {message.senderType === 'app'
-                  ? 'App (Francy)'
-                  : message.senderType === 'bot'
-                    ? 'Bot'
-                    : 'Sistema'}
-              </Typography>
-            </Box>
-          )}
+          {isOutbound && (() => {
+            const sender = resolveOutboundSenderLabel({
+              sentVia: message.sentVia,
+              senderType: message.senderType,
+              agentUid: message.agentUid,
+              adminById,
+            });
+            if (!sender) return null;
+            return (
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.25 }}>
+                <OutboundSenderIcon kind={sender.kind} />
+                <Typography variant="caption" sx={{ color: '#667781', fontWeight: 500 }}>
+                  {sender.label}
+                </Typography>
+              </Box>
+            );
+          })()}
 
           {hasMedia && (
             <MediaContent

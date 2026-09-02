@@ -89,6 +89,7 @@ Deno.serve(async (req) => {
         raw_payload: metaResult.payload,
       },
       user.id,
+      'crm',
     );
 
     const createdAt = persisted.createdAt ?? new Date().toISOString();

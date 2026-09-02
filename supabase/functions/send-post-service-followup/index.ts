@@ -583,8 +583,8 @@ Deno.serve(async (req) => {
           idempotency_key: payload.idempotencyKey,
         },
       },
-      // deno-lint-ignore no-explicit-any
-      null as any,
+      null,
+      'system',
     );
     const createdAt = persisted.createdAt ?? new Date().toISOString();
     await updateConversationPreview(

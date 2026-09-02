@@ -24,6 +24,7 @@ import {
   resolveWhatsAppLine,
 } from './whatsappLines.ts';
 import { queuePersistedAudioTranscription } from './whatsappMediaHydrate.ts';
+import { type OutboundSentVia } from './outboundSentVia.ts';
 import {
   SESSION_WINDOW_CLOSED_CODE,
   SESSION_WINDOW_CLOSED_MESSAGE,
@@ -534,9 +535,10 @@ export async function ensureConversation(
 export async function persistOutboundLog(
   supabase: SupabaseClient,
   row: Record<string, unknown>,
-  agentUid: string,
+  agentUid: string | null,
+  sentVia: OutboundSentVia,
 ): Promise<{ messageId?: string; createdAt?: string }> {
-  const baseRow = { ...row, agent_uid: agentUid };
+  const baseRow = { ...row, agent_uid: agentUid, sent_via: sentVia };
 
   const attemptInsert = async (payload: Record<string, unknown>) =>
     supabase
@@ -548,7 +550,11 @@ export async function persistOutboundLog(
   let { data: message, error: insertError } = await attemptInsert(baseRow);
 
   if (insertError && isForeignKeyViolation(insertError)) {
-    ({ data: message, error: insertError } = await attemptInsert({ ...row, agent_uid: null }));
+    ({ data: message, error: insertError } = await attemptInsert({
+      ...row,
+      agent_uid: null,
+      sent_via: sentVia,
+    }));
   }
 
   if (insertError) {
@@ -679,7 +685,7 @@ export async function sendWhatsAppMediaOutbound(
     client_request_id: params.clientRequestId ?? null,
   };
 
-  const persisted = await persistOutboundLog(supabase, insertRow, params.agentUid);
+  const persisted = await persistOutboundLog(supabase, insertRow, params.agentUid, 'crm');
   const createdAt = persisted.createdAt ?? new Date().toISOString();
 
   await updateConversationPreview(
@@ -772,7 +778,7 @@ export async function sendTextOutbound(
     client_request_id: params.clientRequestId ?? null,
   };
 
-  const persisted = await persistOutboundLog(supabase, insertRow, params.agentUid);
+  const persisted = await persistOutboundLog(supabase, insertRow, params.agentUid, 'crm');
   const createdAt = persisted.createdAt ?? new Date().toISOString();
   await updateConversationPreview(supabase, stableKey, params.text, metaResult.status, createdAt);
 

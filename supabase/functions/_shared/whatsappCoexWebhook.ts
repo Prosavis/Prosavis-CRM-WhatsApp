@@ -273,6 +273,7 @@ export async function persistCoexMessage(params: {
         ...messageLogContentFields(content),
         raw_payload: params.message,
         sender_type: direction === 'outbound' ? 'app' : 'user',
+        sent_via: direction === 'outbound' ? 'app' : null,
         direction,
       })
       .eq('id', existing.id);
@@ -347,6 +348,7 @@ export async function persistCoexMessage(params: {
       recipient_phone: parsed.customerPhone,
       direction,
       sender_type: direction === 'outbound' ? 'app' : 'user',
+      sent_via: direction === 'outbound' ? 'app' : null,
       ...messageLogContentFields(content),
       media_url: null,
       storage_url: null,
@@ -439,6 +441,7 @@ export async function persistCommercialOrphanStatus(params: {
       recipient_phone: recipientId,
       direction: 'outbound',
       sender_type: 'app',
+      sent_via: 'app',
       message_body: COMMERCIAL_ORPHAN_STATUS_STUB,
       status: deliveryStatus,
       wa_message_id: waMessageId,

@@ -151,6 +151,7 @@ async function processRecipient(
         raw_payload: metaResult.payload,
       },
       agentUid,
+      'crm',
     );
 
     const createdAt = persisted.createdAt ?? new Date().toISOString();

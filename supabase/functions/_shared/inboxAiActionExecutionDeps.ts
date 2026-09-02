@@ -205,6 +205,7 @@ export function createInboxAiActionExecutionDeps(params: {
           raw_payload: metaResult.payload,
         },
         agentUid,
+        'crm',
       );
       const createdAt = new Date().toISOString();
       await updateConversationPreview(

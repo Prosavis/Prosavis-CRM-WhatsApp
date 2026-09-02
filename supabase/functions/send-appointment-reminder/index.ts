@@ -355,6 +355,7 @@ Deno.serve(async (req) => {
         },
       },
       /* agentUid= */ null,
+      'system',
     );
 
     const createdAt = persisted.createdAt ?? new Date().toISOString();
