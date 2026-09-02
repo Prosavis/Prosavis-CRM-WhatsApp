@@ -19,10 +19,13 @@ const botWaMeUrl = `https://wa.me/${botWaDigits}`;
 /** Línea de producción Cloud API (misma fuente que el panel). */
 const metaProductionLine: WhatsAppInternalContact = {
   kind: 'phone',
-  value: metaDigits ? `+${metaDigits}` : WHATSAPP_CLOUD_PRODUCTION.phoneDisplay || '+573122531271',
-  copyDisplay: WHATSAPP_CLOUD_PRODUCTION.phoneDisplay || '+57 312 2531271',
+  value: metaDigits
+    ? `+${metaDigits}`
+    : WHATSAPP_CLOUD_PRODUCTION.phoneDisplay || '+573122531271',
+  copyDisplay: WHATSAPP_CLOUD_PRODUCTION.phoneDisplay || '+57 312 2531 271',
   label: WHATSAPP_CLOUD_PRODUCTION.botLabel || 'Prosavis',
-  description: 'Número de WhatsApp Business conectado a Meta Cloud API (inbox del panel)',
+  description:
+    'Número de WhatsApp Business conectado a Meta Cloud API (inbox del panel)',
 };
 
 /** Link para compartir con clientes (abre chat directo al bot). */
@@ -30,7 +33,8 @@ const botDirectLink: WhatsAppInternalContact = {
   kind: 'link',
   value: botWaMeUrl,
   label: 'Link directo al bot',
-  description: 'Para que los clientes escriban al bot de WhatsApp (citas / limpieza)',
+  description:
+    'Para que los clientes escriban al bot de WhatsApp (citas / limpieza)',
 };
 
 export const WHATSAPP_INTERNAL_CONTACTS: WhatsAppInternalContact[] = [

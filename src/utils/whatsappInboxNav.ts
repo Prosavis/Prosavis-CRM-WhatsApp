@@ -4,7 +4,7 @@ import {
 } from '@/constants/whatsappCloudAccounts';
 
 export const WHATSAPP_BOT_PHONE_DISPLAY =
-  WHATSAPP_CLOUD_PRODUCTION.phoneDisplay || '+57 312 2531271';
+  WHATSAPP_CLOUD_PRODUCTION.phoneDisplay || '+57 312 253 1271';
 
 export const WHATSAPP_COMMERCIAL_PHONE_DISPLAY =
   WHATSAPP_CLOUD_COMMERCIAL.phoneDisplay || '+57 311 212 1108';
