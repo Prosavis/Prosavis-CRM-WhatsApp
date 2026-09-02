@@ -19,6 +19,12 @@ export const INBOX_LINE_DNA = {
 
 export const DIRECTORY_SHELL_HEX = DesignTokens.inboxLines.directory;
 
+/** Selected Directorio tab fill — design-system light green, not navy primary. */
+export const DIRECTORY_TAB_HEX = DesignTokens.charts.lightGreen;
+
+/** Ink on `DIRECTORY_TAB_HEX` that stays ≥4.5:1 for the label, icon, and count. */
+export const DIRECTORY_TAB_INK_HEX = '#145218';
+
 export function inboxLineHex(line: WhatsAppLineId): string {
   return INBOX_LINE_DNA[line].hex;
 }

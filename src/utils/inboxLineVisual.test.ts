@@ -3,6 +3,8 @@ import { DesignTokens } from '@/constants/designSystem';
 import { darkTheme, lightTheme } from '@/theme/theme';
 import {
   DIRECTORY_SHELL_HEX,
+  DIRECTORY_TAB_HEX,
+  DIRECTORY_TAB_INK_HEX,
   INBOX_LINE_DNA,
   inboxLineForeground,
   inboxLineHex,
@@ -43,6 +45,16 @@ describe('inboxLineVisual', () => {
     expect(DIRECTORY_SHELL_HEX).toBe('#003D73');
     expect(DIRECTORY_SHELL_HEX).not.toBe(inboxLineHex('bot'));
     expect(DIRECTORY_SHELL_HEX).not.toBe(inboxLineHex('commercial'));
+  });
+
+  it('paints the Directorio tab light green so it cannot read as Inbox Bot navy', () => {
+    expect(DIRECTORY_TAB_HEX).toBe(DesignTokens.charts.lightGreen);
+    expect(DIRECTORY_TAB_HEX).toBe('#81c784');
+    expect(DIRECTORY_TAB_HEX).not.toBe(inboxLineHex('bot'));
+    expect(DIRECTORY_TAB_HEX).not.toBe(DIRECTORY_SHELL_HEX);
+    expect(relativeLuminance(DIRECTORY_TAB_HEX)).toBeGreaterThan(0.4);
+    expect(relativeLuminance(inboxLineHex('bot'))).toBeLessThan(0.1);
+    expect(contrastRatio(DIRECTORY_TAB_INK_HEX, DIRECTORY_TAB_HEX)).toBeGreaterThanOrEqual(4.5);
   });
 
   it('maps lines to MUI primary/secondary and readable labels', () => {

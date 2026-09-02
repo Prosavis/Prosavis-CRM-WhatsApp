@@ -32,7 +32,11 @@ import { playThemeTransitionSound } from '@/components/common/ThemeToggle';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/hooks/useAuth';
 import { getProsavisLogoSrc } from '@/utils/prosavisBrand';
-import { DIRECTORY_SHELL_HEX } from '@/utils/inboxLineVisual';
+import {
+  DIRECTORY_SHELL_HEX,
+  DIRECTORY_TAB_HEX,
+  DIRECTORY_TAB_INK_HEX,
+} from '@/utils/inboxLineVisual';
 import { directoryNavMeta, inboxLineNavMeta } from '@/utils/whatsappInboxNav';
 import { isWhatsAppAdminTab, type WhatsAppTabKey } from '@/utils/whatsappTabs';
 import CompanyHandbookBook from './CompanyHandbookBook';
@@ -101,6 +105,30 @@ function SpecialTabLabel({
       ) : null}
     </Box>
   );
+}
+
+function directoryTabSx(selected: boolean) {
+  return {
+    borderRadius: 1.5,
+    px: { xs: 1, sm: 1.25 },
+    py: 0.6,
+    minHeight: 48,
+    gap: 0.75,
+    fontWeight: 800,
+    border: '1px solid',
+    color: selected
+      ? DIRECTORY_TAB_INK_HEX
+      : (theme: Theme) =>
+          theme.palette.mode === 'dark' ? DIRECTORY_TAB_HEX : DIRECTORY_TAB_INK_HEX,
+    bgcolor: selected
+      ? DIRECTORY_TAB_HEX
+      : (theme: Theme) =>
+          alpha(theme.palette.success.main, theme.palette.mode === 'dark' ? 0.24 : 0.16),
+    borderColor: selected
+      ? 'success.main'
+      : (theme: Theme) =>
+          alpha(theme.palette.success.main, theme.palette.mode === 'dark' ? 0.5 : 0.42),
+  };
 }
 
 function specialTabSx(kind: 'bot' | 'commercial', selected: boolean) {
@@ -224,18 +252,7 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
             onClick={(event) => onTabChange(event, 'leads')}
             aria-label={directory.ariaLabel}
             aria-pressed={directorySelected}
-            sx={{
-              borderRadius: 1.5,
-              px: { xs: 1, sm: 1.25 },
-              py: 0.6,
-              minHeight: 48,
-              gap: 0.75,
-              fontWeight: 800,
-              color: directorySelected ? 'primary.contrastText' : 'primary.main',
-              bgcolor: directorySelected
-                ? 'primary.main'
-                : (theme) => alpha(theme.palette.primary.main, 0.04),
-            }}
+            sx={directoryTabSx(directorySelected)}
           >
             <ContactPhoneIcon fontSize="small" />
             <SpecialTabLabel
