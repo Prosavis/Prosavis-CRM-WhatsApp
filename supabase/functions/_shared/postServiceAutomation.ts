@@ -117,3 +117,84 @@ export function resolvePostServiceRecurringSkip(
   }
   return null;
 }
+
+const PHONE_BASED_CLIENT_ID_RE = /^(?:web|mob)_(\d{7,})$/;
+
+export interface PostServicePreferenceEvent {
+  directory_id?: string | null;
+  outcome?: string;
+  postServiceEnabled?: boolean;
+}
+
+export interface PostServiceDirectoryLookup {
+  byId: Map<string, string>;
+  byAppUserId: Map<string, string>;
+  byAppointmentId: Map<string, string>;
+  byPhoneKey: Map<string, string>;
+  byFirestoreDocId: Map<string, string>;
+}
+
+export function isPostServicePreferenceEnabled(
+  event: PostServicePreferenceEvent,
+): boolean {
+  if (typeof event.postServiceEnabled === "boolean") {
+    return event.postServiceEnabled;
+  }
+  return event.outcome !== "skipped_disabled";
+}
+
+export function applyPostServicePreferences<
+  T extends PostServicePreferenceEvent,
+>(
+  events: T[],
+  enabledByDirectoryId: Map<string, boolean>,
+): Array<T & { postServiceEnabled: boolean }> {
+  return events.map((event) => {
+    const directoryId = event.directory_id?.trim() || "";
+    const stored = directoryId
+      ? enabledByDirectoryId.get(directoryId)
+      : undefined;
+    return {
+      ...event,
+      postServiceEnabled: stored !== false,
+    };
+  });
+}
+
+export function phoneKeyFromClientId(clientId: string | null | undefined): string | null {
+  const match = (clientId ?? "").trim().match(PHONE_BASED_CLIENT_ID_RE);
+  if (!match) return null;
+  return match[1].slice(-10);
+}
+
+export function resolvePostServiceDirectoryId(
+  appointment: {
+    appointmentId: string;
+    clientId?: string | null;
+    clientAppUserId?: string | null;
+  },
+  lookup: PostServiceDirectoryLookup,
+): string | null {
+  const clientId = appointment.clientId?.trim() || "";
+  const appUserId = appointment.clientAppUserId?.trim() || "";
+  if (clientId && lookup.byId.has(clientId)) {
+    return lookup.byId.get(clientId) ?? null;
+  }
+  if (clientId && lookup.byAppUserId.has(clientId)) {
+    return lookup.byAppUserId.get(clientId) ?? null;
+  }
+  if (appUserId && lookup.byAppUserId.has(appUserId)) {
+    return lookup.byAppUserId.get(appUserId) ?? null;
+  }
+  if (clientId && lookup.byFirestoreDocId.has(clientId)) {
+    return lookup.byFirestoreDocId.get(clientId) ?? null;
+  }
+  if (appUserId && lookup.byFirestoreDocId.has(appUserId)) {
+    return lookup.byFirestoreDocId.get(appUserId) ?? null;
+  }
+  const phoneKey = phoneKeyFromClientId(clientId);
+  if (phoneKey && lookup.byPhoneKey.has(phoneKey)) {
+    return lookup.byPhoneKey.get(phoneKey) ?? null;
+  }
+  return lookup.byAppointmentId.get(appointment.appointmentId) ?? null;
+}

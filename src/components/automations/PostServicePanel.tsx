@@ -38,7 +38,9 @@ import {
   POST_SERVICE_OUTCOME_COLOR,
   POST_SERVICE_OUTCOME_LABEL,
   type PostServiceAutomationEvent,
+  type PostServiceAutomationsDashboard,
 } from '@/types/postServiceAutomations';
+import { isPostServicePreferenceEnabled } from '@/utils/postServicePreference';
 
 const KPI_CONFIG = [
   { key: 'scheduled', label: 'Programados', color: 'info.main' },
@@ -124,6 +126,27 @@ const PostServicePanel: React.FC<PostServicePanelProps> = ({ onOpenHistory }) =>
 
   const preferenceMutation = useMutation({
     mutationFn: setPostServiceRecipientPreference,
+    onMutate: async (variables) => {
+      await queryClient.cancelQueries({ queryKey: POST_SERVICE_AUTOMATIONS_QUERY_KEY });
+      const previous = queryClient.getQueryData<PostServiceAutomationsDashboard>(
+        POST_SERVICE_AUTOMATIONS_QUERY_KEY,
+      );
+      queryClient.setQueryData<PostServiceAutomationsDashboard>(
+        POST_SERVICE_AUTOMATIONS_QUERY_KEY,
+        (current) => {
+          if (!current) return current;
+          return {
+            ...current,
+            recentEvents: current.recentEvents.map((event) =>
+              event.directory_id === variables.directoryId
+                ? { ...event, postServiceEnabled: variables.enabled }
+                : event,
+            ),
+          };
+        },
+      );
+      return { previous };
+    },
     onSuccess: async (_, variables) => {
       setFeedback({
         severity: 'success',
@@ -133,7 +156,10 @@ const PostServicePanel: React.FC<PostServicePanelProps> = ({ onOpenHistory }) =>
       });
       await queryClient.invalidateQueries({ queryKey: POST_SERVICE_AUTOMATIONS_QUERY_KEY });
     },
-    onError: (mutationError) => {
+    onError: (mutationError, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(POST_SERVICE_AUTOMATIONS_QUERY_KEY, context.previous);
+      }
       setFeedback({
         severity: 'error',
         message: getActionMessage(mutationError, 'No fue posible cambiar la preferencia.'),
@@ -182,8 +208,8 @@ const PostServicePanel: React.FC<PostServicePanelProps> = ({ onOpenHistory }) =>
                 </Typography>
               </Stack>
               <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                Monitorea la plantilla <strong>service_finalizado</strong>. Desde este panel solo
-                puedes consultar, simular o reintentar fallos individuales.
+                Monitorea la plantilla <strong>service_finalizado</strong>. Puedes desactivar el
+                seguimiento por contacto, simular o reintentar fallos individuales.
               </Typography>
               <Typography variant="caption" color="text.secondary">
                 Última ejecución: {formatDateTime(data?.meta.lastRunAt)}
@@ -391,7 +417,7 @@ function PostServiceEventRow({
   const canRetry =
     (event.outcome === 'failed' || event.outcome === 'pending') &&
     Boolean(event.appointment_id);
-  const enabled = event.outcome !== 'skipped_disabled';
+  const enabled = isPostServicePreferenceEnabled(event);
 
   return (
     <TableRow hover>

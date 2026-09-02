@@ -1,17 +1,27 @@
 // deno-lint-ignore no-import-prefix
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { resolveClientPhoneForAppointment } from "./appointmentPhoneResolver.ts";
+import {
+  isSentinelClientId,
+  resolveClientPhoneForAppointment,
+} from "./appointmentPhoneResolver.ts";
 import {
   getFirestoreDocument,
   runFirestoreQuery,
 } from "./firebaseAdminRest.ts";
 import {
+  applyPostServicePreferences,
   buildPostServiceIdempotencyKey,
+  phoneKeyFromClientId,
+  resolvePostServiceDirectoryId,
+  type PostServiceDirectoryLookup,
   type PostServiceFollowUpPayload,
 } from "./postServiceAutomation.ts";
 
 const TIMEZONE = "America/Bogota" as const;
 const TEMPLATE_NAME = "service_finalizado" as const;
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const LOOKUP_CHUNK = 100;
 
 export interface PostServiceDashboard {
   meta: {
@@ -88,6 +98,142 @@ async function countEvents(
   return count ?? 0;
 }
 
+function chunkIds(ids: string[], size = LOOKUP_CHUNK): string[][] {
+  const unique = [...new Set(ids.filter(Boolean))];
+  const chunks: string[][] = [];
+  for (let i = 0; i < unique.length; i += size) {
+    chunks.push(unique.slice(i, i + size));
+  }
+  return chunks;
+}
+
+function collectAppointmentClientIds(
+  appointments: Array<{ id: string; data: Record<string, unknown> }>,
+): string[] {
+  const ids: string[] = [];
+  for (const appointment of appointments) {
+    for (const raw of [appointment.data.clientId, appointment.data.clientAppUserId]) {
+      const value = String(raw ?? "").trim();
+      if (value && !isSentinelClientId(value)) ids.push(value);
+    }
+  }
+  return ids;
+}
+
+async function loadPostServiceDirectoryLookup(
+  supabase: SupabaseClient,
+  appointments: Array<{ id: string; data: Record<string, unknown> }>,
+): Promise<PostServiceDirectoryLookup> {
+  const lookup: PostServiceDirectoryLookup = {
+    byId: new Map(),
+    byAppUserId: new Map(),
+    byAppointmentId: new Map(),
+    byPhoneKey: new Map(),
+    byFirestoreDocId: new Map(),
+  };
+  if (appointments.length === 0) return lookup;
+
+  const clientIds = collectAppointmentClientIds(appointments);
+  const uuidIds = clientIds.filter((id) => UUID_RE.test(id));
+  const phoneKeys = clientIds
+    .map((id) => phoneKeyFromClientId(id))
+    .filter((key): key is string => Boolean(key));
+  const appointmentIds = appointments.map((appointment) => appointment.id);
+
+  for (const ids of chunkIds(uuidIds)) {
+    const { data, error } = await supabase
+      .from("crm_directory")
+      .select("id")
+      .in("id", ids);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      lookup.byId.set(row.id, row.id);
+    }
+  }
+
+  for (const ids of chunkIds(clientIds)) {
+    const { data, error } = await supabase
+      .from("crm_directory")
+      .select("id, app_user_id")
+      .in("app_user_id", ids);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      if (row.app_user_id) lookup.byAppUserId.set(row.app_user_id, row.id);
+    }
+  }
+
+  for (const ids of chunkIds(appointmentIds)) {
+    const { data, error } = await supabase
+      .from("crm_directory")
+      .select("id, appointment_id")
+      .in("appointment_id", ids);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      if (row.appointment_id) lookup.byAppointmentId.set(row.appointment_id, row.id);
+    }
+  }
+
+  for (const keys of chunkIds(phoneKeys)) {
+    const { data, error } = await supabase
+      .from("crm_directory")
+      .select("id, phone_key")
+      .in("phone_key", keys);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      if (row.phone_key) lookup.byPhoneKey.set(row.phone_key, row.id);
+    }
+  }
+
+  const unresolvedClientIds = clientIds.filter(
+    (id) => !lookup.byId.has(id) && !lookup.byAppUserId.has(id),
+  );
+  for (const ids of chunkIds(unresolvedClientIds, 20)) {
+    const orFilter = ids
+      .map((id) => `metadata->source_ids->>firebase_crmClient_docId.eq.${id}`)
+      .join(",");
+    const { data, error } = await supabase
+      .from("crm_directory")
+      .select("id, metadata")
+      .or(orFilter);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      const metadata = (row.metadata ?? {}) as Record<string, unknown>;
+      const sourceIds = metadata.source_ids;
+      const docId =
+        sourceIds && typeof sourceIds === "object"
+          ? String(
+            (sourceIds as Record<string, unknown>).firebase_crmClient_docId ??
+              "",
+          ).trim()
+          : "";
+      if (docId) lookup.byFirestoreDocId.set(docId, row.id);
+    }
+  }
+
+  return lookup;
+}
+
+async function loadPostServicePreferenceMap(
+  supabase: SupabaseClient,
+  directoryIds: string[],
+): Promise<Map<string, boolean>> {
+  const enabledByDirectoryId = new Map<string, boolean>();
+  for (const ids of chunkIds(directoryIds)) {
+    const { data, error } = await supabase
+      .from("whatsapp_post_service_preferences")
+      .select("directory_id, post_service_enabled")
+      .in("directory_id", ids);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      enabledByDirectoryId.set(
+        row.directory_id,
+        row.post_service_enabled !== false,
+      );
+    }
+  }
+  return enabledByDirectoryId;
+}
+
 export async function buildPostServiceDashboard(
   supabase: SupabaseClient,
 ): Promise<PostServiceDashboard> {
@@ -139,6 +285,7 @@ export async function buildPostServiceDashboard(
       !appointment.data.postServiceWhatsAppLastError,
   ).length;
   const lastRunAt = lastRunResult.data?.run_at ?? null;
+  const directoryLookup = await loadPostServiceDirectoryLookup(supabase, unsent);
   const firestoreEvents = unsent.map((appointment) => {
     const data = appointment.data;
     const lastError = String(data.postServiceWhatsAppLastError ?? "").trim();
@@ -149,7 +296,14 @@ export async function buildPostServiceDashboard(
       id: `firestore:${appointment.id}`,
       batch_run_id: "",
       appointment_id: appointment.id,
-      directory_id: null,
+      directory_id: resolvePostServiceDirectoryId(
+        {
+          appointmentId: appointment.id,
+          clientId: String(data.clientId ?? "").trim() || null,
+          clientAppUserId: String(data.clientAppUserId ?? "").trim() || null,
+        },
+        directoryLookup,
+      ),
       recipient_phone: String(data.clientPhone ?? "").trim() || null,
       recipient_name: String(data.clientName ?? "").trim() || null,
       service_date: scheduledDate ? formatServiceDate(scheduledDate) : "",
@@ -171,7 +325,7 @@ export async function buildPostServiceDashboard(
   ).filter(
     (event) => !unsentAppointmentIds.has(String(event.appointment_id ?? "")),
   );
-  const recentEvents = [
+  const mergedEvents = [
     ...firestoreEvents,
     ...persistedEvents,
   ]
@@ -179,6 +333,14 @@ export async function buildPostServiceDashboard(
       String(b.created_at ?? "").localeCompare(String(a.created_at ?? ""))
     )
     .slice(0, 100);
+  const preferenceMap = await loadPostServicePreferenceMap(
+    supabase,
+    mergedEvents.map((event) => String(event.directory_id ?? "")),
+  );
+  const recentEvents = applyPostServicePreferences(
+    mergedEvents,
+    preferenceMap,
+  );
 
   return {
     meta: {

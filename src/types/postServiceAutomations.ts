@@ -12,6 +12,8 @@ export interface PostServiceAutomationEvent {
   wa_message_id: string | null;
   message_body: string | null;
   created_at: string;
+  /** Preferencia actual del contacto. Ausente en respuestas antiguas. */
+  postServiceEnabled?: boolean;
 }
 
 export interface PostServiceAutomationRun {
