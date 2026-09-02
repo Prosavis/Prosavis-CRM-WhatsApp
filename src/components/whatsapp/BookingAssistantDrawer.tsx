@@ -46,7 +46,10 @@ import {
   type WhatsAppTemplateSuggestion,
 } from '@/utils/whatsappTemplateSuggestions';
 import type { ConversationHistoryMeta } from '../../../supabase/functions/_shared/conversationHistory';
-import type { InboxAiPropertySummary } from '../../../supabase/functions/_shared/inboxAiContextFormat';
+import type {
+  InboxAiAppointment,
+  InboxAiPropertySummary,
+} from '../../../supabase/functions/_shared/inboxAiContextFormat';
 import {
   type MetaSessionWindow,
 } from '../../../supabase/functions/_shared/metaSessionWindow';
@@ -76,6 +79,8 @@ interface BookingAssistantDrawerProps {
   usedHistoryMeta?: ConversationHistoryMeta | null;
   usedConversationTags?: string[] | null;
   usedPropertySummary?: InboxAiPropertySummary | null;
+  usedAppointments?: InboxAiAppointment[] | null;
+  appointmentsLoadFailed?: boolean;
   proposedActions?: InboxAiProposedAction[];
   executingActionId?: string | null;
   onConfirmAction?: (action: InboxAiProposedAction) => void;
@@ -138,6 +143,8 @@ const BookingAssistantDrawer: React.FC<BookingAssistantDrawerProps> = ({
   usedHistoryMeta = null,
   usedConversationTags = null,
   usedPropertySummary = null,
+  usedAppointments = null,
+  appointmentsLoadFailed = false,
   proposedActions = [],
   executingActionId = null,
   onConfirmAction,
@@ -692,6 +699,8 @@ const BookingAssistantDrawer: React.FC<BookingAssistantDrawerProps> = ({
             conversationTags: usedConversationTags,
             propertySummary: usedPropertySummary,
             sessionWindow: effectiveSessionWindow,
+            appointments: usedAppointments,
+            appointmentsLoadFailed,
           }) && (
             <Box sx={{ mb: 2 }}>
               <UsedContextAccordion
@@ -699,6 +708,8 @@ const BookingAssistantDrawer: React.FC<BookingAssistantDrawerProps> = ({
                 conversationTags={usedConversationTags}
                 propertySummary={usedPropertySummary}
                 sessionWindow={effectiveSessionWindow}
+                appointments={usedAppointments}
+                appointmentsLoadFailed={appointmentsLoadFailed}
               />
             </Box>
           )}

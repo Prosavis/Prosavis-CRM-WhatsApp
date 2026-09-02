@@ -41,6 +41,7 @@ $AllFunctions = @(
   'get-whatsapp-media-signed-url',
   'get-whatsapp-media-url',
   'get-whatsapp-metrics',
+  'list-whatsapp-contact-appointments',
   'list-whatsapp-message-log',
   'list-whatsapp-message-templates',
   'list-whatsapp-snippets',

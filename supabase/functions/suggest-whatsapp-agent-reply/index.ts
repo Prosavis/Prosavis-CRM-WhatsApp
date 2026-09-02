@@ -68,6 +68,8 @@ Deno.serve(async (req) => {
         conversationTags: ctx.conversationTags,
         sessionWindow: ctx.sessionWindow,
         propertySummary: ctx.propertySummary,
+        appointments: ctx.appointments,
+        appointmentsLoadFailed: ctx.appointmentsLoadFailed,
       });
     }
 
@@ -142,6 +144,8 @@ Deno.serve(async (req) => {
         conversationTags: ctx.conversationTags,
         sessionWindow: ctx.sessionWindow,
         propertySummary: ctx.propertySummary,
+        appointments: ctx.appointments,
+        appointmentsLoadFailed: ctx.appointmentsLoadFailed,
       },
       greetingFirstName: ctx.greetingFirstName,
       suggestionLog: {

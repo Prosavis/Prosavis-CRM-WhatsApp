@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  formatAppointmentsContextSummary,
   formatHistoryMetaSummary,
   formatPropertySummaryLabel,
   formatSessionWindowLabel,
+  formatUsedContextAppointmentLine,
   hasInboxAiUsedContext,
 } from './inboxAiUsedContext';
 
@@ -16,6 +18,11 @@ describe('inboxAiUsedContext helpers', () => {
       }),
     ).toBe(true);
     expect(hasInboxAiUsedContext({ conversationTags: ['VIP'] })).toBe(true);
+    expect(
+      hasInboxAiUsedContext({
+        appointments: [{ id: 'a1', scheduledDate: '2026-09-03T14:00:00.000Z' }],
+      }),
+    ).toBe(true);
   });
 
   it('formats history meta with truncation flag', () => {
@@ -65,5 +72,45 @@ describe('inboxAiUsedContext helpers', () => {
         requiresTemplate: false,
       }),
     ).toMatch(/^Abierta · expira /);
+  });
+
+  it('groups upcoming and recent appointments with provider and status', () => {
+    const now = new Date('2026-09-02T18:00:00.000Z');
+    const summary = formatAppointmentsContextSummary(
+      [
+        {
+          id: 'past',
+          scheduledDate: '2026-08-20T14:00:00.000Z',
+          status: 'COMPLETED',
+          providerName: 'Johanna',
+          duration: 180,
+        },
+        {
+          id: 'next',
+          scheduledDate: '2026-09-05T14:00:00.000Z',
+          status: 'CONFIRMED',
+          providerName: 'Francy',
+          duration: 120,
+        },
+      ],
+      false,
+      now,
+    );
+    expect(summary.upcomingLines).toHaveLength(1);
+    expect(summary.pastLines).toHaveLength(1);
+    expect(summary.upcomingLines[0]).toContain('Francy');
+    expect(summary.upcomingLines[0]).toContain('Confirmada');
+    expect(summary.pastLines[0]).toContain('Johanna');
+    expect(summary.pastLines[0]).toContain('Completada');
+    expect(
+      formatUsedContextAppointmentLine({
+        id: 'x',
+        scheduledDate: '2026-09-05T14:00:00.000Z',
+        providerName: null,
+      }),
+    ).toContain('sin asignar');
+    expect(hasInboxAiUsedContext({ appointments: [{ id: 'a', scheduledDate: now.toISOString() }] })).toBe(
+      true,
+    );
   });
 });

@@ -4,7 +4,10 @@ import {
   type InboxAiActionGrounding,
 } from './inboxAiActions.ts';
 import type { ConversationHistoryMeta } from './conversationHistory.ts';
-import type { InboxAiPropertySummary } from './inboxAiContextFormat.ts';
+import type {
+  InboxAiAppointment,
+  InboxAiPropertySummary,
+} from './inboxAiContextFormat.ts';
 import type { MetaSessionWindow } from './metaSessionWindow.ts';
 import {
   DEFAULT_GEMINI_MODEL,
@@ -25,6 +28,8 @@ export interface InboxAiResponseContext {
   conversationTags: string[];
   sessionWindow: MetaSessionWindow;
   propertySummary?: InboxAiPropertySummary | null;
+  appointments?: InboxAiAppointment[];
+  appointmentsLoadFailed?: boolean;
 }
 
 export interface SuggestionLogWriteParams {
@@ -39,6 +44,8 @@ function suggestionResponseFields(context: InboxAiResponseContext) {
     conversationTags: context.conversationTags,
     sessionWindow: context.sessionWindow,
     propertySummary: context.propertySummary ?? null,
+    appointments: context.appointments ?? [],
+    appointmentsLoadFailed: context.appointmentsLoadFailed === true,
   };
 }
 

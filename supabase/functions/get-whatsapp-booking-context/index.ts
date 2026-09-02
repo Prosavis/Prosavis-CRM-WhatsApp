@@ -81,6 +81,8 @@ Deno.serve(async (req) => {
       ...(wompiCheckoutUrl ? { wompiCheckoutUrl } : {}),
       ...(wompiPaymentReference ? { wompiPaymentReference } : {}),
       ...(wompiAmountCOP ? { wompiAmountCOP } : {}),
+      appointments: ctx.appointments,
+      appointmentsLoadFailed: ctx.appointmentsLoadFailed,
     });
   } catch (error) {
     if (error instanceof Response) return error;

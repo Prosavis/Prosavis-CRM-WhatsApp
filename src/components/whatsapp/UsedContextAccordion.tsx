@@ -11,17 +11,21 @@ import type { ConversationHistoryMeta } from '../../../supabase/functions/_share
 import type { InboxAiPropertySummary } from '../../../supabase/functions/_shared/inboxAiContextFormat';
 import type { MetaSessionWindow } from '../../../supabase/functions/_shared/metaSessionWindow';
 import {
+  formatAppointmentsContextSummary,
   formatHistoryMetaSummary,
   formatPropertySummaryLabel,
   formatSessionWindowLabel,
   hasInboxAiUsedContext,
 } from '@/utils/inboxAiUsedContext';
+import type { InboxAiAppointment } from '../../../supabase/functions/_shared/inboxAiContextFormat';
 
 export interface UsedContextAccordionProps {
   historyMeta?: ConversationHistoryMeta | null;
   conversationTags?: string[] | null;
   propertySummary?: InboxAiPropertySummary | null;
   sessionWindow?: MetaSessionWindow | null;
+  appointments?: InboxAiAppointment[] | null;
+  appointmentsLoadFailed?: boolean;
   dense?: boolean;
   defaultExpanded?: boolean;
 }
@@ -48,6 +52,8 @@ export default function UsedContextAccordion({
   conversationTags,
   propertySummary,
   sessionWindow,
+  appointments = null,
+  appointmentsLoadFailed = false,
   dense = false,
   defaultExpanded = false,
 }: UsedContextAccordionProps) {
@@ -57,12 +63,20 @@ export default function UsedContextAccordion({
       conversationTags,
       propertySummary,
       sessionWindow,
+      appointments,
+      appointmentsLoadFailed,
     })
   ) {
     return null;
   }
 
   const tags = conversationTags?.filter((t) => t.trim()) ?? [];
+  const appointmentSummary = formatAppointmentsContextSummary(
+    appointments,
+    appointmentsLoadFailed,
+  );
+  const hasAppointmentRows =
+    appointmentSummary.upcomingLines.length > 0 || appointmentSummary.pastLines.length > 0;
 
   return (
     <Accordion
@@ -91,6 +105,47 @@ export default function UsedContextAccordion({
         </Typography>
       </AccordionSummary>
       <AccordionDetails sx={{ px: 1.25, pt: 0, pb: 1.25 }}>
+        <Box sx={{ mb: 1 }}>
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            sx={{ display: 'block', fontWeight: 600, letterSpacing: 0.2 }}
+          >
+            Agendamientos
+          </Typography>
+          {!hasAppointmentRows ? (
+            <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>
+              {appointmentSummary.emptyLabel}
+            </Typography>
+          ) : (
+            <>
+              {appointmentSummary.upcomingLines.length > 0 && (
+                <Box sx={{ mt: 0.5 }}>
+                  <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.primary' }}>
+                    Próximos
+                  </Typography>
+                  {appointmentSummary.upcomingLines.map((line) => (
+                    <Typography key={`up-${line}`} variant="body2" sx={{ fontSize: '0.8rem' }}>
+                      {line}
+                    </Typography>
+                  ))}
+                </Box>
+              )}
+              {appointmentSummary.pastLines.length > 0 && (
+                <Box sx={{ mt: 0.5 }}>
+                  <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.primary' }}>
+                    Recientes
+                  </Typography>
+                  {appointmentSummary.pastLines.map((line) => (
+                    <Typography key={`past-${line}`} variant="body2" sx={{ fontSize: '0.8rem' }}>
+                      {line}
+                    </Typography>
+                  ))}
+                </Box>
+              )}
+            </>
+          )}
+        </Box>
         <ContextRow label="Historial" value={formatHistoryMetaSummary(historyMeta)} />
         <Box sx={{ mb: 1 }}>
           <Typography

@@ -12,7 +12,10 @@ import type { NormalizedBookingContext } from '../../supabase/functions/_shared/
 import type { InboxAiProposedAction } from '../../supabase/functions/_shared/inboxAiActions';
 import type { ExecuteInboxAiActionResult } from '../../supabase/functions/_shared/inboxAiActionExecution';
 import type { ConversationHistoryMeta } from '../../supabase/functions/_shared/conversationHistory';
-import type { InboxAiPropertySummary } from '../../supabase/functions/_shared/inboxAiContextFormat';
+import type {
+  InboxAiAppointment,
+  InboxAiPropertySummary,
+} from '../../supabase/functions/_shared/inboxAiContextFormat';
 import {
   getMetaSessionWindow,
   type MetaSessionWindow,
@@ -23,7 +26,7 @@ import {
 } from '@/utils/whatsappAdminPresence';
 import { isOutboundSentVia, type OutboundSentVia } from '../../supabase/functions/_shared/outboundSentVia';
 
-export type { InboxAiProposedAction, ExecuteInboxAiActionResult, InboxAiPropertySummary };
+export type { InboxAiProposedAction, ExecuteInboxAiActionResult, InboxAiPropertySummary, InboxAiAppointment };
 
 type ConversationRow = Database['public']['Tables']['whatsapp_conversations']['Row'];
 type MessageRow = Database['public']['Tables']['whatsapp_message_log']['Row'];
@@ -896,6 +899,8 @@ export interface SuggestReplyResult {
   historyMeta?: ConversationHistoryMeta;
   conversationTags?: string[];
   propertySummary?: InboxAiPropertySummary | null;
+  appointments?: InboxAiAppointment[];
+  appointmentsLoadFailed?: boolean;
   suggestionLogId?: string | null;
 }
 
@@ -914,6 +919,8 @@ export async function suggestWhatsAppAgentReply(
     historyMeta?: ConversationHistoryMeta;
     conversationTags?: string[];
     propertySummary?: InboxAiPropertySummary | null;
+    appointments?: InboxAiAppointment[];
+    appointmentsLoadFailed?: boolean;
     suggestionLogId?: string | null;
   }>('suggest-whatsapp-agent-reply', {
     stableKey,
@@ -935,6 +942,8 @@ export async function suggestWhatsAppAgentReply(
     historyMeta: data.historyMeta,
     conversationTags: data.conversationTags,
     propertySummary: data.propertySummary ?? null,
+    appointments: data.appointments ?? [],
+    appointmentsLoadFailed: data.appointmentsLoadFailed === true,
     suggestionLogId: data.suggestionLogId ?? null,
   };
 }
@@ -993,6 +1002,8 @@ export interface BookingContextResult {
   wompiCheckoutUrl?: string;
   wompiPaymentReference?: string;
   wompiAmountCOP?: number;
+  appointments?: InboxAiAppointment[];
+  appointmentsLoadFailed?: boolean;
 }
 
 export async function getWhatsAppBookingContext(
@@ -1011,6 +1022,22 @@ export async function getWhatsAppBookingContext(
     wompiCheckoutUrl: data.wompiCheckoutUrl,
     wompiPaymentReference: data.wompiPaymentReference,
     wompiAmountCOP: data.wompiAmountCOP,
+    appointments: data.appointments ?? [],
+    appointmentsLoadFailed: data.appointmentsLoadFailed === true,
+  };
+}
+
+export async function listWhatsAppContactAppointments(stableKey: string): Promise<{
+  appointments: InboxAiAppointment[];
+  appointmentsLoadFailed: boolean;
+}> {
+  const data = await invokeFn<{
+    appointments?: InboxAiAppointment[];
+    appointmentsLoadFailed?: boolean;
+  }>('list-whatsapp-contact-appointments', { stableKey });
+  return {
+    appointments: data.appointments ?? [],
+    appointmentsLoadFailed: data.appointmentsLoadFailed === true,
   };
 }
 

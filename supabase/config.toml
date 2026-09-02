@@ -91,6 +91,9 @@ verify_jwt = false
 [functions.send-whatsapp-template-message]
 verify_jwt = false
 
+[functions.list-whatsapp-contact-appointments]
+verify_jwt = false
+
 [functions.suggest-whatsapp-agent-reply]
 verify_jwt = false
 

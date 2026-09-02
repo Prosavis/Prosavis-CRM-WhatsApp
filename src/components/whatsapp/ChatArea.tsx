@@ -76,6 +76,7 @@ import {
   closeWhatsAppAiSuggestionLog,
   executeInboxAiAction,
   getWhatsAppBookingContext,
+  listWhatsAppContactAppointments,
   deleteWhatsAppMessages,
   deleteWhatsAppConversationPermanently,
   DELETE_WHATSAPP_CONVERSATION_CONFIRM_PHRASE,
@@ -93,6 +94,7 @@ import {
   type BookingContextData,
   type InboxAiProposedAction,
   type InboxAiPropertySummary,
+  type InboxAiAppointment,
   type WhatsAppAdminPresence,
   type WhatsAppSticker,
   type WhatsAppStickerFolder,
@@ -279,6 +281,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [usedHistoryMeta, setUsedHistoryMeta] = useState<ConversationHistoryMeta | null>(null);
   const [usedConversationTags, setUsedConversationTags] = useState<string[]>([]);
   const [usedPropertySummary, setUsedPropertySummary] = useState<InboxAiPropertySummary | null>(null);
+  const [usedAppointments, setUsedAppointments] = useState<InboxAiAppointment[]>([]);
+  const [appointmentsLoadFailed, setAppointmentsLoadFailed] = useState(false);
   const [executingActionId, setExecutingActionId] = useState<string | null>(null);
   const [aiContextDialogOpen, setAiContextDialogOpen] = useState(false);
   const [aiExtraContext, setAiExtraContext] = useState('');
@@ -443,6 +447,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     setUsedHistoryMeta(null);
     setUsedConversationTags([]);
     setUsedPropertySummary(null);
+    setUsedAppointments([]);
+    setAppointmentsLoadFailed(false);
     setExecutingActionId(null);
     setBookingContext(null);
     setSessionWindow(null);
@@ -454,6 +460,24 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     setPendingReactions({});
     Object.values(reactionTimersRef.current).forEach((timer) => window.clearTimeout(timer));
     reactionTimersRef.current = {};
+  }, [stableKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void listWhatsAppContactAppointments(stableKey)
+      .then((result) => {
+        if (cancelled) return;
+        setUsedAppointments(result.appointments);
+        setAppointmentsLoadFailed(result.appointmentsLoadFailed);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.warn('No se pudieron cargar agendamientos del contacto', err);
+        setAppointmentsLoadFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [stableKey]);
 
   useEffect(() => {
@@ -858,6 +882,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       setUsedHistoryMeta(result.historyMeta ?? null);
       setUsedConversationTags(result.conversationTags ?? []);
       setUsedPropertySummary(result.propertySummary ?? null);
+      if (result.appointments) {
+        setUsedAppointments(result.appointments);
+        setAppointmentsLoadFailed(result.appointmentsLoadFailed === true);
+      }
       const nextLogId = result.suggestionLogId ?? null;
       setSuggestionLogId(nextLogId);
       suggestionLogIdRef.current = nextLogId;
@@ -1075,6 +1103,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         includeImageAnalysis,
       );
       setSessionWindow(result.sessionWindow);
+      if (result.appointments) {
+        setUsedAppointments(result.appointments);
+        setAppointmentsLoadFailed(result.appointmentsLoadFailed === true);
+      }
       if (result.bookingContext) {
         setBookingContext(result.bookingContext);
         if (result.wompiCheckoutUrl) {
@@ -1791,6 +1823,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             conversationTags: usedConversationTags,
             propertySummary: usedPropertySummary,
             sessionWindow: liveSessionWindow,
+            appointments: usedAppointments,
+            appointmentsLoadFailed,
           }) && (
             <Box sx={{ px: 1.5, pt: 1, pb: 0.5 }}>
               <UsedContextAccordion
@@ -1798,7 +1832,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 conversationTags={usedConversationTags}
                 propertySummary={usedPropertySummary}
                 sessionWindow={liveSessionWindow}
+                appointments={usedAppointments}
+                appointmentsLoadFailed={appointmentsLoadFailed}
                 dense
+                defaultExpanded
               />
             </Box>
           )}
@@ -1890,6 +1927,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           usedHistoryMeta={usedHistoryMeta}
           usedConversationTags={usedConversationTags}
           usedPropertySummary={usedPropertySummary}
+          usedAppointments={usedAppointments}
+          appointmentsLoadFailed={appointmentsLoadFailed}
           proposedActions={proposedActions}
           executingActionId={executingActionId}
           onConfirmAction={(action) => {
