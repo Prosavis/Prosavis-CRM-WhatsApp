@@ -11,6 +11,7 @@ export const INBOX_CONVERSATION_SELECT = [
   'state',
   'last_message_text',
   'last_message_at',
+  'last_inbound_at',
   'last_message_direction',
   'last_message_outbound_status',
   'unread_count',

@@ -15,12 +15,25 @@ export async function recomputeWhatsAppConversationPreview(
   if (error) throw error;
 
   const latest = messages?.[0];
+  const { data: inboundRows, error: inboundError } = await supabase
+    .from('whatsapp_message_log')
+    .select('created_at')
+    .eq('conversation_stable_key', stableKey)
+    .eq('direction', 'inbound')
+    .eq('hidden_from_panel', false)
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  if (inboundError) throw inboundError;
+  const lastInboundAt = inboundRows?.[0]?.created_at ?? null;
+
   if (!latest) {
     await supabase
       .from('whatsapp_conversations')
       .update({
         last_message_text: null,
         last_message_at: null,
+        last_inbound_at: lastInboundAt,
         last_message_direction: null,
         last_message_outbound_status: null,
       })
@@ -38,6 +51,7 @@ export async function recomputeWhatsAppConversationPreview(
     .update({
       last_message_text: preview,
       last_message_at: latest.created_at,
+      last_inbound_at: lastInboundAt,
       last_message_direction: latest.direction,
       last_message_outbound_status:
         latest.direction === 'outbound' ? latest.status : null,

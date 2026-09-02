@@ -110,9 +110,15 @@ import {
 import type { ConversationHistoryMeta } from '../../../supabase/functions/_shared/conversationHistory';
 import type { ForwardWhatsAppResult } from '@/services/forwardWhatsAppMessage';
 import { isForwardableMessage } from '@/services/forwardWhatsAppMessage';
-import { ContactAvatar } from '@/components/common/ContactAvatar';
+import { SessionWindowAvatar } from '@/components/common/SessionWindowAvatar';
 import { pickContactPhotoUrl } from '@/utils/contactAvatar';
 import { useMetaSessionWindow } from '@/hooks/useMetaSessionWindow';
+import {
+  SESSION_WINDOW_CLOSED_MESSAGE,
+  isSessionComposerLocked,
+  newestInboundTimestamp,
+  type MetaSessionWindow,
+} from '../../../supabase/functions/_shared/metaSessionWindow';
 import { hasInboxAiUsedContext } from '@/utils/inboxAiUsedContext';
 import type { LoadedConversationInbound } from '@/utils/whatsappTemplateSuggestions';
 import {
@@ -139,8 +145,6 @@ import { formatColombiaDateLabel } from '@/utils/colombiaTime';
 import { quotedMessagePreview } from '@/utils/whatsappCoexStub';
 import type { WhatsAppTagFolder } from '@/types/whatsapp';
 import TagListGrouped from './TagListGrouped';
-import type { MetaSessionWindow } from '../../../supabase/functions/_shared/metaSessionWindow';
-
 interface ChatAreaProps {
   conversation: WhatsAppConversation;
   phoneNumberId?: string;
@@ -324,6 +328,25 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const sendPhoneNumberId = conversation.phoneNumberId || phoneNumberId;
   const stableKey = conversationKey;
   const isLidThread = isLidStableKey(stableKey);
+  const loadedConversationInbound = useMemo(
+    () =>
+      selectLoadedConversationInbound(
+        messageHistory,
+        conversation.id,
+        stableKey,
+      ),
+    [conversation.id, messageHistory, stableKey],
+  );
+  const lastInboundAt = newestInboundTimestamp(
+    loadedConversationInbound?.lastInboundAt,
+    conversation.lastInboundAt,
+  );
+  const liveSessionWindow = useMetaSessionWindow(sessionWindow, lastInboundAt);
+  const sessionComposerLocked = isSessionComposerLocked({
+    isLidThread,
+    sessionWindow: liveSessionWindow,
+  });
+  const sessionWindowClosed = !isLidThread && liveSessionWindow.requiresTemplate;
   const messages = useMemo(
     () =>
       mergeInboxMessages(
@@ -563,6 +586,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
   const handleSend = useCallback(
     async (text: string) => {
+      if (sessionWindowClosed) {
+        throw new Error(SESSION_WINDOW_CLOSED_MESSAGE);
+      }
       const replyId = replyToMessage?.waMessageId;
       setReplyToMessage(null);
       const clientRequestId =
@@ -618,7 +644,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         }
       }
     },
-    [customerPhone, sendPhoneNumberId, replyToMessage],
+    [customerPhone, sendPhoneNumberId, replyToMessage, sessionWindowClosed],
   );
 
   const handleLoadOlder = useCallback(async () => {
@@ -649,6 +675,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       mediaType: 'image' | 'audio' | 'video' | 'document',
       caption?: string,
     ) => {
+      if (sessionWindowClosed) {
+        throw new Error(SESSION_WINDOW_CLOSED_MESSAGE);
+      }
       // Sanitiza el nombre para Storage: sin espacios ni caracteres conflictivos en URL.
       const safeName = file.name.replace(/[^\w.\-]+/g, '_');
       const storagePath = `${Date.now()}_${safeName}`;
@@ -673,7 +702,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         ...(replyId ? { replyToWaMessageId: replyId } : {}),
       });
     },
-    [customerPhone, sendPhoneNumberId, replyToMessage],
+    [customerPhone, sendPhoneNumberId, replyToMessage, sessionWindowClosed],
   );
 
   const handleUploadSticker = useCallback(async (
@@ -703,6 +732,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   }, [loadStickers]);
 
   const handleSendSticker = useCallback(async (sticker: WhatsAppSticker) => {
+    if (sessionWindowClosed) {
+      throw new Error(SESSION_WINDOW_CLOSED_MESSAGE);
+    }
     const replyId = replyToMessage?.waMessageId;
     setReplyToMessage(null);
     await sendMedia(customerPhone, 'sticker', sticker.downloadUrl, {
@@ -713,7 +745,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       sizeBytes: sticker.sizeBytes,
       isAnimatedSticker: sticker.isAnimated === true,
     });
-  }, [sendPhoneNumberId, replyToMessage, customerPhone]);
+  }, [sendPhoneNumberId, replyToMessage, customerPhone, sessionWindowClosed]);
 
   const handleSendMediaBatch = useCallback(
     async (
@@ -721,6 +753,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       caption: string | undefined,
       onStatusChange: (id: string, status: PendingAttachmentStatus, error?: string) => void,
     ): Promise<{ failedClientAttachmentIds: string[] }> => {
+      if (sessionWindowClosed) {
+        throw new Error(SESSION_WINDOW_CLOSED_MESSAGE);
+      }
       const clientBatchId =
         typeof crypto !== 'undefined' && 'randomUUID' in crypto
           ? `wa_${crypto.randomUUID()}`
@@ -795,7 +830,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
       return { failedClientAttachmentIds: [...failedIds] };
     },
-    [sendPhoneNumberId, replyToMessage, customerPhone],
+    [sendPhoneNumberId, replyToMessage, customerPhone, sessionWindowClosed],
   );
 
   const handleRequestSuggestion = useCallback(async (forceGenerate = false, extraContext?: string) => {
@@ -1247,6 +1282,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   }, []);
 
   const handleReact = useCallback((msg: WhatsAppMessage, emoji: string) => {
+    if (sessionWindowClosed) {
+      setSnack({ open: true, message: SESSION_WINDOW_CLOSED_MESSAGE, severity: 'error' });
+      return;
+    }
     if (!msg.waMessageId) {
       setSnack({ open: true, message: 'Este mensaje no tiene ID de WhatsApp para reaccionar', severity: 'error' });
       return;
@@ -1293,23 +1332,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         setSnack({ open: true, message: msgText, severity: 'error' });
       }
     }, 500);
-  }, [myUid, phoneNumberId, stableKey]);
+  }, [myUid, phoneNumberId, stableKey, sessionWindowClosed, customerPhone, sendPhoneNumberId]);
 
   const visibleMessages = useMemo(
     () => messages.filter((message) => !message.reactionTo),
     [messages],
   );
-  const loadedConversationInbound = useMemo(
-    () =>
-      selectLoadedConversationInbound(
-        messageHistory,
-        conversation.id,
-        stableKey,
-      ),
-    [conversation.id, messageHistory, stableKey],
-  );
-  const lastInboundAt = loadedConversationInbound?.lastInboundAt ?? null;
-  const liveSessionWindow = useMetaSessionWindow(sessionWindow, lastInboundAt);
   useEffect(() => {
     if (loadedConversationInbound) {
       onLoadedConversationInbound?.(loadedConversationInbound);
@@ -1407,11 +1435,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           </>
         ) : (
           <>
-            <ContactAvatar
+            <SessionWindowAvatar
               displayName={displayName}
               phone={conversation.contactPhone || conversation.phone}
               photoUrl={pickContactPhotoUrl(headerPhotoUrl, conversation.contactPhotoUrl)}
               size={40}
+              lastInboundAt={lastInboundAt}
             />
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography variant="subtitle1" fontWeight={600} noWrap>{displayName}</Typography>
@@ -1785,9 +1814,27 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               responder desde el CRM hasta que la persona escriba con su teléfono.
             </Alert>
           )}
+          {sessionWindowClosed && (
+            <Alert
+              severity="warning"
+              sx={{ mx: 1.5, mt: 1 }}
+              action={(
+                <Button color="inherit" size="small" onClick={onToggleTemplatesPanel}>
+                  Enviar plantilla
+                </Button>
+              )}
+            >
+              La ventana de 24 h está cerrada. No se puede escribir texto libre. Envía una
+              plantilla para reabrir.
+            </Alert>
+          )}
+          <Box
+            aria-disabled={sessionComposerLocked}
+            sx={sessionWindowClosed ? { opacity: 0.45, pointerEvents: 'none' } : undefined}
+          >
           <MessageInput
             conversationKey={stableKey}
-            disabled={isLidThread}
+            disabled={sessionComposerLocked}
             onSend={handleSend}
             onSendMedia={handleSendMedia}
             onSendMediaBatch={handleSendMediaBatch}
@@ -1807,6 +1854,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             onSendSticker={handleSendSticker}
             inboxLine={resolveWhatsAppLine(sendPhoneNumberId)}
           />
+          </Box>
         </>
       )}
 

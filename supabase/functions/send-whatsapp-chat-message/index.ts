@@ -1,6 +1,8 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { requireCrmAdmin } from '../_shared/supabase.ts';
 import {
+  SESSION_WINDOW_CLOSED_CODE,
+  SESSION_WINDOW_CLOSED_MESSAGE,
   assertMetaSendEnabled,
   formatError,
   sendTextOutbound,
@@ -70,6 +72,15 @@ Deno.serve(async (req) => {
           agentUid: user.id,
           clientRequestId,
         });
+
+    if (result.error === SESSION_WINDOW_CLOSED_CODE) {
+      return jsonResponse({
+        success: false,
+        error: SESSION_WINDOW_CLOSED_MESSAGE,
+        code: SESSION_WINDOW_CLOSED_CODE,
+        requiresTemplate: true,
+      }, 409);
+    }
 
     return jsonResponse({
       success: result.success,

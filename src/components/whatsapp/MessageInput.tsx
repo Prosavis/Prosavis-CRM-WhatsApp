@@ -521,7 +521,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   }, [stopTimer]);
 
   const handleSend = useCallback(async () => {
-    if (sending) return;
+    if (disabled || sending) return;
     setSendError(null);
     stopTypingNow();
 
@@ -606,7 +606,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
     } finally {
       setSending(false);
     }
-  }, [text, sending, onSend, onSendMedia, onSendMediaBatch, pendingFiles, clearPendingFile, conversationKey, stopTypingNow, inboxLine, playError]);
+  }, [disabled, text, sending, onSend, onSendMedia, onSendMediaBatch, pendingFiles, clearPendingFile, conversationKey, stopTypingNow, inboxLine, playError]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {

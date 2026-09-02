@@ -1,8 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  SESSION_WINDOW_CLOSED_CODE,
   buildMetaSessionWindow,
+  formatSessionWindowRemainingLabel,
+  freeformSendBlockReason,
   getMetaSessionWindow,
+  isSessionComposerLocked,
+  newestInboundTimestamp,
+  nextLastInboundAt,
   resolveMetaSessionWindow,
+  sessionWindowHue,
+  sessionWindowRemainingRatio,
+  sessionWindowStrokeColor,
 } from '../../supabase/functions/_shared/metaSessionWindow';
 import {
   getLoadedConversationInbound,
@@ -163,6 +172,85 @@ describe('resolveMetaSessionWindow', () => {
       expiresAt: '2026-08-06T11:30:00.000Z',
       requiresTemplate: false,
     });
+  });
+});
+
+describe('session window remaining helpers', () => {
+  it('maps a full window to ratio 1 and green hue', () => {
+    expect(
+      sessionWindowRemainingRatio(
+        '2026-08-05T12:00:00.000Z',
+        '2026-08-05T12:00:00.000Z',
+      ),
+    ).toBe(1);
+    expect(sessionWindowHue(1)).toBe(120);
+    expect(sessionWindowStrokeColor(1)).toBe('hsl(120, 90%, 42%)');
+  });
+
+  it('maps a half window to amber and a closed window to ratio 0 / red', () => {
+    expect(
+      sessionWindowRemainingRatio(
+        '2026-08-04T12:00:00.000Z',
+        '2026-08-05T00:00:00.000Z',
+      ),
+    ).toBe(0.5);
+    expect(sessionWindowHue(0.5)).toBe(60);
+    expect(
+      sessionWindowRemainingRatio(
+        '2026-08-04T12:00:00.000Z',
+        '2026-08-05T12:00:00.000Z',
+      ),
+    ).toBe(0);
+    expect(sessionWindowHue(0)).toBe(0);
+    expect(sessionWindowStrokeColor(0)).toBe('hsl(0, 90%, 42%)');
+  });
+
+  it('returns null remaining for an unknown inbound and labels closed vs open', () => {
+    expect(sessionWindowRemainingRatio(null, '2026-08-05T12:00:00.000Z')).toBeNull();
+    expect(formatSessionWindowRemainingLabel(null)).toBe(
+      'Desconocida · requiere plantilla',
+    );
+    expect(
+      formatSessionWindowRemainingLabel(
+        '2026-08-04T12:00:00.000Z',
+        '2026-08-05T12:00:00.000Z',
+      ),
+    ).toBe('Cerrada · requiere plantilla');
+    expect(
+      formatSessionWindowRemainingLabel(
+        '2026-08-05T10:00:00.000Z',
+        '2026-08-05T12:00:00.000Z',
+      ),
+    ).toBe('Abierta · 22 h');
+  });
+
+  it('keeps the newest inbound timestamp and blocks free-form when closed', () => {
+    expect(
+      nextLastInboundAt('2026-08-05T10:00:00.000Z', '2026-08-05T09:00:00.000Z'),
+    ).toBe('2026-08-05T10:00:00.000Z');
+    expect(
+      newestInboundTimestamp(
+        '2026-08-05T10:00:00.000Z',
+        new Date('2026-08-05T11:00:00.000Z'),
+        null,
+      )?.toISOString(),
+    ).toBe('2026-08-05T11:00:00.000Z');
+    expect(freeformSendBlockReason('2026-08-05T11:00:00.000Z', '2026-08-05T12:00:00.000Z')).toBeNull();
+    expect(
+      freeformSendBlockReason('2026-08-04T12:00:00.000Z', '2026-08-05T12:00:00.000Z'),
+    ).toBe(SESSION_WINDOW_CLOSED_CODE);
+    expect(
+      isSessionComposerLocked({
+        isLidThread: false,
+        sessionWindow: { requiresTemplate: true },
+      }),
+    ).toBe(true);
+    expect(
+      isSessionComposerLocked({
+        isLidThread: false,
+        sessionWindow: { requiresTemplate: false },
+      }),
+    ).toBe(false);
   });
 });
 

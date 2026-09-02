@@ -2,6 +2,7 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { conversationStableKey, isCommercialPhoneNumberId } from './whatsappLines.ts';
 import { formatWebhookError } from './whatsappInboundIdentity.ts';
 import { hydratePersistedMessageMedia } from './whatsappMediaHydrate.ts';
+import { nextLastInboundAt } from './metaSessionWindow.ts';
 import { recomputeWhatsAppConversationPreview } from './recomputeConversationPreview.ts';
 import {
   CLOUD_API_REVOKED_LABEL,
@@ -280,7 +281,7 @@ export async function persistCoexMessage(params: {
     const conversationKey = String(existing.conversation_stable_key || stableKey);
     const { data: existingConv } = await params.supabase
       .from('whatsapp_conversations')
-      .select('last_message_text')
+      .select('last_message_text, last_inbound_at')
       .eq('stable_key', conversationKey)
       .maybeSingle();
     if (
@@ -291,6 +292,11 @@ export async function persistCoexMessage(params: {
         last_message_text: body,
         last_message_at: createdAt,
         last_message_direction: direction,
+        ...(direction === 'inbound'
+          ? {
+              last_inbound_at: nextLastInboundAt(existingConv?.last_inbound_at, createdAt),
+            }
+          : {}),
       }).eq('stable_key', conversationKey);
     }
     await hydratePersistedMessageMedia({
@@ -306,7 +312,7 @@ export async function persistCoexMessage(params: {
 
   const { data: existingConv } = await params.supabase
     .from('whatsapp_conversations')
-    .select('unread_count')
+    .select('unread_count, last_inbound_at')
     .eq('stable_key', stableKey)
     .maybeSingle();
 
@@ -318,6 +324,11 @@ export async function persistCoexMessage(params: {
     last_message_text: body,
     last_message_at: createdAt,
     last_message_direction: direction,
+    ...(direction === 'inbound'
+      ? {
+          last_inbound_at: nextLastInboundAt(existingConv?.last_inbound_at, createdAt),
+        }
+      : {}),
     phone_number_id: params.phoneNumberId,
   };
   if (params.incrementUnread === true && direction === 'inbound') {

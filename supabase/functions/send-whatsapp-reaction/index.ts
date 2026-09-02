@@ -1,13 +1,17 @@
 ﻿import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { requireCrmAdmin } from '../_shared/supabase.ts';
 import {
+  SESSION_WINDOW_CLOSED_CODE,
+  SESSION_WINDOW_CLOSED_MESSAGE,
   assertMetaSendEnabled,
   formatError,
   getGraphCredentials,
   isRecipientBlocked,
   metaErrorCode,
   metaErrorMessage,
+  outboundConversationKey,
   persistOutboundLog,
+  rejectIfSessionWindowClosed,
   sendToMeta,
   UNARCHIVE_CONVERSATION_PATCH,
 } from '../_shared/whatsappOutbound.ts';
@@ -43,6 +47,16 @@ Deno.serve(async (req) => {
     const recipient = resolveRecipient(to);
     const stableKey = getStableKeyFromRecipient(to);
     const recipientPhone = recipient.phone ? normalizePhone(recipient.phone) : stableKey;
+    const sessionKey = outboundConversationKey(to, graph.phoneNumberId);
+    const sessionBlock = await rejectIfSessionWindowClosed(supabase, sessionKey);
+    if (sessionBlock) {
+      return jsonResponse({
+        success: false,
+        error: SESSION_WINDOW_CLOSED_MESSAGE,
+        code: SESSION_WINDOW_CLOSED_CODE,
+        requiresTemplate: true,
+      }, 409);
+    }
     const reactionRemoved = emoji.trim() === '';
 
     const metaResult = await sendToMeta({

@@ -46,6 +46,7 @@ export interface Database {
           assigned_to: string | null;
           last_message_text: string | null;
           last_message_at: string | null;
+          last_inbound_at: string | null;
           last_message_direction: 'inbound' | 'outbound' | null;
           last_message_outbound_status: string | null;
           unread_count: number;

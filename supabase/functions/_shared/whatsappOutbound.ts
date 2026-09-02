@@ -24,6 +24,13 @@ import {
   resolveWhatsAppLine,
 } from './whatsappLines.ts';
 import { queuePersistedAudioTranscription } from './whatsappMediaHydrate.ts';
+import {
+  SESSION_WINDOW_CLOSED_CODE,
+  SESSION_WINDOW_CLOSED_MESSAGE,
+  freeformSendBlockReason,
+} from './metaSessionWindow.ts';
+
+export { SESSION_WINDOW_CLOSED_CODE, SESSION_WINDOW_CLOSED_MESSAGE };
 
 export type { MediaType };
 export { buildOutboundMediaPayload, defaultMimeForMediaType };
@@ -167,6 +174,24 @@ export function assertMetaSendEnabled(): void {
   if (!enabled) {
     throw new Error('Envio Meta desactivado. Configure ENABLE_META_SEND=true y secrets validos.');
   }
+}
+
+export async function rejectIfSessionWindowClosed(
+  supabase: SupabaseClient,
+  stableKey: string,
+): Promise<SendMediaOutboundResult | null> {
+  const { data, error } = await supabase
+    .from('whatsapp_conversations')
+    .select('last_inbound_at')
+    .eq('stable_key', stableKey)
+    .maybeSingle();
+  if (error) {
+    console.error('rejectIfSessionWindowClosed failed', error);
+    return null;
+  }
+  const reason = freeformSendBlockReason(data?.last_inbound_at ?? null);
+  if (!reason) return null;
+  return { success: false, error: reason };
 }
 
 export async function isRecipientBlocked(
@@ -591,6 +616,9 @@ export async function sendWhatsAppMediaOutbound(
 
   await ensureConversation(supabase, stableKey, recipientPhone, graph.phoneNumberId);
 
+  const sessionBlock = await rejectIfSessionWindowClosed(supabase, stableKey);
+  if (sessionBlock) return sessionBlock;
+
   // Meta no puede descargar signed URLs de Supabase de forma fiable (131053 / HTTP 500).
   // Subimos el binario a Graph `/media` y enviamos por `id`.
   let mediaUrlForLog = params.mediaUrl;
@@ -714,6 +742,9 @@ export async function sendTextOutbound(
     graph.phoneNumberId,
     params.contactName,
   );
+
+  const sessionBlock = await rejectIfSessionWindowClosed(supabase, stableKey);
+  if (sessionBlock) return sessionBlock;
 
   const metaResult = await sendToMeta({
     to: recipientPhone,

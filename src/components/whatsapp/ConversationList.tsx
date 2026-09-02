@@ -57,7 +57,7 @@ import { summarizePeerPresences } from '@/utils/whatsappAdminPresence';
 import OutboundPreviewTicks from './OutboundPreviewTicks';
 import InboxCategorySidebar from './InboxCategorySidebar';
 import TagListGrouped from './TagListGrouped';
-import { ContactAvatar } from '@/components/common/ContactAvatar';
+import { SessionWindowAvatar } from '@/components/common/SessionWindowAvatar';
 import {
   getDirectoryMetaForConversation,
   useDirectoryContactMeta,
@@ -258,7 +258,7 @@ const ConversationRow: React.FC<ConversationRowProps> = React.memo(({
           size="small"
         />
       )}
-      <ListItemAvatar>
+      <ListItemAvatar sx={{ minWidth: 72 }}>
         <Badge
           badgeContent={conv.crmForceUnread && conv.unreadCount === 0 ? ' ' : conv.unreadCount}
           color={inboxLineMuiColor(inboxLine)}
@@ -266,11 +266,12 @@ const ConversationRow: React.FC<ConversationRowProps> = React.memo(({
           invisible={!isUnread}
           variant={conv.crmForceUnread && conv.unreadCount === 0 ? 'dot' : 'standard'}
         >
-          <ContactAvatar
+          <SessionWindowAvatar
             displayName={rowName}
             phone={rowPhone}
             photoUrl={rowPhoto}
             size={48}
+            lastInboundAt={conv.lastInboundAt}
           />
         </Badge>
       </ListItemAvatar>

@@ -6,6 +6,7 @@ export interface WhatsAppConversation {
   state: 'active' | 'escalated' | 'resolved';
   lastMessageText?: string;
   lastMessageAt?: Date;
+  lastInboundAt?: Date;
   lastMessageDirection?: 'inbound' | 'outbound';
   lastMessageOutboundStatus?: string;
   unreadCount: number;

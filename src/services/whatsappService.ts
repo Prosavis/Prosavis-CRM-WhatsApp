@@ -135,6 +135,7 @@ export function mapConversationRow(
     state,
     lastMessageText: asOptionalString(record.last_message_text),
     lastMessageAt: toDate(asOptionalString(record.last_message_at)),
+    lastInboundAt: toDate(asOptionalString(record.last_inbound_at)),
     lastMessageDirection:
       record.last_message_direction === 'inbound' || record.last_message_direction === 'outbound'
         ? record.last_message_direction
@@ -238,6 +239,7 @@ export interface WhatsAppConversation {
   state: 'active' | 'escalated' | 'resolved';
   lastMessageText?: string;
   lastMessageAt?: Date;
+  lastInboundAt?: Date;
   lastMessageDirection?: 'inbound' | 'outbound';
   /** Estado del último saliente (Meta webhook `statuses`), solo si `lastMessageDirection === 'outbound'`. */
   lastMessageOutboundStatus?: 'sent' | 'delivered' | 'read' | 'failed' | string;

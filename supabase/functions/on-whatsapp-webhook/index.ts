@@ -7,6 +7,7 @@ import {
   cloudApiUnsupportedDisposition,
   getMessageContent,
 } from '../_shared/whatsappMessageContent.ts';
+import { nextLastInboundAt } from '../_shared/metaSessionWindow.ts';
 import { recomputeWhatsAppConversationPreview } from '../_shared/recomputeConversationPreview.ts';
 import { UNARCHIVE_CONVERSATION_PATCH } from '../_shared/whatsappOutbound.ts';
 import { directoryPhoneKey } from '../_shared/directoryPhone.ts';
@@ -316,7 +317,7 @@ async function processInboundMessage(params: {
 
   const { data: existingConversation, error: conversationReadError } = await params.supabase
     .from('whatsapp_conversations')
-    .select('unread_count, contact_name, contact_name_locked, metadata')
+    .select('unread_count, contact_name, contact_name_locked, metadata, last_inbound_at')
     .eq('stable_key', stableKey)
     .maybeSingle();
 
@@ -339,6 +340,7 @@ async function processInboundMessage(params: {
     state: 'active',
     last_message_text: lastMessageText,
     last_message_at: createdAt,
+    last_inbound_at: nextLastInboundAt(existingConversation?.last_inbound_at, createdAt),
     last_message_direction: 'inbound',
     last_message_outbound_status: null,
     unread_count: unreadCount,
