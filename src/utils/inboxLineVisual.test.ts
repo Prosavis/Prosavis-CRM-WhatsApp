@@ -39,8 +39,8 @@ describe('inboxLineVisual', () => {
     expect(inboxLineHex('commercial')).toBe(DesignTokens.inboxLines.commercial);
   });
 
-  it('keeps the directory shell on a distinct navy from Bot', () => {
-    expect(DIRECTORY_SHELL_HEX).toBe('#003D73');
+  it('keeps the directory shell on light green, distinct from Bot', () => {
+    expect(DIRECTORY_SHELL_HEX).toBe('#81C784');
     expect(DIRECTORY_SHELL_HEX).not.toBe(inboxLineHex('bot'));
     expect(DIRECTORY_SHELL_HEX).not.toBe(inboxLineHex('commercial'));
   });

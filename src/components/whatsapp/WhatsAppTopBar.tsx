@@ -231,10 +231,14 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
               minHeight: 48,
               gap: 0.75,
               fontWeight: 800,
-              color: directorySelected ? 'primary.contrastText' : 'primary.main',
+              border: '1px solid',
+              borderColor: directorySelected
+                ? DIRECTORY_SHELL_HEX
+                : (theme) => alpha(DIRECTORY_SHELL_HEX, theme.palette.mode === 'dark' ? 0.5 : 0.7),
+              color: directorySelected ? '#002446' : DIRECTORY_SHELL_HEX,
               bgcolor: directorySelected
-                ? 'primary.main'
-                : (theme) => alpha(theme.palette.primary.main, 0.04),
+                ? DIRECTORY_SHELL_HEX
+                : (theme) => alpha(DIRECTORY_SHELL_HEX, theme.palette.mode === 'dark' ? 0.22 : 0.18),
             }}
           >
             <ContactPhoneIcon fontSize="small" />
