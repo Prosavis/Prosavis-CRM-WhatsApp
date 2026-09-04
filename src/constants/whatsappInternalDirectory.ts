@@ -22,7 +22,7 @@ const metaProductionLine: WhatsAppInternalContact = {
   value: metaDigits
     ? `+${metaDigits}`
     : WHATSAPP_CLOUD_PRODUCTION.phoneDisplay || '+573122531271',
-  copyDisplay: WHATSAPP_CLOUD_PRODUCTION.phoneDisplay || '+57 312 2531 271',
+  copyDisplay: WHATSAPP_CLOUD_PRODUCTION.phoneDisplay || '+57 312 253 1271',
   label: WHATSAPP_CLOUD_PRODUCTION.botLabel || 'Prosavis',
   description:
     'Número de WhatsApp Business conectado a Meta Cloud API (inbox del panel)',
@@ -55,8 +55,8 @@ export const WHATSAPP_INTERNAL_CONTACTS: WhatsAppInternalContact[] = [
   {
     kind: 'phone',
     value: '+573112121108',
-    copyDisplay: '+57 311 2121108',
-    label: '+57 311 2121108',
+    copyDisplay: '+57 311 212 1108',
+    label: '+57 311 212 1108',
     description: 'Comercial (Francy): trabajo o propuestas a empresas',
   },
   {
