@@ -105,7 +105,7 @@ async function googleAccessToken(): Promise<{ token: string; from: string } | nu
   });
   const json = await res.json() as { access_token?: string };
   if (!res.ok || !json.access_token) return null;
-  return { token: json.access_token, from: env('GMAIL_OPS_FROM') || 'support@prosavis.com' };
+  return { token: json.access_token, from: env('GMAIL_OPS_FROM') || 'comercial@prosavis.com' };
 }
 
 async function mergeDirectoryTag(
