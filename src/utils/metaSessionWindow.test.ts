@@ -251,6 +251,18 @@ describe('session window remaining helpers', () => {
         sessionWindow: { requiresTemplate: false },
       }),
     ).toBe(false);
+    expect(
+      isSessionComposerLocked({
+        isLidThread: true,
+        sessionWindow: { requiresTemplate: false },
+      }),
+    ).toBe(false);
+    expect(
+      isSessionComposerLocked({
+        isLidThread: true,
+        sessionWindow: { requiresTemplate: true },
+      }),
+    ).toBe(true);
   });
 });
 

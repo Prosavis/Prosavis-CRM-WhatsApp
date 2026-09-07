@@ -16,8 +16,9 @@ const commonColors = {
   },
   error: {
     main: DesignTokens.semantic.error,
-    light: '#e57373',
-    dark: '#d32f2f',
+    light: '#ff8a94',
+    dark: '#8c1620',
+    contrastText: '#ffffff',
   },
   info: {
     main: DesignTokens.semantic.info,
@@ -210,6 +211,34 @@ const createProsavisTheme = (mode: PaletteMode) => {
     },
     spacing: parseInt(DesignTokens.spacing.sm),
     components: {
+      MuiCssBaseline: {
+        styleOverrides: {
+          'html, body': {
+            fontVariantNumeric: 'tabular-nums',
+          },
+          '@media (prefers-reduced-motion: reduce)': {
+            '*, *::before, *::after': {
+              animationDuration: '0.01ms !important',
+              animationIterationCount: '1 !important',
+              scrollBehavior: 'auto !important',
+              transitionDuration: '0.01ms !important',
+            },
+          },
+        },
+      },
+      MuiTableContainer: {
+        defaultProps: {
+          tabIndex: 0,
+        },
+        styleOverrides: {
+          root: {
+            '&:focus-visible': {
+              outline: `3px solid ${DesignTokens.brand.primary.orange}`,
+              outlineOffset: 2,
+            },
+          },
+        },
+      },
       // Configuración de Material-UI components
       MuiButton: {
         styleOverrides: {

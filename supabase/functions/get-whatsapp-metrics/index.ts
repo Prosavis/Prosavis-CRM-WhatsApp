@@ -19,6 +19,11 @@ import {
   scheduledDateToIso,
   type LastAppointmentIndex,
 } from '../_shared/clientSegments.ts';
+import {
+  buildInboundPeriodTotals,
+  buildOutboundResponseSemantics,
+  type InboundPeriodObservation,
+} from '../_shared/metricsSemantics.ts';
 
 interface MessageLogRow {
   direction: 'inbound' | 'outbound';
@@ -546,25 +551,25 @@ Deno.serve(async (req) => {
     const totalFailed = outbound.filter((row) => row.status === 'failed').length;
     const totalResponses = inbound.length;
 
-    const outboundContacts = new Set(
-      outbound
+    const outboundResponse = buildOutboundResponseSemantics({
+      sentMessageCount: totalSent,
+      responseMessageCount: totalResponses,
+      messagedContactKeys: outbound
         .filter((row) => ['sent', 'delivered', 'read'].includes(row.status))
         .map((row) => row.conversation_stable_key)
         .filter((key): key is string => !!key),
-    );
-    const respondedContacts = new Set(
-      inbound
+      respondingContactKeys: inbound
         .map((row) => row.conversation_stable_key)
         .filter((key): key is string => !!key),
-    );
-    let respondedAndContacted = 0;
-    for (const key of respondedContacts) {
-      if (outboundContacts.has(key)) respondedAndContacted += 1;
-    }
-    const responseRate =
-      outboundContacts.size > 0
-        ? Math.round((respondedAndContacted / outboundContacts.size) * 1000) / 10
-        : 0;
+    });
+    const {
+      uniqueContactsMessaged,
+      uniqueContactsResponded,
+      responseRate,
+      rawResponseRate,
+      responseRateWarning,
+      responseRateDiagnostics,
+    } = outboundResponse;
 
     stage = 'index_directory';
     const directoryByPhoneKey = new Map<string, DirectoryRow>();
@@ -589,6 +594,7 @@ Deno.serve(async (req) => {
     const inboundByDay = new Map<string, PeopleBucket>();
     const inboundByWeek = new Map<string, PeopleBucket>();
     const inboundByMonth = new Map<string, PeopleBucket>();
+    const inboundPeriodObservations: InboundPeriodObservation[] = [];
 
     for (const row of inbound) {
       const day = bogotaDayKey(row.created_at);
@@ -607,6 +613,14 @@ Deno.serve(async (req) => {
         continue;
       }
 
+      // Fecha de ingreso al CRM: first_contact_at (fallback created_at).
+      const firstAt = dir?.first_contact_at ?? dir?.created_at ?? null;
+      const firstDay = bogotaDayKey(firstAt);
+      inboundPeriodObservations.push({
+        conversationStableKey: stableKey,
+        firstContactDay: firstDay,
+      });
+
       const week = weekKeyFromDay(day);
       const month = monthKeyFromDay(day);
       ensurePeopleBucket(inboundByDay, day).messagesReceived += 1;
@@ -615,12 +629,8 @@ Deno.serve(async (req) => {
 
       if (!stableKey) continue;
 
-      // Fecha de ingreso al CRM: first_contact_at (fallback created_at).
       // Nuevo = sin registro, sin fecha de ingreso, o ingreso en el bucket actual.
       // Existente = ya tenía fecha de ingreso anterior al bucket.
-      const firstAt = dir?.first_contact_at ?? dir?.created_at ?? null;
-      const firstDay = bogotaDayKey(firstAt);
-
       const classify = (bucketKey: string, kind: 'day' | 'week' | 'month') => {
         const bucket =
           kind === 'day'
@@ -649,6 +659,10 @@ Deno.serve(async (req) => {
 
     const periodStartKey = bogotaDayKey(from.toISOString()) ?? from.toISOString().slice(0, 10);
     const periodEndKey = bogotaDayKey(to.toISOString()) ?? to.toISOString().slice(0, 10);
+    const inboundTotals = buildInboundPeriodTotals(inboundPeriodObservations, {
+      startDay: periodStartKey,
+      endDay: periodEndKey,
+    });
     const allDays = eachDayInclusive(periodStartKey, periodEndKey);
     const allWeeks = [...new Set(allDays.map(weekKeyFromDay))].sort();
     const allMonths = [...new Set(allDays.map(monthKeyFromDay))].sort();
@@ -901,8 +915,25 @@ Deno.serve(async (req) => {
       totalFailed,
       totalResponses,
       responseRate,
-      uniqueContactsMessaged: outboundContacts.size,
-      uniqueContactsResponded: respondedAndContacted,
+      rawResponseRate,
+      responseRateWarning,
+      responseRateDiagnostics,
+      uniqueContactsMessaged,
+      uniqueContactsResponded,
+      outboundTotals: {
+        messageCounts: {
+          sent: totalSent,
+          delivered: totalDelivered,
+          read: totalRead,
+          reachedDevice,
+          failed: totalFailed,
+          responsesReceived: totalResponses,
+        },
+        uniqueContacts: {
+          messaged: uniqueContactsMessaged,
+          responded: uniqueContactsResponded,
+        },
+      },
       optOutCount,
       byCampaign,
       byTemplate,
@@ -914,6 +945,7 @@ Deno.serve(async (req) => {
         optOut: optOutCount,
         agendados: directoryRows.filter((e) => (e.pending_appointments_count ?? 0) > 0).length,
       },
+      inboundTotals,
       inboundTimeseries,
       clientSegments,
       directoryClients,

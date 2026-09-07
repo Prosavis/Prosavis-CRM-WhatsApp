@@ -24,7 +24,11 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import type { MetricsGranularSeries, InboundTimeseriesPoint } from '@/types/whatsapp';
+import type {
+  InboundTimeseriesPoint,
+  InboundTotals,
+  MetricsGranularSeries,
+} from '@/types/whatsapp';
 import {
   labelInboundSeries,
   type MetricsGranularity,
@@ -47,17 +51,16 @@ import MetricsSection from './MetricsSection';
 
 interface InboundActivitySectionProps {
   series?: MetricsGranularSeries<InboundTimeseriesPoint>;
+  totals?: InboundTotals;
   loading: boolean;
   /** Ventana de días del filtro Periodo (solo para subtítulo / Excel). */
   days?: number;
-  /** Control Periodo (compartido con outbound). */
-  periodControl?: React.ReactNode;
 }
 
 type InboundViewMode = 'clients' | 'messages';
 
 const EXISTING_BLUE = '#1565c0';
-const NEW_BLUE = '#42a5f5';
+const NEW_BLUE = '#1769aa';
 const MESSAGES_TEAL = '#00897b';
 
 const GRANULARITY_LABEL: Record<MetricsGranularity, string> = {
@@ -93,9 +96,9 @@ const InboundTooltip: React.FC<InboundTooltipProps> = ({ active, label, payload,
 
 const InboundActivitySection: React.FC<InboundActivitySectionProps> = ({
   series,
+  totals,
   loading,
   days,
-  periodControl,
 }) => {
   const theme = useTheme();
   const [granularity, setGranularity] = useState<MetricsGranularity>('day');
@@ -110,7 +113,7 @@ const InboundActivitySection: React.FC<InboundActivitySectionProps> = ({
     return labelInboundSeries(series[granularity] ?? [], granularity);
   }, [series, granularity]);
 
-  const totals = useMemo(() => {
+  const bucketTotals = useMemo(() => {
     return data.reduce(
       (acc, row) => {
         acc.messagesReceived += row.messagesReceived;
@@ -146,7 +149,7 @@ const InboundActivitySection: React.FC<InboundActivitySectionProps> = ({
             { header: 'Métrica', type: 'text' },
             { header: 'Valor', type: 'int' },
           ],
-          rows: [['Mensajes recibidos', totals.messagesReceived]],
+          rows: [['Mensajes recibidos', totals?.messagesReceived ?? bucketTotals.messagesReceived]],
         });
       });
       return;
@@ -179,9 +182,9 @@ const InboundActivitySection: React.FC<InboundActivitySectionProps> = ({
           { header: 'Valor', type: 'int' },
         ],
         rows: [
-          ['Clientes únicos', totals.uniquePeople],
-          ['Nuevos', totals.newPeople],
-          ['Existentes', totals.existingPeople],
+          ['Clientes únicos', totals?.uniquePeople ?? 0],
+          ['Nuevos', totals?.newPeople ?? 0],
+          ['Existentes', totals?.existingPeople ?? 0],
         ],
       });
     });
@@ -271,7 +274,6 @@ const InboundActivitySection: React.FC<InboundActivitySectionProps> = ({
 
   const toolbar = (
     <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-      {periodControl}
       {viewToggle}
     </Stack>
   );
@@ -342,7 +344,7 @@ const InboundActivitySection: React.FC<InboundActivitySectionProps> = ({
                       stackId="people"
                       fill="url(#inboundExisting)"
                       maxBarSize={48}
-                      animationDuration={700}
+                      isAnimationActive={false}
                     />
                     <Bar
                       dataKey="newPeople"
@@ -351,7 +353,7 @@ const InboundActivitySection: React.FC<InboundActivitySectionProps> = ({
                       fill="url(#inboundNew)"
                       radius={[6, 6, 0, 0]}
                       maxBarSize={48}
-                      animationDuration={700}
+                      isAnimationActive={false}
                     />
                   </>
                 ) : (
@@ -361,7 +363,7 @@ const InboundActivitySection: React.FC<InboundActivitySectionProps> = ({
                     fill="url(#inboundMessages)"
                     radius={[6, 6, 0, 0]}
                     maxBarSize={56}
-                    animationDuration={700}
+                    isAnimationActive={false}
                   />
                 )}
               </ComposedChart>
@@ -386,35 +388,28 @@ const InboundActivitySection: React.FC<InboundActivitySectionProps> = ({
                 <Typography variant="body2">
                   Existentes:{' '}
                   <Box component="span" fontWeight={700} color={existingColor}>
-                    {formatInt(totals.existingPeople)}
+                    {formatInt(totals?.existingPeople ?? 0)}
                   </Box>
                 </Typography>
                 <Typography variant="body2">
                   Nuevos:{' '}
                   <Box component="span" fontWeight={700} color={newColor}>
-                    {formatInt(totals.newPeople)}
+                    {formatInt(totals?.newPeople ?? 0)}
                   </Box>
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
-                  Clientes únicos (suma buckets): {formatInt(totals.uniquePeople)}
+                  Clientes únicos del periodo: {formatInt(totals?.uniquePeople ?? 0)}
                 </Typography>
               </>
             ) : (
               <Typography variant="body2">
                 Mensajes recibidos:{' '}
                 <Box component="span" fontWeight={700} color={messagesColor}>
-                  {formatInt(totals.messagesReceived)}
+                  {formatInt(totals?.messagesReceived ?? bucketTotals.messagesReceived)}
                 </Box>
               </Typography>
             )}
           </Stack>
-
-          <Box sx={{ mt: 2 }}>
-            <Typography variant="subtitle2" sx={{ mb: 0.75 }}>
-              Detalle por periodo
-            </Typography>
-            {detailTable}
-          </Box>
         </>
       )}
     </MetricsSection>

@@ -353,7 +353,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     isLidThread,
     sessionWindow: liveSessionWindow,
   });
-  const sessionWindowClosed = !isLidThread && liveSessionWindow.requiresTemplate;
+  const sessionWindowClosed = liveSessionWindow.requiresTemplate;
   const messages = useMemo(
     () =>
       mergeInboxMessages(
@@ -1852,8 +1852,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           )}
           {isLidThread && (
             <Alert severity="info" sx={{ mx: 1.5, mt: 1 }}>
-              Este chat es una cuenta de Facebook (LID) sin número de WhatsApp. No se puede
-              responder desde el CRM hasta que la persona escriba con su teléfono.
+              Esta persona usa un identificador privado de WhatsApp (BSUID). Puedes responder
+              desde el CRM aunque Meta no comparta su número de teléfono.
             </Alert>
           )}
           {sessionWindowClosed && (

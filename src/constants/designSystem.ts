@@ -58,7 +58,7 @@ export const DesignTokens = {
   semantic: {
     success: '#4caf50',
     warning: '#ff9800',
-    error: '#f44336',
+    error: '#B4232F',
     info: '#2196f3',
   },
 
@@ -85,6 +85,32 @@ export const DesignTokens = {
     lightOrange: '#ffb74d', // Naranja claro
     android: '#3DDC84',     // Verde Android
     star: '#ffc107',        // Amarillo estrella
+  },
+
+  // Visualización analítica: roles estables para claro/oscuro.
+  dataViz: {
+    light: {
+      favorite: '#237A49',
+      recurring: '#1769AA',
+      standard: '#667788',
+      risk: '#B4232F',
+      warning: '#B54708',
+      neutral: '#526170',
+      grid: '#D8E0E8',
+      canvas: '#F4F7FA',
+      density: ['#DDEAF4', '#9CC4DE', '#4D91BC', '#1769AA', '#002446'],
+    },
+    dark: {
+      favorite: '#6CCB93',
+      recurring: '#74B7E5',
+      standard: '#B9C6D2',
+      risk: '#FF8A94',
+      warning: '#FFB86B',
+      neutral: '#CBD5E0',
+      grid: '#404B5A',
+      canvas: '#0F1419',
+      density: ['#223442', '#285875', '#2F7FA8', '#65A9CF', '#B5DAEE'],
+    },
   },
 
   // Modo oscuro (optimizado para mejor contraste)
@@ -122,7 +148,7 @@ export const DesignTokens = {
     },
     text: {
       primary: '#212121',
-      secondary: '#757575',
+      secondary: '#626262',
       tertiary: '#9e9e9e',
       muted: '#bdbdbd',
     },

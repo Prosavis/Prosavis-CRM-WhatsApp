@@ -136,6 +136,7 @@ const TemplateLibrary: React.FC<TemplateLibraryProps> = (props) => {
         phoneNumberId: props.phoneNumberId,
         templateName: activeTemplate.name,
         templateLanguage: activeTemplate.language,
+        templateCategory: activeTemplate.category,
         components: components.length > 0 ? components : undefined,
         displayMessageBody,
       });

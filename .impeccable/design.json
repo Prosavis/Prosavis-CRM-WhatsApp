@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-07T16:30:00.000Z",
+  "title": "Design System: Prosavis CRM — Sala de control",
+  "extensions": {
+    "colorMeta": {
+      "command-navy": {
+        "role": "primary",
+        "displayName": "Command Navy",
+        "canonical": "#002446",
+        "tonalRamp": ["#00101F", "#002446", "#123D63", "#365A79", "#65809A", "#9AABBA", "#CCD5DC", "#F1F4F6"]
+      },
+      "action-orange": {
+        "role": "secondary",
+        "displayName": "Action Orange",
+        "canonical": "#FF7700",
+        "tonalRamp": ["#351800", "#6A3000", "#A84D00", "#E36900", "#FF8F2C", "#FFB46E", "#FFD9B5", "#FFF3E8"]
+      },
+      "quality-risk": {
+        "role": "semantic",
+        "displayName": "Measured Risk",
+        "canonical": "#B4232F",
+        "tonalRamp": ["#2A070B", "#5A1017", "#861923", "#B4232F", "#D85861", "#E9959B", "#F5C8CB", "#FCEDEF"]
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "View headline",
+        "purpose": "Orienta la vista sin competir con los datos."
+      },
+      "body": {
+        "displayName": "Operational body",
+        "purpose": "Explicaciones y lectura continua."
+      },
+      "label": {
+        "displayName": "Data label",
+        "purpose": "Unidades, denominadores y metadatos."
+      }
+    },
+    "shadows": [
+      {
+        "name": "floating-utility",
+        "value": "0 6px 16px rgba(0,36,70,0.12)",
+        "purpose": "Menús, tooltips y paneles temporales."
+      },
+      {
+        "name": "focus-halo",
+        "value": "0 0 0 3px rgba(255,119,0,0.28)",
+        "purpose": "Foco visible de controles."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-fast",
+        "value": "150ms cubic-bezier(0.2,0,0,1)",
+        "purpose": "Hover, selección y foco."
+      },
+      {
+        "name": "state-standard",
+        "value": "200ms cubic-bezier(0.2,0,0,1)",
+        "purpose": "Paneles y cambios de vista."
+      }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "600px" },
+      { "name": "md", "value": "960px" },
+      { "name": "lg", "value": "1280px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Analytics Panel",
+      "kind": "card",
+      "refersTo": "analytics-panel",
+      "description": "Región plana para una pregunta analítica y su evidencia.",
+      "html": "<section class=\"ds-analytics-panel\"><h2>¿Qué cambió?</h2><p>Periodo y denominador visibles.</p></section>",
+      "css": ".ds-analytics-panel{background:#fff;color:#17212b;padding:20px;border-radius:12px;border:1px solid #d8e0e8;font:14px/1.55 Inter,system-ui,sans-serif}.ds-analytics-panel:focus-within{outline:3px solid rgba(255,119,0,.28);outline-offset:2px}.ds-analytics-panel h2{margin:0 0 6px;font-size:16px;line-height:1.4}"
+    },
+    {
+      "name": "Selected Filter",
+      "kind": "chip",
+      "refersTo": "filter-selected",
+      "description": "Filtro activo de contraste alto.",
+      "html": "<button class=\"ds-filter-selected\" type=\"button\" aria-pressed=\"true\">Recurrentes</button>",
+      "css": ".ds-filter-selected{border:0;border-radius:6px;padding:6px 10px;background:#002446;color:#fff;font:600 12px/1.4 Inter,system-ui,sans-serif;transition:background 150ms cubic-bezier(.2,0,0,1)}.ds-filter-selected:hover{background:#123d63}.ds-filter-selected:focus-visible{outline:3px solid rgba(255,119,0,.28);outline-offset:2px}"
+    },
+    {
+      "name": "Primary Action",
+      "kind": "button",
+      "refersTo": "action-primary",
+      "description": "Acción operativa primaria, sobria y directa.",
+      "html": "<button class=\"ds-action-primary\" type=\"button\">Aplicar filtros</button>",
+      "css": ".ds-action-primary{min-height:36px;border:0;border-radius:8px;padding:8px 14px;background:#002446;color:#fff;font:600 14px/1.4 Inter,system-ui,sans-serif;transition:background 150ms cubic-bezier(.2,0,0,1)}.ds-action-primary:hover{background:#123d63}.ds-action-primary:active{background:#001529}.ds-action-primary:focus-visible{outline:3px solid rgba(255,119,0,.28);outline-offset:2px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "La sala de control serena",
+    "overview": "La superficie se comporta como un instrumento operativo bien calibrado: primero orienta, luego permite investigar. La calidad se percibe en alineación, contraste, lenguaje, estados completos, interacción rápida y honestidad estadística.",
+    "keyCharacteristics": [
+      "Contexto temporal y universo siempre visibles.",
+      "Una pregunta principal por visualización.",
+      "Insights enlazados con evidencia y drill-down.",
+      "Navegación, filtros, estados y tablas consistentes.",
+      "Profundidad progresiva sin ocultar datos esenciales en hover."
+    ],
+    "rules": [
+      { "name": "Context First", "body": "Ninguna gráfica aparece sin periodo, universo, unidad y actualización.", "section": "typography" },
+      { "name": "One Question", "body": "Una visual responde una pregunta; si mezcla unidades o preguntas, se divide.", "section": "components" },
+      { "name": "Red Means Risk", "body": "El rojo se reserva para riesgo, error o pérdida.", "section": "colors" },
+      { "name": "Flat by Default", "body": "Si una superficie no flota funcionalmente sobre otra, no recibe sombra.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do mostrar periodo, universo, unidad, denominador y última actualización.",
+      "Do enlazar cada insight con una visual y cada visual con filas auditables."
+    ],
+    "donts": [
+      "Don't construir dashboards con cards idénticas, donuts pequeños, KPIs gigantes o gráficas sin una pregunta clara.",
+      "Don't usar glassmorphism, gradientes decorativos, sombras grandes, tipografía ornamental o animaciones de landing.",
+      "Don't esconder denominadores en hover, mezclar unidades en un eje o usar color como único significado."
+    ]
+  }
+}

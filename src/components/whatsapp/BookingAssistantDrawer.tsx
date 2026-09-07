@@ -316,6 +316,7 @@ const BookingAssistantDrawer: React.FC<BookingAssistantDrawerProps> = ({
         phoneNumberId,
         templateName: templateSuggestion.template.name,
         templateLanguage: templateSuggestion.template.language,
+        templateCategory: templateSuggestion.template.category,
         components: components.length > 0 ? components : undefined,
         displayMessageBody,
       });

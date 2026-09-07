@@ -11,22 +11,15 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
-  FormControl,
   FormControlLabel,
   IconButton,
-  InputLabel,
   ListItemIcon,
   ListItemText,
   Menu,
   MenuItem,
   Radio,
   RadioGroup,
-  Select,
-  Stack,
-  Tab,
-  Tabs,
   TextField,
-  Typography,
 } from '@mui/material';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
@@ -39,7 +32,13 @@ import {
   listWhatsAppMessageLog,
   purgeWhatsAppMessageLog,
 } from '@/services/whatsappService';
-import { applyMetricsVista, resolveMetricsVista, type MetricsVista } from '@/utils/metricsVistas';
+import {
+  applyMetricsScope,
+  applyMetricsVista,
+  metricsPeriodRange,
+  resolveMetricsDays,
+  resolveMetricsVista,
+} from '@/utils/metricsVistas';
 import ClientSegmentsSection from './ClientSegmentsSection';
 import InboundActivitySection from './InboundActivitySection';
 import CompletedServicesSection from './CompletedServicesSection';
@@ -48,7 +47,10 @@ import OutboundPerformanceSection, {
 } from './OutboundPerformanceSection';
 import CalidadSection from './CalidadSection';
 import FriccionSection from './FriccionSection';
-import HeatmapSection from './HeatmapSection';
+import HeatmapSection, { type HeatmapMode } from './HeatmapSection';
+import MetricsShell from './shared/MetricsShell';
+import MetricsPageState from './shared/MetricsPageState';
+import MetricsViewHeader from './shared/MetricsViewHeader';
 
 const { phoneNumberId, phoneDisplay, botLabel } = WHATSAPP_CLOUD_PRODUCTION;
 
@@ -64,10 +66,13 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const vista = resolveMetricsVista(searchParams);
-  const [days, setDays] = useState(30);
-  const [heatmapPreferGps, setHeatmapPreferGps] = useState(true);
-  const [heatmapStatus, setHeatmapStatus] = useState('all');
-  const [heatmapLayer, setHeatmapLayer] = useState('all');
+  const days = resolveMetricsDays(searchParams);
+  const heatmapPreferGps = searchParams.get('source') !== 'address';
+  const heatmapStatus = searchParams.get('status') ?? 'all';
+  const heatmapLayer = searchParams.get('layer') ?? 'all';
+  const heatmapMode: HeatmapMode =
+    searchParams.get('mapMode') === 'points' ? 'points' : 'density';
+  const metricsPeriod = metricsPeriodRange(days);
   const [logsFetchWarning, setLogsFetchWarning] = useState<string | null>(null);
   const [purgeDialogOpen, setPurgeDialogOpen] = useState(false);
   const [purgeScope, setPurgeScope] = useState<'line' | 'all'>('line');
@@ -97,14 +102,16 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
       source: heatmapPreferGps ? 'gps' : 'address',
       status: heatmapStatus,
       layer: heatmapLayer,
-      from: null,
-      to: null,
+      from: metricsPeriod.from,
+      to: metricsPeriod.to,
     }),
     queryFn: () =>
       getAppointmentHeatmap({
         source: heatmapPreferGps ? 'gps' : 'address',
         status: heatmapStatus,
         layer: heatmapLayer,
+        from: metricsPeriod.from,
+        to: metricsPeriod.to,
       }),
     staleTime: 60_000,
     enabled: needsHeatmap,
@@ -148,72 +155,62 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
     }
   };
 
-  const periodSelect = (
-    <FormControl size="small" sx={{ minWidth: 130 }}>
-      <InputLabel>Periodo</InputLabel>
-      <Select
-        value={days}
-        label="Periodo"
-        onChange={(e) => setDays(Number(e.target.value))}
-      >
-        <MenuItem value={7}>7 días</MenuItem>
-        <MenuItem value={14}>14 días</MenuItem>
-        <MenuItem value={30}>30 días</MenuItem>
-        <MenuItem value={60}>60 días</MenuItem>
-        <MenuItem value={90}>90 días</MenuItem>
-      </Select>
-    </FormControl>
-  );
-
   return (
-    <div data-tour="whatsapp-tab-metrics">
-      <Stack
-        direction="row"
-        alignItems="center"
-        justifyContent="space-between"
-        spacing={1}
-        sx={{ mb: 1.5, minHeight: 28 }}
-      >
-        <Typography variant="caption" color="text.secondary">
-          {metrics?.dataQuality && !metricsLoading
-            ? `Filas leídas · log: ${metrics.dataQuality.messageLogRows.toLocaleString('es-CO')} · directorio: ${metrics.dataQuality.directoryRows.toLocaleString('es-CO')} · citas COMPLETED: ${metrics.dataQuality.appointmentRows.toLocaleString('es-CO')}`
-            : '\u00a0'}
-        </Typography>
-        <IconButton
-          size="small"
-          aria-label="Opciones avanzadas de métricas"
-          onClick={(e) => setAdvancedMenuAnchor(e.currentTarget)}
-          sx={{ color: 'text.secondary' }}
-        >
-          <MoreVertIcon fontSize="small" />
-        </IconButton>
-        <Menu
-          anchorEl={advancedMenuAnchor}
-          open={Boolean(advancedMenuAnchor)}
-          onClose={() => setAdvancedMenuAnchor(null)}
-          anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-          transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-        >
-          <MenuItem
-            onClick={() => {
-              setAdvancedMenuAnchor(null);
-              setPurgeError(null);
-              setPurgeTypedPhrase('');
-              setPurgeScope('line');
-              setPurgeDialogOpen(true);
-            }}
+    <MetricsShell
+      vista={vista}
+      days={days}
+      onVistaChange={(next) => {
+        setSearchParams(applyMetricsVista(searchParams, next), { replace: true });
+      }}
+      onDaysChange={(nextDays) => {
+        setSearchParams(
+          applyMetricsScope(searchParams, { days: nextDays === 30 ? null : String(nextDays) }),
+          { replace: true },
+        );
+      }}
+      context={
+        metrics?.dataQuality && !metricsLoading
+          ? `Cobertura · ${metrics.dataQuality.messageLogRows.toLocaleString('es-CO')} mensajes · ${metrics.dataQuality.directoryRows.toLocaleString('es-CO')} contactos · ${metrics.dataQuality.appointmentRows.toLocaleString('es-CO')} servicios completados`
+          : undefined
+      }
+      advancedAction={
+        <>
+          <IconButton
+            size="small"
+            aria-label="Opciones avanzadas de métricas"
+            onClick={(event) => setAdvancedMenuAnchor(event.currentTarget)}
+            sx={{ color: 'text.secondary' }}
           >
-            <ListItemIcon>
-              <DeleteSweepIcon fontSize="small" color="warning" />
-            </ListItemIcon>
-            <ListItemText
-              primary="Limpiar registro de mensajes"
-              secondary="Borra filas de whatsapp_message_log (avanzado)"
-            />
-          </MenuItem>
-        </Menu>
-      </Stack>
-
+            <MoreVertIcon fontSize="small" />
+          </IconButton>
+          <Menu
+            anchorEl={advancedMenuAnchor}
+            open={Boolean(advancedMenuAnchor)}
+            onClose={() => setAdvancedMenuAnchor(null)}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+          >
+            <MenuItem
+              onClick={() => {
+                setAdvancedMenuAnchor(null);
+                setPurgeError(null);
+                setPurgeTypedPhrase('');
+                setPurgeScope('line');
+                setPurgeDialogOpen(true);
+              }}
+            >
+              <ListItemIcon>
+                <DeleteSweepIcon fontSize="small" color="warning" />
+              </ListItemIcon>
+              <ListItemText
+                primary="Limpiar registro de mensajes"
+                secondary="Borra filas de whatsapp_message_log (avanzado)"
+              />
+            </MenuItem>
+          </Menu>
+        </>
+      }
+    >
       <Dialog
         open={purgeDialogOpen}
         onClose={() => !purgeLoading && setPurgeDialogOpen(false)}
@@ -304,34 +301,38 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
         </DialogActions>
       </Dialog>
 
-      <Tabs
-        value={vista}
-        onChange={(_event, next: MetricsVista) => {
-          setSearchParams(applyMetricsVista(searchParams, next), { replace: true });
-        }}
-        variant="scrollable"
-        scrollButtons="auto"
-        sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}
-      >
-        <Tab value="mapa" label="Mapa" />
-        <Tab value="calidad" label="Calidad" />
-        <Tab value="friccion" label="Fricción" />
-        <Tab value="clientes" label="Clientes" />
-        <Tab value="actividad" label="Actividad" />
-        <Tab value="outbound" label="Outbound" />
-      </Tabs>
-
       {vista === 'mapa' && (
         <HeatmapSection
           data={heatmapQuery.data}
           loading={heatmapQuery.isPending}
           error={heatmapQuery.error instanceof Error ? heatmapQuery.error.message : null}
           preferGps={heatmapPreferGps}
-          onPreferGpsChange={setHeatmapPreferGps}
+          onPreferGpsChange={(value) => {
+            setSearchParams(
+              applyMetricsScope(searchParams, { source: value ? null : 'address' }),
+              { replace: true },
+            );
+          }}
           status={heatmapStatus}
-          onStatusChange={setHeatmapStatus}
+          onStatusChange={(value) => {
+            setSearchParams(applyMetricsScope(searchParams, { status: value }), { replace: true });
+          }}
           layer={heatmapLayer}
-          onLayerChange={setHeatmapLayer}
+          onLayerChange={(value) => {
+            setSearchParams(applyMetricsScope(searchParams, { layer: value }), { replace: true });
+          }}
+          mode={heatmapMode}
+          onModeChange={(value) => {
+            setSearchParams(
+              applyMetricsScope(searchParams, {
+                mapMode: value === 'density' ? null : value,
+              }),
+              { replace: true },
+            );
+          }}
+          periodLabel={`${metricsPeriod.from} – ${metricsPeriod.to}`}
+          updatedAt={heatmapQuery.dataUpdatedAt}
+          onRetry={() => void heatmapQuery.refetch()}
         />
       )}
 
@@ -340,6 +341,8 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
           metrics={qualityQuery.data}
           loading={qualityQuery.isPending}
           error={qualityQuery.error instanceof Error ? qualityQuery.error.message : null}
+          updatedAt={qualityQuery.dataUpdatedAt}
+          onRetry={() => void qualityQuery.refetch()}
         />
       )}
 
@@ -348,57 +351,134 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
           metrics={qualityQuery.data}
           loading={qualityQuery.isPending}
           error={qualityQuery.error instanceof Error ? qualityQuery.error.message : null}
+          updatedAt={qualityQuery.dataUpdatedAt}
+          onRetry={() => void qualityQuery.refetch()}
         />
       )}
 
       {vista === 'clientes' && (
-        <>
-          {metricsError && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {metricsError}
-            </Alert>
-          )}
+        <MetricsPageState
+          loading={metricsLoading}
+          error={metricsError}
+          empty={!metrics?.clientSegments || metrics.clientSegments.total === 0}
+          onRetry={() => void loadMetrics()}
+        >
+          <MetricsViewHeader
+            title="Directorio y segmentos"
+            purpose="Entiende la composición de la audiencia y abre el grupo exacto sobre el que vas a actuar."
+            periodLabel="Directorio actual"
+            universeLabel={`${(metrics?.clientSegments?.total ?? 0).toLocaleString('es-CO')} contactos`}
+            updatedAt={metricsQuery.dataUpdatedAt}
+            insights={[
+              {
+                label: 'Clientes con cita',
+                value: (metrics?.clientSegments?.clients ?? 0).toLocaleString('es-CO'),
+              },
+              {
+                label: 'Recurrentes',
+                value: (metrics?.clientSegments?.recurring ?? 0).toLocaleString('es-CO'),
+                tone: 'positive',
+              },
+              {
+                label: 'Para reactivar',
+                value: (metrics?.clientSegments?.inactive ?? 0).toLocaleString('es-CO'),
+                tone: 'warning',
+              },
+            ]}
+          />
           <ClientSegmentsSection
             segments={metrics?.clientSegments}
             clients={metrics?.directoryClients}
-            loading={metricsLoading}
+            loading={false}
             onReload={() => void loadMetrics()}
           />
-        </>
+        </MetricsPageState>
       )}
 
       {vista === 'actividad' && (
-        <>
-          {metricsError && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {metricsError}
-            </Alert>
-          )}
+        <MetricsPageState
+          loading={metricsLoading}
+          error={metricsError}
+          empty={!metrics?.inboundTotals && !metrics?.completedMeta}
+          onRetry={() => void loadMetrics()}
+        >
+          <MetricsViewHeader
+            title="Actividad operativa"
+            purpose="Compara demanda inbound y servicios completados sin confundir personas, mensajes ni ventanas temporales."
+            periodLabel={`Últimos ${days} días`}
+            universeLabel={`${(metrics?.inboundTotals?.uniquePeople ?? 0).toLocaleString('es-CO')} contactos únicos`}
+            updatedAt={metricsQuery.dataUpdatedAt}
+            insights={[
+              {
+                label: 'Contactos inbound',
+                value: (metrics?.inboundTotals?.uniquePeople ?? 0).toLocaleString('es-CO'),
+              },
+              {
+                label: 'Nuevos',
+                value: (metrics?.inboundTotals?.newPeople ?? 0).toLocaleString('es-CO'),
+                tone: 'positive',
+              },
+              {
+                label: 'Servicios en el periodo',
+                value: (metrics?.completedMeta?.inSelectedPeriod ?? 0).toLocaleString('es-CO'),
+              },
+            ]}
+          />
           <InboundActivitySection
             series={metrics?.inboundTimeseries}
-            loading={metricsLoading}
+            totals={metrics?.inboundTotals}
+            loading={false}
             days={days}
-            periodControl={periodSelect}
           />
           <CompletedServicesSection
             series={metrics?.completedServicesTimeseries}
             appointments={metrics?.completedAppointments}
             meta={metrics?.completedMeta}
-            loading={metricsLoading}
+            loading={false}
           />
-        </>
+        </MetricsPageState>
       )}
 
       {vista === 'outbound' && (
-        <>
-          {metricsError && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {metricsError}
-            </Alert>
-          )}
+        <MetricsPageState
+          loading={metricsLoading}
+          error={metricsError}
+          empty={!metrics || metrics.totalSent === 0}
+          onRetry={() => void loadMetrics()}
+        >
+          <MetricsViewHeader
+            title="Rendimiento outbound"
+            purpose="Separa volumen de mensajes, alcance único, respuesta y fallos para evaluar cada campaña con su denominador."
+            periodLabel={`Últimos ${days} días`}
+            universeLabel={`${(
+              metrics?.outboundTotals?.uniqueContacts.messaged ??
+              metrics?.uniqueContactsMessaged ??
+              0
+            ).toLocaleString('es-CO')} contactos alcanzados`}
+            updatedAt={metricsQuery.dataUpdatedAt}
+            insights={[
+              {
+                label: 'Mensajes enviados',
+                value: (metrics?.totalSent ?? 0).toLocaleString('es-CO'),
+              },
+              {
+                label: 'Contactos que respondieron',
+                value: (
+                  metrics?.outboundTotals?.uniqueContacts.responded ??
+                  metrics?.uniqueContactsResponded ??
+                  0
+                ).toLocaleString('es-CO'),
+                tone: 'positive',
+              },
+              {
+                label: 'Tasa por contacto',
+                value: `${(metrics?.responseRate ?? 0).toLocaleString('es-CO')}%`,
+                tone: metrics?.responseRateWarning ? 'warning' : 'default',
+              },
+            ]}
+          />
           <OutboundPerformanceSection
             metrics={metrics}
-            metricsLoading={metricsLoading}
             days={days}
             logs={logs}
             logsLoading={logsLoading}
@@ -407,9 +487,9 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
             broadcastJobParam={broadcastJobParam}
             onInitialJobConsumed={onClearBroadcastJobParam}
           />
-        </>
+        </MetricsPageState>
       )}
-    </div>
+    </MetricsShell>
   );
 };
 

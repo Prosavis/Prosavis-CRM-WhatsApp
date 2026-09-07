@@ -3,8 +3,6 @@ import {
   Alert,
   Box,
   Button,
-  Card,
-  CardContent,
   Chip,
   CircularProgress,
   Dialog,
@@ -25,7 +23,6 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import CampaignIcon from '@mui/icons-material/Campaign';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import CloseIcon from '@mui/icons-material/Close';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -41,6 +38,7 @@ import {
   downloadWorkbook,
   excelGeneratedAtLine,
 } from './utils/exportMetricsExcel';
+import MetricsSection from './MetricsSection';
 
 const RECIPIENT_STATUS_LABEL: Record<BroadcastRecipientStatus, string> = {
   pending: 'Pendiente',
@@ -195,34 +193,25 @@ const BroadcastJobsSection: React.FC<BroadcastJobsSectionProps> = ({
 
   return (
     <>
-      <Card
-        elevation={0}
-        sx={{ mb: 3, border: '1px solid', borderColor: 'divider', borderRadius: 2 }}
+      <MetricsSection
+        title="¿Qué ocurrió en los envíos masivos del panel?"
+        subtitle={`Jobs creados por la UI durante los últimos ${days} días. Esta fuente se concilia con el log, pero no es el mismo conjunto de filas.`}
+        toolbarExtra={
+          <Tooltip title="Descargar envíos Excel">
+            <span>
+              <IconButton
+                size="small"
+                onClick={handleDownload}
+                disabled={loading || jobs.length === 0}
+                aria-label="Descargar envíos Excel"
+              >
+                <DownloadIcon fontSize="small" />
+              </IconButton>
+            </span>
+          </Tooltip>
+        }
         data-tour="whatsapp-metrics-broadcasts"
       >
-        <CardContent>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-            <CampaignIcon color="secondary" fontSize="small" />
-            <Typography variant="subtitle1" fontWeight={600}>
-              Envíos masivos (panel)
-            </Typography>
-            <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
-              Últimos {days} días · detalle por destinatario
-            </Typography>
-            <Tooltip title="Descargar envíos Excel">
-              <span>
-                <IconButton
-                  size="small"
-                  onClick={handleDownload}
-                  disabled={loading || jobs.length === 0}
-                  aria-label="Descargar envíos Excel"
-                >
-                  <DownloadIcon fontSize="small" />
-                </IconButton>
-              </span>
-            </Tooltip>
-          </Box>
-
           {error && !detailJob && (
             <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
               {error}
@@ -309,8 +298,7 @@ const BroadcastJobsSection: React.FC<BroadcastJobsSectionProps> = ({
               </Table>
             </TableContainer>
           )}
-        </CardContent>
-      </Card>
+      </MetricsSection>
 
       <Dialog open={!!detailJob} onClose={closeDetail} maxWidth="md" fullWidth scroll="paper">
         {detailJob && (

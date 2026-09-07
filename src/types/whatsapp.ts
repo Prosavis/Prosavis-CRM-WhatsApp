@@ -90,6 +90,47 @@ export interface InboundTimeseriesPoint {
   existingPeople: number;
 }
 
+export interface InboundTotals {
+  messagesReceived: number;
+  uniquePeople: number;
+  newPeople: number;
+  existingPeople: number;
+}
+
+export interface WhatsAppOutboundTotals {
+  messageCounts: {
+    /** Mensajes outbound en estado sent, delivered o read. */
+    sent: number;
+    /** Mensajes cuyo estado actual es delivered. */
+    delivered: number;
+    /** Mensajes cuyo estado actual es read. */
+    read: number;
+    /** Mensajes cuyo estado actual es delivered o read. */
+    reachedDevice: number;
+    /** Mensajes cuyo estado actual es failed. */
+    failed: number;
+    /** Mensajes inbound recibidos durante el período. */
+    responsesReceived: number;
+  };
+  uniqueContacts: {
+    /** Contactos únicos con al menos un mensaje outbound exitoso. */
+    messaged: number;
+    /** Contactos únicos contactados que enviaron al menos un inbound. */
+    responded: number;
+  };
+}
+
+export type WhatsAppResponseRateWarning = 'RAW_MESSAGE_RESPONSE_RATE_ABOVE_100';
+
+export interface WhatsAppResponseRateDiagnostics {
+  responseRateBasis: 'unique_contacts';
+  responseRateNumerator: number;
+  responseRateDenominator: number;
+  rawResponseRateBasis: 'messages';
+  rawResponseRateNumerator: number;
+  rawResponseRateDenominator: number;
+}
+
 export interface CompletedServicesTimeseriesPoint {
   bucket: string;
   completed: number;
@@ -173,15 +214,29 @@ export interface DirectoryClientMetricRow {
 
 export interface WhatsAppMetrics {
   period: { from: string; to: string };
+  /** Conteo de mensajes outbound en estado sent, delivered o read. */
   totalSent: number;
+  /** Conteo de mensajes cuyo estado actual es delivered. */
   totalDelivered: number;
+  /** Conteo de mensajes cuyo estado actual es read. */
   totalRead: number;
+  /** Conteo de mensajes cuyo estado actual es delivered o read. */
   reachedDevice: number;
+  /** Conteo de mensajes cuyo estado actual es failed. */
   totalFailed: number;
+  /** Conteo de mensajes inbound; no es un conteo de contactos. */
   totalResponses: number;
+  /** Porcentaje de contactos únicos contactados que respondieron. */
   responseRate: number;
+  /** Respuestas inbound por mensaje enviado; puede superar 100%. */
+  rawResponseRate: number;
+  responseRateWarning: WhatsAppResponseRateWarning | null;
+  responseRateDiagnostics: WhatsAppResponseRateDiagnostics;
+  outboundTotals: WhatsAppOutboundTotals;
   optOutCount: number;
+  /** Alias legado de outboundTotals.uniqueContacts.messaged. */
   uniqueContactsMessaged?: number;
+  /** Alias legado de outboundTotals.uniqueContacts.responded. */
   uniqueContactsResponded?: number;
   byCampaign: Record<string, OutboundMetricsBucket>;
   byTemplate?: Record<string, OutboundMetricsBucket>;
@@ -196,6 +251,8 @@ export interface WhatsAppMetrics {
     optOut: number;
     agendados: number;
   };
+  /** Totales únicos de todo el período, no suma de buckets. */
+  inboundTotals: InboundTotals;
   inboundTimeseries?: MetricsGranularSeries<InboundTimeseriesPoint>;
   clientSegments?: ClientSegmentsMetrics;
   directoryClients?: DirectoryClientMetricRow[];

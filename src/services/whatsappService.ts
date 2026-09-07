@@ -875,6 +875,7 @@ export async function sendWhatsAppTemplateMessageAdmin(params: {
   recipientPhone: string;
   templateName: string;
   templateLanguage?: string;
+  templateCategory?: string;
   phoneNumberId?: string;
   displayMessageBody?: string;
   components?: Array<{

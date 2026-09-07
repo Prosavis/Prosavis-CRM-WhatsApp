@@ -2,10 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   Box,
   Button,
-  Card,
-  CardContent,
   CircularProgress,
-  Grid,
   IconButton,
   Stack,
   Table,
@@ -18,14 +15,6 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import PeopleAltOutlinedIcon from '@mui/icons-material/PeopleAltOutlined';
-import BusinessOutlinedIcon from '@mui/icons-material/BusinessOutlined';
-import AutorenewOutlinedIcon from '@mui/icons-material/AutorenewOutlined';
-import EventAvailableOutlinedIcon from '@mui/icons-material/EventAvailableOutlined';
-import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
-import NotificationsActiveOutlinedIcon from '@mui/icons-material/NotificationsActiveOutlined';
-import BlockOutlinedIcon from '@mui/icons-material/BlockOutlined';
-import StarOutlinedIcon from '@mui/icons-material/StarOutlined';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import InboxOutlinedIcon from '@mui/icons-material/InboxOutlined';
 import WhatsAppIcon from '@mui/icons-material/WhatsApp';
@@ -42,6 +31,9 @@ import {
   excelGeneratedAtLine,
 } from './utils/exportMetricsExcel';
 import MetricsSection from './MetricsSection';
+import MetricsContextBanner from './shared/MetricsContextBanner';
+import MetricsKpiCard from './shared/MetricsKpiCard';
+import MetricsKpiGrid from './shared/MetricsKpiGrid';
 import { openWhatsAppInbox } from '@/utils/openWhatsAppInbox';
 import { whatsappDesktopUrl } from '@/utils/whatsappDesktopUrl';
 
@@ -66,9 +58,9 @@ interface ClientSegmentsSectionProps {
 const CARDS: Array<{
   key: ClientSegmentKey;
   label: string;
-  color: string;
-  bg: string;
-  icon: React.ReactNode;
+  accent: string;
+  tone?: 'default' | 'success' | 'warning' | 'risk' | 'info' | 'neutral';
+  group: 'Audiencia' | 'Relación' | 'Operación';
   /** Base para el porcentaje: audiencia total o clientes reales. */
   base: 'total' | 'clients';
   pick: (s: ClientSegmentsMetrics) => number;
@@ -76,45 +68,44 @@ const CARDS: Array<{
   {
     key: 'potential',
     label: 'Público de interés',
-    color: '#1976d2',
-    bg: '#e3f2fd',
-    icon: <PeopleAltOutlinedIcon />,
+    accent: 'primary.main',
+    group: 'Audiencia',
     base: 'total',
     pick: (s) => s.total,
   },
   {
     key: 'clients',
     label: 'Clientes (agendaron)',
-    color: '#2e7d32',
-    bg: '#e8f5e9',
-    icon: <EventAvailableOutlinedIcon />,
+    accent: 'success.main',
+    tone: 'success',
+    group: 'Audiencia',
     base: 'total',
     pick: (s) => s.clients,
   },
   {
     key: 'active',
     label: 'Clientes activos',
-    color: '#00897b',
-    bg: '#e0f2f1',
-    icon: <CheckCircleOutlineIcon />,
+    accent: 'success.dark',
+    tone: 'success',
+    group: 'Relación',
     base: 'clients',
     pick: (s) => s.active,
   },
   {
     key: 'inactive',
     label: 'Inactivos (reactivar)',
-    color: '#d32f2f',
-    bg: '#ffebee',
-    icon: <NotificationsActiveOutlinedIcon />,
+    accent: 'warning.dark',
+    tone: 'warning',
+    group: 'Operación',
     base: 'clients',
     pick: (s) => s.inactive,
   },
   {
     key: 'favorites',
     label: 'Clientes favoritos',
-    color: '#f9a825',
-    bg: '#fff8e1',
-    icon: <StarOutlinedIcon />,
+    accent: 'success.main',
+    tone: 'success',
+    group: 'Relación',
     // Tag manual; % sobre audiencia (no exige cita Firebase).
     base: 'total',
     pick: (s) => s.favorites ?? 0,
@@ -122,9 +113,9 @@ const CARDS: Array<{
   {
     key: 'blacklist',
     label: 'Lista negra',
-    color: '#b71c1c',
-    bg: '#ffcdd2',
-    icon: <BlockOutlinedIcon />,
+    accent: 'error.main',
+    tone: 'risk',
+    group: 'Operación',
     // Incluye no-clientes (equipo, leads, etc.): % sobre audiencia, no sobre clientes.
     base: 'total',
     pick: (s) => s.blacklist ?? 0,
@@ -132,22 +123,23 @@ const CARDS: Array<{
   {
     key: 'company',
     label: 'Clientes empresa',
-    color: '#6a1b9a',
-    bg: '#f3e5f5',
-    icon: <BusinessOutlinedIcon />,
+    accent: 'secondary.dark',
+    group: 'Relación',
     base: 'clients',
     pick: (s) => s.company,
   },
   {
     key: 'recurring',
     label: 'Clientes recurrentes',
-    color: '#ed6c02',
-    bg: '#fff3e0',
-    icon: <AutorenewOutlinedIcon />,
+    accent: 'info.main',
+    tone: 'info',
+    group: 'Relación',
     base: 'clients',
     pick: (s) => s.recurring,
   },
 ];
+
+const SEGMENT_GROUPS = ['Audiencia', 'Relación', 'Operación'] as const;
 
 function matchesSegment(client: DirectoryClientMetricRow, key: ClientSegmentKey): boolean {
   switch (key) {
@@ -370,8 +362,8 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
 
   return (
     <MetricsSection
-      title="Clientes"
-      subtitle="Público de interés = directorio activo sin TEST/opt-out. Cliente = agendó ≥1 vez (Firebase, 24 meses). Activo = última cita ≤ 30 días; inactivo = > 30 días. Favoritos = tag Favoritos (manual). Lista negra = Decline/🚫/Bloqueado o bloqueado en inbox — incluye no-clientes; no cuenta en activos/inactivos. Clic en un KPI para el detalle; edita tags en la columna Tags."
+      title="¿Cómo se compone el directorio?"
+      subtitle="Selecciona un KPI para abrir las filas que explican el segmento y editar sus tags."
       expanded={detailOpen}
       onExpandedChange={setDetailOpen}
       onDownload={handleDownload}
@@ -570,80 +562,56 @@ const ClientSegmentsSection: React.FC<ClientSegmentsSectionProps> = ({
         )
       }
     >
-      <Grid container spacing={2}>
-        {CARDS.map((card) => {
-          const count = segments ? card.pick(segments) : 0;
-          const base = segments
-            ? card.base === 'clients'
-              ? segments.clients
-              : segments.total
-            : 0;
-          const pct = base > 0 ? Math.round((count / base) * 1000) / 10 : 0;
-          const pctLabel =
-            card.key === 'potential'
-              ? 'audiencia total'
-              : `${pct}% de ${card.base === 'clients' ? 'clientes' : 'la audiencia'}`;
-          const isSelected = selected === card.key;
-          return (
-            <Grid item xs={6} sm={4} md={3} lg={true} key={card.key}>
-              <Card
-                elevation={0}
-                role="button"
-                tabIndex={0}
-                aria-pressed={isSelected}
-                onClick={() => handleSelect(card.key)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    handleSelect(card.key);
-                  }
-                }}
-                sx={{
-                  height: '100%',
-                  cursor: 'pointer',
-                  border: '2px solid',
-                  borderColor: isSelected ? card.color : 'divider',
-                  borderRadius: 2,
-                  transition: 'box-shadow 0.2s, border-color 0.2s',
-                  '&:hover': { boxShadow: 3 },
-                }}
-              >
-                <CardContent sx={{ textAlign: 'center', py: 2.5 }}>
-                  <Box
-                    sx={{
-                      width: 44,
-                      height: 44,
-                      borderRadius: '50%',
-                      bgcolor: card.bg,
-                      color: card.color,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      mx: 'auto',
-                      mb: 1,
-                    }}
-                  >
-                    {card.icon}
-                  </Box>
-                  {loading ? (
-                    <CircularProgress size={22} />
-                  ) : (
-                    <Typography variant="h4" fontWeight={800} sx={{ color: card.color }}>
-                      {count.toLocaleString('es-CO')}
-                    </Typography>
-                  )}
-                  <Typography variant="body2" color="text.secondary" fontWeight={500}>
-                    {card.label}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {pctLabel}
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-          );
-        })}
-      </Grid>
+      <MetricsContextBanner summary="Definiciones de audiencia y relación">
+        Público de interés excluye TEST y opt-out. Cliente significa que agendó al menos una vez
+        durante la ventana de citas de 24 meses. Activo tiene última cita en 30 días; inactivo,
+        una anterior. Favoritos es un tag manual. Lista negra reúne Decline, 🚫, Bloqueado o
+        bloqueo en inbox y puede incluir no-clientes.
+      </MetricsContextBanner>
+      <Stack spacing={2}>
+        {SEGMENT_GROUPS.map((group) => (
+          <Box key={group}>
+            <Typography
+              component="h3"
+              variant="overline"
+              color="text.secondary"
+              fontWeight={700}
+              sx={{ display: 'block', mb: 0.75 }}
+            >
+              {group}
+            </Typography>
+            <MetricsKpiGrid minWidth={185}>
+              {CARDS.filter((card) => card.group === group).map((card) => {
+                const count = segments ? card.pick(segments) : 0;
+                const base = segments
+                  ? card.base === 'clients'
+                    ? segments.clients
+                    : segments.total
+                  : 0;
+                const pct = base > 0 ? Math.round((count / base) * 1000) / 10 : 0;
+                const detail =
+                  card.key === 'potential'
+                    ? 'audiencia total'
+                    : `${pct.toLocaleString('es-CO')}% de ${
+                        card.base === 'clients' ? 'clientes' : 'la audiencia'
+                      }`;
+                return (
+                  <MetricsKpiCard
+                    key={card.key}
+                    label={card.label}
+                    value={loading ? '…' : count.toLocaleString('es-CO')}
+                    detail={detail}
+                    selected={selected === card.key}
+                    onClick={() => handleSelect(card.key)}
+                    accent={card.accent}
+                    tone={card.tone}
+                  />
+                );
+              })}
+            </MetricsKpiGrid>
+          </Box>
+        ))}
+      </Stack>
       <BlacklistClientDetailDialog
         open={!!detailRow}
         row={detailRow}

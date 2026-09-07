@@ -1,5 +1,6 @@
 const BSUID_REGEX = /^[A-Z]{2}\.[A-Za-z0-9.]+$/;
 const PARENT_BSUID_REGEX = /^[A-Z]{2}\.ENT\.[A-Za-z0-9]+$/;
+const LID_CUSTOMER_PREFIX = 'lid:';
 
 export interface WhatsAppRecipient {
   phone?: string;
@@ -24,9 +25,12 @@ export function normalizePhone(phone: string): string {
 }
 
 export function resolveRecipient(value: string): WhatsAppRecipient {
-  if (isParentBsuid(value)) return { parentBsuid: value };
-  if (isBsuid(value)) return { bsuid: value };
-  return { phone: value };
+  const recipientValue = value.trim().startsWith(LID_CUSTOMER_PREFIX)
+    ? value.trim().slice(LID_CUSTOMER_PREFIX.length)
+    : value.trim();
+  if (isParentBsuid(recipientValue)) return { parentBsuid: recipientValue };
+  if (isBsuid(recipientValue)) return { bsuid: recipientValue };
+  return { phone: recipientValue };
 }
 
 export function buildRecipientPayload(

@@ -73,6 +73,7 @@ import {
   COMMERCIAL_PHONE_NUMBER_ID,
   customerPhoneFromStableKey,
   isCommercialPhoneNumberId,
+  isLidStableKey,
   phoneNumberIdForFilter,
   resolveWhatsAppLine,
   siblingConversationStableKey,
@@ -630,9 +631,10 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
       )
     : wabaId;
   const templateRecipientDigits = recipientPhoneForTemplates.replace(/\D/g, '');
+  const templateRecipientIsLid = isLidStableKey(selectedConversation?.id);
   const canShowTemplates =
     Boolean(selectedConversation && activeWabaId && activePhoneNumberId) &&
-    templateRecipientDigits.length >= 10;
+    (templateRecipientIsLid || templateRecipientDigits.length >= 10);
   const templateLastInboundAt =
     loadedConversationInbound &&
     loadedConversationInbound.conversationId === selectedConversation?.id

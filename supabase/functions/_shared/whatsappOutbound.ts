@@ -21,6 +21,7 @@ import {
   COMMERCIAL_PHONE_NUMBER_ID,
   conversationStableKey,
   customerPhoneFromStableKey,
+  isLidCustomerKey,
   resolveWhatsAppLine,
 } from './whatsappLines.ts';
 import { queuePersistedAudioTranscription } from './whatsappMediaHydrate.ts';
@@ -141,12 +142,24 @@ export function metaErrorCode(payload: Record<string, unknown>): number | undefi
 
 export function outboundCustomerPhone(to: string): string {
   const customer = customerPhoneFromStableKey(to);
+  if (isLidCustomerKey(customer)) return customer;
   const recipient = resolveRecipient(customer);
   return recipient.phone ? normalizePhone(recipient.phone) : getStableKeyFromRecipient(customer);
 }
 
 export function outboundConversationKey(to: string, phoneNumberId?: string): string {
   return conversationStableKey(outboundCustomerPhone(to), phoneNumberId);
+}
+
+export function outboundRecipientLogIdentity(to: string): {
+  recipientPhone: string | null;
+  recipientBsuid: string | null;
+} {
+  const recipient = resolveRecipient(customerPhoneFromStableKey(to));
+  return {
+    recipientPhone: recipient.phone ? normalizePhone(recipient.phone) : null,
+    recipientBsuid: recipient.bsuid ?? recipient.parentBsuid ?? null,
+  };
 }
 
 export function getGraphCredentials(phoneNumberIdOverride?: string): GraphCredentials {
@@ -277,7 +290,7 @@ async function resolveOutboundMediaForMeta(
     accessToken: string;
   },
 ): Promise<{ mediaId?: string; mediaUrlForLog: string }> {
-  let mediaUrlForLog = params.mediaUrl;
+  let mediaUrlForLog: string;
   const storagePath = params.storagePath?.trim();
 
   if (storagePath) {
@@ -379,6 +392,7 @@ export async function sendToMeta(params: {
   if (params.reactionToWaMessageId !== undefined && params.reactionEmoji !== undefined) {
     requestBody = {
       messaging_product: 'whatsapp',
+      recipient_type: 'individual',
       ...recipientPayload,
       type: 'reaction',
       reaction: {
@@ -389,6 +403,7 @@ export async function sendToMeta(params: {
   } else if (params.templateName) {
     requestBody = {
       messaging_product: 'whatsapp',
+      recipient_type: 'individual',
       ...recipientPayload,
       type: 'template',
       template: {
@@ -409,6 +424,7 @@ export async function sendToMeta(params: {
     });
     requestBody = {
       messaging_product: 'whatsapp',
+      recipient_type: 'individual',
       ...recipientPayload,
       type: params.mediaType,
       [params.mediaType]: mediaPayload,
@@ -416,6 +432,7 @@ export async function sendToMeta(params: {
   } else {
     requestBody = {
       messaging_product: 'whatsapp',
+      recipient_type: 'individual',
       ...recipientPayload,
       type: 'text',
       text: {
@@ -497,7 +514,7 @@ export function buildTemplateDisplayBody(
 export async function ensureConversation(
   supabase: SupabaseClient,
   stableKey: string,
-  recipientPhone: string,
+  recipientKey: string,
   phoneNumberId: string,
   contactName?: string | null,
 ) {
@@ -510,12 +527,15 @@ export async function ensureConversation(
 
   const row: Record<string, unknown> = {
     stable_key: stableKey,
-    phone: recipientPhone,
-    contact_phone: recipientPhone,
     phone_number_id: phoneNumberId || null,
     state: 'active',
     ...UNARCHIVE_CONVERSATION_PATCH,
   };
+  const recipientIdentity = outboundRecipientLogIdentity(recipientKey);
+  if (recipientIdentity.recipientPhone) {
+    row.phone = recipientIdentity.recipientPhone;
+    row.contact_phone = recipientIdentity.recipientPhone;
+  }
 
   const nameToSet = resolveOutboundContactName({
     incomingName: contactName,
@@ -618,7 +638,7 @@ export async function sendWhatsAppMediaOutbound(
 
   const recipientPhone = outboundCustomerPhone(params.to);
   const stableKey = outboundConversationKey(recipientPhone, graph.phoneNumberId);
-  const recipient = resolveRecipient(recipientPhone);
+  const recipientIdentity = outboundRecipientLogIdentity(recipientPhone);
 
   await ensureConversation(supabase, stableKey, recipientPhone, graph.phoneNumberId);
 
@@ -627,10 +647,9 @@ export async function sendWhatsAppMediaOutbound(
 
   // Meta no puede descargar signed URLs de Supabase de forma fiable (131053 / HTTP 500).
   // Subimos el binario a Graph `/media` y enviamos por `id`.
-  let mediaUrlForLog = params.mediaUrl;
-  let mediaId: string | undefined;
+  let resolvedMedia: Awaited<ReturnType<typeof resolveOutboundMediaForMeta>>;
   try {
-    const resolved = await resolveOutboundMediaForMeta(supabase, {
+    resolvedMedia = await resolveOutboundMediaForMeta(supabase, {
       mediaType: params.mediaType,
       mediaUrl: params.mediaUrl,
       storagePath: params.storagePath,
@@ -639,11 +658,10 @@ export async function sendWhatsAppMediaOutbound(
       phoneNumberId: graph.phoneNumberId,
       accessToken: graph.accessToken,
     });
-    mediaUrlForLog = resolved.mediaUrlForLog;
-    mediaId = resolved.mediaId;
   } catch (error) {
     return { success: false, error: formatError(error) };
   }
+  const { mediaUrlForLog, mediaId } = resolvedMedia;
 
   const metaResult = await sendToMeta({
     to: recipientPhone,
@@ -658,8 +676,8 @@ export async function sendWhatsAppMediaOutbound(
 
   const insertRow: Record<string, unknown> = {
     conversation_stable_key: stableKey,
-    recipient_phone: recipientPhone,
-    recipient_bsuid: recipient.bsuid ?? null,
+    recipient_phone: recipientIdentity.recipientPhone,
+    recipient_bsuid: recipientIdentity.recipientBsuid,
     direction: 'outbound',
     sender_type: 'agent',
     message_body: metaResult.logMessageBody,
@@ -739,7 +757,7 @@ export async function sendTextOutbound(
 
   const recipientPhone = outboundCustomerPhone(params.to);
   const stableKey = outboundConversationKey(recipientPhone, graph.phoneNumberId);
-  const recipient = resolveRecipient(recipientPhone);
+  const recipientIdentity = outboundRecipientLogIdentity(recipientPhone);
 
   await ensureConversation(
     supabase,
@@ -762,8 +780,8 @@ export async function sendTextOutbound(
 
   const insertRow: Record<string, unknown> = {
     conversation_stable_key: stableKey,
-    recipient_phone: recipientPhone,
-    recipient_bsuid: recipient.bsuid ?? null,
+    recipient_phone: recipientIdentity.recipientPhone,
+    recipient_bsuid: recipientIdentity.recipientBsuid,
     direction: 'outbound',
     sender_type: 'agent',
     message_body: params.text,

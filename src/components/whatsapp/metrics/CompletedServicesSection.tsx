@@ -23,7 +23,6 @@ import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import TrendingFlatIcon from '@mui/icons-material/TrendingFlat';
 import CloseIcon from '@mui/icons-material/Close';
 import {
-  Area,
   Bar,
   CartesianGrid,
   Cell,
@@ -52,7 +51,6 @@ import {
   excelGeneratedAtLine,
 } from './utils/exportMetricsExcel';
 import {
-  AreaGradient,
   BarGradient,
   ChartTooltipCard,
   chartAxisTick,
@@ -61,6 +59,7 @@ import {
   formatAxisInt,
 } from './utils/chartTheme';
 import MetricsSection from './MetricsSection';
+import MetricsContextBanner from './shared/MetricsContextBanner';
 
 const GRANULARITY_LABEL: Record<MetricsGranularity, string> = {
   day: 'Día',
@@ -204,7 +203,7 @@ const ComparisonCard: React.FC<{ lens: ComparisonLens }> = ({ lens }) => {
       <Typography
         variant="caption"
         color="text.secondary"
-        sx={{ mt: 'auto', pt: 0.5, lineHeight: 1.35, opacity: 0.85 }}
+        sx={{ mt: 'auto', pt: 0.5, lineHeight: 1.35 }}
       >
         {lens.explanation}
       </Typography>
@@ -274,7 +273,6 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
 
   const barColor = chartColor(theme, '#2e7d32');
   const barSelectedColor = chartColor(theme, '#1b5e20', 0.22);
-  const trendColor = chartColor(theme, '#1565c0');
 
   const comparisonLenses = useMemo<ComparisonLens[]>(() => {
     const lenses: ComparisonLens[] = [];
@@ -463,8 +461,8 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
 
   return (
     <MetricsSection
-      title="Servicios completados"
-      subtitle="Citas COMPLETED en Firestore appointments, agrupadas por scheduledDate (America/Bogota). Ventana fija de 6 meses — independiente del filtro «Periodo» de arriba. Clic en una barra para ver las citas."
+      title="¿Cómo evolucionan los servicios completados?"
+      subtitle="Serie principal de volumen completado. Selecciona una barra para auditar las citas del periodo."
       granularity={granularity}
       onGranularityChange={handleGranularityChange}
       onDownload={handleDownload}
@@ -519,6 +517,11 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
         </TableContainer>
       }
     >
+      <MetricsContextBanner summary="Ventana y fecha de corte de servicios">
+        Esta serie usa una ventana fija de seis meses, independiente del periodo global, y agrupa
+        por fecha programada en America/Bogota. Los periodos en curso se marcan como parciales y
+        no se comparan como si estuvieran cerrados.
+      </MetricsContextBanner>
       {meta && (
         <Stack direction="row" spacing={1} sx={{ mb: 1.5 }} flexWrap="wrap" useFlexGap>
           <Chip size="small" label={`Total 6 meses: ${formatInt(meta.totalCompleted)}`} />
@@ -575,7 +578,6 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
               <defs>
                 <BarGradient id="completedBar" color={barColor} />
                 <BarGradient id="completedBarSelected" color={barSelectedColor} from={1} to={0.72} />
-                <AreaGradient id="completedTrend" color={trendColor} />
               </defs>
               <CartesianGrid
                 vertical={false}
@@ -600,18 +602,6 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
                 content={<CompletedChartTooltip />}
                 cursor={{ fill: alpha(theme.palette.text.primary, 0.05) }}
               />
-              <Area
-                type="monotone"
-                dataKey="completed"
-                name="Tendencia"
-                stroke={trendColor}
-                strokeWidth={2}
-                fill="url(#completedTrend)"
-                dot={false}
-                activeDot={false}
-                legendType="none"
-                isAnimationActive={false}
-              />
               <Bar
                 dataKey="completed"
                 name="Completados"
@@ -619,7 +609,7 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
                 cursor="pointer"
                 maxBarSize={64}
                 onClick={handleBarClick}
-                animationDuration={800}
+                isAnimationActive={false}
               >
                 {chartData.map((row) => (
                   <Cell

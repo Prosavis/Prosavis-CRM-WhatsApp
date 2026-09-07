@@ -8,20 +8,16 @@ import {
   getGraphCredentials,
   isRecipientBlocked,
   outboundConversationKey,
+  outboundRecipientLogIdentity,
   persistOutboundLog,
   sendToMeta,
   updateConversationPreview,
 } from '../_shared/whatsappOutbound.ts';
-import { normalizePhone, resolveRecipient } from '../_shared/whatsappIdentity.ts';
-
-function validateE164ishPhone(input: string): string {
-  const normalized = normalizePhone(input);
-  const digits = normalized.replace(/\D/g, '');
-  if (digits.length < 10 || digits.length > 15) {
-    throw new Error('Número de teléfono inválido (use formato internacional, ej. 573001234567).');
-  }
-  return normalized;
-}
+import {
+  BSUID_AUTH_TEMPLATE_UNSUPPORTED_CODE,
+  assertTemplateRecipientSupported,
+  resolveTemplateRecipientKey,
+} from '../_shared/whatsappTemplateRecipient.ts';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -33,6 +29,7 @@ Deno.serve(async (req) => {
     const recipientPhone = body.recipientPhone ? String(body.recipientPhone).trim() : '';
     const templateName = body.templateName ? String(body.templateName).trim() : '';
     const templateLanguage = body.templateLanguage ? String(body.templateLanguage).trim() : 'es_CO';
+    const templateCategory = body.templateCategory ? String(body.templateCategory).trim() : undefined;
     const components = body.components as Array<Record<string, unknown>> | undefined;
     const phoneNumberId = body.phoneNumberId ? String(body.phoneNumberId).trim() : undefined;
     const displayMessageBody = body.displayMessageBody
@@ -49,34 +46,41 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: String(error) }, 503);
     }
 
-    const phone = validateE164ishPhone(recipientPhone);
-    if (await isRecipientBlocked(supabase, phone)) {
+    const recipientKey = resolveTemplateRecipientKey(recipientPhone);
+    try {
+      assertTemplateRecipientSupported(recipientKey, templateCategory);
+    } catch (error) {
+      return jsonResponse({
+        error: formatError(error),
+        code: BSUID_AUTH_TEMPLATE_UNSUPPORTED_CODE,
+      }, 400);
+    }
+    if (await isRecipientBlocked(supabase, recipientKey)) {
       return jsonResponse({ error: 'recipient_blocked' }, 400);
     }
 
     const graph = getGraphCredentials(phoneNumberId);
     const metaResult = await sendToMeta({
-      to: phone,
+      to: recipientKey,
       phoneNumberId: graph.phoneNumberId,
       accessToken: graph.accessToken,
       templateName,
       templateLanguage,
       templateComponents: components,
       messageBody: displayMessageBody,
-      requirePhone: true,
     });
 
-    const stableKey = outboundConversationKey(phone, graph.phoneNumberId);
-    const recipient = resolveRecipient(phone);
+    const stableKey = outboundConversationKey(recipientKey, graph.phoneNumberId);
+    const recipientIdentity = outboundRecipientLogIdentity(recipientKey);
 
-    await ensureConversation(supabase, stableKey, normalizePhone(phone), graph.phoneNumberId);
+    await ensureConversation(supabase, stableKey, recipientKey, graph.phoneNumberId);
 
     const persisted = await persistOutboundLog(
       supabase,
       {
         conversation_stable_key: stableKey,
-        recipient_phone: normalizePhone(phone),
-        recipient_bsuid: recipient.bsuid ?? null,
+        recipient_phone: recipientIdentity.recipientPhone,
+        recipient_bsuid: recipientIdentity.recipientBsuid,
         direction: 'outbound',
         sender_type: 'agent',
         message_body: displayMessageBody,

@@ -194,5 +194,5 @@ export function isSessionComposerLocked(params: {
   isLidThread: boolean;
   sessionWindow: Pick<MetaSessionWindow, 'requiresTemplate'>;
 }): boolean {
-  return params.isLidThread || params.sessionWindow.requiresTemplate;
+  return params.sessionWindow.requiresTemplate;
 }

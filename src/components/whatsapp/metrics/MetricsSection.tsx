@@ -56,8 +56,16 @@ const MetricsSection: React.FC<MetricsSectionProps> = ({
 
   return (
     <Card
+      component="section"
       elevation={0}
-      sx={{ mb: 3, border: '1px solid', borderColor: 'divider', borderRadius: 2 }}
+      sx={{
+        mb: 2,
+        border: '1px solid',
+        borderColor: 'divider',
+        borderRadius: 2,
+        boxShadow: 'none',
+        '&:hover': { boxShadow: 'none', transform: 'none' },
+      }}
     >
       <CardContent>
         <Stack
@@ -68,7 +76,7 @@ const MetricsSection: React.FC<MetricsSectionProps> = ({
           sx={{ mb: 2 }}
         >
           <Box>
-            <Typography variant="subtitle1" fontWeight={700}>
+            <Typography component="h2" variant="subtitle1" fontWeight={700}>
               {title}
             </Typography>
             {subtitle && (
