@@ -5,7 +5,9 @@ import {
   formatSessionWindowRemainingLabel,
   freeformSendBlockReason,
   getMetaSessionWindow,
+  isAwaitingReplyAfterReactivation,
   isSessionComposerLocked,
+  sessionWindowClosedAlert,
   newestInboundTimestamp,
   nextLastInboundAt,
   resolveMetaSessionWindow,
@@ -257,6 +259,32 @@ describe('session window remaining helpers', () => {
         sessionWindow: { requiresTemplate: false },
       }),
     ).toBe(false);
+    expect(
+      isSessionComposerLocked({
+        isLidThread: true,
+        sessionWindow: { requiresTemplate: true },
+      }),
+    ).toBe(true);
+  });
+});
+
+describe('awaiting reply after reactivation template', () => {
+  it('treats a later outbound template as already reactivated, not as a missing template', () => {
+    expect(
+      isAwaitingReplyAfterReactivation({
+        requiresTemplate: true,
+        lastInboundAt: '2026-09-04T23:43:47.000Z',
+        lastOutboundTemplateAt: '2026-09-07T20:12:00.000Z',
+      }),
+    ).toBe(true);
+    expect(
+      sessionWindowClosedAlert({ awaitingReplyAfterReactivation: true }),
+    ).toEqual({
+      severity: 'info',
+      message:
+        'Ya reactivamos este chat con una plantilla. Meta abre la ventana de 24 h cuando la persona responda; hasta entonces no se puede escribir texto libre.',
+      actionLabel: 'Otra plantilla',
+    });
     expect(
       isSessionComposerLocked({
         isLidThread: true,

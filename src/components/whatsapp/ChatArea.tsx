@@ -118,8 +118,11 @@ import { pickContactPhotoUrl } from '@/utils/contactAvatar';
 import { useMetaSessionWindow } from '@/hooks/useMetaSessionWindow';
 import {
   SESSION_WINDOW_CLOSED_MESSAGE,
+  isAwaitingReplyAfterReactivation,
   isSessionComposerLocked,
   newestInboundTimestamp,
+  newestOutboundTemplateAt,
+  sessionWindowClosedAlert,
   type MetaSessionWindow,
 } from '../../../supabase/functions/_shared/metaSessionWindow';
 import { hasInboxAiUsedContext } from '@/utils/inboxAiUsedContext';
@@ -365,6 +368,18 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       ),
     [conversation.id, messageHistory, olderMessages, optimisticMessages, stableKey],
   );
+  const lastOutboundTemplateAt = useMemo(
+    () => newestOutboundTemplateAt(messages),
+    [messages],
+  );
+  const awaitingReplyAfterReactivation = isAwaitingReplyAfterReactivation({
+    requiresTemplate: liveSessionWindow.requiresTemplate,
+    lastInboundAt,
+    lastOutboundTemplateAt,
+  });
+  const closedWindowAlert = sessionWindowClosedAlert({
+    awaitingReplyAfterReactivation,
+  });
   const loading = isConversationMessageHistoryLoading(
     messageHistory,
     conversation.id,
@@ -1858,16 +1873,15 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           )}
           {sessionWindowClosed && (
             <Alert
-              severity="warning"
+              severity={closedWindowAlert.severity}
               sx={{ mx: 1.5, mt: 1 }}
               action={(
                 <Button color="inherit" size="small" onClick={onToggleTemplatesPanel}>
-                  Enviar plantilla
+                  {closedWindowAlert.actionLabel}
                 </Button>
               )}
             >
-              La ventana de 24 h está cerrada. No se puede escribir texto libre. Envía una
-              plantilla para reabrir.
+              {closedWindowAlert.message}
             </Alert>
           )}
           <Box

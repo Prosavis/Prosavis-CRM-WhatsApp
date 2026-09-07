@@ -196,3 +196,56 @@ export function isSessionComposerLocked(params: {
 }): boolean {
   return params.sessionWindow.requiresTemplate;
 }
+
+export function newestOutboundTemplateAt(
+  messages: readonly {
+    direction?: string | null;
+    templateName?: string | null;
+    createdAt?: TimestampInput;
+  }[],
+): Date | null {
+  let newest: number | null = null;
+  for (const message of messages) {
+    if (message.direction !== 'outbound') continue;
+    if (!String(message.templateName ?? '').trim()) continue;
+    const millis = timestampMillis(message.createdAt);
+    if (millis == null) continue;
+    if (newest == null || millis > newest) newest = millis;
+  }
+  return newest == null ? null : new Date(newest);
+}
+
+export function isAwaitingReplyAfterReactivation(params: {
+  requiresTemplate: boolean;
+  lastInboundAt: TimestampInput;
+  lastOutboundTemplateAt: TimestampInput;
+}): boolean {
+  if (!params.requiresTemplate) return false;
+  const outboundMillis = timestampMillis(params.lastOutboundTemplateAt);
+  if (outboundMillis == null) return false;
+  const inboundMillis = timestampMillis(params.lastInboundAt);
+  return inboundMillis == null || outboundMillis > inboundMillis;
+}
+
+export function sessionWindowClosedAlert(params: {
+  awaitingReplyAfterReactivation: boolean;
+}): {
+  severity: 'warning' | 'info';
+  message: string;
+  actionLabel: string;
+} {
+  if (params.awaitingReplyAfterReactivation) {
+    return {
+      severity: 'info',
+      message:
+        'Ya reactivamos este chat con una plantilla. Meta abre la ventana de 24 h cuando la persona responda; hasta entonces no se puede escribir texto libre.',
+      actionLabel: 'Otra plantilla',
+    };
+  }
+  return {
+    severity: 'warning',
+    message:
+      'La ventana de 24 h está cerrada. No se puede escribir texto libre. Envía una plantilla para reabrir.',
+    actionLabel: 'Enviar plantilla',
+  };
+}
