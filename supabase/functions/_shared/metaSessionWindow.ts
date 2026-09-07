@@ -1,7 +1,7 @@
 export const META_SESSION_WINDOW_MS = 24 * 60 * 60 * 1000;
 export const SESSION_WINDOW_CLOSED_CODE = 'SESSION_WINDOW_CLOSED';
 export const SESSION_WINDOW_CLOSED_MESSAGE =
-  'La ventana de 24 h está cerrada. Envía una plantilla para volver a escribir.';
+  'La ventana de 24 h está cerrada. Se abre cuando el cliente responda. Mientras tanto solo puedes enviar una plantilla.';
 
 export type MetaSessionWindowStatus = 'open' | 'closed' | 'unknown';
 
@@ -238,14 +238,14 @@ export function sessionWindowClosedAlert(params: {
     return {
       severity: 'info',
       message:
-        'Ya reactivamos este chat con una plantilla. Meta abre la ventana de 24 h cuando la persona responda; hasta entonces no se puede escribir texto libre.',
+        'Ya enviamos una plantilla. La ventana de 24 h se abre cuando el cliente responda; hasta entonces no se puede escribir texto libre.',
       actionLabel: 'Otra plantilla',
     };
   }
   return {
     severity: 'warning',
     message:
-      'La ventana de 24 h está cerrada. No se puede escribir texto libre. Envía una plantilla para reabrir.',
+      'La ventana de 24 h está cerrada. Se abre cuando el cliente responda. Mientras tanto solo puedes enviar una plantilla.',
     actionLabel: 'Enviar plantilla',
   };
 }

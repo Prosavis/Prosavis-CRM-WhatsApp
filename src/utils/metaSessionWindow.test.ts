@@ -268,8 +268,8 @@ describe('session window remaining helpers', () => {
   });
 });
 
-describe('awaiting reply after reactivation template', () => {
-  it('treats a later outbound template as already reactivated, not as a missing template', () => {
+describe('awaiting reply after outbound template', () => {
+  it('keeps the composer locked and does not claim that a template opens the window', () => {
     expect(
       isAwaitingReplyAfterReactivation({
         requiresTemplate: true,
@@ -282,8 +282,16 @@ describe('awaiting reply after reactivation template', () => {
     ).toEqual({
       severity: 'info',
       message:
-        'Ya reactivamos este chat con una plantilla. Meta abre la ventana de 24 h cuando la persona responda; hasta entonces no se puede escribir texto libre.',
+        'Ya enviamos una plantilla. La ventana de 24 h se abre cuando el cliente responda; hasta entonces no se puede escribir texto libre.',
       actionLabel: 'Otra plantilla',
+    });
+    expect(
+      sessionWindowClosedAlert({ awaitingReplyAfterReactivation: false }),
+    ).toEqual({
+      severity: 'warning',
+      message:
+        'La ventana de 24 h está cerrada. Se abre cuando el cliente responda. Mientras tanto solo puedes enviar una plantilla.',
+      actionLabel: 'Enviar plantilla',
     });
     expect(
       isSessionComposerLocked({
