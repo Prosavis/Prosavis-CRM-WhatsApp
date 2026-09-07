@@ -1835,7 +1835,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 appointments={usedAppointments}
                 appointmentsLoadFailed={appointmentsLoadFailed}
                 dense
-                defaultExpanded
               />
             </Box>
           )}

@@ -32,7 +32,7 @@ export interface UsedContextAccordionProps {
 
 function ContextRow({ label, value }: { label: string; value: string }) {
   return (
-    <Box sx={{ mb: 1 }}>
+    <Box sx={{ minWidth: 0 }}>
       <Typography
         variant="caption"
         color="text.secondary"
@@ -105,76 +105,85 @@ export default function UsedContextAccordion({
         </Typography>
       </AccordionSummary>
       <AccordionDetails sx={{ px: 1.25, pt: 0, pb: 1.25 }}>
-        <Box sx={{ mb: 1 }}>
-          <Typography
-            variant="caption"
-            color="text.secondary"
-            sx={{ display: 'block', fontWeight: 600, letterSpacing: 0.2 }}
-          >
-            Agendamientos
-          </Typography>
-          {!hasAppointmentRows ? (
-            <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>
-              {appointmentSummary.emptyLabel}
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+            gap: 1.5,
+            alignItems: 'start',
+          }}
+        >
+          <Box sx={{ minWidth: 0 }}>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ display: 'block', fontWeight: 600, letterSpacing: 0.2 }}
+            >
+              Agendamientos
             </Typography>
-          ) : (
-            <>
-              {appointmentSummary.upcomingLines.length > 0 && (
-                <Box sx={{ mt: 0.5 }}>
-                  <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.primary' }}>
-                    Próximos
-                  </Typography>
-                  {appointmentSummary.upcomingLines.map((line) => (
-                    <Typography key={`up-${line}`} variant="body2" sx={{ fontSize: '0.8rem' }}>
-                      {line}
+            {!hasAppointmentRows ? (
+              <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>
+                {appointmentSummary.emptyLabel}
+              </Typography>
+            ) : (
+              <>
+                {appointmentSummary.upcomingLines.length > 0 && (
+                  <Box sx={{ mt: 0.5 }}>
+                    <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.primary' }}>
+                      Próximos
                     </Typography>
-                  ))}
-                </Box>
-              )}
-              {appointmentSummary.pastLines.length > 0 && (
-                <Box sx={{ mt: 0.5 }}>
-                  <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.primary' }}>
-                    Recientes
-                  </Typography>
-                  {appointmentSummary.pastLines.map((line) => (
-                    <Typography key={`past-${line}`} variant="body2" sx={{ fontSize: '0.8rem' }}>
-                      {line}
+                    {appointmentSummary.upcomingLines.map((line) => (
+                      <Typography key={`up-${line}`} variant="body2" sx={{ fontSize: '0.8rem' }}>
+                        {line}
+                      </Typography>
+                    ))}
+                  </Box>
+                )}
+                {appointmentSummary.pastLines.length > 0 && (
+                  <Box sx={{ mt: 0.5 }}>
+                    <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.primary' }}>
+                      Recientes
                     </Typography>
-                  ))}
-                </Box>
-              )}
-            </>
-          )}
-        </Box>
-        <ContextRow label="Historial" value={formatHistoryMetaSummary(historyMeta)} />
-        <Box sx={{ mb: 1 }}>
-          <Typography
-            variant="caption"
-            color="text.secondary"
-            sx={{ display: 'block', fontWeight: 600, letterSpacing: 0.2 }}
-          >
-            Tags
-          </Typography>
-          {tags.length === 0 ? (
-            <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>
-              Sin tags
+                    {appointmentSummary.pastLines.map((line) => (
+                      <Typography key={`past-${line}`} variant="body2" sx={{ fontSize: '0.8rem' }}>
+                        {line}
+                      </Typography>
+                    ))}
+                  </Box>
+                )}
+              </>
+            )}
+          </Box>
+          <ContextRow label="Historial" value={formatHistoryMetaSummary(historyMeta)} />
+          <Box sx={{ minWidth: 0 }}>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ display: 'block', fontWeight: 600, letterSpacing: 0.2 }}
+            >
+              Tags
             </Typography>
-          ) : (
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
-              {tags.map((tag) => (
-                <Chip key={tag} label={tag} size="small" variant="outlined" />
-              ))}
-            </Box>
-          )}
+            {tags.length === 0 ? (
+              <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>
+                Sin tags
+              </Typography>
+            ) : (
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                {tags.map((tag) => (
+                  <Chip key={tag} label={tag} size="small" variant="outlined" />
+                ))}
+              </Box>
+            )}
+          </Box>
+          <ContextRow
+            label="Propiedad"
+            value={formatPropertySummaryLabel(propertySummary)}
+          />
+          <ContextRow
+            label="Ventana de sesión"
+            value={formatSessionWindowLabel(sessionWindow)}
+          />
         </Box>
-        <ContextRow
-          label="Propiedad"
-          value={formatPropertySummaryLabel(propertySummary)}
-        />
-        <ContextRow
-          label="Ventana de sesión"
-          value={formatSessionWindowLabel(sessionWindow)}
-        />
       </AccordionDetails>
     </Accordion>
   );
