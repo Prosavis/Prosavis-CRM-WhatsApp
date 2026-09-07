@@ -32,7 +32,6 @@ import { playThemeTransitionSound } from '@/components/common/ThemeToggle';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/hooks/useAuth';
 import { getProsavisLogoSrc } from '@/utils/prosavisBrand';
-import { DIRECTORY_SHELL_HEX } from '@/utils/inboxLineVisual';
 import { directoryNavMeta, inboxLineNavMeta } from '@/utils/whatsappInboxNav';
 import { isWhatsAppAdminTab, type WhatsAppTabKey } from '@/utils/whatsappTabs';
 import CompanyHandbookBook from './CompanyHandbookBook';
@@ -101,6 +100,23 @@ function SpecialTabLabel({
       ) : null}
     </Box>
   );
+}
+
+function plainNavTabSx(selected: boolean) {
+  return {
+    minHeight: 40,
+    px: { xs: 1, sm: 1.5 },
+    py: 0.5,
+    borderRadius: 2,
+    gap: 0.75,
+    fontWeight: 600,
+    fontSize: '0.8125rem',
+    textTransform: 'none' as const,
+    color: selected ? 'primary.main' : 'text.primary',
+    bgcolor: selected
+      ? (theme: Theme) => alpha(theme.palette.primary.main, 0.1)
+      : 'transparent',
+  };
 }
 
 function specialTabSx(kind: 'bot' | 'commercial', selected: boolean) {
@@ -195,6 +211,7 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
         direction="row"
         spacing={1}
         data-tour="whatsapp-tabs"
+        data-testid="whatsapp-tabs"
         sx={{
           flex: '1 1 280px',
           minWidth: 0,
@@ -202,98 +219,53 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
           flexWrap: 'wrap',
         }}
       >
-        <Box
-          sx={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 0.75,
-            pl: 0.75,
-            pr: 0.75,
-            py: 0.5,
-            minHeight: 56,
-            width: 'max-content',
-            maxWidth: '100%',
-            borderRadius: 2,
-            border: '1px solid',
-            borderColor: alpha(DIRECTORY_SHELL_HEX, 0.42),
-            bgcolor: (theme) => alpha(DIRECTORY_SHELL_HEX, theme.palette.mode === 'dark' ? 0.22 : 0.1),
-            flexWrap: 'wrap',
+        <ButtonBase
+          onClick={(event) => {
+            event.stopPropagation();
+            onTabChange(event, 'inbox');
           }}
+          aria-label={bot.ariaLabel}
+          aria-pressed={botSelected}
+          sx={specialTabSx('bot', botSelected)}
         >
-          <ButtonBase
-            onClick={(event) => onTabChange(event, 'leads')}
-            aria-label={directory.ariaLabel}
-            aria-pressed={directorySelected}
-            sx={{
-              borderRadius: 1.5,
-              px: { xs: 1, sm: 1.25 },
-              py: 0.6,
-              minHeight: 48,
-              gap: 0.75,
-              fontWeight: 800,
-              border: '1px solid',
-              borderColor: directorySelected
-                ? DIRECTORY_SHELL_HEX
-                : (theme) => alpha(DIRECTORY_SHELL_HEX, theme.palette.mode === 'dark' ? 0.5 : 0.7),
-              color: directorySelected ? '#002446' : DIRECTORY_SHELL_HEX,
-              bgcolor: directorySelected
-                ? DIRECTORY_SHELL_HEX
-                : (theme) => alpha(DIRECTORY_SHELL_HEX, theme.palette.mode === 'dark' ? 0.22 : 0.18),
-            }}
-          >
-            <ContactPhoneIcon fontSize="small" />
-            <SpecialTabLabel
-              title={directory.title}
-              subtitle={directory.count}
-              compact={compactTabs}
-            />
-          </ButtonBase>
-          <ButtonBase
-            onClick={(event) => {
-              event.stopPropagation();
-              onTabChange(event, 'inbox');
-            }}
-            aria-label={bot.ariaLabel}
-            aria-pressed={botSelected}
-            sx={specialTabSx('bot', botSelected)}
-          >
-            <InboxIcon fontSize="small" />
-            <SpecialTabLabel title={bot.title} subtitle={bot.phone} compact={compactTabs} />
-          </ButtonBase>
-          <ButtonBase
-            onClick={(event) => {
-              event.stopPropagation();
-              onTabChange(event, 'commercial');
-            }}
-            aria-label={commercial.ariaLabel}
-            aria-pressed={commercialSelected}
-            sx={specialTabSx('commercial', commercialSelected)}
-          >
-            <StorefrontIcon fontSize="small" />
-            <SpecialTabLabel
-              title={commercial.title}
-              subtitle={commercial.phone}
-              compact={compactTabs}
-            />
-          </ButtonBase>
-        </Box>
-
+          <InboxIcon fontSize="small" />
+          <SpecialTabLabel title={bot.title} subtitle={bot.phone} compact={compactTabs} />
+        </ButtonBase>
+        <ButtonBase
+          onClick={(event) => {
+            event.stopPropagation();
+            onTabChange(event, 'commercial');
+          }}
+          aria-label={commercial.ariaLabel}
+          aria-pressed={commercialSelected}
+          sx={specialTabSx('commercial', commercialSelected)}
+        >
+          <StorefrontIcon fontSize="small" />
+          <SpecialTabLabel
+            title={commercial.title}
+            subtitle={commercial.phone}
+            compact={compactTabs}
+          />
+        </ButtonBase>
+        <ButtonBase
+          onClick={(event) => onTabChange(event, 'leads')}
+          aria-label={directory.ariaLabel}
+          aria-pressed={directorySelected}
+          sx={plainNavTabSx(directorySelected)}
+        >
+          <ContactPhoneIcon fontSize="small" />
+          {compactTabs ? null : directory.title}
+          {directory.count ? (
+            <Box component="span" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+              {directory.count}
+            </Box>
+          ) : null}
+        </ButtonBase>
         <ButtonBase
           onClick={(event) => onTabChange(event, 'discounts')}
           aria-label="Descuentos"
           aria-pressed={discountsSelected}
-          sx={{
-            minHeight: 40,
-            px: { xs: 1, sm: 1.5 },
-            py: 0.5,
-            borderRadius: 2,
-            gap: 0.75,
-            fontWeight: 600,
-            fontSize: '0.8125rem',
-            textTransform: 'none',
-            color: discountsSelected ? 'primary.main' : 'text.primary',
-            bgcolor: discountsSelected ? (theme) => alpha(theme.palette.primary.main, 0.1) : 'transparent',
-          }}
+          sx={plainNavTabSx(discountsSelected)}
         >
           <ConfirmationNumberIcon fontSize="small" />
           {compactTabs ? null : 'Descuentos'}

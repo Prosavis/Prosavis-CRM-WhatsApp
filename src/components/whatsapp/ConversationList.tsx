@@ -790,7 +790,6 @@ const ConversationList: React.FC<ConversationListProps> = ({
         sx={{
           display: 'flex',
           flexDirection: 'column',
-          position: 'relative',
           flex: compactList ? 1 : '0 0 auto',
           width: compactList ? '100%' : listWidth,
           minWidth: compactList ? 0 : listWidth,
@@ -1354,6 +1353,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
           </Box>
         )}
       </Box>
+      </Box>
       {!compactList && (
         <Box
           role="separator"
@@ -1368,14 +1368,11 @@ const ConversationList: React.FC<ConversationListProps> = ({
           onPointerCancel={handleListResizePointerUp}
           onDoubleClick={handleListResizeDoubleClick}
           sx={{
-            position: 'absolute',
-            top: 0,
-            right: 0,
+            flexShrink: 0,
+            alignSelf: 'stretch',
             width: 8,
-            height: '100%',
             cursor: 'col-resize',
             touchAction: 'none',
-            zIndex: 2,
             bgcolor: resizingList ? (t) => alpha(t.palette.primary.main, 0.28) : 'transparent',
             '&:hover': {
               bgcolor: (t) => alpha(t.palette.primary.main, 0.18),
@@ -1383,7 +1380,6 @@ const ConversationList: React.FC<ConversationListProps> = ({
           }}
         />
       )}
-      </Box>
     </Box>
   );
 };
