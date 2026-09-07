@@ -1,5 +1,6 @@
 /**
- * Lote empresas: WhatsApp hasta 50 enviados reales (relleno si fallan) + 50 intentos de correo.
+ * Lote empresas: 100 WA sent (relleno si fallan) + 100 email por ventana.
+ * Lun–Jue 08:00 / 12:30 / 18:00. Viernes solo 08:00. Sáb–dom off.
  * Plantilla WA: EMPRESAS_WA_TEMPLATE (v3 APPROVED).
  * Auth: x-api-key (REMINDER_API_KEY / REACTIVATION_API_KEY).
  */
@@ -27,7 +28,9 @@ import {
   EMPRESAS_WA_TEMPLATE_V3,
   EMPRESAS_WA_ATTEMPT_CAP,
   EMPRESAS_OUTREACH_BATCH,
+  EMPRESAS_OUTREACH_EMAIL_PASS,
   EMPRESAS_OUTREACH_PASS,
+  isEmpresasSendAllowed,
   EMAIL_ENVIADO_TAG,
   EMAIL_ENVIADO_TAG_ID,
   buildDirectoryUpsert,
@@ -320,12 +323,39 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const dryRun = body.dryRun === true;
     const channel = String(body.channel || 'both').trim().toLowerCase();
-    const limit = Math.min(Math.max(Number(body.limit) || 50, 1), 50);
+    const limit = Math.min(Math.max(Number(body.limit) || EMPRESAS_OUTREACH_EMAIL_PASS, 1), EMPRESAS_OUTREACH_EMAIL_PASS);
     const doWa = channel === 'whatsapp' || channel === 'both';
     const doEmail = channel === 'email' || channel === 'both';
     const supabase = getServiceClient();
     const started = Date.now();
-    const sendWindow = resolveEmpresasSendWindow(new Date());
+    const now = new Date();
+    if (!dryRun && !isEmpresasSendAllowed(now)) {
+      return jsonResponse({
+        success: true,
+        skipped: 'outside_schedule',
+        dryRun,
+        channel,
+        limit,
+        waSentInWindow: 0,
+        emailSentInWindow: 0,
+        remainingWa: EMPRESAS_OUTREACH_BATCH,
+        remainingEmail: EMPRESAS_OUTREACH_BATCH,
+        secretsOk: true,
+        stats: {
+          waSent: 0,
+          waFailed: 0,
+          waSkipped: 0,
+          waRounds: 0,
+          waAttempts: 0,
+          emailSent: 0,
+          emailFailed: 0,
+          emailSkipped: 0,
+          emailSkippedNoSecrets: 0,
+        },
+        schedulerName: body.schedulerName ?? null,
+      });
+    }
+    const sendWindow = resolveEmpresasSendWindow(now);
     const waAlready = await countSentInWindow(
       supabase,
       'last_wa_at',
@@ -344,7 +374,7 @@ Deno.serve(async (req) => {
     const remainingEmail = remainingForQuota(EMPRESAS_OUTREACH_BATCH, emailAlready);
     const waTarget = doWa ? passLimit(remainingWa, limit, EMPRESAS_OUTREACH_PASS) : 0;
     const emailTarget = doEmail
-      ? Math.min(remainingEmail, Math.max(0, limit), EMPRESAS_OUTREACH_BATCH)
+      ? Math.min(remainingEmail, Math.max(0, limit), EMPRESAS_OUTREACH_EMAIL_PASS)
       : 0;
 
     const stats = {
