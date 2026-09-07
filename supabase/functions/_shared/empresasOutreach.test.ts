@@ -1,6 +1,8 @@
 import { assertEquals, assertStringIncludes } from 'jsr:@std/assert';
 import {
   composeEmpresasWhatsApp,
+  empresasWindowLabelsForDay,
+  isEmpresasSendAllowed,
   nextWhatsAppNeed,
   passLimit,
   remainingForQuota,
@@ -46,35 +48,44 @@ Deno.test('composeEmpresasWhatsApp interpolates without household prices', () =>
   assertEquals(waCompanyParam(''), 'su empresa');
 });
 
-Deno.test('nextWhatsAppNeed pide los que faltan para 50 enviados', () => {
-  assertEquals(nextWhatsAppNeed(50, 40), 10);
-  assertEquals(nextWhatsAppNeed(50, 50), 0);
-  assertEquals(nextWhatsAppNeed(50, 0), 50);
-  assertEquals(nextWhatsAppNeed(50, 63), 0);
+Deno.test('nextWhatsAppNeed pide los que faltan para 100 enviados', () => {
+  assertEquals(nextWhatsAppNeed(100, 40), 60);
+  assertEquals(nextWhatsAppNeed(100, 100), 0);
+  assertEquals(nextWhatsAppNeed(100, 0), 100);
+  assertEquals(nextWhatsAppNeed(100, 130), 0);
 });
 
 Deno.test('shouldContinueWhatsAppQuota corta al tope de intentos o al target', () => {
   assertEquals(
-    shouldContinueWhatsAppQuota({ target: 50, sent: 40, attempts: 50, maxAttempts: 100 }),
+    shouldContinueWhatsAppQuota({ target: 100, sent: 40, attempts: 50, maxAttempts: 200 }),
     true,
   );
   assertEquals(
-    shouldContinueWhatsAppQuota({ target: 50, sent: 50, attempts: 50, maxAttempts: 100 }),
+    shouldContinueWhatsAppQuota({ target: 100, sent: 100, attempts: 100, maxAttempts: 200 }),
     false,
   );
   assertEquals(
-    shouldContinueWhatsAppQuota({ target: 50, sent: 40, attempts: 100, maxAttempts: 100 }),
+    shouldContinueWhatsAppQuota({ target: 100, sent: 40, attempts: 200, maxAttempts: 200 }),
     false,
   );
 });
 
-Deno.test('remainingForQuota and passLimit keep a 504 retry from sending another 50', () => {
-  assertEquals(remainingForQuota(50, 44), 6);
-  assertEquals(remainingForQuota(50, 50), 0);
-  assertEquals(remainingForQuota(50, 95), 0);
-  assertEquals(passLimit(6, 50, 20), 6);
-  assertEquals(passLimit(50, 50, 20), 20);
-  assertEquals(passLimit(50, 6, 20), 6);
+Deno.test('remainingForQuota and passLimit keep a 504 retry from sending another 100', () => {
+  assertEquals(remainingForQuota(100, 44), 56);
+  assertEquals(remainingForQuota(100, 100), 0);
+  assertEquals(remainingForQuota(100, 195), 0);
+  assertEquals(passLimit(6, 100, 20), 6);
+  assertEquals(passLimit(100, 100, 20), 20);
+  assertEquals(passLimit(100, 6, 20), 6);
+});
+
+Deno.test('calendar is Mon-Thu three windows, Friday morning only, weekend off', () => {
+  assertEquals(empresasWindowLabelsForDay('2026-09-07'), ['08:00', '12:30', '18:00']);
+  assertEquals(empresasWindowLabelsForDay('2026-09-04'), ['08:00']);
+  assertEquals(empresasWindowLabelsForDay('2026-09-05'), []);
+  assertEquals(isEmpresasSendAllowed(new Date('2026-09-07T23:05:00.000Z')), true);
+  assertEquals(isEmpresasSendAllowed(new Date('2026-09-04T17:40:00.000Z')), false);
+  assertEquals(isEmpresasSendAllowed(new Date('2026-09-05T15:00:00.000Z')), false);
 });
 
 Deno.test('resolveEmpresasSendWindow uses Bogotá 08:00 / 12:30 / 18:00', () => {
