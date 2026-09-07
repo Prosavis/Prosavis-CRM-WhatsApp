@@ -6,9 +6,9 @@ export const inboxQueryKeys = {
     ['inbox', 'conversations', phoneNumberId ?? 'all', options?.includeOrphans !== false] as const,
   messages: (stableKey: string) => ['inbox', 'messages', stableKey] as const,
   directoryMeta: (signature: string) => ['inbox', 'directory-meta', signature] as const,
-  metrics: (days: number, phoneNumberId?: string) =>
+  metrics: (days: number | 'all', phoneNumberId?: string) =>
     ['whatsapp-metrics', days, phoneNumberId ?? 'all'] as const,
-  metricsLogs: (days: number, phoneNumberId?: string) =>
+  metricsLogs: (days: number | 'all', phoneNumberId?: string) =>
     ['whatsapp-metrics-logs', days, phoneNumberId ?? 'all'] as const,
   qualityMetrics: (from: string | null, to: string | null) =>
     ['client-quality-metrics', from ?? 'all', to ?? 'all'] as const,

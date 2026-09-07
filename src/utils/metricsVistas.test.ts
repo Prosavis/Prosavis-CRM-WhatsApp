@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyMetricsScope,
   applyMetricsVista,
+  metricsPeriodLabel,
   metricsPeriodRange,
   resolveMetricsDays,
   resolveMetricsVista,
@@ -33,6 +34,14 @@ describe('metricsVistas', () => {
     expect(resolveMetricsDays(new URLSearchParams('days=60'))).toBe(60);
     expect(resolveMetricsDays(new URLSearchParams('days=365'))).toBe(30);
     expect(resolveMetricsDays(new URLSearchParams('days=foo'))).toBe(30);
+    expect(resolveMetricsDays(new URLSearchParams())).toBe(30);
+  });
+
+  it('treats days=all as the unbounded historic period', () => {
+    expect(resolveMetricsDays(new URLSearchParams('days=all'))).toBe('all');
+    expect(metricsPeriodRange('all')).toEqual({ from: null, to: null });
+    expect(metricsPeriodLabel('all')).toBe('Histórico completo');
+    expect(metricsPeriodLabel(30)).toBe('Últimos 30 días');
   });
 
   it('persists and clears analysis scope without dropping unrelated params', () => {
@@ -50,6 +59,15 @@ describe('metricsVistas', () => {
     expect(next.get('mapMode')).toBe('points');
     expect(next.get('status')).toBe('COMPLETED');
     expect(next.get('layer')).toBeNull();
+  });
+
+  it('persists days=all instead of treating it as a cleared filter', () => {
+    const next = applyMetricsScope(new URLSearchParams('tab=metrics&status=COMPLETED'), {
+      days: 'all',
+      status: 'all',
+    });
+    expect(next.get('days')).toBe('all');
+    expect(next.get('status')).toBeNull();
   });
 
   it('builds an inclusive UTC period for map queries', () => {

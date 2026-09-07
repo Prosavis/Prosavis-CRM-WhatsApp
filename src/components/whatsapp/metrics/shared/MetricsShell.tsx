@@ -11,7 +11,7 @@ import {
   Typography,
 } from '@mui/material';
 import type { SelectChangeEvent } from '@mui/material';
-import type { MetricsVista } from '@/utils/metricsVistas';
+import type { MetricsDays, MetricsVista } from '@/utils/metricsVistas';
 
 const TABS: Array<{ value: MetricsVista; label: string; group: string }> = [
   { value: 'mapa', label: 'Mapa', group: 'Operación' },
@@ -24,9 +24,9 @@ const TABS: Array<{ value: MetricsVista; label: string; group: string }> = [
 
 interface MetricsShellProps {
   vista: MetricsVista;
-  days: number;
+  days: MetricsDays;
   onVistaChange: (vista: MetricsVista) => void;
-  onDaysChange: (days: number) => void;
+  onDaysChange: (days: MetricsDays) => void;
   context?: React.ReactNode;
   advancedAction?: React.ReactNode;
   children: React.ReactNode;
@@ -65,13 +65,17 @@ const MetricsShell: React.FC<MetricsShellProps> = ({
             labelId="metrics-period-label"
             value={String(days)}
             label="Periodo"
-            onChange={(event: SelectChangeEvent) => onDaysChange(Number(event.target.value))}
+            onChange={(event: SelectChangeEvent) => {
+              const next = event.target.value;
+              onDaysChange(next === 'all' ? 'all' : Number(next));
+            }}
           >
             <MenuItem value="7">7 días</MenuItem>
             <MenuItem value="14">14 días</MenuItem>
             <MenuItem value="30">30 días</MenuItem>
             <MenuItem value="60">60 días</MenuItem>
             <MenuItem value="90">90 días</MenuItem>
+            <MenuItem value="all">Histórico</MenuItem>
           </Select>
         </FormControl>
         {advancedAction}

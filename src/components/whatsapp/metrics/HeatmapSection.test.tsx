@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppointmentHeatmapResult } from '@/types/whatsapp';
 import HeatmapSection from './HeatmapSection';
 
-const { mapSpy } = vi.hoisted(() => {
+const { mapSpy, tileLayerSpy } = vi.hoisted(() => {
   const createMap = () => ({
     remove: vi.fn(),
     hasLayer: vi.fn(() => false),
@@ -14,15 +14,21 @@ const { mapSpy } = vi.hoisted(() => {
     panTo: vi.fn(),
     invalidateSize: vi.fn(),
   });
-  return { mapSpy: vi.fn(() => createMap()) };
+  return {
+    mapSpy: vi.fn(() => createMap()),
+    tileLayerSpy: vi.fn<(url: string, options: { attribution?: string }) => {
+      addTo: ReturnType<typeof vi.fn>;
+      removeFrom: ReturnType<typeof vi.fn>;
+    }>(() => ({
+      addTo: vi.fn().mockReturnThis(),
+      removeFrom: vi.fn(),
+    })),
+  };
 });
 
 vi.mock('leaflet', () => ({
   map: mapSpy,
-  tileLayer: vi.fn(() => ({
-    addTo: vi.fn().mockReturnThis(),
-    removeFrom: vi.fn(),
-  })),
+  tileLayer: tileLayerSpy,
   heatLayer: vi.fn(() => ({
     addTo: vi.fn().mockReturnThis(),
   })),
@@ -72,6 +78,7 @@ const noop = () => undefined;
 describe('HeatmapSection', () => {
   beforeEach(() => {
     mapSpy.mockClear();
+    tileLayerSpy.mockClear();
   });
 
   it('creates the map after the first load reveals the container', () => {
@@ -111,5 +118,12 @@ describe('HeatmapSection', () => {
 
     expect(screen.getByRole('region', { name: /Mapa de 1 citas/ })).toBeInTheDocument();
     expect(mapSpy).toHaveBeenCalledTimes(1);
+    expect(tileLayerSpy).toHaveBeenCalledWith(
+      expect.stringContaining('World_Light_Gray_Base'),
+      expect.objectContaining({ attribution: expect.stringContaining('Esri') }),
+    );
+    const firstTileUrl = tileLayerSpy.mock.calls.at(0)?.[0];
+    expect(typeof firstTileUrl).toBe('string');
+    expect(String(firstTileUrl)).not.toMatch(/cartocdn/i);
   });
 });

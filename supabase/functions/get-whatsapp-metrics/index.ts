@@ -118,12 +118,12 @@ function monthKeyFromDay(day: string): string {
   return day.slice(0, 7);
 }
 
-function eachDayInclusive(startKey: string, endKey: string): string[] {
+function eachDayInclusive(startKey: string, endKey: string, maxDays = 400): string[] {
   if (startKey > endKey) return [];
   const days: string[] = [];
   let cursor = startKey;
   let guard = 0;
-  while (cursor <= endKey && guard < 400) {
+  while (cursor <= endKey && guard < maxDays) {
     days.push(cursor);
     const [y, m, d] = cursor.split('-').map(Number);
     cursor = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
@@ -342,10 +342,11 @@ Deno.serve(async (req) => {
   try {
     const { supabase } = await requireCrmAdmin(req);
     const body = await req.json().catch(() => ({}));
-    const days = Math.min(Math.max(Number(body.days ?? 30) || 30, 1), 90);
-    const from = new Date();
-    from.setDate(from.getDate() - days);
+    const historic = body.days === 'all';
+    const days = historic ? null : Math.min(Math.max(Number(body.days ?? 30) || 30, 1), 90);
     const to = new Date();
+    const from = new Date(to);
+    if (days != null) from.setDate(from.getDate() - days);
 
     // Servicios: ventana amplia (6 meses) — en DB el último COMPLETED puede ser >30d
     const completedFrom = new Date(to);
@@ -364,9 +365,9 @@ Deno.serve(async (req) => {
           'direction,status,campaign_type,template_name,conversation_stable_key,created_at',
         )
         .eq('hidden_from_panel', false)
-        .gte('created_at', from.toISOString())
         .order('created_at', { ascending: true })
         .range(rangeFrom, rangeTo);
+      if (!historic) q = q.gte('created_at', from.toISOString());
       if (phoneNumberId) q = q.eq('phone_number_id', phoneNumberId);
       return q;
     });
@@ -657,13 +658,18 @@ Deno.serve(async (req) => {
       classify(month, 'month');
     }
 
-    const periodStartKey = bogotaDayKey(from.toISOString()) ?? from.toISOString().slice(0, 10);
     const periodEndKey = bogotaDayKey(to.toISOString()) ?? to.toISOString().slice(0, 10);
+    const inboundDayKeys = [...inboundByDay.keys()].sort();
+    const periodStartKey = historic
+      ? (inboundDayKeys[0] ?? periodEndKey)
+      : (bogotaDayKey(from.toISOString()) ?? from.toISOString().slice(0, 10));
     const inboundTotals = buildInboundPeriodTotals(inboundPeriodObservations, {
       startDay: periodStartKey,
       endDay: periodEndKey,
     });
-    const allDays = eachDayInclusive(periodStartKey, periodEndKey);
+    const allDays = historic
+      ? (inboundDayKeys.length > 0 ? inboundDayKeys : [periodEndKey])
+      : eachDayInclusive(periodStartKey, periodEndKey);
     const allWeeks = [...new Set(allDays.map(weekKeyFromDay))].sort();
     const allMonths = [...new Set(allDays.map(monthKeyFromDay))].sort();
 
@@ -907,7 +913,10 @@ Deno.serve(async (req) => {
 
     stage = 'response';
     return jsonResponse({
-      period: { from: from.toISOString(), to: to.toISOString() },
+      period: {
+        from: historic ? `${periodStartKey}T00:00:00.000Z` : from.toISOString(),
+        to: to.toISOString(),
+      },
       totalSent,
       totalDelivered,
       totalRead,

@@ -11,6 +11,7 @@ import {
   Typography,
 } from '@mui/material';
 import type { OutboundMetricsBucket, WhatsAppMetrics } from '@/types/whatsapp';
+import { metricsPeriodLabel, metricsPeriodPhrase, type MetricsDays } from '@/utils/metricsVistas';
 import BroadcastJobsSection from './BroadcastJobsSection';
 import MetricsSection from './MetricsSection';
 import OutboundBreakdownTables from './OutboundBreakdownTables';
@@ -28,7 +29,7 @@ export type { MessageLogRow } from './OutboundMessageLog';
 
 interface OutboundPerformanceSectionProps {
   metrics: WhatsAppMetrics | null;
-  days: number;
+  days: MetricsDays;
   logs: MessageLogRow[];
   logsLoading: boolean;
   logsFetchWarning: string | null;
@@ -88,7 +89,7 @@ const OutboundPerformanceSection: React.FC<OutboundPerformanceSectionProps> = ({
   ];
 
   const handleDownloadTables = () => {
-    const meta = [excelGeneratedAtLine(), `Periodo: últimos ${days} días`];
+    const meta = [excelGeneratedAtLine(), `Periodo: ${metricsPeriodLabel(days)}`];
     void downloadWorkbook('rendimiento-outbound.xlsx', (wb) => {
       addStyledSheet(wb, {
         name: 'Resumen KPIs',
@@ -188,7 +189,7 @@ const OutboundPerformanceSection: React.FC<OutboundPerformanceSectionProps> = ({
         name: 'Mensajes',
         title: 'Registro de mensajes',
         subtitle: `${filteredLogs.length.toLocaleString('es-CO')} registro(s) según el filtro actual.`,
-        meta: [excelGeneratedAtLine(), `Periodo: últimos ${days} días`],
+        meta: [excelGeneratedAtLine(), `Periodo: ${metricsPeriodLabel(days)}`],
         columns: [
           { header: 'Fecha', type: 'datetime' },
           { header: 'Destinatario', type: 'text' },
@@ -215,7 +216,7 @@ const OutboundPerformanceSection: React.FC<OutboundPerformanceSectionProps> = ({
     <Box>
       <MetricsSection
         title="¿Cómo rindieron los mensajes salientes?"
-        subtitle={`Volumen de mensajes y alcance por contacto durante los últimos ${days} días. Los breakdowns detallan campaña, tipo y plantilla.`}
+        subtitle={`Volumen de mensajes y alcance por contacto durante ${metricsPeriodPhrase(days)}. Los breakdowns detallan campaña, tipo y plantilla.`}
         onDownload={handleDownloadTables}
         downloadLabel="Descargar rendimiento Excel"
         defaultExpanded

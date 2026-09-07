@@ -35,6 +35,7 @@ import {
 import {
   applyMetricsScope,
   applyMetricsVista,
+  metricsPeriodLabel,
   metricsPeriodRange,
   resolveMetricsDays,
   resolveMetricsVista,
@@ -168,11 +169,6 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
           { replace: true },
         );
       }}
-      context={
-        metrics?.dataQuality && !metricsLoading
-          ? `Cobertura · ${metrics.dataQuality.messageLogRows.toLocaleString('es-CO')} mensajes · ${metrics.dataQuality.directoryRows.toLocaleString('es-CO')} contactos · ${metrics.dataQuality.appointmentRows.toLocaleString('es-CO')} servicios completados`
-          : undefined
-      }
       advancedAction={
         <>
           <IconButton
@@ -330,7 +326,11 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
               { replace: true },
             );
           }}
-          periodLabel={`${metricsPeriod.from} – ${metricsPeriod.to}`}
+          periodLabel={
+            metricsPeriod.from && metricsPeriod.to
+              ? `${metricsPeriod.from} – ${metricsPeriod.to}`
+              : 'Histórico completo'
+          }
           updatedAt={heatmapQuery.dataUpdatedAt}
           onRetry={() => void heatmapQuery.refetch()}
         />
@@ -405,7 +405,7 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
           <MetricsViewHeader
             title="Actividad operativa"
             purpose="Compara demanda inbound y servicios completados sin confundir personas, mensajes ni ventanas temporales."
-            periodLabel={`Últimos ${days} días`}
+            periodLabel={metricsPeriodLabel(days)}
             universeLabel={`${(metrics?.inboundTotals?.uniquePeople ?? 0).toLocaleString('es-CO')} contactos únicos`}
             updatedAt={metricsQuery.dataUpdatedAt}
             insights={[
@@ -449,7 +449,7 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
           <MetricsViewHeader
             title="Rendimiento outbound"
             purpose="Separa volumen de mensajes, alcance único, respuesta y fallos para evaluar cada campaña con su denominador."
-            periodLabel={`Últimos ${days} días`}
+            periodLabel={metricsPeriodLabel(days)}
             universeLabel={`${(
               metrics?.outboundTotals?.uniqueContacts.messaged ??
               metrics?.uniqueContactsMessaged ??

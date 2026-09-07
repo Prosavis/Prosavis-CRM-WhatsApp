@@ -37,6 +37,7 @@ import {
   safeRate,
 } from './shared/metricsTheme';
 import { buildDensityZones } from './utils/heatmapAnalytics';
+import { mapTileLayer } from './utils/mapTiles';
 
 const PEREIRA_CENTER: L.LatLngExpression = [4.8133, -75.6961];
 const EMPTY_POINTS: HeatmapPoint[] = [];
@@ -186,13 +187,10 @@ const HeatmapSection: React.FC<HeatmapSectionProps> = ({
     const map = mapRef.current;
     if (!map) return;
     tileRef.current?.removeFrom(map);
-    const tileUrl =
-      theme.palette.mode === 'dark'
-        ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-        : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
-    const tileLayer = L.tileLayer(tileUrl, {
-      attribution: '&copy; OpenStreetMap &copy; CARTO',
-      maxZoom: 19,
+    const tiles = mapTileLayer(theme.palette.mode === 'dark' ? 'dark' : 'light');
+    const tileLayer = L.tileLayer(tiles.url, {
+      attribution: tiles.attribution,
+      maxZoom: tiles.maxZoom,
     }).addTo(map);
     tileRef.current = tileLayer;
     return () => {

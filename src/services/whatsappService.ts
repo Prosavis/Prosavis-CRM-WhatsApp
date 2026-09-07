@@ -1243,7 +1243,7 @@ function mapBroadcastRecipient(row: BroadcastRecipientRow): BroadcastRecipientDe
 
 /** Lista jobs de envío masivo recientes (pestaña Métricas / historial frío). */
 export async function listBroadcastJobs(options: {
-  days?: number;
+  days?: number | 'all';
   limit?: number;
   /** Filtra por job_kind (p. ej. cold_app_user). */
   jobKind?: string;
@@ -1251,16 +1251,16 @@ export async function listBroadcastJobs(options: {
   const days = options.days ?? 30;
   const limit = options.limit ?? 50;
   const from = new Date();
-  from.setDate(from.getDate() - days);
+  if (days !== 'all') from.setDate(from.getDate() - days);
 
   let query = supabase
     .from('whatsapp_broadcast_jobs')
     .select(
       'id, status, total_recipients, sent, failed, skipped, template_name, rich_body_preview, created_at, completed_at, last_progress_at, job_kind',
     )
-    .gte('created_at', from.toISOString())
     .order('created_at', { ascending: false })
     .limit(limit);
+  if (days !== 'all') query = query.gte('created_at', from.toISOString());
 
   if (options.jobKind) {
     query = query.eq('job_kind', options.jobKind);
@@ -2275,7 +2275,7 @@ export async function getWhatsAppMediaSignedUrl(params: {
 }
 
 export async function listWhatsAppMessageLog(filters: {
-  days?: number;
+  days?: number | 'all';
   status?: string;
   search?: string;
   phoneNumberId?: string;
@@ -2286,7 +2286,7 @@ export async function listWhatsAppMessageLog(filters: {
 }
 
 export async function getWhatsAppMetrics(
-  days = 30,
+  days: number | 'all' = 30,
   phoneNumberId?: string,
 ): Promise<WhatsAppMetrics> {
   return invokeFn<WhatsAppMetrics>('get-whatsapp-metrics', {

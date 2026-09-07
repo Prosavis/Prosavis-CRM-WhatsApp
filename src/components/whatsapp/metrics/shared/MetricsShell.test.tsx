@@ -48,5 +48,25 @@ describe('MetricsShell', () => {
     await user.click(screen.getByRole('combobox', { name: 'Periodo' }));
     await user.click(screen.getByRole('option', { name: '60 días' }));
     expect(onDaysChange).toHaveBeenCalledWith(60);
+
+    await user.click(screen.getByRole('combobox', { name: 'Periodo' }));
+    expect(screen.getByRole('option', { name: 'Histórico' })).toBeInTheDocument();
+    await user.click(screen.getByRole('option', { name: 'Histórico' }));
+    expect(onDaysChange).toHaveBeenCalledWith('all');
+  });
+
+  it('defaults the period control to 30 days', () => {
+    render(
+      <MetricsShell
+        vista="actividad"
+        days={30}
+        onVistaChange={vi.fn()}
+        onDaysChange={vi.fn()}
+      >
+        <p>Vista actual</p>
+      </MetricsShell>,
+    );
+
+    expect(screen.getByRole('combobox', { name: 'Periodo' })).toHaveTextContent('30 días');
   });
 });

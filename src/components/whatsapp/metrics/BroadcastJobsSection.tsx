@@ -33,6 +33,7 @@ import {
   type BroadcastRecipientDetail,
   type BroadcastRecipientStatus,
 } from '@/services/whatsappService';
+import { metricsPeriodLabel, metricsPeriodPhrase, type MetricsDays } from '@/utils/metricsVistas';
 import {
   addStyledSheet,
   downloadWorkbook,
@@ -65,7 +66,7 @@ const JOB_STATUS_LABEL: Record<string, string> = {
 const RECIPIENTS_PAGE_SIZE = 25;
 
 export interface BroadcastJobsSectionProps {
-  days: number;
+  days: MetricsDays;
   /** Si viene de un envío recién terminado, abre el detalle de ese job. */
   initialJobId?: string | null;
   onInitialJobConsumed?: () => void;
@@ -163,8 +164,8 @@ const BroadcastJobsSection: React.FC<BroadcastJobsSectionProps> = ({
       addStyledSheet(wb, {
         name: 'Envíos',
         title: 'Envíos masivos (panel)',
-        subtitle: `${jobs.length.toLocaleString('es-CO')} envío(s) en los últimos ${days} días.`,
-        meta: [excelGeneratedAtLine(), `Periodo: últimos ${days} días`],
+        subtitle: `${jobs.length.toLocaleString('es-CO')} envío(s) en ${metricsPeriodPhrase(days)}.`,
+        meta: [excelGeneratedAtLine(), `Periodo: ${metricsPeriodLabel(days)}`],
         columns: [
           { header: 'Fecha', type: 'datetime' },
           { header: 'Estado', type: 'text' },
@@ -195,7 +196,7 @@ const BroadcastJobsSection: React.FC<BroadcastJobsSectionProps> = ({
     <>
       <MetricsSection
         title="¿Qué ocurrió en los envíos masivos del panel?"
-        subtitle={`Jobs creados por la UI durante los últimos ${days} días. Esta fuente se concilia con el log, pero no es el mismo conjunto de filas.`}
+        subtitle={`Jobs creados por la UI durante ${metricsPeriodPhrase(days)}. Esta fuente se concilia con el log, pero no es el mismo conjunto de filas.`}
         toolbarExtra={
           <Tooltip title="Descargar envíos Excel">
             <span>

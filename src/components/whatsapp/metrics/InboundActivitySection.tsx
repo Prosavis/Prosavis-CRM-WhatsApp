@@ -29,6 +29,7 @@ import type {
   InboundTotals,
   MetricsGranularSeries,
 } from '@/types/whatsapp';
+import { metricsPeriodLabel, type MetricsDays } from '@/utils/metricsVistas';
 import {
   labelInboundSeries,
   type MetricsGranularity,
@@ -54,7 +55,7 @@ interface InboundActivitySectionProps {
   totals?: InboundTotals;
   loading: boolean;
   /** Ventana de días del filtro Periodo (solo para subtítulo / Excel). */
-  days?: number;
+  days?: MetricsDays;
 }
 
 type InboundViewMode = 'clients' | 'messages';
@@ -264,8 +265,7 @@ const InboundActivitySection: React.FC<InboundActivitySectionProps> = ({
     </ToggleButtonGroup>
   );
 
-  const periodHint =
-    typeof days === 'number' ? ` Últimos ${days} días.` : '';
+  const periodHint = days == null ? '' : ` ${metricsPeriodLabel(days)}.`;
 
   const subtitle =
     viewMode === 'messages'

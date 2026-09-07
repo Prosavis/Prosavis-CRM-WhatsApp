@@ -9,6 +9,8 @@ export const METRICS_VISTA_KEYS = [
 
 export type MetricsVista = (typeof METRICS_VISTA_KEYS)[number];
 
+export type MetricsDays = number | 'all';
+
 const VISTA_SET = new Set<string>(METRICS_VISTA_KEYS);
 const METRICS_DAY_OPTIONS = new Set([7, 14, 30, 60, 90]);
 
@@ -32,8 +34,10 @@ export function applyMetricsVista(
   return next;
 }
 
-export function resolveMetricsDays(search: URLSearchParams): number {
-  const parsed = Number.parseInt(search.get('days') ?? '', 10);
+export function resolveMetricsDays(search: URLSearchParams): MetricsDays {
+  const raw = search.get('days');
+  if (raw === 'all') return 'all';
+  const parsed = Number.parseInt(raw ?? '', 10);
   return METRICS_DAY_OPTIONS.has(parsed) ? parsed : 30;
 }
 
@@ -43,6 +47,10 @@ export function applyMetricsScope(
 ): URLSearchParams {
   const next = new URLSearchParams(search);
   for (const [key, value] of Object.entries(updates)) {
+    if (key === 'days' && value === 'all') {
+      next.set(key, 'all');
+      continue;
+    }
     if (value == null || value === '' || value === 'all') {
       next.delete(key);
     } else {
@@ -53,9 +61,10 @@ export function applyMetricsScope(
 }
 
 export function metricsPeriodRange(
-  days: number,
+  days: MetricsDays,
   now = new Date(),
-): { from: string; to: string } {
+): { from: string | null; to: string | null } {
+  if (days === 'all') return { from: null, to: null };
   const end = new Date(Date.UTC(
     now.getUTCFullYear(),
     now.getUTCMonth(),
@@ -67,4 +76,12 @@ export function metricsPeriodRange(
     from: start.toISOString().slice(0, 10),
     to: end.toISOString().slice(0, 10),
   };
+}
+
+export function metricsPeriodLabel(days: MetricsDays): string {
+  return days === 'all' ? 'Histórico completo' : `Últimos ${days} días`;
+}
+
+export function metricsPeriodPhrase(days: MetricsDays): string {
+  return days === 'all' ? 'el histórico completo' : `los últimos ${days} días`;
 }

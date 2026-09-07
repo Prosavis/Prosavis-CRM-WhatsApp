@@ -7,17 +7,18 @@ Deno.serve(async (req) => {
   try {
     const { supabase } = await requireCrmAdmin(req);
     const body = await req.json().catch(() => ({}));
-    const days = Number(body.days ?? 30);
+    const historic = body.days === 'all';
+    const days = historic ? null : Number(body.days ?? 30);
     const from = new Date();
-    from.setDate(from.getDate() - days);
+    if (days != null) from.setDate(from.getDate() - days);
 
     let query = supabase
       .from('whatsapp_message_log')
       .select('*')
       .eq('hidden_from_panel', false)
-      .gte('created_at', from.toISOString())
       .order('created_at', { ascending: false })
       .limit(Number(body.limit ?? 100));
+    if (!historic) query = query.gte('created_at', from.toISOString());
 
     if (body.phoneNumberId) query = query.eq('phone_number_id', body.phoneNumberId);
     if (body.status && body.status !== 'all') query = query.eq('status', body.status);

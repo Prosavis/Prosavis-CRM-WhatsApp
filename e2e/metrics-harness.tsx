@@ -23,7 +23,7 @@ import type {
   DirectoryClientMetricRow,
   WhatsAppMetrics,
 } from '@/types/whatsapp';
-import type { MetricsVista } from '@/utils/metricsVistas';
+import { resolveMetricsDays, type MetricsDays, type MetricsVista } from '@/utils/metricsVistas';
 
 const quality: ClientQualityMetrics = {
   nucleusSize: 83,
@@ -329,9 +329,8 @@ function App() {
   ].includes(requested ?? '')
     ? (requested as MetricsVista)
     : 'calidad';
-  const initialDays = Number.parseInt(params.get('days') ?? '30', 10);
   const [vista, setVista] = useState(initialVista);
-  const [days, setDays] = useState(Number.isFinite(initialDays) ? initialDays : 30);
+  const [days, setDays] = useState<MetricsDays>(resolveMetricsDays(params));
   const dark = params.get('theme') === 'dark';
   const updateScope = (key: string, value: string) => {
     const nextUrl = new URL(window.location.href);
