@@ -6,11 +6,13 @@
 export const EMPRESAS_WA_TEMPLATE = 'outreach_empresas_limpieza_v3';
 export const EMPRESAS_WA_TEMPLATE_V3 = 'outreach_empresas_limpieza_v3';
 export const EMPRESAS_WA_CAMPAIGN = 'promo_pro_empresas';
-/** Tope de intentos WA por ventana (fallos se sustituyen con leads nuevos, no reintento). */
-export const EMPRESAS_WA_ATTEMPT_CAP = 100;
-export const EMPRESAS_OUTREACH_BATCH = 50;
+/** Tope de intentos WA por ventana (2× sent; fallos se sustituyen, no reintento). */
+export const EMPRESAS_WA_ATTEMPT_CAP = 200;
+export const EMPRESAS_OUTREACH_BATCH = 100;
 /** Tope por invocación Edge (~20 × 3s < idle 150s). El cron rellena remaining. */
 export const EMPRESAS_OUTREACH_PASS = 20;
+/** Tope email por invocación Edge (2–3 pases cierran 100). */
+export const EMPRESAS_OUTREACH_EMAIL_PASS = 50;
 
 const BOGOTA_OFFSET = '-05:00';
 
@@ -47,6 +49,35 @@ function addCalendarDays(ymd: string, delta: number): string {
   const m = String(next.getUTCMonth() + 1).padStart(2, '0');
   const d = String(next.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
+}
+
+function weekdayUtc(ymd: string): number {
+  const [year, month, day] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+}
+
+/** Lun–Jue: 08:00 / 12:30 / 18:00. Viernes: solo 08:00. Sáb–dom: ninguna. */
+export function empresasWindowLabelsForDay(ymd: string): string[] {
+  const dow = weekdayUtc(ymd);
+  if (dow === 0 || dow === 6) return [];
+  if (dow === 5) return ['08:00'];
+  return ['08:00', '12:30', '18:00'];
+}
+
+export function isEmpresasSendWindow(ymd: string, label: string): boolean {
+  return empresasWindowLabelsForDay(ymd).includes(label);
+}
+
+/** Ahora (Bogotá) está dentro de una franja que sí manda. Antes de 08:00 = no. */
+export function isEmpresasSendAllowed(now: Date, label?: string): boolean {
+  const { ymd, hm } = bogotaYmdHm(now);
+  if (label) return isEmpresasSendWindow(ymd, label);
+  const labels = empresasWindowLabelsForDay(ymd);
+  if (labels.length === 0) return false;
+  if (hm >= '18:00') return labels.includes('18:00');
+  if (hm >= '12:30') return labels.includes('12:30');
+  if (hm >= '08:00') return labels.includes('08:00');
+  return false;
 }
 
 function bogotaInstant(ymd: string, hm: string): string {
@@ -98,23 +129,27 @@ export function resolveEmpresasSendWindow(now: Date): EmpresasSendWindow {
 
 export function empresasWindowsForDay(ymd: string): EmpresasSendWindow[] {
   const next = addCalendarDays(ymd, 1);
-  return [
-    {
-      label: '08:00',
+  return empresasWindowLabelsForDay(ymd).map((label) => {
+    if (label === '18:00') {
+      return {
+        label: '18:00' as const,
+        startIso: bogotaInstant(ymd, '18:00'),
+        endIso: bogotaInstant(next, '00:00'),
+      };
+    }
+    if (label === '12:30') {
+      return {
+        label: '12:30' as const,
+        startIso: bogotaInstant(ymd, '12:30'),
+        endIso: bogotaInstant(ymd, '18:00'),
+      };
+    }
+    return {
+      label: '08:00' as const,
       startIso: bogotaInstant(ymd, '08:00'),
       endIso: bogotaInstant(ymd, '12:30'),
-    },
-    {
-      label: '12:30',
-      startIso: bogotaInstant(ymd, '12:30'),
-      endIso: bogotaInstant(ymd, '18:00'),
-    },
-    {
-      label: '18:00',
-      startIso: bogotaInstant(ymd, '18:00'),
-      endIso: bogotaInstant(next, '00:00'),
-    },
-  ];
+    };
+  });
 }
 
 export function nextWhatsAppNeed(target: number, sent: number): number {
