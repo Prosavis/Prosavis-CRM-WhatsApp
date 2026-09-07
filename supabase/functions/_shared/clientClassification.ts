@@ -12,6 +12,19 @@ const BLACKLIST_TOKENS = new Set(['decline', '🚫', 'bloqueado']);
 const TEST_TOKENS = new Set(['test']);
 /** Tag Favoritos = acceso rápido preferido en métricas. */
 const FAVORITOS_TOKENS = new Set(['favoritos', 'favorito']);
+/** Decline como tag de venta/pago (distinto de Parar). */
+const DECLINE_TOKENS = new Set(['decline']);
+/** Bloqueo de contacto (incluye el emoji de lista negra). */
+const BLOQUEADO_TOKENS = new Set(['bloqueado', '🚫']);
+/** Opt-out de jornadas empresas; no es Decline residencial. */
+const PARAR_TOKENS = new Set(['parar', 'baja']);
+/** Tokens normalizados (sin acento) para Cliente Problemática. */
+const PROBLEMATICA_TOKENS = new Set([
+  'cliente problematica',
+  'problematica',
+]);
+
+export type QualityLayer = 'risk' | 'favorite' | 'recurring' | 'standard';
 
 function splitTokens(value: string): string[] {
   return value
@@ -22,6 +35,35 @@ function splitTokens(value: string): string[] {
 
 function isEmpresasToken(token: string): boolean {
   return EMPRESAS_TOKENS.has(token);
+}
+
+function normalizeTagToken(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+}
+
+function collectNormalizedTokens(client: ClassifiableClient): string[] {
+  const out: string[] = [];
+  if (client.classification) {
+    for (const part of splitTokens(client.classification)) {
+      out.push(normalizeTagToken(part));
+    }
+  }
+  if (client.tags && Array.isArray(client.tags)) {
+    for (const tag of client.tags) {
+      if (!tag) continue;
+      out.push(normalizeTagToken(tag));
+      if (tag.includes(',')) {
+        for (const part of splitTokens(tag)) {
+          out.push(normalizeTagToken(part));
+        }
+      }
+    }
+  }
+  return out;
 }
 
 export type ClassifiableClient = {
@@ -139,4 +181,43 @@ export function hasAgendadoTag(client: ClassifiableClient): boolean {
   }
 
   return false;
+}
+
+/** Cliente Problemática (queja / pelea / pedido de devolución). */
+export function hasProblematicaTag(client: ClassifiableClient): boolean {
+  return collectNormalizedTokens(client).some((token) => PROBLEMATICA_TOKENS.has(token));
+}
+
+/** Tag Decline (rechazó cotización/servicio). */
+export function hasDeclineTag(client: ClassifiableClient): boolean {
+  return hasExactToken(client, DECLINE_TOKENS);
+}
+
+/** Tag Bloqueado / 🚫. */
+export function hasBloqueadoTag(client: ClassifiableClient): boolean {
+  return hasExactToken(client, BLOQUEADO_TOKENS);
+}
+
+/** Parar / BAJA de jornadas empresas. */
+export function hasPararTag(client: ClassifiableClient): boolean {
+  return hasExactToken(client, PARAR_TOKENS);
+}
+
+/** Riesgo único: Problemática ∪ Bloqueado ∪ Decline. */
+export function hasRiskTag(client: ClassifiableClient): boolean {
+  return hasProblematicaTag(client) || hasBlacklistTag(client);
+}
+
+/**
+ * Capa de calidad. Prioridad: riesgo > favorito > recurrente > estándar.
+ * `completedCount` es el número de citas COMPLETED del cliente.
+ */
+export function qualityLayer(
+  client: ClassifiableClient,
+  completedCount: number,
+): QualityLayer {
+  if (hasRiskTag(client)) return 'risk';
+  if (hasFavoritosTag(client)) return 'favorite';
+  if (completedCount >= 2 || isRecurringClient(client)) return 'recurring';
+  return 'standard';
 }

@@ -55,6 +55,12 @@ file_size_limit = "25MiB"
 [functions.get-whatsapp-metrics]
 verify_jwt = false
 
+[functions.get-client-quality-metrics]
+verify_jwt = false
+
+[functions.get-appointment-heatmap]
+verify_jwt = false
+
 [functions.list-whatsapp-message-log]
 verify_jwt = false
 

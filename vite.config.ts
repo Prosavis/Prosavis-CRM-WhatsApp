@@ -36,6 +36,8 @@ export default defineConfig({
       '@emotion/styled',
       'prop-types',
       'react-is',
+      'leaflet',
+      'leaflet.heat',
     ],
   },
   server: {

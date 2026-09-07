@@ -226,6 +226,94 @@ export interface WhatsAppMetrics {
   };
 }
 
+export type QualityLayer = 'risk' | 'favorite' | 'recurring' | 'standard';
+
+export interface QualityTagCount {
+  key: string;
+  label: string;
+  count: number;
+  pct: number;
+  ratio: number | null;
+}
+
+export interface QualityLayerCount {
+  key: QualityLayer;
+  label: string;
+  count: number;
+  pct: number;
+}
+
+export interface QualityCrossCancel {
+  key: string;
+  label: string;
+  withCanceled: number;
+  total: number;
+}
+
+export interface QualityClientRow {
+  id: string;
+  name: string | null;
+  phone: string | null;
+  layer: QualityLayer;
+  completedCount: number;
+  canceledCount: number;
+  tags: string[];
+  isFavorite: boolean;
+  isProblematica: boolean;
+  isBloqueado: boolean;
+  isDecline: boolean;
+  isRecurringTag: boolean;
+  isCompany: boolean;
+  isAgendado: boolean;
+  isParar: boolean;
+}
+
+export interface ClientQualityMetrics {
+  nucleusSize: number;
+  period: { from: string | null; to: string | null };
+  tags: QualityTagCount[];
+  layers: QualityLayerCount[];
+  riskUnique: { count: number; pct: number; ratio: number | null };
+  favoritesVsRest: {
+    favorites: { n: number; avgCompleted: number; pctTwoPlus: number };
+    rest: { n: number; avgCompleted: number; pctTwoPlus: number };
+  };
+  cancellations: {
+    clientsWithCanceled: number;
+    clientsWithCanceledPct: number;
+    canceledBookings: number;
+    pagoPendiente: number;
+    pagoAceptado: number;
+    pagoEnProceso: number;
+  };
+  crossCancel: QualityCrossCancel[];
+  clients: QualityClientRow[];
+}
+
+export type HeatmapPointSource = 'gps' | 'address';
+
+export interface HeatmapPoint {
+  id: string;
+  lat: number;
+  lng: number;
+  source: HeatmapPointSource;
+  layer: QualityLayer;
+  status: string;
+  scheduledStart: string | null;
+}
+
+export interface AppointmentHeatmapResult {
+  points: HeatmapPoint[];
+  coverage: {
+    total: number;
+    withGps: number;
+    withAddressOnly: number;
+    withoutPoint: number;
+  };
+  source: HeatmapPointSource;
+  serviceId?: string;
+}
+
 export interface MessageLogFilters {
   days?: number;
   status?: string;

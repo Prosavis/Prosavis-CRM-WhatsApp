@@ -7,7 +7,11 @@ import {
 import { subscribeInboxConversations, subscribeInboxMessages } from '@/utils/inboxRealtimeSync';
 import { getCachedMediaUrl, mediaUrlCacheKey, setCachedMediaUrl } from '@/utils/mediaUrlCache';
 import type { Database } from '@/types/database';
-import type { WhatsAppMetrics } from '@/types/whatsapp';
+import type {
+  AppointmentHeatmapResult,
+  ClientQualityMetrics,
+  WhatsAppMetrics,
+} from '@/types/whatsapp';
 import type { NormalizedBookingContext } from '../../supabase/functions/_shared/bookingContext';
 import type { InboxAiProposedAction } from '../../supabase/functions/_shared/inboxAiActions';
 import type { ExecuteInboxAiActionResult } from '../../supabase/functions/_shared/inboxAiActionExecution';
@@ -2287,6 +2291,32 @@ export async function getWhatsAppMetrics(
   return invokeFn<WhatsAppMetrics>('get-whatsapp-metrics', {
     days,
     phoneNumberId,
+  });
+}
+
+export async function getClientQualityMetrics(params: {
+  from?: string | null;
+  to?: string | null;
+} = {}): Promise<ClientQualityMetrics> {
+  return invokeFn<ClientQualityMetrics>('get-client-quality-metrics', {
+    from: params.from ?? undefined,
+    to: params.to ?? undefined,
+  });
+}
+
+export async function getAppointmentHeatmap(params: {
+  from?: string | null;
+  to?: string | null;
+  source?: 'gps' | 'address';
+  status?: string;
+  layer?: string;
+} = {}): Promise<AppointmentHeatmapResult> {
+  return invokeFn<AppointmentHeatmapResult>('get-appointment-heatmap', {
+    from: params.from ?? undefined,
+    to: params.to ?? undefined,
+    source: params.source ?? 'gps',
+    status: params.status ?? 'all',
+    layer: params.layer ?? 'all',
   });
 }
 

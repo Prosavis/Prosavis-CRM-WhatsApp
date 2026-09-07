@@ -23,23 +23,32 @@ import {
   RadioGroup,
   Select,
   Stack,
+  Tab,
+  Tabs,
   TextField,
   Typography,
 } from '@mui/material';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import { WHATSAPP_CLOUD_PRODUCTION } from '@/constants/whatsappCloudAccounts';
+import { useSearchParams } from 'react-router-dom';
 import {
+  getAppointmentHeatmap,
+  getClientQualityMetrics,
   getWhatsAppMetrics,
   listWhatsAppMessageLog,
   purgeWhatsAppMessageLog,
 } from '@/services/whatsappService';
+import { applyMetricsVista, resolveMetricsVista, type MetricsVista } from '@/utils/metricsVistas';
 import ClientSegmentsSection from './ClientSegmentsSection';
 import InboundActivitySection from './InboundActivitySection';
 import CompletedServicesSection from './CompletedServicesSection';
 import OutboundPerformanceSection, {
   type MessageLogRow,
 } from './OutboundPerformanceSection';
+import CalidadSection from './CalidadSection';
+import FriccionSection from './FriccionSection';
+import HeatmapSection from './HeatmapSection';
 
 const { phoneNumberId, phoneDisplay, botLabel } = WHATSAPP_CLOUD_PRODUCTION;
 
@@ -53,7 +62,12 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
   onClearBroadcastJobParam,
 }) => {
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const vista = resolveMetricsVista(searchParams);
   const [days, setDays] = useState(30);
+  const [heatmapPreferGps, setHeatmapPreferGps] = useState(true);
+  const [heatmapStatus, setHeatmapStatus] = useState('all');
+  const [heatmapLayer, setHeatmapLayer] = useState('all');
   const [logsFetchWarning, setLogsFetchWarning] = useState<string | null>(null);
   const [purgeDialogOpen, setPurgeDialogOpen] = useState(false);
   const [purgeScope, setPurgeScope] = useState<'line' | 'all'>('line');
@@ -62,10 +76,38 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
   const [purgeError, setPurgeError] = useState<string | null>(null);
   const [advancedMenuAnchor, setAdvancedMenuAnchor] = useState<null | HTMLElement>(null);
 
+  const needsOpsMetrics = vista === 'clientes' || vista === 'actividad' || vista === 'outbound';
+  const needsQuality = vista === 'calidad' || vista === 'friccion';
+  const needsHeatmap = vista === 'mapa';
+
   const metricsQuery = useQuery({
     queryKey: inboxQueryKeys.metrics(days, phoneNumberId),
     queryFn: () => getWhatsAppMetrics(days, phoneNumberId),
     staleTime: 30_000,
+    enabled: needsOpsMetrics,
+  });
+  const qualityQuery = useQuery({
+    queryKey: inboxQueryKeys.qualityMetrics(null, null),
+    queryFn: () => getClientQualityMetrics(),
+    staleTime: 60_000,
+    enabled: needsQuality,
+  });
+  const heatmapQuery = useQuery({
+    queryKey: inboxQueryKeys.appointmentHeatmap({
+      source: heatmapPreferGps ? 'gps' : 'address',
+      status: heatmapStatus,
+      layer: heatmapLayer,
+      from: null,
+      to: null,
+    }),
+    queryFn: () =>
+      getAppointmentHeatmap({
+        source: heatmapPreferGps ? 'gps' : 'address',
+        status: heatmapStatus,
+        layer: heatmapLayer,
+      }),
+    staleTime: 60_000,
+    enabled: needsHeatmap,
   });
   const logsQuery = useQuery({
     queryKey: inboxQueryKeys.metricsLogs(days, phoneNumberId),
@@ -88,6 +130,7 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
       })) satisfies MessageLogRow[];
     },
     staleTime: 30_000,
+    enabled: vista === 'outbound',
   });
 
   const metrics = metricsQuery.data ?? null;
@@ -261,44 +304,111 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
         </DialogActions>
       </Dialog>
 
-      {metricsError && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {metricsError}
-        </Alert>
+      <Tabs
+        value={vista}
+        onChange={(_event, next: MetricsVista) => {
+          setSearchParams(applyMetricsVista(searchParams, next), { replace: true });
+        }}
+        variant="scrollable"
+        scrollButtons="auto"
+        sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}
+      >
+        <Tab value="mapa" label="Mapa" />
+        <Tab value="calidad" label="Calidad" />
+        <Tab value="friccion" label="Fricción" />
+        <Tab value="clientes" label="Clientes" />
+        <Tab value="actividad" label="Actividad" />
+        <Tab value="outbound" label="Outbound" />
+      </Tabs>
+
+      {vista === 'mapa' && (
+        <HeatmapSection
+          data={heatmapQuery.data}
+          loading={heatmapQuery.isPending}
+          error={heatmapQuery.error instanceof Error ? heatmapQuery.error.message : null}
+          preferGps={heatmapPreferGps}
+          onPreferGpsChange={setHeatmapPreferGps}
+          status={heatmapStatus}
+          onStatusChange={setHeatmapStatus}
+          layer={heatmapLayer}
+          onLayerChange={setHeatmapLayer}
+        />
       )}
 
-      <ClientSegmentsSection
-        segments={metrics?.clientSegments}
-        clients={metrics?.directoryClients}
-        loading={metricsLoading}
-        onReload={() => void loadMetrics()}
-      />
+      {vista === 'calidad' && (
+        <CalidadSection
+          metrics={qualityQuery.data}
+          loading={qualityQuery.isPending}
+          error={qualityQuery.error instanceof Error ? qualityQuery.error.message : null}
+        />
+      )}
 
-      <InboundActivitySection
-        series={metrics?.inboundTimeseries}
-        loading={metricsLoading}
-        days={days}
-        periodControl={periodSelect}
-      />
+      {vista === 'friccion' && (
+        <FriccionSection
+          metrics={qualityQuery.data}
+          loading={qualityQuery.isPending}
+          error={qualityQuery.error instanceof Error ? qualityQuery.error.message : null}
+        />
+      )}
 
-      <CompletedServicesSection
-        series={metrics?.completedServicesTimeseries}
-        appointments={metrics?.completedAppointments}
-        meta={metrics?.completedMeta}
-        loading={metricsLoading}
-      />
+      {vista === 'clientes' && (
+        <>
+          {metricsError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {metricsError}
+            </Alert>
+          )}
+          <ClientSegmentsSection
+            segments={metrics?.clientSegments}
+            clients={metrics?.directoryClients}
+            loading={metricsLoading}
+            onReload={() => void loadMetrics()}
+          />
+        </>
+      )}
 
-      <OutboundPerformanceSection
-        metrics={metrics}
-        metricsLoading={metricsLoading}
-        days={days}
-        logs={logs}
-        logsLoading={logsLoading}
-        logsFetchWarning={logsFetchWarning}
-        onClearLogsWarning={() => setLogsFetchWarning(null)}
-        broadcastJobParam={broadcastJobParam}
-        onInitialJobConsumed={onClearBroadcastJobParam}
-      />
+      {vista === 'actividad' && (
+        <>
+          {metricsError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {metricsError}
+            </Alert>
+          )}
+          <InboundActivitySection
+            series={metrics?.inboundTimeseries}
+            loading={metricsLoading}
+            days={days}
+            periodControl={periodSelect}
+          />
+          <CompletedServicesSection
+            series={metrics?.completedServicesTimeseries}
+            appointments={metrics?.completedAppointments}
+            meta={metrics?.completedMeta}
+            loading={metricsLoading}
+          />
+        </>
+      )}
+
+      {vista === 'outbound' && (
+        <>
+          {metricsError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {metricsError}
+            </Alert>
+          )}
+          <OutboundPerformanceSection
+            metrics={metrics}
+            metricsLoading={metricsLoading}
+            days={days}
+            logs={logs}
+            logsLoading={logsLoading}
+            logsFetchWarning={logsFetchWarning}
+            onClearLogsWarning={() => setLogsFetchWarning(null)}
+            broadcastJobParam={broadcastJobParam}
+            onInitialJobConsumed={onClearBroadcastJobParam}
+          />
+        </>
+      )}
     </div>
   );
 };

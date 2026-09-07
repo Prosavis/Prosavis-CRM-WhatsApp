@@ -10,6 +10,15 @@ export const inboxQueryKeys = {
     ['whatsapp-metrics', days, phoneNumberId ?? 'all'] as const,
   metricsLogs: (days: number, phoneNumberId?: string) =>
     ['whatsapp-metrics-logs', days, phoneNumberId ?? 'all'] as const,
+  qualityMetrics: (from: string | null, to: string | null) =>
+    ['client-quality-metrics', from ?? 'all', to ?? 'all'] as const,
+  appointmentHeatmap: (filters: {
+    source: string;
+    status: string;
+    layer: string;
+    from: string | null;
+    to: string | null;
+  }) => ['appointment-heatmap', filters] as const,
   directoryEntries: (filters: unknown) => ['directory', 'entries', filters] as const,
   directoryStats: ['directory', 'stats'] as const,
 };

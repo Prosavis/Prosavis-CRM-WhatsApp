@@ -13,6 +13,15 @@ const BLACKLIST_TOKENS = new Set(['decline', '🚫', 'bloqueado']);
 const TEST_TOKENS = new Set(['test']);
 /** Tag Favoritos = acceso rápido preferido en métricas. */
 const FAVORITOS_TOKENS = new Set(['favoritos', 'favorito']);
+const DECLINE_TOKENS = new Set(['decline']);
+const BLOQUEADO_TOKENS = new Set(['bloqueado', '🚫']);
+const PARAR_TOKENS = new Set(['parar', 'baja']);
+const PROBLEMATICA_TOKENS = new Set([
+  'cliente problematica',
+  'problematica',
+]);
+
+export type QualityLayer = 'risk' | 'favorite' | 'recurring' | 'standard';
 
 export const DIRECTORY_LEGACY_LABELS: Record<string, string> = {
   company: 'Empresa',
@@ -31,6 +40,14 @@ function splitTokens(value: string): string[] {
 
 function isEmpresasToken(token: string): boolean {
   return EMPRESAS_TOKENS.has(token);
+}
+
+function normalizeTagToken(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
 }
 
 export function isCompanyClient(client: {
@@ -170,6 +187,59 @@ export function isTestContact(client: ClassifiableClient): boolean {
 /** Tag Favoritos / Favorito en tags o classification. */
 export function hasFavoritosTag(client: ClassifiableClient): boolean {
   return hasExactToken(client, FAVORITOS_TOKENS);
+}
+
+function collectNormalizedTokens(client: ClassifiableClient): string[] {
+  const out: string[] = [];
+  const classification =
+    client.clientClassification ?? client.classification ?? null;
+  if (classification) {
+    for (const part of splitTokens(classification)) {
+      out.push(normalizeTagToken(part));
+    }
+  }
+  if (client.tags && Array.isArray(client.tags)) {
+    for (const tag of client.tags) {
+      if (!tag) continue;
+      out.push(normalizeTagToken(tag));
+      if (tag.includes(',')) {
+        for (const part of splitTokens(tag)) {
+          out.push(normalizeTagToken(part));
+        }
+      }
+    }
+  }
+  return out;
+}
+
+export function hasProblematicaTag(client: ClassifiableClient): boolean {
+  return collectNormalizedTokens(client).some((token) => PROBLEMATICA_TOKENS.has(token));
+}
+
+export function hasDeclineTag(client: ClassifiableClient): boolean {
+  return hasExactToken(client, DECLINE_TOKENS);
+}
+
+export function hasBloqueadoTag(client: ClassifiableClient): boolean {
+  return hasExactToken(client, BLOQUEADO_TOKENS);
+}
+
+export function hasPararTag(client: ClassifiableClient): boolean {
+  return hasExactToken(client, PARAR_TOKENS);
+}
+
+export function hasRiskTag(client: ClassifiableClient): boolean {
+  return hasProblematicaTag(client) || hasBlacklistTag(client);
+}
+
+export function qualityLayer(
+  client: ClassifiableClient,
+  completedCount: number,
+): QualityLayer {
+  if (hasRiskTag(client)) return 'risk';
+  if (hasFavoritosTag(client)) return 'favorite';
+  if (completedCount >= 2 || isRecurringClient(client)) return 'recurring';
+  return 'standard';
 }
 
 export function getClassificationLabel(classification?: string | null): string {
