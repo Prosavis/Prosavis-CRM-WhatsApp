@@ -132,7 +132,37 @@ const HeatmapSection: React.FC<HeatmapSectionProps> = ({
   const heatRef = useRef<L.Layer | null>(null);
   const markersRef = useRef<L.LayerGroup | null>(null);
   const tileRef = useRef<L.TileLayer | null>(null);
+  const [mapEpoch, setMapEpoch] = useState(0);
   const [selected, setSelected] = useState<HeatmapPoint | null>(null);
+
+  const disposeMap = useCallback(() => {
+    mapRef.current?.remove();
+    mapRef.current = null;
+    heatRef.current = null;
+    markersRef.current = null;
+    tileRef.current = null;
+  }, []);
+
+  const attachMapContainer = useCallback((node: HTMLDivElement | null) => {
+    if (node === mapEl.current && mapRef.current) return;
+    disposeMap();
+    mapEl.current = node;
+    if (!node) {
+      setMapEpoch((value) => value + 1);
+      return;
+    }
+    const map = L.map(node, {
+      center: PEREIRA_CENTER,
+      zoom: 13,
+      zoomControl: true,
+    });
+    markersRef.current = L.layerGroup().addTo(map);
+    mapRef.current = map;
+    requestAnimationFrame(() => {
+      map.invalidateSize();
+    });
+    setMapEpoch((value) => value + 1);
+  }, [disposeMap]);
 
   const points = data?.points ?? EMPTY_POINTS;
   const coverage = data?.coverage;
@@ -153,24 +183,6 @@ const HeatmapSection: React.FC<HeatmapSectionProps> = ({
   }, [points]);
 
   useEffect(() => {
-    if (!mapEl.current || mapRef.current) return;
-    const map = L.map(mapEl.current, {
-      center: PEREIRA_CENTER,
-      zoom: 13,
-      zoomControl: true,
-    });
-    markersRef.current = L.layerGroup().addTo(map);
-    mapRef.current = map;
-    return () => {
-      map.remove();
-      mapRef.current = null;
-      heatRef.current = null;
-      markersRef.current = null;
-      tileRef.current = null;
-    };
-  }, []);
-
-  useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     tileRef.current?.removeFrom(map);
@@ -187,7 +199,7 @@ const HeatmapSection: React.FC<HeatmapSectionProps> = ({
       if (map.hasLayer(tileLayer)) map.removeLayer(tileLayer);
       if (tileRef.current === tileLayer) tileRef.current = null;
     };
-  }, [theme.palette.mode]);
+  }, [mapEpoch, theme.palette.mode]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -221,6 +233,9 @@ const HeatmapSection: React.FC<HeatmapSectionProps> = ({
       }
     }
     fitResults();
+    requestAnimationFrame(() => {
+      map.invalidateSize();
+    });
     const renderedHeat = heatRef.current;
     return () => {
       for (const cleanupMarker of markerCleanups) cleanupMarker();
@@ -228,7 +243,7 @@ const HeatmapSection: React.FC<HeatmapSectionProps> = ({
       if (heatRef.current === renderedHeat) heatRef.current = null;
       markerGroup?.clearLayers();
     };
-  }, [fitResults, heatLatLngs, mode, palette.density, points, theme]);
+  }, [fitResults, heatLatLngs, mapEpoch, mode, palette.density, points, theme]);
 
   const gpsCoverage = coverage ? safeRate(coverage.withGps, coverage.total) : 0;
   const selectedIndex = selected ? points.findIndex((point) => point.id === selected.id) : -1;
@@ -376,7 +391,7 @@ const HeatmapSection: React.FC<HeatmapSectionProps> = ({
           }}
         >
           <div
-            ref={mapEl}
+            ref={attachMapContainer}
             role="region"
             aria-label={`Mapa de ${formatMetricInt(points.length)} citas. Modo ${
               mode === 'density' ? 'densidad' : 'puntos por capa'
