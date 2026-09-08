@@ -193,6 +193,7 @@ export interface Database {
           otp_required: boolean;
           preferred_service_address_line: string | null;
           preferred_service_address_ref: string | null;
+          service_addresses: Json;
           first_contact_at: string | null;
           last_contact_at: string | null;
           messages_count: number;
