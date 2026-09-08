@@ -188,7 +188,8 @@ describe('formatInboxAiContextBlock', () => {
     expect(block).toContain('Pereira — cobertura directa');
     expect(block).toContain('Dosquebradas — cobertura directa');
     expect(block).toContain('Cerritos — cobertura directa');
-    expect(block).toContain('Santa Rosa de Cabal');
+    expect(block).toContain('Santa Rosa de Cabal — cobertura directa');
+    expect(block).toContain('Cartago — cobertura directa');
     expect(block).not.toContain('Nombre para saludar:');
   });
 

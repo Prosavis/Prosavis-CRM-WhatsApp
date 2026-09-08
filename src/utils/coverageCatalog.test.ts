@@ -11,7 +11,9 @@ describe('formatCoverageCatalogBlock', () => {
     expect(block).toContain('Pereira — cobertura directa');
     expect(block).toContain('Dosquebradas — cobertura directa');
     expect(block).toContain('Cerritos — cobertura directa');
-    expect(block).toContain('Santa Rosa de Cabal');
+    expect(block).toContain('Santa Rosa de Cabal — cobertura directa');
+    expect(block).toContain('Cartago — cobertura directa');
+    expect(block).not.toMatch(/confirmación operativa/);
     expect(block).toMatch(/Bogotá/);
     expect(block).toMatch(/no hay cobertura/i);
     expect(block).not.toMatch(/atendemos en las principales zonas de Bogotá/i);

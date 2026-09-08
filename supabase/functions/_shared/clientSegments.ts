@@ -386,7 +386,7 @@ export function isEligibleForReactivation(
   if (isTestContact({ classification: client.classification, tags: client.tags })) {
     return false;
   }
-  // Auxiliares / Job / Marian / Decline / ciudades fuera de Pereira-Dosquebradas-Santa Rosa, etc.
+  // Auxiliares / Job / Marian / Decline / ciudades fuera de Pereira-Dosquebradas-Santa Rosa-Cartago, etc.
   if (
     shouldSkipReactivationByTags({
       tags: client.tags,

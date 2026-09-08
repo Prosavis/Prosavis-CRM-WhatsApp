@@ -36,8 +36,11 @@ export const INBOX_CATEGORY_TAG_ALIASES: Record<InboxTagCategoryId, readonly str
     'quindío',
     'quindio',
     'armenia',
-    'cartago',
-    'santa rosa',
+    'cali',
+    'chinchiná',
+    'chinchina',
+    'ginebra valle',
+    'manizales',
   ],
   trabajo: ['marian', 'job', 'jobs', 'trabajo / cv', 'trabajo/cv', 'trabajo'],
   /** Tag canónico suite-wide: WhatsApp `Empresas`. */

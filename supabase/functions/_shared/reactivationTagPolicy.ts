@@ -7,7 +7,7 @@
  * - TEST / Empresas / problemáticos / no priorizar
  * - Tag de ciudad/región fuera de cobertura operativa
  *
- * Cobertura operativa (ciudad): Pereira, Dosquebradas, Santa Rosa.
+ * Cobertura operativa (ciudad): Pereira, Dosquebradas, Santa Rosa, Cartago.
  * Sin tag de ciudad → se permite (la mayoría local no lleva ciudad).
  * Con tag de ciudad permitida → se permite.
  * Con tag de ciudad NO permitida → se excluye.
@@ -19,6 +19,7 @@ export const REACTIVATION_ALLOWED_CITY_TAGS = [
   'dos quebradas',
   'santa rosa',
   'santa rosa de cabal',
+  'cartago',
 ] as const;
 
 /** Ciudades/regiones conocidas fuera de la cobertura de reactivación. */
@@ -29,7 +30,6 @@ export const REACTIVATION_OUT_OF_COVERAGE_CITY_TAGS = [
   'quindío',
   'quindio',
   'armenia',
-  'cartago',
   'medellín',
   'medellin',
   'cali',
@@ -169,7 +169,7 @@ export function getReactivationTagSkipReason(options: {
     if (HARD_EXCLUDE.has(token)) return 'tag_excluded';
   }
 
-  // Ciudad/región explícita fuera de Pereira / Dosquebradas / Santa Rosa.
+  // Ciudad/región explícita fuera de Pereira / Dosquebradas / Santa Rosa / Cartago.
   const geoTags = tokens.filter(isCoverageGeographyTag);
   if (geoTags.length > 0) {
     const hasAllowed = geoTags.some((t) => ALLOWED_CITY.has(t));

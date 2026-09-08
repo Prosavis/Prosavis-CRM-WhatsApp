@@ -111,6 +111,24 @@ describe('whatsappInboxStats', () => {
     expect(withOverride.trabajo.sort()).toEqual([TAG_MARIAN, TAG_JOB].sort());
   });
 
+  it('fuera_cobertura incluye Cali y otras ciudades fuera de zona', () => {
+    const tags = [
+      { id: 'cali', name: 'Cali' },
+      { id: 'manizales', name: 'Manizales' },
+      { id: 'chinchina', name: 'Chinchiná' },
+      { id: 'ginebra', name: 'Ginebra Valle' },
+      { id: 'pereira', name: 'Pereira' },
+      { id: 'cartago', name: 'Cartago' },
+      { id: 'santa-rosa', name: 'Santa Rosa' },
+    ];
+    expect(resolveCategoryTagIds('fuera_cobertura', tags).sort()).toEqual([
+      'cali',
+      'chinchina',
+      'ginebra',
+      'manizales',
+    ]);
+  });
+
   it('resolveCategoryTagIds acepta aliases case-insensitive', () => {
     const tags = [
       { id: '1', name: 'AGENDADOS' },

@@ -19,11 +19,11 @@ export const DIRECT_COVERAGE_ZONES = [
   'Pereira',
   'Dosquebradas',
   'Cerritos',
+  'Santa Rosa de Cabal',
+  'Cartago',
 ] as const;
 
-export const MANUAL_REVIEW_COVERAGE_ZONES = [
-  'Santa Rosa de Cabal',
-] as const;
+export const MANUAL_REVIEW_COVERAGE_ZONES = [] as const;
 
 export const OUT_OF_COVERAGE_EXAMPLE_CITIES = [
   'Bogotá',
