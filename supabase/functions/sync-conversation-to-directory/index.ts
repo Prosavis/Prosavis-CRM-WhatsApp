@@ -7,6 +7,10 @@ import {
 } from '../_shared/directoryPhone.ts';
 import { getServiceClient } from '../_shared/supabase.ts';
 import { isCommercialPhoneNumberId } from '../_shared/whatsappLines.ts';
+import {
+  applyOutreachIdentityToEntry,
+  findOutreachLeadByPhoneKey,
+} from '../_shared/directoryOutreachIdentity.ts';
 
 interface WebhookPayload {
   type: 'INSERT' | 'UPDATE';
@@ -124,6 +128,10 @@ Deno.serve(async (req) => {
       existingEntry = byPhone?.[0] ?? null;
     }
 
+    const outreachLead = existingEntry
+      ? null
+      : await findOutreachLeadByPhoneKey(supabase, phoneKey);
+
     // --- Construir el JSONB para upsert_directory_entry ---
     // phone ya está normalizado a E.164 (línea 92: normalizeDirectoryPhoneE164)
     const entry: Record<string, unknown> = {
@@ -136,17 +144,21 @@ Deno.serve(async (req) => {
 
     if (isCommercial) {
       const commercialKey = safeString(record.stable_key) || safeString(record.id);
+      const commercialEntry = applyOutreachIdentityToEntry(
+        {
+          phone,
+          last_whatsapp_message_at: safeString(record.last_message_at),
+          last_whatsapp_message_text: safeString(record.last_message_text),
+          last_whatsapp_intent: safeString(record.last_intent),
+          channels: ['WHATSAPP'],
+          source: 'WHATSAPP',
+        },
+        outreachLead,
+      );
       const { data: upsertedId, error: upsertError } = await supabase.rpc(
         'upsert_directory_entry',
         {
-          p_entry: {
-            phone,
-            last_whatsapp_message_at: safeString(record.last_message_at),
-            last_whatsapp_message_text: safeString(record.last_message_text),
-            last_whatsapp_intent: safeString(record.last_intent),
-            channels: ['WHATSAPP'],
-            source: 'WHATSAPP',
-          },
+          p_entry: commercialEntry,
           p_overwrite_classification: false,
           p_replace_tags: false,
         },
@@ -236,11 +248,13 @@ Deno.serve(async (req) => {
       entry.status = 'active';
     }
 
+    const upsertEntry = applyOutreachIdentityToEntry(entry, outreachLead);
+
     // --- Ejecutar upsert_directory_entry via RPC ---
     const { data: upsertedId, error: upsertError } = await supabase.rpc(
       'upsert_directory_entry',
       {
-        p_entry: entry,
+        p_entry: upsertEntry,
         p_overwrite_classification: false,
         p_replace_tags: false,
       },
