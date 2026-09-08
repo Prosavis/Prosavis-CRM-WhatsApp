@@ -97,6 +97,11 @@ Deno.test(
       collectedCOP: 130_000,
       overdueCOP: 20_000,
       upcomingCOP: 50_000,
+      paidGrossCOP: 0,
+      refundCOP: 0,
+      creditIssuedCOP: 0,
+      creditAppliedCOP: 0,
+      creditLiabilityCOP: 0,
     });
     assertEquals(payload.capacity, {
       offeredMinutes: 720,

@@ -17,6 +17,11 @@ export interface OpsRollupRow {
   recoverable_minutes?: number | null;
   billed_cop?: number | null;
   collected_cop?: number | null;
+  paid_gross_cop?: number | null;
+  refund_cop?: number | null;
+  credit_issued_cop?: number | null;
+  credit_applied_cop?: number | null;
+  credit_liability_cop?: number | null;
   overdue_cop?: number | null;
   upcoming_cop?: number | null;
   contribution_before_cac_cop?: number | null;
@@ -168,6 +173,11 @@ export function buildOpsMetricsPayload(
       collectedCOP,
       overdueCOP,
       upcomingCOP,
+      paidGrossCOP: sum(currentRows, "paid_gross_cop"),
+      refundCOP: sum(currentRows, "refund_cop"),
+      creditIssuedCOP: sum(currentRows, "credit_issued_cop"),
+      creditAppliedCOP: sum(currentRows, "credit_applied_cop"),
+      creditLiabilityCOP: sum(currentRows, "credit_liability_cop"),
     },
     margin: {
       cashCOP: sum(currentRows, "cash_margin_cop"),

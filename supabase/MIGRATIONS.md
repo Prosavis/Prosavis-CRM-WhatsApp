@@ -104,6 +104,19 @@ Revisar el SQL generado antes de commitear.
 - RLS directorio: `20260721133000_enable_rls_directory_issues_suggestions_backup.sql`
   (desde 12/08: guard si falta tabla backup en reset local).
 
+### Cancelación y resolución financiera (08/09/2026)
+
+- Archivo: `20260908171438_cancellation_payment_resolution.sql`.
+- Añade motivo, resultado financiero, cobro bruto/neto, devoluciones y créditos
+  en `bookings`, `booking_facts` y `daily_ops_rollup`.
+- Backfill de cancelaciones existentes a `motivo_desconocido_legacy` antes de
+  hacer el motivo exigible. El RPC tolera proyecciones viejas.
+- `collected_cop` queda neto de devoluciones completadas.
+- pgTAP: `supabase/tests/cancellation_payment_resolution.test.sql`.
+- Orden de despliegue: esta migración compatible → backfill Firestore
+  dry-run/apply → Functions + proyección → reconciliar facts → UserConsole →
+  App/Web. GitHub Actions sigue apagado; no `db push` sin orden de este turno.
+
 ### OPS V5 (12/08/2026 noche)
 
 - Gate SQL local: **313 tests PASS** (`npm run test:ops-v5-sql`).
