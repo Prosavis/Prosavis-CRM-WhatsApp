@@ -1,9 +1,9 @@
 import { corsHeaders } from '../_shared/cors.ts';
 import { isUsableName } from '../_shared/contactDisplayName.ts';
 import {
+  directoryPhoneFromWhatsAppIdentity,
   directoryPhoneKey,
   directoryPhoneLookupVariants,
-  normalizeDirectoryPhoneE164,
 } from '../_shared/directoryPhone.ts';
 import { getServiceClient } from '../_shared/supabase.ts';
 import { isCommercialPhoneNumberId } from '../_shared/whatsappLines.ts';
@@ -84,15 +84,18 @@ Deno.serve(async (req) => {
     const supabase = getServiceClient();
     const isCommercial = isCommercialPhoneNumberId(safeString(record.phone_number_id));
 
-    // --- Resolver phone (E.164 canónico) ---
-    const rawPhone = safeString(record.contact_phone) || safeString(record.phone);
-    if (!rawPhone) {
-      return new Response(JSON.stringify({ error: 'Falta phone/contact_phone en el record.' }), {
-        status: 400,
+    // LID/BSUID conversations have no dialable phone; the table trigger
+    // creates the crm_directory row keyed by stable_key.
+    const phone = directoryPhoneFromWhatsAppIdentity(
+      safeString(record.contact_phone),
+      safeString(record.phone),
+    );
+    if (!phone) {
+      return new Response(JSON.stringify({ ok: true, skipped: 'no_e164_phone' }), {
+        status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-    const phone = normalizeDirectoryPhoneE164(rawPhone) ?? rawPhone;
 
     // --- Construir display_name y full_name ---
     // contact_name (editable manualmente) tiene prioridad sobre el push name de WhatsApp
@@ -106,7 +109,7 @@ Deno.serve(async (req) => {
     const isActive = record.state === 'active';
 
     // --- Buscar entry existente (phone_key canónico, luego variantes legacy) ---
-    const phoneKey = directoryPhoneKey(rawPhone);
+    const phoneKey = directoryPhoneKey(phone);
     let existingEntry: Record<string, unknown> | null = null;
 
     if (phoneKey) {
@@ -119,7 +122,7 @@ Deno.serve(async (req) => {
     }
 
     if (!existingEntry) {
-      const phoneVariants = directoryPhoneLookupVariants(rawPhone);
+      const phoneVariants = directoryPhoneLookupVariants(phone);
       const { data: byPhone } = await supabase
         .from('crm_directory')
         .select('id, display_name, full_name, photo_url, unread_whatsapp_count, opt_out, status')

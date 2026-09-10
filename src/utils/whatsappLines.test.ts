@@ -6,6 +6,7 @@ import {
   customerPhoneFromStableKey,
   isCommercialStableKey,
   isLidStableKey,
+  isWhatsappLidIdentity,
   resolveWhatsAppLine,
   siblingConversationStableKey,
 } from './whatsappLines';
@@ -31,5 +32,14 @@ describe('whatsappLines', () => {
     const key = conversationStableKey('lid:CO.2284278722318211', COMMERCIAL_PHONE_NUMBER_ID);
     expect(isLidStableKey(key)).toBe(true);
     expect(isLidStableKey(conversationStableKey(CUSTOMER, COMMERCIAL_PHONE_NUMBER_ID))).toBe(false);
+  });
+
+  it('does not treat a private LID or BSUID as a dialable phone', () => {
+    expect(isWhatsappLidIdentity('lid:CO.2284278722318211')).toBe(true);
+    expect(
+      isWhatsappLidIdentity(`lid:CO.2284278722318211__${COMMERCIAL_PHONE_NUMBER_ID}`),
+    ).toBe(true);
+    expect(isWhatsappLidIdentity('CO.2284278722318211')).toBe(true);
+    expect(isWhatsappLidIdentity(CUSTOMER)).toBe(false);
   });
 });

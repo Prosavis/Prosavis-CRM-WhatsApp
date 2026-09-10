@@ -81,6 +81,17 @@ export function isLidStableKey(stableKey: string | null | undefined): boolean {
   return isLidCustomerKey(customerPhoneFromStableKey(stableKey ?? ''));
 }
 
+const BSUID_IDENTITY_REGEX = /^[A-Z]{2}\.[A-Za-z0-9.]+$/;
+
+/** True when a WhatsApp identifier is a private LID/BSUID, not a dialable phone. */
+export function isWhatsappLidIdentity(value: string | null | undefined): boolean {
+  const v = (value ?? '').trim();
+  if (!v) return false;
+  const customer = customerPhoneFromStableKey(v);
+  if (isLidCustomerKey(v) || isLidCustomerKey(customer)) return true;
+  return BSUID_IDENTITY_REGEX.test(customer);
+}
+
 export function siblingConversationStableKey(stableKey: string): string | null {
   const key = stableKey.trim();
   if (!key) return null;

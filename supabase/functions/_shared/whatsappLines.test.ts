@@ -6,6 +6,7 @@ import {
   customerPhoneFromStableKey,
   isCommercialPhoneNumberId,
   isCommercialStableKey,
+  isWhatsappLidIdentity,
   resolveWhatsAppLine,
   siblingConversationStableKey,
   assertBotOnlyAutomation,
@@ -33,6 +34,17 @@ Deno.test('sibling keys point bot ↔ commercial without colliding', () => {
   const commercial = conversationStableKey(CUSTOMER, COMMERCIAL_PHONE_NUMBER_ID);
   assertEquals(siblingConversationStableKey(bot), commercial);
   assertEquals(siblingConversationStableKey(commercial), bot);
+});
+
+Deno.test('LID/BSUID identifiers are not treated as directory phones', () => {
+  assertEquals(isWhatsappLidIdentity('lid:CO.2284278722318211'), true);
+  assertEquals(
+    isWhatsappLidIdentity(`lid:CO.2284278722318211__${COMMERCIAL_PHONE_NUMBER_ID}`),
+    true,
+  );
+  assertEquals(isWhatsappLidIdentity('CO.2284278722318211'), true);
+  assertEquals(isWhatsappLidIdentity('573001234567'), false);
+  assertEquals(isWhatsappLidIdentity('+573001234567'), false);
 });
 
 Deno.test('bot automation cannot target commercial line', () => {

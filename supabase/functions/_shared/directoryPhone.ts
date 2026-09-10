@@ -3,6 +3,8 @@
  * Alineado con prosavis-firebase/functions/src/utils/phone.ts
  */
 
+import { isWhatsappLidIdentity } from './whatsappLines.ts';
+
 export function normalizeDirectoryPhoneE164(
   phone: string | null | undefined
 ): string | null {
@@ -40,6 +42,16 @@ export function isReactivationPhoneValid(
     return national.length === 10 && national.startsWith('3');
   }
   return digits.length >= 10 && digits.length <= 15;
+}
+
+/** E.164 usable in crm_directory. LID/BSUID is not a phone. */
+export function directoryPhoneFromWhatsAppIdentity(
+  contactPhone: string | null | undefined,
+  phone: string | null | undefined,
+): string | null {
+  const raw = (contactPhone || phone || '').trim();
+  if (!raw || isWhatsappLidIdentity(raw)) return null;
+  return normalizeDirectoryPhoneE164(raw);
 }
 
 export function directoryPhoneKey(

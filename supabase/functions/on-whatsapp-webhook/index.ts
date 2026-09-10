@@ -10,6 +10,10 @@ import {
 import { nextLastInboundAt } from '../_shared/metaSessionWindow.ts';
 import { recomputeWhatsAppConversationPreview } from '../_shared/recomputeConversationPreview.ts';
 import { UNARCHIVE_CONVERSATION_PATCH } from '../_shared/whatsappOutbound.ts';
+import {
+  remapDirectoryLidToPhone,
+  type DirectoryLidRemapClient,
+} from '../_shared/directoryLidRemap.ts';
 import { directoryPhoneKey } from '../_shared/directoryPhone.ts';
 import { REACTIVATION_SEQUENCE } from '../_shared/reactivationCadence.ts';
 import { applyColdFailureTag, removeColdFailureTags } from '../_shared/coldAppUserOutreach.ts';
@@ -152,6 +156,14 @@ async function remapLidConversationToPhone(params: {
   const lidKey = conversationStableKey(lidCustomerKey(params.userId), params.phoneNumberId);
   const phoneKey = conversationStableKey(params.phone, params.phoneNumberId);
   if (!params.userId || !params.phone || lidKey === phoneKey) return;
+
+  await remapDirectoryLidToPhone({
+    supabase: params.supabase as DirectoryLidRemapClient,
+    lidKey,
+    phoneKey,
+    phone: params.phone,
+    phoneNumberId: params.phoneNumberId,
+  });
 
   const { data: lidConv, error: lidReadError } = await params.supabase
     .from('whatsapp_conversations')
@@ -415,7 +427,7 @@ async function processInboundMessage(params: {
   });
 
   // Actualiza directorio: last_response_at + opt-out por "PARAR".
-  // LID threads have no phone; the directory trigger already no-ops without one.
+  // LID threads have no E.164; sync_conversation_to_directory keys them by stable_key.
   if (!isLid) {
     await syncDirectoryOnInbound({
       supabase: params.supabase,
