@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { supabase } from '@/config/supabase';
+import { directoryService } from '@/services/directoryService';
 import type { WhatsAppConversation } from '@/services/whatsappService';
 import type { DirectoryEntry } from '@/types/lead';
 import { pickContactPhotoUrl } from '@/utils/contactAvatar';
 import { resolveContactDisplayName } from '@/utils/contactDisplayName';
 import {
-  directoryPhoneLookupVariants,
-  directoryPhonesMatch,
-} from '@/utils/directoryPhone';
-import { normalizeWhatsAppPanelPhone } from '@/utils/whatsappPhone';
+  directoryEntryMatchesConversation,
+  isDialableConversationPhone,
+} from '@/utils/directoryConversationMatch';
+import { directoryPhonesMatch } from '@/utils/directoryPhone';
 
 export interface ContactPanelUser {
   id: string;
@@ -38,53 +38,24 @@ export interface WhatsAppContactContextValue {
   photoUrl?: string;
 }
 
-function mapDirectoryRow(row: Record<string, unknown>): DirectoryEntry {
+function userFromDirectoryEntry(entry: DirectoryEntry): ContactPanelUser {
+  const meta = entry.metadata ?? {};
+  const dName = entry.displayName ?? entry.fullName ?? undefined;
   return {
-    id: String(row.id),
-    fullName: row.full_name != null ? String(row.full_name) : '',
-    displayName: row.display_name != null ? String(row.display_name) : undefined,
-    email: row.email != null ? String(row.email) : undefined,
-    phone: row.phone != null ? String(row.phone) : undefined,
-    photoUrl: row.photo_url != null ? String(row.photo_url) : undefined,
-    address: row.address != null ? String(row.address) : undefined,
-    notes: row.notes != null ? String(row.notes) : undefined,
-    appUserId: row.app_user_id != null ? String(row.app_user_id) : undefined,
-    isAppUser: Boolean(row.is_app_user),
-    providerId: row.provider_id != null ? String(row.provider_id) : undefined,
-    serviceId: row.service_id != null ? String(row.service_id) : undefined,
-    classification: (row.classification as DirectoryEntry['classification']) ?? 'unknown',
-    qualityTag: (row.quality_tag as DirectoryEntry['qualityTag']) ?? 'standard',
-    status: (row.status as string) ?? 'active',
-    source: row.source != null ? String(row.source) : undefined,
-    channels: (row.channels as DirectoryEntry['channels']) ?? [],
-    paymentStatus: row.payment_status != null ? String(row.payment_status) : undefined,
-    pendingAmount: Number(row.pending_amount ?? 0),
-    pendingAppointmentsCount: Number(row.pending_appointments_count ?? 0),
-    lastChargedAmount: row.last_charged_amount != null ? Number(row.last_charged_amount) : undefined,
-    otpRequired: Boolean(row.otp_required),
-    preferredServiceAddressLine: row.preferred_service_address_line != null ? String(row.preferred_service_address_line) : undefined,
-    preferredServiceAddressRef: row.preferred_service_address_ref != null ? String(row.preferred_service_address_ref) : undefined,
-    firstContactAt: row.first_contact_at != null ? String(row.first_contact_at) : undefined,
-    lastContactAt: row.last_contact_at != null ? String(row.last_contact_at) : undefined,
-    messagesCount: Number(row.messages_count ?? 0),
-    activeSequence: (row.active_sequence as string) ?? 'NINGUNA',
-    sequenceStep: Number(row.sequence_step ?? 0),
-    optOut: Boolean(row.opt_out),
-    lastResponseText: row.last_response_text != null ? String(row.last_response_text) : undefined,
-    lastResponseAt: row.last_response_at != null ? String(row.last_response_at) : undefined,
-    lastWhatsAppMessageAt: row.last_whatsapp_message_at != null ? String(row.last_whatsapp_message_at) : undefined,
-    lastWhatsAppMessageText: row.last_whatsapp_message_text != null ? String(row.last_whatsapp_message_text) : undefined,
-    lastWhatsAppIntent: row.last_whatsapp_intent != null ? String(row.last_whatsapp_intent) : undefined,
-    unreadWhatsAppCount: Number(row.unread_whatsapp_count ?? 0),
-    whatsAppAssignedTo: row.whatsapp_assigned_to != null ? String(row.whatsapp_assigned_to) : undefined,
-    whatsAppConversationId: row.whatsapp_conversation_id != null ? String(row.whatsapp_conversation_id) : undefined,
-    appointmentId: row.appointment_id != null ? String(row.appointment_id) : undefined,
-    internalNotes: row.internal_notes != null ? String(row.internal_notes) : undefined,
-    tags: (row.tags as string[]) ?? [],
-    metadata: (row.metadata ?? {}) as Record<string, unknown>,
-    createdAt: String(row.created_at),
-    updatedAt: String(row.updated_at),
-    lastSyncedAt: row.last_synced_at != null ? String(row.last_synced_at) : undefined,
+    id: String(entry.appUserId ?? entry.phone ?? entry.id),
+    name: dName,
+    displayName: dName,
+    email: entry.email,
+    photoURL: entry.photoUrl,
+    photoUrl: entry.photoUrl,
+    phoneNumber: entry.phone,
+    bio: entry.notes ?? (meta.bio != null ? String(meta.bio) : undefined),
+    department: meta.department != null ? String(meta.department) : undefined,
+    city: meta.city != null ? String(meta.city) : undefined,
+    address:
+      entry.address ??
+      (meta.address != null ? String(meta.address) : undefined),
+    isProvider: Boolean(entry.providerId) || Boolean(meta.isProvider),
   };
 }
 
@@ -122,63 +93,26 @@ export function useWhatsAppContactContext(
     const gen = ++fetchGenRef.current;
     setLoading(true);
     try {
-      const phone = normalizeWhatsAppPanelPhone(
-        conversation.phone ?? conversation.contactPhone ?? conversation.id,
-      );
+      const phoneRaw = conversation.phone ?? conversation.contactPhone ?? null;
+      let entry: DirectoryEntry | null = null;
+      if (isDialableConversationPhone(phoneRaw)) {
+        const found = await directoryService.findByPhone(phoneRaw);
+        entry = found[0] ?? null;
+      }
+      if (!entry && conversation.id) {
+        entry = await directoryService.findByConversation(conversation.id);
+      }
 
-      if (phone) {
-        const phoneVariants = directoryPhoneLookupVariants(phone);
-        const lookupPhones =
-          phoneVariants.length > 0 ? phoneVariants : [phone];
+      if (gen !== fetchGenRef.current) return;
 
-        const { data: dirRows } = await supabase
-          .from('crm_directory')
-          .select('*')
-          .in('phone', lookupPhones)
-          .order('updated_at', { ascending: false })
-          .limit(5);
-
-        if (gen !== fetchGenRef.current) return;
-
-        const dirRow =
-          (dirRows ?? []).find((row) =>
-            directoryPhonesMatch(row.phone as string | null, phone),
-          ) ?? null;
-
-        setDirectoryEntry(dirRow ? mapDirectoryRow(dirRow) : null);
-
-        if (dirRow) {
-          const meta = (dirRow.metadata ?? {}) as Record<string, unknown>;
-          const dName =
-            (dirRow.display_name as string | null) ??
-            (dirRow.full_name as string | null) ??
-            undefined;
-          const dirPhone = (dirRow.phone as string | null) ?? phone;
-          const dirNotes = (dirRow.notes as string | null) ?? undefined;
-          const dirAddress = (dirRow.address as string | null) ?? undefined;
-          setUser({
-            id: String(dirRow.app_user_id ?? dirRow.phone ?? phone),
-            name: dName,
-            displayName: dName,
-            email: (dirRow.email as string | null) ?? undefined,
-            photoURL: (dirRow.photo_url as string | null) ?? undefined,
-            photoUrl: (dirRow.photo_url as string | null) ?? undefined,
-            phoneNumber: dirPhone,
-            bio: dirNotes ?? (meta.bio != null ? String(meta.bio) : undefined),
-            department: meta.department != null ? String(meta.department) : undefined,
-            city: meta.city != null ? String(meta.city) : undefined,
-            address: dirAddress ?? (meta.address != null ? String(meta.address) : undefined),
-            isProvider:
-              Boolean(dirRow.provider_id) || Boolean(meta.isProvider),
-          });
-        } else {
-          setUser(null);
-        }
-      } else {
-        if (gen !== fetchGenRef.current) return;
+      if (!entry || !directoryEntryMatchesConversation(entry, conversation)) {
         setDirectoryEntry(null);
         setUser(null);
+        return;
       }
+
+      setDirectoryEntry(entry);
+      setUser(userFromDirectoryEntry(entry));
     } finally {
       if (gen === fetchGenRef.current) {
         setLoading(false);
@@ -190,13 +124,8 @@ export function useWhatsAppContactContext(
     void refresh();
   }, [refresh]);
 
-  // Prefer directory only when it matches this conversation's phone (avoids stale overlay).
   const matchedDirectory =
-    directoryEntry &&
-    directoryPhonesMatch(
-      directoryEntry.phone,
-      conversation?.phone ?? conversation?.contactPhone ?? conversation?.id,
-    )
+    directoryEntry && directoryEntryMatchesConversation(directoryEntry, conversation ?? {})
       ? directoryEntry
       : null;
 

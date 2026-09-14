@@ -8,6 +8,27 @@ import {
 } from './directoryPhone.ts';
 import type { InboxAiDirectory } from './inboxAiContextFormat.ts';
 
+const COMMERCIAL_STABLE_KEY_SEP = '__';
+const LID_CUSTOMER_PREFIX = 'lid:';
+const BSUID_IDENTITY_REGEX = /^[A-Z]{2}\.[A-Za-z0-9.]+$/;
+
+function customerKeyFromStableKey(stableKey: string): string {
+  const idx = stableKey.indexOf(COMMERCIAL_STABLE_KEY_SEP);
+  return idx === -1 ? stableKey.trim() : stableKey.slice(0, idx).trim();
+}
+
+function isCommercialConversationKey(stableKey: string): boolean {
+  return stableKey.includes(COMMERCIAL_STABLE_KEY_SEP);
+}
+
+function isLidConversationKey(stableKey: string): boolean {
+  const customer = customerKeyFromStableKey(stableKey);
+  return (
+    customer.startsWith(LID_CUSTOMER_PREFIX) ||
+    BSUID_IDENTITY_REGEX.test(customer)
+  );
+}
+
 type SupabaseClient = any;
 
 const CONVERSATION_TAG_QUERY_BATCH_SIZE = 100;
@@ -150,31 +171,10 @@ export async function loadConversationContext(
   };
 }
 
-export async function loadDirectoryByPhone(
-  supabase: SupabaseClient,
-  phone: string,
-): Promise<InboxAiDirectory | null> {
-  const e164 = normalizeDirectoryPhoneE164(phone) ?? phone;
-  const variants = directoryPhoneLookupVariants(e164);
-  const lookupPhones = variants.length > 0 ? variants : [phone];
+const DIRECTORY_SELECT =
+  'id, full_name, display_name, phone, email, address, preferred_service_address_line, notes, internal_notes, tags, app_user_id, source, service_id, classification, payment_status, opt_out, metadata';
 
-  const { data: rows, error } = await supabase
-    .from('crm_directory')
-    .select(
-      'id, full_name, display_name, phone, email, address, preferred_service_address_line, notes, internal_notes, tags, app_user_id, source, service_id, classification, payment_status, opt_out, metadata',
-    )
-    .in('phone', lookupPhones)
-    .order('updated_at', { ascending: false })
-    .limit(DIRECTORY_QUERY_LIMIT);
-  if (error) throw error;
-
-  const targetKey = directoryPhoneKey(phone);
-  const row = (rows ?? []).find((candidate: Record<string, unknown>) => {
-    const key = directoryPhoneKey(asTrimmedString(candidate.phone));
-    return Boolean(targetKey && key && key === targetKey);
-  }) ?? (rows ?? [])[0] ?? null;
-  if (!row) return null;
-
+function mapInboxAiDirectoryRow(row: Record<string, unknown>): InboxAiDirectory {
   const tags = Array.isArray(row.tags)
     ? row.tags
       .map((tag: unknown) => asTrimmedString(tag))
@@ -185,6 +185,7 @@ export async function loadDirectoryByPhone(
   return {
     id: String(row.id),
     fullName: asTrimmedString(row.display_name) ?? asTrimmedString(row.full_name),
+    phone: asTrimmedString(row.phone),
     email: asTrimmedString(row.email),
     address: asTrimmedString(row.address),
     preferredServiceAddress: asTrimmedString(row.preferred_service_address_line),
@@ -199,6 +200,65 @@ export async function loadDirectoryByPhone(
     optOut: row.opt_out === true,
     isReturningClient: Boolean(appUserId),
   };
+}
+
+export async function loadDirectoryByPhone(
+  supabase: SupabaseClient,
+  phone: string,
+): Promise<InboxAiDirectory | null> {
+  const e164 = normalizeDirectoryPhoneE164(phone) ?? phone;
+  const variants = directoryPhoneLookupVariants(e164);
+  const lookupPhones = variants.length > 0 ? variants : [phone];
+
+  const { data: rows, error } = await supabase
+    .from('crm_directory')
+    .select(DIRECTORY_SELECT)
+    .in('phone', lookupPhones)
+    .order('updated_at', { ascending: false })
+    .limit(DIRECTORY_QUERY_LIMIT);
+  if (error) throw error;
+
+  const targetKey = directoryPhoneKey(phone);
+  const row = (rows ?? []).find((candidate: Record<string, unknown>) => {
+    const key = directoryPhoneKey(asTrimmedString(candidate.phone));
+    return Boolean(targetKey && key && key === targetKey);
+  }) ?? (rows ?? [])[0] ?? null;
+  if (!row) return null;
+  return mapInboxAiDirectoryRow(row);
+}
+
+export async function loadDirectoryByConversation(
+  supabase: SupabaseClient,
+  stableKey: string,
+): Promise<InboxAiDirectory | null> {
+  const key = stableKey.trim();
+  if (!key) return null;
+  const column = isCommercialConversationKey(key)
+    ? 'whatsapp_commercial_conversation_id'
+    : 'whatsapp_conversation_id';
+
+  const { data, error } = await supabase
+    .from('crm_directory')
+    .select(DIRECTORY_SELECT)
+    .eq(column, key)
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return mapInboxAiDirectoryRow(data as Record<string, unknown>);
+}
+
+/** Phone lookup first; LID chats and misses fall back to the conversation key. */
+export async function loadDirectoryForConversation(
+  supabase: SupabaseClient,
+  stableKey: string,
+  phone?: string | null,
+): Promise<InboxAiDirectory | null> {
+  if (!isLidConversationKey(stableKey) && phone) {
+    const byPhone = await loadDirectoryByPhone(supabase, phone);
+    if (byPhone) return byPhone;
+  }
+  return loadDirectoryByConversation(supabase, stableKey);
 }
 
 async function loadOfficialSnippets(

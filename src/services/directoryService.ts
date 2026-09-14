@@ -8,6 +8,9 @@ import {
 import type { DirectoryEntry, DirectoryClassification } from '@/types/lead';
 import type { Database } from '@/types/database';
 import {
+  conversationDirectoryColumn,
+} from '@/utils/directoryConversationMatch';
+import {
   directoryPhoneKey,
   directoryPhoneLookupVariants,
   normalizeDirectoryPhoneE164,
@@ -89,6 +92,7 @@ export function mapRowToEntry(row: DirectoryRow): DirectoryEntry {
     unreadWhatsAppCount: row.unread_whatsapp_count,
     whatsAppAssignedTo: row.whatsapp_assigned_to ?? undefined,
     whatsAppConversationId: row.whatsapp_conversation_id ?? undefined,
+    whatsAppCommercialConversationId: row.whatsapp_commercial_conversation_id ?? undefined,
     appointmentId: row.appointment_id ?? undefined,
     internalNotes: row.internal_notes ?? undefined,
     tags: row.tags ?? [],
@@ -138,6 +142,9 @@ function toDbEntry(data: Partial<DirectoryEntry>): Record<string, unknown> {
   if (data.unreadWhatsAppCount !== undefined) row.unread_whatsapp_count = data.unreadWhatsAppCount;
   if (data.whatsAppAssignedTo !== undefined) row.whatsapp_assigned_to = data.whatsAppAssignedTo;
   if (data.whatsAppConversationId !== undefined) row.whatsapp_conversation_id = data.whatsAppConversationId;
+  if (data.whatsAppCommercialConversationId !== undefined) {
+    row.whatsapp_commercial_conversation_id = data.whatsAppCommercialConversationId;
+  }
   if (data.appointmentId !== undefined) row.appointment_id = data.appointmentId;
   if (data.internalNotes !== undefined) row.internal_notes = data.internalNotes;
   if (data.tags !== undefined) row.tags = data.tags;
@@ -338,6 +345,29 @@ export const directoryService = {
         return true;
       })
       .map((row) => mapRowToEntry(row));
+  },
+
+  /** Busca la ficha ligada al hilo WhatsApp (teléfono o LID/BSUID). */
+  async findByConversation(stableKey: string): Promise<DirectoryEntry | null> {
+    const key = stableKey.trim();
+    if (!key) return null;
+    const column = conversationDirectoryColumn(key);
+    const { data, error } = await supabase
+      .from('crm_directory')
+      .select('*')
+      .eq(column, key)
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return data ? mapRowToEntry(data as DirectoryRow) : null;
+  },
+
+  async mergeEntries(primaryId: string, duplicateId: string): Promise<void> {
+    const { error } = await supabase.rpc('merge_directory_entries', {
+      p_primary: primaryId,
+      p_duplicate: duplicateId,
+    });
+    if (error) throw error;
   },
 
   /** Busca entrada por Firebase app_user_id. */

@@ -35,10 +35,15 @@ import { AppointmentService } from '@/services/appointmentService';
 import type { Appointment } from '@/types/appointment';
 import type { DirectoryChannel, DirectoryEntry } from '@/types/lead';
 import {
+  directoryConversationLink,
+  directoryEntryMatchesConversation,
+  isDialableConversationPhone,
+} from '@/utils/directoryConversationMatch';
+import {
   directoryPhoneKey,
-  directoryPhonesMatch,
   normalizeDirectoryPhoneE164,
 } from '@/utils/directoryPhone';
+import { isWhatsappLidIdentity } from '@/utils/whatsappLines';
 import { isUsableName } from '@/utils/contactDisplayName';
 import { ContactAvatar } from '@/components/common/ContactAvatar';
 import { uploadCrmContactPhoto } from '@/services/storageService';
@@ -115,8 +120,8 @@ function buildFormState(
 ): FormState {
   const metadata = entry?.metadata ?? {};
   return {
-    fullName: (entry?.fullName || '').trim(),
-    displayName: (entry?.displayName || '').trim(),
+    fullName: (entry?.fullName || conversation.contactName || conversation.whatsappProfileName || '').trim(),
+    displayName: (entry?.displayName || conversation.contactName || conversation.whatsappProfileName || '').trim(),
     email: (entry?.email || '').trim(),
     phone: formatPhoneDisplay(entry?.phone),
     photoUrl: (entry?.photoUrl || '').trim(),
@@ -274,12 +279,7 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
       return;
     }
 
-    const convPhone = conversation.contactPhone || conversation.phone || conversation.id;
-    // Never hydrate names from a directory row that belongs to another phone.
-    if (
-      entry &&
-      !directoryPhonesMatch(entry.phone, convPhone)
-    ) {
+    if (entry && !directoryEntryMatchesConversation(entry, conversation)) {
       hydratedIdsRef.current = { conversationId: convId, entryId: null };
       hydrateForm(null, conversation);
       return;
@@ -341,7 +341,7 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
     if (autoSyncDoneRef.current) return;
     if (loading) return;
     const convPhone = conversation.contactPhone || conversation.phone;
-    if (!convPhone) return;
+    if (!isDialableConversationPhone(convPhone)) return;
 
     const gen = ++syncGenRef.current;
     let cancelled = false;
@@ -376,15 +376,14 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
           return;
         }
 
-        if (entry && !directoryPhonesMatch(entry.phone, convPhone)) {
-          // Stale directory row for another phone — do not write.
+        if (entry && !directoryEntryMatchesConversation(entry, conversation)) {
           autoSyncDoneRef.current = true;
           return;
         }
 
         const updates: Record<string, unknown> = {};
         const hasPhoneInEntry = entry.phone && entry.phone.trim().length > 0;
-        if (!hasPhoneInEntry && convPhone) {
+        if (!hasPhoneInEntry && isDialableConversationPhone(convPhone)) {
           updates.phone = convPhone;
         }
 
@@ -477,18 +476,21 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
   }, [conversation.contactPhone, conversation.phone, form.phone, setField]);
 
   const handleSave = useCallback(async () => {
-    if (!entry) return;
-
     setSaving(true);
     setError(null);
     setSaveSuccess(false);
 
     try {
-      const convPhone = conversation.contactPhone || conversation.phone || conversation.id;
-      if (!directoryPhonesMatch(entry.phone, convPhone)) {
+      if (entry && !directoryEntryMatchesConversation(entry, conversation)) {
         setError(
-          'La ficha del directorio no corresponde a este chat (teléfono distinto). Recarga e intenta de nuevo.',
+          'La ficha del directorio no corresponde a este chat. Recarga e intenta de nuevo.',
         );
+        return;
+      }
+
+      const fullName = form.fullName.trim() || form.displayName.trim();
+      if (!fullName) {
+        setError('El nombre es obligatorio.');
         return;
       }
 
@@ -502,9 +504,16 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
         normalizedPhone = normalized;
       }
 
-      // Form phone must still resolve to the same conversation identity.
+      if (!entry && !normalizedPhone) {
+        setError('Necesitamos un teléfono válido para crear la ficha.');
+        return;
+      }
+
+      const convDialable = conversation.contactPhone || conversation.phone;
       const formPhoneKey = directoryPhoneKey(normalizedPhone ?? form.phone);
-      const convPhoneKey = directoryPhoneKey(convPhone);
+      const convPhoneKey = isDialableConversationPhone(convDialable)
+        ? directoryPhoneKey(convDialable)
+        : null;
       if (formPhoneKey && convPhoneKey && formPhoneKey !== convPhoneKey) {
         setError(
           'El teléfono de la ficha no coincide con el de este chat. Corrige el teléfono antes de guardar.',
@@ -512,15 +521,16 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
         return;
       }
 
-      const metadata = { ...(entry.metadata ?? {}) };
+      const metadata = { ...(entry?.metadata ?? {}) };
       if (form.department.trim()) metadata.department = form.department.trim();
       else delete metadata.department;
       if (form.city.trim()) metadata.city = form.city.trim();
       else delete metadata.city;
 
+      const conversationLink = directoryConversationLink(conversation.id);
       const directoryPayload: Partial<DirectoryEntry> = {
-        fullName: form.fullName.trim() || '',
-        displayName: form.displayName.trim() || form.fullName.trim() || undefined,
+        fullName,
+        displayName: form.displayName.trim() || fullName,
         email: form.email.trim() || undefined,
         phone: normalizedPhone,
         photoUrl: form.photoUrl.trim() || undefined,
@@ -528,8 +538,8 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
         notes: form.notes.trim() || undefined,
         qualityTag: form.qualityTag as DirectoryEntry['qualityTag'],
         status: form.status,
-        source: form.source || undefined,
-        channels: form.channels,
+        source: form.source || 'WHATSAPP_INBOUND',
+        channels: form.channels.length > 0 ? form.channels : ['WHATSAPP'],
         activeSequence: form.activeSequence,
         whatsAppAssignedTo: form.whatsAppAssignedTo.trim() || undefined,
         optOut: form.optOut,
@@ -543,6 +553,7 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
         serviceId: form.serviceId.trim() || undefined,
         internalNotes: form.internalNotes.trim() || undefined,
         metadata,
+        ...conversationLink,
       };
 
       const pendingAmount = parseNum(form.pendingAmount);
@@ -554,9 +565,26 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
       const lastChargedAmount = parseNum(form.lastChargedAmount);
       if (lastChargedAmount !== undefined) directoryPayload.lastChargedAmount = lastChargedAmount;
 
-      await directoryService.updateEntry(entry.id, directoryPayload);
+      let targetEntryId = entry?.id;
+      if (!entry) {
+        const created = await directoryService.createEntry(directoryPayload);
+        targetEntryId = created.id;
+        await directoryService.updateEntry(created.id, conversationLink);
+      } else if (normalizedPhone) {
+        const existingByPhone = await directoryService.findByPhone(normalizedPhone);
+        const other = existingByPhone.find((row) => row.id !== entry.id);
+        if (other) {
+          await directoryService.mergeEntries(other.id, entry.id);
+          targetEntryId = other.id;
+          await directoryService.updateEntry(other.id, directoryPayload);
+        } else {
+          await directoryService.updateEntry(entry.id, directoryPayload);
+        }
+      } else {
+        await directoryService.updateEntry(entry.id, directoryPayload);
+      }
 
-      const contactName = (form.displayName.trim() || form.fullName.trim());
+      const contactName = form.displayName.trim() || fullName;
       await patchWhatsAppConversationAdmin({
         conversationId: conversation.id,
         patch: {
@@ -564,19 +592,17 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
           contactPhotoUrl: form.photoUrl.trim() || null,
           whatsappProfileName: form.whatsappProfileName.trim() || null,
           adminNotes: form.adminNotes.trim() || null,
-          // Bloquea el nombre frente a futuros mensajes entrantes de WhatsApp.
           contactNameLocked: contactName.length >= 2 ? true : undefined,
         },
       });
 
-      // Write-back solo si el app_user_id pertenece a esta entrada (phone ya validado).
-      const appUid = (form.appUserId.trim() || entry.appUserId || '').trim();
-      const entryAppUid = (entry.appUserId || '').trim();
-      if (appUid && (!entryAppUid || appUid === entryAppUid)) {
+      const appUid = (form.appUserId.trim() || entry?.appUserId || '').trim();
+      const entryAppUid = (entry?.appUserId || '').trim();
+      if (appUid && targetEntryId && (!entryAppUid || appUid === entryAppUid)) {
         try {
           await updateAppUserProfile({
             uid: appUid,
-            name: form.fullName.trim() || form.displayName.trim() || undefined,
+            name: fullName,
             email: form.email.trim() || undefined,
             photoUrl: form.photoUrl.trim() || undefined,
           });
@@ -591,6 +617,8 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
 
       const savedForm: FormState = {
         ...form,
+        fullName,
+        displayName: form.displayName.trim() || fullName,
         phone: normalizedPhone ?? form.phone,
       };
       setForm(savedForm);
@@ -602,9 +630,15 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
     } finally {
       setSaving(false);
     }
-  }, [conversation.id, conversation.contactPhone, conversation.phone, entry, form, refetch]);
+  }, [conversation, entry, form, refetch]);
 
   const hasLinkedAppUser = Boolean(user?.id || entry?.appUserId || form.appUserId.trim());
+  const isLidChat =
+    isWhatsappLidIdentity(conversation.id) ||
+    isWhatsappLidIdentity(conversation.phone) ||
+    isWhatsappLidIdentity(conversation.contactPhone);
+  const showCreating = syncing && !entry && !isLidChat;
+  const showForm = !loading && !showCreating;
 
   return (
     <Box
@@ -657,8 +691,23 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
           </Alert>
         )}
 
-        {entry ? (
+        {showCreating && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', py: 2 }}>
+            <CircularProgress size={24} />
+            <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+              Creando entrada en directorio…
+            </Typography>
+          </Box>
+        )}
+
+        {showForm ? (
           <>
+            {!entry && (
+              <Alert severity="info" sx={{ mb: 1.5 }}>
+                Meta no compartió el teléfono de este chat. Completa nombre, teléfono y dirección
+                para guardar la ficha en el directorio.
+              </Alert>
+            )}
             {hasLinkedAppUser && (
               <Chip
                 label="Usuario app vinculado"
@@ -1047,6 +1096,8 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
               />
             </Stack>
 
+            {entry && (
+            <>
             <Divider sx={{ my: 2 }} />
 
             {/* === Auditoría (solo lectura) === */}
@@ -1094,7 +1145,15 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
               {entry.whatsAppConversationId && (
                 <ReadOnlyRow label="Conversación WA" value={entry.whatsAppConversationId} />
               )}
+              {entry.whatsAppCommercialConversationId && (
+                <ReadOnlyRow
+                  label="Conversación comercial"
+                  value={entry.whatsAppCommercialConversationId}
+                />
+              )}
             </Stack>
+            </>
+            )}
 
             <Button
               variant="contained"
@@ -1103,21 +1162,10 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
               onClick={() => void handleSave()}
               startIcon={saving ? <CircularProgress size={16} color="inherit" /> : undefined}
             >
-              {saving ? 'Guardando…' : 'Guardar cambios'}
+              {saving ? 'Guardando…' : entry ? 'Guardar cambios' : 'Crear ficha'}
             </Button>
           </>
-        ) : syncing ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', py: 2 }}>
-            <CircularProgress size={24} />
-            <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
-              Creando entrada en directorio…
-            </Typography>
-          </Box>
-        ) : (
-          <Typography variant="body2" color="text.secondary">
-            No hay entrada en el directorio para este teléfono.
-          </Typography>
-        )}
+        ) : null}
 
         <Divider sx={{ my: 2 }} />
 

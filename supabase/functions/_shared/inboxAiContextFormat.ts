@@ -50,6 +50,7 @@ export type InboxAiSectionHeading = keyof typeof SECTION_CHAR_BUDGETS;
 export interface InboxAiDirectory {
   id?: string;
   fullName?: string | null;
+  phone?: string | null;
   email?: string | null;
   address?: string | null;
   /** Dirección preferida de servicio en directorio (si existe). */
@@ -488,7 +489,7 @@ export function formatInboxAiContextBlock(params: {
   const directoryLines: string[] = [];
   if (directory) {
     directoryLines.push(`Nombre: ${directory.fullName ?? '—'}`);
-    directoryLines.push(`Teléfono: ${params.phone}`);
+    directoryLines.push(`Teléfono: ${directory.phone || params.phone}`);
     if (directory.email) directoryLines.push(`Email: ${directory.email}`);
     if (directory.city) directoryLines.push(`Ciudad: ${directory.city}`);
     if (directory.address) directoryLines.push(`Dirección de contacto: ${directory.address}`);

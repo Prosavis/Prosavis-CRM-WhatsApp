@@ -87,3 +87,57 @@ describe('directoryService.updateEntry', () => {
     expect(updateEq).toHaveBeenCalledWith('id', 'entry-a');
   });
 });
+
+describe('directoryService.findByConversation', () => {
+  it('looks up commercial LID threads by whatsapp_commercial_conversation_id', async () => {
+    const { directoryService } = await import('@/services/directoryService');
+    const { supabase } = await import('@/config/supabase');
+    const maybeSingleFn = vi.fn().mockResolvedValue({
+      data: {
+        id: 'dir-lid',
+        full_name: 'SOFY',
+        display_name: 'SOFY',
+        phone: null,
+        whatsapp_commercial_conversation_id: 'lid:CO.1__1043086062223440',
+        created_at: '2026-09-14',
+        updated_at: '2026-09-14',
+        classification: 'unknown',
+        quality_tag: 'standard',
+        status: 'active',
+        channels: [],
+        tags: [],
+        metadata: {},
+        is_app_user: false,
+        pending_amount: 0,
+        pending_appointments_count: 0,
+        messages_count: 0,
+        sequence_step: 0,
+        opt_out: false,
+        unread_whatsapp_count: 0,
+        otp_required: false,
+        active_sequence: 'NINGUNA',
+      },
+      error: null,
+    });
+    const limitFn = vi.fn(() => ({ maybeSingle: maybeSingleFn }));
+    const eqFn = vi.fn(() => ({ limit: limitFn }));
+    vi.mocked(supabase.from).mockReturnValue({
+      select: vi.fn(() => ({
+        eq: eqFn,
+      })),
+    } as never);
+
+    const entry = await directoryService.findByConversation(
+      'lid:CO.1__1043086062223440',
+    );
+
+    expect(entry?.id).toBe('dir-lid');
+    expect(entry?.whatsAppCommercialConversationId).toBe(
+      'lid:CO.1__1043086062223440',
+    );
+    expect(eqFn).toHaveBeenCalledWith(
+      'whatsapp_commercial_conversation_id',
+      'lid:CO.1__1043086062223440',
+    );
+  });
+});

@@ -46,7 +46,7 @@ import {
 } from './inboxAiContextFormat.ts';
 import {
   loadConversationContext,
-  loadDirectoryByPhone,
+  loadDirectoryForConversation,
   loadOfficialAnswers,
   type InboxAiConversationContext,
   type InboxAiOfficialAnswers,
@@ -379,7 +379,7 @@ export async function buildInboxAiContext(
 
   let directory: InboxAiDirectory | null = null;
   try {
-    directory = await loadDirectoryByPhone(supabase, phone);
+    directory = await loadDirectoryForConversation(supabase, stableKey, phone);
   } catch (err) {
     console.warn(
       JSON.stringify({

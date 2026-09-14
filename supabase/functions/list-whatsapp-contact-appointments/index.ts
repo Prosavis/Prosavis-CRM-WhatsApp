@@ -2,7 +2,7 @@ import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { requireCrmAdmin } from '../_shared/supabase.ts';
 import { formatError } from '../_shared/errors.ts';
 import { loadAppointmentsForContact } from '../_shared/inboxAiContext.ts';
-import { loadDirectoryByPhone } from '../_shared/inboxAiKnowledge.ts';
+import { loadDirectoryForConversation } from '../_shared/inboxAiKnowledge.ts';
 import { customerPhoneFromStableKey } from '../_shared/whatsappLines.ts';
 import { normalizePhone } from '../_shared/whatsappIdentity.ts';
 
@@ -19,7 +19,7 @@ Deno.serve(async (req) => {
     let directoryId: string | null = null;
     let appUserId: string | null = null;
     try {
-      const directory = await loadDirectoryByPhone(supabase, phone);
+      const directory = await loadDirectoryForConversation(supabase, stableKey, phone);
       directoryId = directory?.id ?? null;
       appUserId = directory?.appUserId ?? null;
     } catch (err) {

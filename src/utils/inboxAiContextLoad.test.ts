@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   OFFICIAL_ANSWERS_QUERY_LIMITS,
   loadConversationContext,
+  loadDirectoryByConversation,
   loadDirectoryByPhone,
+  loadDirectoryForConversation,
   loadOfficialAnswers,
 } from '../../supabase/functions/_shared/inboxAiKnowledge';
 
@@ -313,6 +315,7 @@ describe('loadDirectoryByPhone', () => {
     expect(result).toMatchObject({
       id: 'directory-1',
       fullName: 'Ana',
+      phone: '+573001112233',
       source: 'whatsapp',
       serviceId: 'cleaning',
       classification: 'client',
@@ -324,6 +327,70 @@ describe('loadDirectoryByPhone', () => {
       table: 'crm_directory',
       method: 'limit',
       args: [5],
+    });
+  });
+});
+
+describe('loadDirectoryByConversation', () => {
+  it('finds a commercial LID row by whatsapp_commercial_conversation_id', async () => {
+    const stableKey = 'lid:CO.1056069074089331__1043086062223440';
+    const { client, calls } = createSupabaseDouble({
+      crm_directory: [{
+        id: '08e759aa-c899-4efa-8947-82b661a975f2',
+        phone: null,
+        full_name: 'SOFY',
+        display_name: 'SOFY',
+        whatsapp_commercial_conversation_id: stableKey,
+        source: 'WHATSAPP',
+        classification: 'unknown',
+        opt_out: false,
+        tags: [],
+        metadata: {},
+      }],
+    });
+
+    const result = await loadDirectoryByConversation(client, stableKey);
+
+    expect(result).toMatchObject({
+      id: '08e759aa-c899-4efa-8947-82b661a975f2',
+      fullName: 'SOFY',
+    });
+    expect(calls).toContainEqual({
+      table: 'crm_directory',
+      method: 'eq',
+      args: ['whatsapp_commercial_conversation_id', stableKey],
+    });
+  });
+});
+
+describe('loadDirectoryForConversation', () => {
+  it('skips the fake BSUID phone lookup on LID chats', async () => {
+    const stableKey = 'lid:CO.1056069074089331__1043086062223440';
+    const { client, calls } = createSupabaseDouble({
+      crm_directory: [{
+        id: 'dir-lid',
+        phone: null,
+        full_name: 'SOFY',
+        display_name: 'SOFY',
+        whatsapp_commercial_conversation_id: stableKey,
+        tags: [],
+        metadata: {},
+        opt_out: false,
+      }],
+    });
+
+    const result = await loadDirectoryForConversation(
+      client,
+      stableKey,
+      '1056069074089331',
+    );
+
+    expect(result?.id).toBe('dir-lid');
+    expect(calls.some((call) => call.method === 'in')).toBe(false);
+    expect(calls).toContainEqual({
+      table: 'crm_directory',
+      method: 'eq',
+      args: ['whatsapp_commercial_conversation_id', stableKey],
     });
   });
 });

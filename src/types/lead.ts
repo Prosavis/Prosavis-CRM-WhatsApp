@@ -102,6 +102,7 @@ export interface DirectoryEntry {
   unreadWhatsAppCount: number;
   whatsAppAssignedTo?: string;
   whatsAppConversationId?: string;
+  whatsAppCommercialConversationId?: string;
 
   // Internal
   internalNotes?: string;

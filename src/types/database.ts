@@ -208,6 +208,7 @@ export interface Database {
           unread_whatsapp_count: number;
           whatsapp_assigned_to: string | null;
           whatsapp_conversation_id: string | null;
+          whatsapp_commercial_conversation_id: string | null;
           appointment_id: string | null;
           internal_notes: string | null;
           tags: string[];
