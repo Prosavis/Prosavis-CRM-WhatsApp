@@ -29,6 +29,10 @@ import {
   normalizePhone,
   resolveRecipient,
 } from '../_shared/whatsappIdentity.ts';
+import {
+  buildProfessionalReminderAddress,
+  sanitizeWhatsAppTemplateParam,
+} from '../_shared/whatsappTemplateText.ts';
 
 const DEFAULT_TIMEZONE = 'America/Bogota';
 
@@ -260,18 +264,28 @@ Deno.serve(async (req) => {
         {
           type: 'body',
           parameters: [
-            { type: 'text', text: appointmentData.clientName },
-            { type: 'text', text: appointmentData.professionalName || 'Profesional' },
-            { type: 'text', text: formatSchedule(appointmentData.scheduledDate) },
-            { type: 'text', text: appointmentData.address || '—' },
-            { type: 'text', text: formatDuration(appointmentData.durationMinutes) },
+            { type: 'text', text: sanitizeWhatsAppTemplateParam(appointmentData.clientName) },
             {
               type: 'text',
-              text: buildPaymentText(appointmentData.totalAmount, appointmentData.paymentStatus),
+              text: sanitizeWhatsAppTemplateParam(appointmentData.professionalName || 'Profesional'),
+            },
+            { type: 'text', text: sanitizeWhatsAppTemplateParam(formatSchedule(appointmentData.scheduledDate)) },
+            { type: 'text', text: sanitizeWhatsAppTemplateParam(appointmentData.address) },
+            {
+              type: 'text',
+              text: sanitizeWhatsAppTemplateParam(formatDuration(appointmentData.durationMinutes)),
             },
             {
               type: 'text',
-              text: buildPaymentWarning(appointmentData.totalAmount, appointmentData.paymentStatus),
+              text: sanitizeWhatsAppTemplateParam(
+                buildPaymentText(appointmentData.totalAmount, appointmentData.paymentStatus),
+              ),
+            },
+            {
+              type: 'text',
+              text: sanitizeWhatsAppTemplateParam(
+                buildPaymentWarning(appointmentData.totalAmount, appointmentData.paymentStatus),
+              ),
             },
           ],
         },
@@ -283,18 +297,19 @@ Deno.serve(async (req) => {
       // {{3}} horario (fecha + hora)
       // {{4}} duración
       const scheduleText = `${formatDate(appointmentData.scheduledDate)} — ${formatTime(appointmentData.scheduledDate)}`;
-      const addressText = mapsLink
-        ? `${appointmentData.address || '—'}\n📍 Google Maps: ${mapsLink}`
-        : (appointmentData.address || '—');
+      const addressText = buildProfessionalReminderAddress(appointmentData.address, mapsLink);
 
       components = [
         {
           type: 'body',
           parameters: [
-            { type: 'text', text: appointmentData.clientName },
+            { type: 'text', text: sanitizeWhatsAppTemplateParam(appointmentData.clientName) },
             { type: 'text', text: addressText },
-            { type: 'text', text: scheduleText },
-            { type: 'text', text: formatDuration(appointmentData.durationMinutes) },
+            { type: 'text', text: sanitizeWhatsAppTemplateParam(scheduleText) },
+            {
+              type: 'text',
+              text: sanitizeWhatsAppTemplateParam(formatDuration(appointmentData.durationMinutes)),
+            },
           ],
         },
       ];

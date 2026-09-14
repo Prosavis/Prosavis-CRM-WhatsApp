@@ -16,6 +16,7 @@ import {
   normalizePhone,
   resolveRecipient,
 } from '../_shared/whatsappIdentity.ts';
+import { sanitizeWhatsAppTemplateParam } from '../_shared/whatsappTemplateText.ts';
 
 const DEFAULT_TIMEZONE = 'America/Bogota';
 const TEMPLATE_NAME = 'confirmacion_cita';
@@ -109,18 +110,18 @@ Deno.serve(async (req) => {
     const dateStr = formatDate(scheduledDate);
     const timeStr = formatTime(scheduledDate);
     const paymentText = buildPaymentText(totalAmount, paymentStatus);
-    const displayAddress = address || '—';
+    const displayAddress = sanitizeWhatsAppTemplateParam(address);
     const displayMessageBody = `Confirmación: ${clientName} - ${dateStr} ${timeStr}`;
 
     const components = [
       {
         type: 'body',
         parameters: [
-          { type: 'text', text: clientName },
-          { type: 'text', text: dateStr },
-          { type: 'text', text: timeStr },
+          { type: 'text', text: sanitizeWhatsAppTemplateParam(clientName) },
+          { type: 'text', text: sanitizeWhatsAppTemplateParam(dateStr) },
+          { type: 'text', text: sanitizeWhatsAppTemplateParam(timeStr) },
           { type: 'text', text: displayAddress },
-          { type: 'text', text: paymentText },
+          { type: 'text', text: sanitizeWhatsAppTemplateParam(paymentText) },
         ],
       },
     ];
