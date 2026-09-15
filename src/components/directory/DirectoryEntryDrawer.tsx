@@ -13,8 +13,6 @@ import {
   Stack,
   Tooltip,
   Typography,
-  useMediaQuery,
-  useTheme,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import EditIcon from '@mui/icons-material/Edit';
@@ -24,6 +22,7 @@ import { es } from 'date-fns/locale';
 import { ContactAvatar } from '@/components/common/ContactAvatar';
 import type { DirectoryEntry } from '@/types/lead';
 import { getClassificationLabel } from '@/utils/classificationLabels';
+import { usePhoneLayout } from '@/hooks/usePhoneLayout';
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -145,8 +144,7 @@ const DirectoryEntryDrawer: React.FC<DirectoryEntryDrawerProps> = ({
   onEdit,
   onDelete,
 }) => {
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const isMobile = usePhoneLayout();
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   if (!entry) {

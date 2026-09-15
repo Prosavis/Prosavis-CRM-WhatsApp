@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { Box, IconButton, Typography } from '@mui/material';
+import CloseIcon from '@mui/icons-material/Close';
 import TemplateLibrary from '@/components/whatsapp/templates/TemplateLibrary';
 import {
   getWhatsAppBookingContext,
@@ -20,6 +22,8 @@ interface TemplatesSidePanelProps {
   conversationDisplayName?: string;
   lastInboundAt?: Date | null;
   lastMessageDirection?: 'inbound' | 'outbound';
+  compact?: boolean;
+  onClose?: () => void;
 }
 
 const TemplatesSidePanel: React.FC<TemplatesSidePanelProps> = ({
@@ -33,6 +37,8 @@ const TemplatesSidePanel: React.FC<TemplatesSidePanelProps> = ({
   conversationDisplayName,
   lastInboundAt = null,
   lastMessageDirection,
+  compact = false,
+  onClose,
 }) => {
   const [bookingContext, setBookingContext] = useState<BookingContextData | null>(null);
   const [sessionWindow, setSessionWindow] = useState<MetaSessionWindow | null>(null);
@@ -83,17 +89,43 @@ const TemplatesSidePanel: React.FC<TemplatesSidePanelProps> = ({
   ]);
 
   return (
-    <TemplateLibrary
-      mode="inbox"
-      wabaId={wabaId}
-      phoneNumberId={phoneNumberId}
-      recipientPhone={recipientPhone}
-      onApplyDraft={onApplyDraftToComposer}
-      snippets={snippets}
-      onSnippetsChanged={onSnippetsChanged}
-      suggestionContext={suggestionContext}
-      bookingContext={bookingContext ?? undefined}
-    />
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0 }}>
+      {compact && onClose ? (
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            minHeight: 56,
+            px: 1,
+            borderBottom: 1,
+            borderColor: 'divider',
+          }}
+        >
+          <IconButton
+            aria-label="Cerrar plantillas"
+            onClick={onClose}
+            sx={{ width: 44, height: 44 }}
+          >
+            <CloseIcon />
+          </IconButton>
+          <Typography variant="subtitle1" fontWeight={700}>
+            Plantillas
+          </Typography>
+        </Box>
+      ) : null}
+      <TemplateLibrary
+        mode="inbox"
+        wabaId={wabaId}
+        phoneNumberId={phoneNumberId}
+        recipientPhone={recipientPhone}
+        onApplyDraft={onApplyDraftToComposer}
+        snippets={snippets}
+        onSnippetsChanged={onSnippetsChanged}
+        suggestionContext={suggestionContext}
+        bookingContext={bookingContext ?? undefined}
+        compact={compact}
+      />
+    </Box>
   );
 };
 

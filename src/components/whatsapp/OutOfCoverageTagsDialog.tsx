@@ -21,6 +21,7 @@ import {
 import { useAuth } from '@/hooks/useAuth';
 import { normalizeInboxTagName } from '@/constants/inboxCategories';
 import TagListGrouped from './TagListGrouped';
+import { usePhoneLayout } from '@/hooks/usePhoneLayout';
 
 export interface OutOfCoverageTagsDialogProps {
   open: boolean;
@@ -40,6 +41,7 @@ const OutOfCoverageTagsDialog: React.FC<OutOfCoverageTagsDialogProps> = ({
   currentTagIds,
   onSaved,
 }) => {
+  const isMobile = usePhoneLayout();
   const { user } = useAuth();
   const [selected, setSelected] = useState<string[]>([]);
   const [search, setSearch] = useState('');
@@ -97,7 +99,13 @@ const OutOfCoverageTagsDialog: React.FC<OutOfCoverageTagsDialogProps> = ({
   }, [selected, user?.id, onSaved, onClose]);
 
   return (
-    <Dialog open={open} onClose={saving ? undefined : onClose} maxWidth="xs" fullWidth>
+    <Dialog
+      open={open}
+      onClose={saving ? undefined : onClose}
+      maxWidth="xs"
+      fullWidth
+      fullScreen={isMobile}
+    >
       <DialogTitle>Tags de Fuera de cobertura</DialogTitle>
       <DialogContent dividers>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>

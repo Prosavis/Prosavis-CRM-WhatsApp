@@ -25,7 +25,36 @@ export default defineConfig({
         storageState: 'e2e/.auth/admin.json',
       },
       dependencies: ['setup'],
-      testIgnore: /auth\.setup\.ts/,
+      testIgnore: [/auth\.setup\.ts/, /inbox\.mobile\.spec\.ts/],
+    },
+    {
+      name: 'mobile-chromium',
+      testMatch: /inbox\.mobile\.spec\.ts/,
+      use: {
+        ...devices['Pixel 5'],
+        viewport: { width: 390, height: 844 },
+        storageState: 'e2e/.auth/admin.json',
+      },
+      dependencies: ['setup'],
+    },
+    {
+      name: 'mobile-webkit',
+      testMatch: /inbox\.mobile\.spec\.ts/,
+      use: {
+        ...devices['iPhone 13'],
+        storageState: 'e2e/.auth/admin.json',
+      },
+      dependencies: ['setup'],
+    },
+    {
+      name: 'mobile-webkit-landscape',
+      testMatch: /inbox\.mobile\.spec\.ts/,
+      use: {
+        ...devices['iPhone 13'],
+        viewport: { width: 844, height: 390 },
+        storageState: 'e2e/.auth/admin.json',
+      },
+      dependencies: ['setup'],
     },
   ],
   webServer: process.env.E2E_SKIP_WEBSERVER

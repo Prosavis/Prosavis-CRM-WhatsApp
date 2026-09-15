@@ -44,6 +44,7 @@ import {
   deleteWhatsAppTagFolder,
   reorderWhatsAppTagFolders,
 } from '@/services/whatsappService';
+import { usePhoneLayout } from '@/hooks/usePhoneLayout';
 import { WHATSAPP_TAG_PRESET_COLORS } from '@/constants';
 import { buildTagFolderDisplayItems } from '@/utils/tagFolders';
 import TagColorPickerPopover from './TagColorPickerPopover';
@@ -66,6 +67,7 @@ const TagManagerDialog: React.FC<TagManagerDialogProps> = ({
   tagCounts,
   onTagsChanged,
 }) => {
+  const isMobile = usePhoneLayout();
   const [newName, setNewName] = useState('');
   const [newColor, setNewColor] = useState<string>(WHATSAPP_TAG_PRESET_COLORS[0]);
   const [newFolderId, setNewFolderId] = useState<string>('');
@@ -310,7 +312,7 @@ const TagManagerDialog: React.FC<TagManagerDialogProps> = ({
   );
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth fullScreen={isMobile}>
       <DialogTitle>Gestionar tags</DialogTitle>
       <DialogContent>
         <Box sx={{ display: 'flex', gap: 1, mb: 1.5, alignItems: 'center' }}>

@@ -9,6 +9,7 @@ import {
   FormControl,
   FormControlLabel,
   InputLabel,
+  IconButton,
   Link as MuiLink,
   MenuItem,
   Select,
@@ -22,6 +23,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
+import CloseIcon from '@mui/icons-material/Close';
 import { Link } from 'react-router-dom';
 import type { WhatsAppConversation } from '@/services/whatsappService';
 import {
@@ -225,11 +227,15 @@ const SectionTitle: React.FC<SectionTitleProps> = ({ children }) => (
 interface WhatsAppContactSidePanelProps {
   conversation: WhatsAppConversation;
   contact: WhatsAppContactContextValue;
+  mobile?: boolean;
+  onClose?: () => void;
 }
 
 const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
   conversation,
   contact,
+  mobile = false,
+  onClose,
 }) => {
   const { user, directoryEntry, lead, refetch, loading } = contact;
   const entry: DirectoryEntry | null = directoryEntry ?? lead;
@@ -643,9 +649,9 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
   return (
     <Box
       sx={{
-        width: 360,
-        minWidth: 300,
-        maxWidth: 400,
+        width: mobile ? '100%' : 360,
+        minWidth: mobile ? 0 : 300,
+        maxWidth: mobile ? '100%' : 400,
         flexShrink: 0,
         display: 'flex',
         flexDirection: 'column',
@@ -656,20 +662,42 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
         overflow: 'hidden',
       }}
     >
-      <Box sx={{ p: 1.5, borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
-        <Typography variant="subtitle2" fontWeight={600}>
-          Ficha cliente
-        </Typography>
-        {conversation.whatsappProfileName && (
-          <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
-            Perfil WA: {conversation.whatsappProfileName}
+      <Box
+        sx={{
+          p: mobile ? 1 : 1.5,
+          minHeight: mobile ? 56 : undefined,
+          borderBottom: 1,
+          borderColor: 'divider',
+          bgcolor: 'background.paper',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 0.5,
+        }}
+      >
+        {mobile && onClose ? (
+          <IconButton
+            aria-label="Cerrar ficha del cliente"
+            onClick={onClose}
+            sx={{ width: 44, height: 44 }}
+          >
+            <CloseIcon />
+          </IconButton>
+        ) : null}
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="subtitle2" fontWeight={600}>
+            Ficha cliente
           </Typography>
-        )}
-        {conversation.contactPhone && (
-          <Typography variant="caption" color="text.secondary" display="block">
-            {conversation.contactPhone}
-          </Typography>
-        )}
+          {conversation.whatsappProfileName && (
+            <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+              Perfil WA: {conversation.whatsappProfileName}
+            </Typography>
+          )}
+          {conversation.contactPhone && (
+            <Typography variant="caption" color="text.secondary" display="block">
+              {conversation.contactPhone}
+            </Typography>
+          )}
+        </Box>
       </Box>
 
       <Box sx={{ flex: 1, overflow: 'auto', p: 1.5 }}>

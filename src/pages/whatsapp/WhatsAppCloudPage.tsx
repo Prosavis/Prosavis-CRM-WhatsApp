@@ -11,6 +11,7 @@ import {
   WHATSAPP_CLOUD_PRODUCTION,
 } from '@/constants/whatsappCloudAccounts';
 import useSoundEffects from '@/hooks/useSoundEffects';
+import { usePhoneLayout } from '@/hooks/usePhoneLayout';
 import { ensureWhatsAppConversationFromLead } from '@/services/whatsappService';
 import { directoryService } from '@/services/directoryService';
 import {
@@ -44,6 +45,7 @@ const AutomationsPage = lazy(() => import('@/pages/automations/AutomationsPage')
 const { phoneNumberId, wabaId, phoneDisplay, botLabel } = WHATSAPP_CLOUD_PRODUCTION;
 
 const WhatsAppCloudPage: React.FC = () => {
+  const phoneLayout = usePhoneLayout();
   const [searchParams, setSearchParams] = useSearchParams();
   const { playNavigation } = useSoundEffects();
   const { registerTabController, unregisterTabController } = useAdminTour();
@@ -102,6 +104,7 @@ const WhatsAppCloudPage: React.FC = () => {
 
   const [directoryTotalContacts, setDirectoryTotalContacts] = useState<number | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [mobileChatActive, setMobileChatActive] = useState(false);
   const [showNotificationsOnboarding, setShowNotificationsOnboarding] = useState(
     () =>
       isNotificationSupported() &&
@@ -226,11 +229,20 @@ const WhatsAppCloudPage: React.FC = () => {
   }, [fetchDirectoryStats]);
 
   return (
-    <>
+    <Box
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: phoneLayout ? '100%' : 'auto',
+        minHeight: phoneLayout ? 0 : 'calc(100vh - 32px)',
+        overflow: phoneLayout ? 'hidden' : 'visible',
+      }}
+    >
       <WhatsAppTopBar
         activeTab={activeTab}
         onTabChange={handleMainTabChange}
         directoryTotalContacts={directoryTotalContacts}
+        hideOnMobile={mobileChatActive && isInboxSurface}
       />
 
       {showNotificationsOnboarding && (
@@ -249,10 +261,23 @@ const WhatsAppCloudPage: React.FC = () => {
         </Alert>
       )}
 
-      <Box sx={{ px: { xs: 0.5, sm: 0 } }}>
+      <Box
+        sx={{
+          px: phoneLayout && !isInboxSurface ? 1 : 0,
+          pb: phoneLayout
+            ? mobileChatActive && isInboxSurface
+              ? 0
+              : 'calc(var(--crm-mobile-nav-height) + var(--crm-safe-bottom))'
+            : 0,
+          flex: isInboxSurface ? 1 : '0 0 auto',
+          minHeight: 0,
+          overflow: phoneLayout ? (isInboxSurface ? 'hidden' : 'auto') : 'visible',
+        }}
+      >
         {isInboxSurface ? (
           <Box
             data-tour={activeTab === 'commercial' ? 'whatsapp-tab-commercial' : 'whatsapp-tab-inbox'}
+            sx={{ height: '100%' }}
           >
             <WhatsAppLayout
               phoneNumberId={inboxPhoneNumberId}
@@ -264,6 +289,7 @@ const WhatsAppCloudPage: React.FC = () => {
               focusConversation={focusConversation}
               onClearFocusConversation={handleClearFocusConversation}
               onClearFocusDeepLink={handleClearFocusDeepLink}
+              onMobileChatChange={setMobileChatActive}
             />
           </Box>
         ) : null}
@@ -378,7 +404,7 @@ const WhatsAppCloudPage: React.FC = () => {
         }}
       />
 
-    </>
+    </Box>
   );
 };
 

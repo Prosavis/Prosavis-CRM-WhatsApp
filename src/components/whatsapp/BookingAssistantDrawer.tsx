@@ -36,6 +36,7 @@ import MetaTemplateEditor from '@/components/whatsapp/templates/MetaTemplateEdit
 import TemplateLibrary from '@/components/whatsapp/templates/TemplateLibrary';
 import ProposedActionChips from '@/components/whatsapp/ProposedActionChips';
 import UsedContextAccordion from '@/components/whatsapp/UsedContextAccordion';
+import { usePhoneLayout } from '@/hooks/usePhoneLayout';
 import {
   buildDisplayMessageBody,
   buildTemplateSendComponents,
@@ -149,6 +150,7 @@ const BookingAssistantDrawer: React.FC<BookingAssistantDrawerProps> = ({
   executingActionId = null,
   onConfirmAction,
 }) => {
+  const phoneLayout = usePhoneLayout();
   const activeStep = getActiveStep(bookingContext.stage);
   const { collectedData, missingData, availableSlots, paymentStatus, calculatedPrice, clientInfo } = bookingContext;
   const effectiveSessionWindow = useMetaSessionWindow(sessionWindow, lastInboundAt);
@@ -368,7 +370,12 @@ const BookingAssistantDrawer: React.FC<BookingAssistantDrawerProps> = ({
       open={open}
       onClose={onClose}
       PaperProps={{
-        sx: { width: { xs: '100%', sm: 380 }, p: 0 },
+        sx: {
+          width: phoneLayout ? '100%' : 380,
+          p: 0,
+          pt: phoneLayout ? 'var(--crm-safe-top)' : 0,
+          pb: phoneLayout ? 'var(--crm-safe-bottom)' : 0,
+        },
       }}
     >
       <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -386,7 +393,11 @@ const BookingAssistantDrawer: React.FC<BookingAssistantDrawerProps> = ({
           <Typography variant="subtitle1" fontWeight={700}>
             Asistente de Agendamiento
           </Typography>
-          <IconButton size="small" onClick={onClose} sx={{ color: 'white' }}>
+          <IconButton
+            aria-label="Cerrar asistente de agendamiento"
+            onClick={onClose}
+            sx={{ color: 'white', width: 44, height: 44 }}
+          >
             <CloseIcon />
           </IconButton>
         </Box>
@@ -773,7 +784,14 @@ const BookingAssistantDrawer: React.FC<BookingAssistantDrawerProps> = ({
         anchor="right"
         open={templateLibraryOpen}
         onClose={() => setTemplateLibraryOpen(false)}
-        PaperProps={{ sx: { width: { xs: '100%', sm: 420 }, p: 0 } }}
+        PaperProps={{
+          sx: {
+            width: phoneLayout ? '100%' : 420,
+            p: 0,
+            pt: phoneLayout ? 'var(--crm-safe-top)' : 0,
+            pb: phoneLayout ? 'var(--crm-safe-bottom)' : 0,
+          },
+        }}
       >
         <TemplateLibrary
           mode="booking"

@@ -27,6 +27,7 @@ import FolderOutlinedIcon from '@mui/icons-material/FolderOutlined';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import LocalOfferOutlinedIcon from '@mui/icons-material/LocalOfferOutlined';
+import CloseIcon from '@mui/icons-material/Close';
 import {
   INBOX_CATEGORIES,
   type InboxCategoryId,
@@ -63,6 +64,8 @@ export interface InboxCategorySidebarProps {
   selectedTagIds?: string[];
   onToggleTagFilter?: (tagId: string) => void;
   tagCountsById?: Record<string, number>;
+  mobile?: boolean;
+  onRequestClose?: () => void;
 }
 
 const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
@@ -77,6 +80,8 @@ const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
   selectedTagIds = [],
   onToggleTagFilter,
   tagCountsById,
+  mobile = false,
+  onRequestClose,
 }) => {
   const theme = useTheme();
   const [folderOpened, setFolderOpened] = useState<Record<string, boolean>>({});
@@ -86,7 +91,8 @@ const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
   );
   const showTagOrg = Boolean(onToggleTagFilter) && (tags.length > 0 || tagFolders.length > 0);
   // Ancho suficiente para "Fuera de cobertura" + conteo + engranaje sin truncar.
-  const width = collapsed ? 56 : 268;
+  const effectiveCollapsed = mobile ? false : collapsed;
+  const width = mobile ? '100%' : effectiveCollapsed ? 56 : 268;
 
   return (
     <Box
@@ -107,21 +113,22 @@ const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
           duration: theme.transitions.duration.shorter,
         }),
         overflow: 'hidden',
+        height: mobile ? '100%' : undefined,
       }}
     >
       <Box
         sx={{
           display: 'flex',
           alignItems: 'center',
-          justifyContent: collapsed ? 'center' : 'space-between',
-          px: collapsed ? 0.5 : 1.25,
+        justifyContent: effectiveCollapsed ? 'center' : 'space-between',
+        px: effectiveCollapsed ? 0.5 : 1.25,
           py: 1,
           borderBottom: 1,
           borderColor: 'divider',
           minHeight: 48,
         }}
       >
-        {!collapsed && (
+        {!effectiveCollapsed && (
           <Typography
             variant="caption"
             sx={{
@@ -134,14 +141,21 @@ const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
             Categorías
           </Typography>
         )}
-        <Tooltip title={collapsed ? 'Mostrar categorías' : 'Ocultar categorías'}>
+        <Tooltip title={mobile ? 'Cerrar filtros' : effectiveCollapsed ? 'Mostrar categorías' : 'Ocultar categorías'}>
           <IconButton
-            size="small"
-            onClick={() => onCollapsedChange(!collapsed)}
-            aria-label={collapsed ? 'Expandir categorías' : 'Colapsar categorías'}
-            aria-expanded={!collapsed}
+            onClick={() => {
+              if (mobile) onRequestClose?.();
+              else onCollapsedChange(!effectiveCollapsed);
+            }}
+            aria-label={mobile ? 'Cerrar filtros' : effectiveCollapsed ? 'Expandir categorías' : 'Colapsar categorías'}
+            aria-expanded={mobile ? undefined : !effectiveCollapsed}
+            sx={{ minWidth: 44, minHeight: 44 }}
           >
-            {collapsed ? <ChevronRightIcon fontSize="small" /> : <ChevronLeftIcon fontSize="small" />}
+            {mobile
+              ? <CloseIcon fontSize="small" />
+              : effectiveCollapsed
+                ? <ChevronRightIcon fontSize="small" />
+                : <ChevronLeftIcon fontSize="small" />}
           </IconButton>
         </Tooltip>
       </Box>
@@ -159,22 +173,25 @@ const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
               sx={{
                 display: 'flex',
                 alignItems: 'center',
-                mx: collapsed ? 0.5 : 0.75,
+                mx: effectiveCollapsed ? 0.5 : 0.75,
                 my: 0.15,
                 gap: 0.25,
               }}
             >
               <ListItemButton
                 selected={selected}
-                onClick={() => onCategoryChange(item.id)}
+                onClick={() => {
+                  onCategoryChange(item.id);
+                  if (mobile) onRequestClose?.();
+                }}
                 aria-label={`${item.label}: ${count}`}
                 title={item.description}
                 sx={{
                   flex: 1,
                   borderRadius: 1.5,
-                  minHeight: 40,
-                  justifyContent: collapsed ? 'center' : 'flex-start',
-                  px: collapsed ? 0.75 : 1,
+                  minHeight: mobile ? 44 : 40,
+                  justifyContent: effectiveCollapsed ? 'center' : 'flex-start',
+                  px: effectiveCollapsed ? 0.75 : 1,
                   py: 0.75,
                   alignItems: 'flex-start',
                   '&.Mui-selected': {
@@ -187,15 +204,15 @@ const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
               >
                 <ListItemIcon
                   sx={{
-                    minWidth: collapsed ? 0 : 32,
-                    mt: collapsed ? 0 : 0.15,
+                    minWidth: effectiveCollapsed ? 0 : 32,
+                    mt: effectiveCollapsed ? 0 : 0.15,
                     color: selected ? 'primary.main' : 'text.secondary',
                     justifyContent: 'center',
                   }}
                 >
                   {icon}
                 </ListItemIcon>
-                {!collapsed && (
+                {!effectiveCollapsed && (
                   <ListItemText
                     primary={item.label}
                     primaryTypographyProps={{
@@ -210,7 +227,7 @@ const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
                     sx={{ my: 0, mr: 0.5 }}
                   />
                 )}
-                {!collapsed && (
+                {!effectiveCollapsed && (
                   <Typography
                     variant="caption"
                     sx={{
@@ -224,7 +241,7 @@ const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
                     {count}
                   </Typography>
                 )}
-                {showConfig && !collapsed && (
+                {showConfig && !effectiveCollapsed && (
                   <Tooltip title="Configurar tags de esta categoría">
                     <IconButton
                       size="small"
@@ -233,7 +250,13 @@ const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
                         onConfigureOutOfCoverage?.();
                       }}
                       aria-label="Configurar tags de Fuera de cobertura"
-                      sx={{ flexShrink: 0, ml: 0.25, p: 0.35 }}
+                      sx={{
+                        flexShrink: 0,
+                        ml: 0.25,
+                        width: mobile ? 44 : 28,
+                        height: mobile ? 44 : 28,
+                        p: 0.35,
+                      }}
                     >
                       <SettingsOutlinedIcon sx={{ fontSize: 15 }} />
                     </IconButton>
@@ -243,7 +266,7 @@ const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
             </Box>
           );
 
-          if (collapsed) {
+          if (effectiveCollapsed) {
             return (
               <Tooltip key={item.id} title={`${item.label} (${count})`} placement="right">
                 {row}
@@ -253,7 +276,7 @@ const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
           return row;
         })}
 
-        {showTagOrg && !collapsed && (
+        {showTagOrg && !effectiveCollapsed && (
           <>
             <Typography
               variant="caption"
@@ -284,7 +307,7 @@ const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
                       mx: 0.75,
                       my: 0.1,
                       borderRadius: 1.5,
-                      minHeight: 34,
+                      minHeight: mobile ? 44 : 34,
                       '&.Mui-selected': {
                         bgcolor: (t) => alpha(t.palette.primary.main, 0.12),
                       },
@@ -335,7 +358,12 @@ const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
                         [item.folder.id]: !expanded,
                       }))
                     }
-                    sx={{ mx: 0.75, my: 0.1, borderRadius: 1.5, minHeight: 34 }}
+                    sx={{
+                      mx: 0.75,
+                      my: 0.1,
+                      borderRadius: 1.5,
+                      minHeight: mobile ? 44 : 34,
+                    }}
                   >
                     <ListItemIcon sx={{ minWidth: 28 }}>
                       <FolderOutlinedIcon fontSize="small" color="action" />
@@ -361,7 +389,7 @@ const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
                             my: 0.1,
                             pl: 3.5,
                             borderRadius: 1.5,
-                            minHeight: 32,
+                            minHeight: mobile ? 44 : 32,
                             '&.Mui-selected': {
                               bgcolor: (t) => alpha(t.palette.primary.main, 0.12),
                             },
@@ -403,7 +431,7 @@ const InboxCategorySidebar: React.FC<InboxCategorySidebarProps> = ({
           </>
         )}
 
-        {showTagOrg && collapsed && (
+        {showTagOrg && effectiveCollapsed && (
           <Tooltip title="Tags organizados (expande el panel)" placement="right">
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 1 }}>
               <LocalOfferOutlinedIcon fontSize="small" color="action" />

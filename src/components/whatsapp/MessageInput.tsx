@@ -60,6 +60,7 @@ import {
   setComposerDraft,
 } from '@/utils/messageComposerDraftStore';
 import { WhatsAppLexicalEditor, type WhatsAppLexicalEditorHandle } from './lexical/WhatsAppLexicalEditor';
+import { usePhoneLayout } from '@/hooks/usePhoneLayout';
 
 type SupportedMediaType = Extract<
   WhatsAppOutboundMediaType,
@@ -123,6 +124,7 @@ const TYPING_START_DEBOUNCE_MS = 300;
 const TYPING_STOP_DEBOUNCE_MS = 2_500;
 const COMPOSER_DRAFT_DEBOUNCE_MS = 300;
 const COMPOSER_MIN_TEXTAREA_HEIGHT = 72;
+const COMPOSER_MOBILE_MIN_TEXTAREA_HEIGHT = 44;
 const COMPOSER_MAX_TEXTAREA_HEIGHT = 220;
 const COMPOSER_VERTICAL_PADDING = 16;
 
@@ -197,6 +199,10 @@ const MessageInput: React.FC<MessageInputProps> = ({
   inboxLine = 'bot',
 }) => {
   const { playError } = useSoundEffects();
+  const isMobile = usePhoneLayout();
+  const composerMinHeight = isMobile
+    ? COMPOSER_MOBILE_MIN_TEXTAREA_HEIGHT
+    : COMPOSER_MIN_TEXTAREA_HEIGHT;
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -204,7 +210,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [snippetHighlight, setSnippetHighlight] = useState(0);
-  const [composerHeight, setComposerHeight] = useState(COMPOSER_MIN_TEXTAREA_HEIGHT);
+  const [composerHeight, setComposerHeight] = useState(composerMinHeight);
   const [aiAnchorEl, setAiAnchorEl] = useState<null | HTMLElement>(null);
   const [emojiAnchorEl, setEmojiAnchorEl] = useState<null | HTMLElement>(null);
   const [stickerAnchorEl, setStickerAnchorEl] = useState<null | HTMLElement>(null);
@@ -744,6 +750,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
         borderTop: 1,
         borderColor: dragActive ? 'success.main' : 'divider',
         transition: 'background-color 0.15s, border-color 0.15s',
+        pb: isMobile ? 'var(--crm-safe-bottom)' : 0,
       }}
     >
       {sendError && (
@@ -909,7 +916,14 @@ const MessageInput: React.FC<MessageInputProps> = ({
         </Paper>
       )}
 
-      <Box sx={{ display: 'flex', alignItems: 'flex-end', gap: 1, p: 1.5 }}>
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'flex-end',
+          gap: isMobile ? 0.25 : 1,
+          p: isMobile ? 0.5 : 1.5,
+        }}
+      >
         <Box
           sx={{
             alignItems: 'flex-start',
@@ -920,7 +934,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
             pb: 0.25,
           }}
         >
-          {!isRecording && (
+          {!isRecording && !isMobile && (
             <Box sx={{ alignItems: 'center', display: 'flex', gap: 0.25 }}>
               <Tooltip title="Negrita (*texto*)">
                 <IconButton size="small" disabled={composerDisabled} onClick={() => wrapSelection('*')}>
@@ -953,7 +967,11 @@ const MessageInput: React.FC<MessageInputProps> = ({
                     size="small"
                     disabled={composerDisabled || suggestionLoading}
                     onClick={(event) => setAiAnchorEl(event.currentTarget)}
-                    sx={{ color: suggestionLoading ? undefined : '#7c3aed' }}
+                    sx={{
+                      color: suggestionLoading ? undefined : '#7c3aed',
+                      width: isMobile ? 44 : 34,
+                      height: isMobile ? 44 : 34,
+                    }}
                   >
                     {suggestionLoading ? <CircularProgress size={20} /> : <AutoAwesomeIcon />}
                   </IconButton>
@@ -1004,6 +1022,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
                   size="small"
                   disabled={composerDisabled}
                   onClick={(e) => setAnchorEl(e.currentTarget)}
+                  sx={{ width: isMobile ? 44 : 34, height: isMobile ? 44 : 34 }}
                 >
                   <AttachFileIcon sx={{ transform: 'rotate(45deg)' }} />
                 </IconButton>
@@ -1052,6 +1071,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
               </IconButton>
             )}
 
+            {!isMobile ? (
             <Tooltip title="Emojis rápidos">
               <IconButton
                 size="small"
@@ -1061,8 +1081,9 @@ const MessageInput: React.FC<MessageInputProps> = ({
                 <EmojiEmotionsIcon />
               </IconButton>
             </Tooltip>
+            ) : null}
 
-            {onSendSticker && (
+            {onSendSticker && !isMobile && (
               <Tooltip title="Stickers">
                 <IconButton
                   size="small"
@@ -1121,8 +1142,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
               flex: 1,
               minHeight: composerHeight + COMPOSER_VERTICAL_PADDING,
               position: 'relative',
-              px: 1.5,
-              py: 1,
+              px: isMobile ? 1 : 1.5,
+              py: isMobile ? 0.5 : 1,
               '&:focus-within': {
                 boxShadow: (t) => `0 0 0 2px ${alpha(t.palette.primary.main, 0.18)}`,
               },
@@ -1133,7 +1154,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
               disabled={composerDisabled}
               ariaLabel={captionPlaceholder}
               placeholder={captionPlaceholder}
-              composerMinHeight={COMPOSER_MIN_TEXTAREA_HEIGHT}
+              composerMinHeight={composerMinHeight}
               composerMaxHeight={COMPOSER_MAX_TEXTAREA_HEIGHT}
               onHeightChange={handleLexicalHeightChange}
               onPlainTextChange={handleLexicalPlainChange}
@@ -1157,7 +1178,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
                 <IconButton
                   onClick={startRecording}
                   disabled={disabled || sending || pendingFiles.length >= 10}
-                  sx={{ color: 'text.secondary' }}
+                  sx={{ color: 'text.secondary', width: 44, height: 44 }}
                 >
                   <MicIcon />
                 </IconButton>
@@ -1166,9 +1187,10 @@ const MessageInput: React.FC<MessageInputProps> = ({
           ) : null)}
 
         <IconButton
+          aria-label={pendingFiles.length > 0 ? 'Enviar mensaje y archivos' : 'Enviar mensaje'}
           onClick={handleSend}
           disabled={!canSend || sending || disabled || isRecording}
-          sx={{ color: 'text.secondary' }}
+          sx={{ color: 'text.secondary', width: 44, height: 44 }}
         >
           {sending ? <CircularProgress size={24} /> : <SendIcon />}
         </IconButton>

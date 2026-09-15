@@ -24,6 +24,7 @@ import {
   REMINDER_STATUS_LABEL,
   reminderStatusTooltip,
 } from '@/types/reminderAutomations';
+import { usePhoneLayout } from '@/hooks/usePhoneLayout';
 import { retryReminderSend } from '@/services/reminderAutomationsService';
 import { openWhatsAppInbox } from '@/utils/openWhatsAppInbox';
 
@@ -57,6 +58,7 @@ const ReminderMessageDetailDialog: React.FC<ReminderMessageDetailDialogProps> = 
   onRetrySuccess,
   hideRetry = false,
 }) => {
+  const isMobile = usePhoneLayout();
   const navigate = useNavigate();
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
@@ -104,7 +106,7 @@ const ReminderMessageDetailDialog: React.FC<ReminderMessageDetailDialogProps> = 
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth fullScreen={isMobile}>
       <DialogTitle sx={{ pr: 6 }}>
         Detalle del recordatorio
         <IconButton

@@ -4,9 +4,8 @@ import {
   Table,
   TableContainer,
   TablePagination,
-  useMediaQuery,
-  useTheme,
 } from '@mui/material';
+import { usePhoneLayout } from '@/hooks/usePhoneLayout';
 
 interface MetricsDataTableProps {
   children: React.ReactNode;
@@ -33,8 +32,7 @@ const MetricsDataTable: React.FC<MetricsDataTableProps> = ({
   maxHeight = 520,
   outlined = false,
 }) => {
-  const theme = useTheme();
-  const compact = useMediaQuery(theme.breakpoints.down('sm'));
+  const compact = usePhoneLayout();
   const paginated = typeof count === 'number' && Boolean(onPageChange);
 
   return (
@@ -46,6 +44,8 @@ const MetricsDataTable: React.FC<MetricsDataTableProps> = ({
         sx={{
           maxHeight,
           overflowX: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          overscrollBehaviorX: 'contain',
           '& .MuiTableCell-root': {
             px: compact ? 1 : 2,
             py: compact ? 0.75 : 1,
@@ -71,6 +71,22 @@ const MetricsDataTable: React.FC<MetricsDataTableProps> = ({
           }
           rowsPerPageOptions={onRowsPerPageChange ? rowsPerPageOptions : [rowsPerPage]}
           labelRowsPerPage="Filas"
+          sx={{
+            '& .MuiTablePagination-toolbar': {
+              minHeight: compact ? 56 : 52,
+              flexWrap: compact ? 'wrap' : 'nowrap',
+              px: compact ? 1 : 2,
+            },
+            '& .MuiTablePagination-spacer': {
+              display: compact ? 'none' : 'block',
+            },
+            '& .MuiTablePagination-selectLabel': {
+              display: compact ? 'none' : 'block',
+            },
+            '& .MuiTablePagination-displayedRows': {
+              ml: compact ? 'auto' : 0,
+            },
+          }}
         />
       ) : null}
     </>

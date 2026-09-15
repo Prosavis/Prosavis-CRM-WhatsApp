@@ -56,6 +56,8 @@ import {
   isCreateDiscountFormValid,
   normalizeDiscountCode,
 } from '@/utils/discountCodeValidation';
+import DiscountCodesMobileList from './DiscountCodesMobileList';
+import { usePhoneLayout } from '@/hooks/usePhoneLayout';
 
 const AMOUNT_PRESETS = [5000, 10000, 15000, 20000];
 
@@ -103,6 +105,7 @@ const surfaceSx = {
 
 const DiscountCodesTab: React.FC = () => {
   const theme = useTheme();
+  const isMobile = usePhoneLayout();
   const brandBlue = DesignTokens.brand.primary.blue;
   const brandOrange = DesignTokens.brand.primary.orange;
 
@@ -733,6 +736,16 @@ const DiscountCodesTab: React.FC = () => {
           </Alert>
         )}
 
+        {isMobile ? (
+          <DiscountCodesMobileList
+            codes={codes}
+            loading={loading}
+            onCopy={handleCopy}
+            onEdit={handleEditOpen}
+            onDelete={setDeleteTarget}
+            onPermanentDelete={setPermanentDeleteTarget}
+          />
+        ) : (
         <TableContainer sx={{ maxWidth: '100%' }}>
           <Table size="small" sx={{ minWidth: 960 }}>
             <TableHead>
@@ -1050,10 +1063,16 @@ const DiscountCodesTab: React.FC = () => {
             </TableBody>
           </Table>
         </TableContainer>
+        )}
       </Box>
 
       {/* ── Diálogo: Soft delete ── */}
-      <Dialog open={!!deleteTarget} onClose={() => !deleting && setDeleteTarget(null)} PaperProps={{ sx: { borderRadius: 2 } }}>
+      <Dialog
+        open={!!deleteTarget}
+        onClose={() => !deleting && setDeleteTarget(null)}
+        fullScreen={isMobile}
+        PaperProps={{ sx: { borderRadius: { xs: 0, sm: 2 } } }}
+      >
         <DialogTitle fontWeight={700}>Eliminar código</DialogTitle>
         <DialogContent>
           <DialogContentText>
@@ -1087,7 +1106,8 @@ const DiscountCodesTab: React.FC = () => {
       <Dialog
         open={!!permanentDeleteTarget}
         onClose={() => !permanentDeleting && setPermanentDeleteTarget(null)}
-        PaperProps={{ sx: { borderRadius: 2 } }}
+        fullScreen={isMobile}
+        PaperProps={{ sx: { borderRadius: { xs: 0, sm: 2 } } }}
       >
         <DialogTitle fontWeight={700}>Eliminar definitivamente</DialogTitle>
         <DialogContent>
@@ -1129,7 +1149,8 @@ const DiscountCodesTab: React.FC = () => {
         onClose={() => !editUpdating && setEditTarget(null)}
         maxWidth="sm"
         fullWidth
-        PaperProps={{ sx: { borderRadius: 2 } }}
+        fullScreen={isMobile}
+        PaperProps={{ sx: { borderRadius: { xs: 0, sm: 2 } } }}
       >
         <DialogTitle fontWeight={700}>Editar código: {editTarget?.code}</DialogTitle>
         <DialogContent>

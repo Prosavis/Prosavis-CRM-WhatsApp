@@ -25,7 +25,7 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  useMediaQuery,
+  Drawer,
   useTheme,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
@@ -47,6 +47,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import CheckBoxOutlinedIcon from '@mui/icons-material/CheckBoxOutlined';
 import SelectAllIcon from '@mui/icons-material/SelectAll';
 import FilterListIcon from '@mui/icons-material/FilterList';
+import TuneIcon from '@mui/icons-material/Tune';
 import type {
   WhatsAppConversation,
   WhatsAppTag,
@@ -84,6 +85,7 @@ import {
   type InboxTagCategoryId,
 } from '@/constants/inboxCategories';
 import { useLongPress } from '@/hooks/useLongPress';
+import { usePhoneLayout } from '@/hooks/usePhoneLayout';
 import { coloredChipSx } from '@/utils/coloredChipStyles';
 import { formatRelativeColombiaTime } from '@/utils/colombiaTime';
 import { conversationPreviewText } from '@/utils/whatsappCoexStub';
@@ -408,7 +410,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
   onConfigureOutOfCoverage,
 }) => {
   const theme = useTheme();
-  const compactList = useMediaQuery(theme.breakpoints.down('sm'));
+  const compactList = usePhoneLayout();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<InboxCategoryId>(readStoredInboxFilter);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readStoredSidebarCollapsed);
@@ -429,6 +431,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
     conversation: WhatsAppConversation;
   } | null>(null);
   const [assignTagsAnchor, setAssignTagsAnchor] = useState<null | HTMLElement>(null);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
   useEffect(() => {
     try {
@@ -772,19 +775,51 @@ const ConversationList: React.FC<ConversationListProps> = ({
         width: compactList ? '100%' : 'auto',
       }}
     >
-      <InboxCategorySidebar
-        category={filter}
-        onCategoryChange={handleCategoryChange}
-        tabCounts={tabCounts}
-        collapsed={sidebarCollapsed}
-        onCollapsedChange={setSidebarCollapsed}
-        onConfigureOutOfCoverage={onConfigureOutOfCoverage}
-        tags={tags}
-        tagFolders={tagFolders}
-        selectedTagIds={selectedTagIds}
-        onToggleTagFilter={toggleTagId}
-        tagCountsById={filter === 'archived' ? archivedTagCountsById : tagCountsById}
-      />
+      {!compactList && (
+        <InboxCategorySidebar
+          category={filter}
+          onCategoryChange={handleCategoryChange}
+          tabCounts={tabCounts}
+          collapsed={sidebarCollapsed}
+          onCollapsedChange={setSidebarCollapsed}
+          onConfigureOutOfCoverage={onConfigureOutOfCoverage}
+          tags={tags}
+          tagFolders={tagFolders}
+          selectedTagIds={selectedTagIds}
+          onToggleTagFilter={toggleTagId}
+          tagCountsById={filter === 'archived' ? archivedTagCountsById : tagCountsById}
+        />
+      )}
+
+      <Drawer
+        anchor="bottom"
+        open={compactList && mobileFiltersOpen}
+        onClose={() => setMobileFiltersOpen(false)}
+        PaperProps={{
+          sx: {
+            height: 'min(82dvh, 720px)',
+            borderTopLeftRadius: 16,
+            borderTopRightRadius: 16,
+            pb: 'var(--crm-safe-bottom)',
+          },
+        }}
+      >
+        <InboxCategorySidebar
+          category={filter}
+          onCategoryChange={handleCategoryChange}
+          tabCounts={tabCounts}
+          collapsed={false}
+          onCollapsedChange={() => undefined}
+          onConfigureOutOfCoverage={onConfigureOutOfCoverage}
+          tags={tags}
+          tagFolders={tagFolders}
+          selectedTagIds={selectedTagIds}
+          onToggleTagFilter={toggleTagId}
+          tagCountsById={filter === 'archived' ? archivedTagCountsById : tagCountsById}
+          mobile
+          onRequestClose={() => setMobileFiltersOpen(false)}
+        />
+      </Drawer>
 
       <Box
         sx={{
@@ -797,6 +832,26 @@ const ConversationList: React.FC<ConversationListProps> = ({
         }}
       >
       <Box sx={{ p: 1.5, borderBottom: 1, borderColor: 'divider' }}>
+        {compactList && (
+          <Button
+            fullWidth
+            variant="text"
+            color="inherit"
+            startIcon={<TuneIcon />}
+            onClick={() => setMobileFiltersOpen(true)}
+            aria-label={`Filtrar conversaciones. Categoría actual: ${categoryDef.label}`}
+            sx={{
+              minHeight: 44,
+              mb: 0.75,
+              justifyContent: 'space-between',
+              px: 1,
+              textTransform: 'none',
+              fontWeight: 700,
+            }}
+          >
+            {categoryDef.label} · {categoryCount}
+          </Button>
+        )}
         <Box sx={{ display: 'flex', gap: 0.5, mb: 1 }}>
           <TextField
             fullWidth

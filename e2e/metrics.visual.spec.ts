@@ -17,6 +17,10 @@ for (const theme of THEMES) {
       await expect(page).toHaveScreenshot(`metrics-${vista}-${theme}-1440.png`, {
         fullPage: true,
         animations: 'disabled',
+        mask: vista === 'mapa'
+          ? [page.getByRole('region', { name: /^Mapa de \d+ citas/ })]
+          : [],
+        maskColor: theme === 'dark' ? '#10161d' : '#eef2f6',
         maxDiffPixelRatio: vista === 'mapa' ? 0.025 : 0.008,
       });
 

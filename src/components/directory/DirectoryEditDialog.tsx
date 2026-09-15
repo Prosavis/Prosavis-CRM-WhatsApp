@@ -15,8 +15,6 @@ import {
   Tabs,
   TextField,
   Typography,
-  useMediaQuery,
-  useTheme,
   alpha,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
@@ -27,6 +25,7 @@ import DirectoryClassificationTagPicker, {
 } from '@/components/directory/DirectoryClassificationTagPicker';
 import { listWhatsAppTags } from '@/services/whatsappService';
 import { tagNamesToIds } from '@/utils/classificationLabels';
+import { usePhoneLayout } from '@/hooks/usePhoneLayout';
 import type {
   DirectoryChannel,
   DirectoryEntry,
@@ -146,8 +145,7 @@ export default function DirectoryEditDialog({
   entry,
   onSaved,
 }: DirectoryEditDialogProps) {
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const isMobile = usePhoneLayout();
   const [activeTab, setActiveTab] = useState(0);
   const [saving, setSaving] = useState(false);
 

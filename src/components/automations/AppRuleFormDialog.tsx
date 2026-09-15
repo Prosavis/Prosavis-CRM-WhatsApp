@@ -40,6 +40,7 @@ import type {
   SendPushNotificationActionConfig,
 } from '@/types/automations';
 import { REMINDER_HOURS_OPTIONS, TRIGGER_ACTION_COMPATIBILITY } from '@/types/automations';
+import { usePhoneLayout } from '@/hooks/usePhoneLayout';
 
 const STEPS = ['Disparador', 'Acción', 'Revisión'];
 
@@ -128,6 +129,7 @@ const AppRuleFormDialog: React.FC<AppRuleFormDialogProps> = ({
   initialValues,
   submitting = false,
 }) => {
+  const isMobile = usePhoneLayout();
   const isEdit = !!initialValues;
   const [activeStep, setActiveStep] = useState(0);
   const [name, setName] = useState('');
@@ -337,7 +339,10 @@ const AppRuleFormDialog: React.FC<AppRuleFormDialogProps> = ({
       onClose={onClose}
       maxWidth="sm"
       fullWidth
-      PaperProps={{ sx: { borderRadius: DesignTokens.borderRadius.lg } }}
+      fullScreen={isMobile}
+      PaperProps={{
+        sx: { borderRadius: { xs: 0, sm: DesignTokens.borderRadius.lg } },
+      }}
     >
       <DialogTitle>
         {isEdit ? 'Editar regla' : 'Nueva regla de la app'}

@@ -24,6 +24,7 @@ import {
   formatReactivationDate,
   type ReactivationDashboardRow,
 } from '@/types/reactivationAutomations';
+import { usePhoneLayout } from '@/hooks/usePhoneLayout';
 import {
   retryReactivationStep,
   suspendReactivationRecipient,
@@ -53,6 +54,7 @@ const ReactivationDetailDialog: React.FC<ReactivationDetailDialogProps> = ({
   onRetrySuccess,
   onSuspendSuccess,
 }) => {
+  const isMobile = usePhoneLayout();
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
   const [suspending, setSuspending] = useState(false);
@@ -101,7 +103,7 @@ const ReactivationDetailDialog: React.FC<ReactivationDetailDialogProps> = ({
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth fullScreen={isMobile}>
       <DialogTitle sx={{ pr: 6 }}>
         Detalle de reactivación
         <IconButton

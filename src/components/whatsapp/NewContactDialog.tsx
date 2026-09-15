@@ -23,6 +23,7 @@ import {
 import { directoryService } from '@/services/directoryService';
 import { normalizeDirectoryPhoneE164 } from '@/utils/directoryPhone';
 import { coloredChipSx } from '@/utils/coloredChipStyles';
+import { usePhoneLayout } from '@/hooks/usePhoneLayout';
 
 interface NewContactDialogProps {
   open: boolean;
@@ -38,6 +39,7 @@ const NewContactDialog: React.FC<NewContactDialogProps> = ({
   onCreated,
 }) => {
   const theme = useTheme();
+  const isMobile = usePhoneLayout();
   const [phone, setPhone] = useState('');
   const [name, setName] = useState('');
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
@@ -149,7 +151,7 @@ const NewContactDialog: React.FC<NewContactDialogProps> = ({
   }, [phone, name, phoneNumberId, onCreated, selectedTagIds, resetForm]);
 
   return (
-    <Dialog open={open} onClose={handleClose} maxWidth="xs" fullWidth>
+    <Dialog open={open} onClose={handleClose} maxWidth="xs" fullWidth fullScreen={isMobile}>
       <DialogTitle>Nuevo contacto</DialogTitle>
       <DialogContent>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>

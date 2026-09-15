@@ -47,6 +47,7 @@ import PushPinOutlinedIcon from '@mui/icons-material/PushPinOutlined';
 import MarkChatUnreadIcon from '@mui/icons-material/MarkChatUnread';
 import ReplyIcon from '@mui/icons-material/Reply';
 import ForwardIcon from '@mui/icons-material/Forward';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { crmToast } from '@/utils/crmToast';
 import {
   hasMoreMessages,
@@ -151,6 +152,8 @@ import { formatColombiaDateLabel } from '@/utils/colombiaTime';
 import { quotedMessagePreview } from '@/utils/whatsappCoexStub';
 import type { WhatsAppTagFolder } from '@/types/whatsapp';
 import TagListGrouped from './TagListGrouped';
+import MobileChatActionsMenu from './MobileChatActionsMenu';
+import { usePhoneLayout } from '@/hooks/usePhoneLayout';
 interface ChatAreaProps {
   conversation: WhatsAppConversation;
   phoneNumberId?: string;
@@ -178,6 +181,7 @@ interface ChatAreaProps {
   peerPresences?: WhatsAppAdminPresence[];
   adminById?: ReadonlyMap<string, AdminSenderProfile>;
   onLoadedConversationInbound?: (inbound: LoadedConversationInbound) => void;
+  onBack?: () => void;
 }
 
 function reactionActorKey(message: Pick<WhatsAppMessage, 'direction' | 'agentUid' | 'senderType'>): string {
@@ -256,8 +260,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   peerPresences = [],
   adminById,
   onLoadedConversationInbound,
+  onBack,
 }) => {
   const theme = useTheme();
+  const isMobile = usePhoneLayout();
   const messageSubscriptionIdRef = useRef(0);
   const [messageHistory, dispatchMessageHistory] = useReducer(
     conversationMessageHistoryReducer,
@@ -1384,7 +1390,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         setSnack({ open: true, message: msgText, severity: 'error' });
       }
     }, 500);
-  }, [myUid, phoneNumberId, stableKey, sessionWindowClosed, customerPhone, sendPhoneNumberId]);
+  }, [myUid, sessionWindowClosed, customerPhone, sendPhoneNumberId]);
 
   const visibleMessages = useMemo(
     () => messages.filter((message) => !message.reactionTo),
@@ -1450,7 +1456,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         sx={{
           display: 'flex',
           alignItems: 'center',
-          px: 2,
+          px: isMobile ? 0.5 : 2,
           py: 1,
           bgcolor: (t) =>
             t.palette.mode === 'dark' ? alpha(t.palette.common.white, 0.06) : '#f0f2f5',
@@ -1487,6 +1493,15 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           </>
         ) : (
           <>
+            {isMobile && onBack ? (
+              <IconButton
+                aria-label="Volver a la bandeja"
+                onClick={onBack}
+                sx={{ width: 44, height: 44, flexShrink: 0 }}
+              >
+                <ArrowBackIcon />
+              </IconButton>
+            ) : null}
             <SessionWindowAvatar
               displayName={displayName}
               phone={conversation.contactPhone || conversation.phone}
@@ -1527,6 +1542,27 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 })}
               </Box>
             </Box>
+            {isMobile ? (
+              <MobileChatActionsMenu
+                archived={Boolean(conversation.isArchived)}
+                pinned={Boolean(conversation.isPinned)}
+                forceUnread={Boolean(conversation.crmForceUnread)}
+                bookingLoading={bookingContextLoading}
+                onOpenTags={setTagAnchor}
+                onSelectMessages={() => setSelectionMode(true)}
+                onArchiveToggle={() => void handleArchiveToggle()}
+                onPinToggle={() => void handlePinToggle()}
+                onMarkUnread={() => void handleMarkUnread()}
+                onOpenContact={onToggleContactPanel}
+                onOpenBooking={() => void handleOpenBookingAssistant()}
+                onOpenTemplates={onToggleTemplatesPanel}
+                onDeleteConversation={() => {
+                  setDeleteConversationPhrase('');
+                  setDeleteConversationOpen(true);
+                }}
+              />
+            ) : null}
+            <Box sx={{ display: isMobile ? 'none' : 'flex', alignItems: 'center' }}>
             <Tooltip title="Tags">
               <IconButton
                 size="small"
@@ -1603,6 +1639,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 <DescriptionOutlinedIcon />
               </IconButton>
             </Tooltip>
+            </Box>
           </>
         )}
       </Box>
@@ -2016,7 +2053,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       </Popover>
 
       {/* Delete confirm dialog */}
-      <Dialog open={deleteConfirmOpen} onClose={() => setDeleteConfirmOpen(false)}>
+      <Dialog
+        open={deleteConfirmOpen}
+        onClose={() => setDeleteConfirmOpen(false)}
+        fullScreen={isMobile}
+      >
         <DialogTitle>Eliminar mensaje{deleteCount > 1 ? 's' : ''}</DialogTitle>
         <DialogContent>
           <DialogContentText>
@@ -2038,6 +2079,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         onClose={() => !suggestionLoading && setAiContextDialogOpen(false)}
         maxWidth="sm"
         fullWidth
+        fullScreen={isMobile}
       >
         <DialogTitle>Generar respuesta con contexto</DialogTitle>
         <DialogContent>
@@ -2086,6 +2128,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         onClose={() => !deleteConversationLoading && setDeleteConversationOpen(false)}
         maxWidth="sm"
         fullWidth
+        fullScreen={isMobile}
       >
         <DialogTitle>Eliminar conversación permanentemente</DialogTitle>
         <DialogContent>

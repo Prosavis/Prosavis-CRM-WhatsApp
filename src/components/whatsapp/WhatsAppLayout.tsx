@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Box, Button } from '@mui/material';
+import { Alert, Box, Button, Drawer } from '@mui/material';
 import { crmToast } from '@/utils/crmToast';
 import { alpha, useTheme } from '@mui/material/styles';
 import ConversationList from './ConversationList';
@@ -52,6 +52,7 @@ import {
 } from '@/utils/desktopNotifications';
 import type { LoadedConversationInbound } from '@/utils/whatsappTemplateSuggestions';
 import useSoundEffects from '@/hooks/useSoundEffects';
+import { usePhoneLayout } from '@/hooks/usePhoneLayout';
 
 function resolveAdminDisplayName(
   adminName: string | undefined,
@@ -181,6 +182,8 @@ interface WhatsAppLayoutProps {
   onClearFocusDeepLink?: () => void;
   /** Métricas del inbox (contactos totales, tabs, tags) para cabeceras externas o analítica. */
   onInboxMetrics?: (metrics: WhatsAppInboxMetrics) => void;
+  /** Informa a la página cuando el chat reemplaza la bandeja en móvil. */
+  onMobileChatChange?: (active: boolean) => void;
 }
 
 const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
@@ -194,8 +197,10 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   onClearFocusConversation,
   onClearFocusDeepLink,
   onInboxMetrics,
+  onMobileChatChange,
 }) => {
   const theme = useTheme();
+  const isMobile = usePhoneLayout();
   const { user, profile, session, loading: authLoading } = useAuth();
   const [selectedConversation, setSelectedConversation] = useState<WhatsAppConversation | null>(null);
   const [loadedConversationInbound, setLoadedConversationInbound] =
@@ -271,6 +276,11 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   useEffect(() => {
     onInboxMetrics?.(inboxMetrics);
   }, [inboxMetrics, onInboxMetrics]);
+
+  useEffect(() => {
+    onMobileChatChange?.(isMobile && Boolean(selectedConversation));
+    return () => onMobileChatChange?.(false);
+  }, [isMobile, onMobileChatChange, selectedConversation]);
 
   useEffect(() => {
     inboundBaselineReadyRef.current = false;
@@ -673,6 +683,11 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     setSelectedConversation(null);
   }, []);
 
+  const handleBackToInbox = useCallback(() => {
+    setRightPanel('none');
+    setSelectedConversation(null);
+  }, []);
+
   useEffect(() => {
     if (!selectedConversation || isCommercialPhoneNumberId(selectedConversation.phoneNumberId)) {
       setSiblingCommercialHint(null);
@@ -722,7 +737,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
         }
       }
 
-      if (selectedConversation?.id === conversation.id) {
+      if (!isMobile && selectedConversation?.id === conversation.id) {
         setSelectedConversation(null);
         return;
       }
@@ -735,6 +750,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
       onClearFocusDeepLink,
       onClearFocusPhone,
       onClearFocusConversation,
+      isMobile,
     ],
   );
 
@@ -925,7 +941,8 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
       sx={{
         display: 'flex',
         flexDirection: 'column',
-        height: 'calc(100vh - 96px)',
+        height: isMobile ? '100%' : 'calc(100vh - 96px)',
+        minHeight: 0,
         '@keyframes waInboundPulse': {
           '0%': {
             boxShadow: `0 0 0 0 ${alpha(inboundPulseLine ? inboxLineHex(inboundPulseLine) : theme.palette.primary.main, 0.4)}`,
@@ -956,12 +973,12 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
           data-testid="inbox-conversation-pane"
           data-inbox-ready={loading ? 'false' : 'true'}
           sx={{
-            width: { xs: '100%', sm: 'auto' },
+            width: isMobile ? '100%' : 'auto',
             minWidth: 0,
             borderRight: 1,
             borderColor: 'divider',
             flexShrink: 0,
-            display: 'flex',
+            display: isMobile && selectedConversation ? 'none' : 'flex',
             flexDirection: 'column',
             minHeight: 0,
           }}
@@ -1035,7 +1052,16 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
           />
         </Box>
 
-        <Box data-tour="whatsapp-inbox-chat" sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        <Box
+          data-tour="whatsapp-inbox-chat"
+          sx={{
+            flex: 1,
+            display: isMobile ? (selectedConversation ? 'flex' : 'none') : 'flex',
+            flexDirection: 'column',
+            minWidth: 0,
+            width: isMobile ? '100%' : 'auto',
+          }}
+        >
           {selectedConversation ? (
             <ChatArea
               key={selectedConversation.id}
@@ -1061,13 +1087,14 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
               peerPresences={peersInSelectedChat}
               adminById={adminById}
               onLoadedConversationInbound={setLoadedConversationInbound}
+              onBack={handleBackToInbox}
             />
           ) : (
             <WhatsAppEmptyState />
           )}
         </Box>
 
-        {showRightColumn && selectedConversation && rightPanel === 'templates' && canShowTemplates && activeWabaId && activePhoneNumberId && (
+        {!isMobile && showRightColumn && selectedConversation && rightPanel === 'templates' && canShowTemplates && activeWabaId && activePhoneNumberId && (
           <TemplatesSidePanel
             wabaId={activeWabaId}
             phoneNumberId={activePhoneNumberId}
@@ -1082,12 +1109,69 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
           />
         )}
 
-        {showRightColumn && selectedConversation && rightPanel === 'contact' && (
+        {!isMobile && showRightColumn && selectedConversation && rightPanel === 'contact' && (
           <WhatsAppContactSidePanel
             conversation={selectedConversation}
             contact={contactCtx}
           />
         )}
+
+        <Drawer
+          anchor="right"
+          open={isMobile && showRightColumn && rightPanel === 'templates' && canShowTemplates}
+          onClose={() => setRightPanel('none')}
+          PaperProps={{
+            sx: {
+              width: '100%',
+              maxWidth: '100%',
+              pt: 'var(--crm-safe-top)',
+              pb: 'var(--crm-safe-bottom)',
+            },
+          }}
+        >
+          {selectedConversation && activeWabaId && activePhoneNumberId ? (
+            <TemplatesSidePanel
+              wabaId={activeWabaId}
+              phoneNumberId={activePhoneNumberId}
+              recipientPhone={recipientPhoneForTemplates}
+              onApplyDraftToComposer={(text) => {
+                setComposerDraft(text);
+                setRightPanel('none');
+              }}
+              snippets={snippets}
+              onSnippetsChanged={loadSnippets}
+              conversationStableKey={selectedConversation.id}
+              conversationDisplayName={contactCtx.displayName ?? undefined}
+              lastInboundAt={templateLastInboundAt}
+              lastMessageDirection={selectedConversation.lastMessageDirection}
+              compact
+              onClose={() => setRightPanel('none')}
+            />
+          ) : null}
+        </Drawer>
+
+        <Drawer
+          anchor="right"
+          open={isMobile && showRightColumn && rightPanel === 'contact'}
+          onClose={() => setRightPanel('none')}
+          PaperProps={{
+            sx: {
+              width: '100%',
+              maxWidth: '100%',
+              pt: 'var(--crm-safe-top)',
+              pb: 'var(--crm-safe-bottom)',
+            },
+          }}
+        >
+          {selectedConversation ? (
+            <WhatsAppContactSidePanel
+              conversation={selectedConversation}
+              contact={contactCtx}
+              mobile
+              onClose={() => setRightPanel('none')}
+            />
+          ) : null}
+        </Drawer>
       </Box>
 
       <NewContactDialog

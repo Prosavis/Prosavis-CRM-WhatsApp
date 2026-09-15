@@ -49,6 +49,7 @@ import {
 } from '@/services/whatsappService';
 import { getTemplateDisplayName } from '@/components/whatsapp/templates/templateDisplayNames';
 import useSoundEffects from '@/hooks/useSoundEffects';
+import { usePhoneLayout } from '@/hooks/usePhoneLayout';
 import {
   areInboxSoundsEnabled,
   areSoundsEnabled,
@@ -68,6 +69,7 @@ interface WhatsAppSettingsTabProps {
 }
 
 const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId }) => {
+  const isMobile = usePhoneLayout();
   const [profile, setProfile] = useState<WhatsAppBusinessProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
@@ -426,13 +428,25 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
                           color={s.isPinned ? 'primary' : 'default'}
                           onClick={() => void handleToggleSnippetPin(s)}
                           aria-label={s.isPinned ? 'Quitar de favoritos' : 'Anclar en favoritos'}
+                          sx={{ width: 44, height: 44 }}
                         >
                           <PushPinIcon fontSize="small" />
                         </IconButton>
-                        <IconButton size="small" onClick={() => openSnippetEdit(s)}>
+                        <IconButton
+                          size="small"
+                          onClick={() => openSnippetEdit(s)}
+                          aria-label={`Editar ${s.label}`}
+                          sx={{ width: 44, height: 44 }}
+                        >
                           <EditIcon fontSize="small" />
                         </IconButton>
-                        <IconButton size="small" onClick={() => handleDeleteSnippet(s.id)} color="error">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleDeleteSnippet(s.id)}
+                          color="error"
+                          aria-label={`Eliminar ${s.label}`}
+                          sx={{ width: 44, height: 44 }}
+                        >
                           <DeleteIcon fontSize="small" />
                         </IconButton>
                       </ListItemSecondaryAction>
@@ -495,6 +509,7 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
                           color="error"
                           onClick={() => void handleDeletePreset(preset.id)}
                           aria-label="Eliminar pre-relleno"
+                          sx={{ width: 44, height: 44 }}
                         >
                           <DeleteIcon fontSize="small" />
                         </IconButton>
@@ -608,7 +623,13 @@ const WhatsAppSettingsTab: React.FC<WhatsAppSettingsTabProps> = ({ phoneNumberId
       </Grid>
 
       {/* Snippet Dialog */}
-      <Dialog open={snippetDialog} onClose={() => !snippetSaving && setSnippetDialog(false)} maxWidth="sm" fullWidth>
+      <Dialog
+        open={snippetDialog}
+        onClose={() => !snippetSaving && setSnippetDialog(false)}
+        maxWidth="sm"
+        fullWidth
+        fullScreen={isMobile}
+      >
         <DialogTitle>{snippetEdit ? 'Editar atajo' : 'Nuevo atajo rápido'}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>

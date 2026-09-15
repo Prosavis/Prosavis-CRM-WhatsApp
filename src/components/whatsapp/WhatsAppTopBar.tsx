@@ -2,6 +2,8 @@ import React, { useMemo, useState } from 'react';
 import {
   Avatar,
   Box,
+  BottomNavigation,
+  BottomNavigationAction,
   Button,
   ButtonBase,
   Divider,
@@ -10,12 +12,12 @@ import {
   ListItemText,
   Menu,
   MenuItem,
+  Paper,
   Stack,
   Tooltip,
   Typography,
-  useMediaQuery,
 } from '@mui/material';
-import { alpha, useTheme as useMuiTheme, type Theme } from '@mui/material/styles';
+import { alpha, type Theme } from '@mui/material/styles';
 import InboxIcon from '@mui/icons-material/Inbox';
 import StorefrontIcon from '@mui/icons-material/Storefront';
 import BarChartIcon from '@mui/icons-material/BarChart';
@@ -28,9 +30,11 @@ import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import DarkModeIcon from '@mui/icons-material/Brightness4';
 import LightModeIcon from '@mui/icons-material/Brightness7';
 import LogoutIcon from '@mui/icons-material/Logout';
+import MoreHorizIcon from '@mui/icons-material/MoreHoriz';
 import { playThemeTransitionSound } from '@/components/common/ThemeToggle';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/hooks/useAuth';
+import { usePhoneLayout } from '@/hooks/usePhoneLayout';
 import { getProsavisLogoSrc } from '@/utils/prosavisBrand';
 import { directoryNavMeta, inboxLineNavMeta } from '@/utils/whatsappInboxNav';
 import { isWhatsAppAdminTab, type WhatsAppTabKey } from '@/utils/whatsappTabs';
@@ -41,6 +45,7 @@ export interface WhatsAppTopBarProps {
   activeTab: WhatsAppTabKey;
   onTabChange: (_: React.SyntheticEvent, value: WhatsAppTabKey) => void;
   directoryTotalContacts: number | null;
+  hideOnMobile?: boolean;
 }
 
 const ADMIN_MENU_ITEMS: Array<{
@@ -53,6 +58,17 @@ const ADMIN_MENU_ITEMS: Array<{
   { key: 'automations', label: 'Automatizaciones', icon: <AutoAwesomeIcon fontSize="small" /> },
   { key: 'settings', label: 'Configuración', icon: <SettingsIcon fontSize="small" /> },
 ];
+
+const MOBILE_TAB_LABELS: Record<WhatsAppTabKey, string> = {
+  inbox: 'Inbox Bot',
+  commercial: 'Inbox Comercial',
+  metrics: 'Métricas',
+  leads: 'Directorio',
+  discounts: 'Descuentos',
+  settings: 'Configuración',
+  monitoreo: 'Monitoreo',
+  automations: 'Automatizaciones',
+};
 
 function SpecialTabLabel({
   title,
@@ -153,13 +169,14 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
   activeTab,
   onTabChange,
   directoryTotalContacts,
+  hideOnMobile = false,
 }) => {
   const { mode, toggleMode } = useTheme();
   const { profile, signOut } = useAuth();
-  const muiTheme = useMuiTheme();
-  const compactTabs = useMediaQuery(muiTheme.breakpoints.down('sm'));
+  const compactTabs = usePhoneLayout();
   const [adminAnchor, setAdminAnchor] = useState<null | HTMLElement>(null);
   const [accountAnchor, setAccountAnchor] = useState<null | HTMLElement>(null);
+  const [mobileMoreAnchor, setMobileMoreAnchor] = useState<null | HTMLElement>(null);
   const adminOpen = Boolean(adminAnchor);
   const accountOpen = Boolean(accountAnchor);
   const adminActive = isWhatsAppAdminTab(activeTab);
@@ -177,12 +194,127 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
   const commercialSelected = activeTab === 'commercial';
   const discountsSelected = activeTab === 'discounts';
 
+  const mobileNavValue =
+    activeTab === 'inbox' || activeTab === 'commercial' || activeTab === 'leads'
+      ? activeTab
+      : 'more';
+
   return (
+    <>
+      <Box
+        component="header"
+        sx={{
+          display: compactTabs && !hideOnMobile ? 'flex' : 'none',
+          alignItems: 'center',
+          minHeight: 52,
+          px: 1,
+          borderBottom: 1,
+          borderColor: 'divider',
+          bgcolor: 'background.paper',
+          flexShrink: 0,
+        }}
+      >
+        <Box
+          component="img"
+          src={getProsavisLogoSrc(mode)}
+          alt="Prosavis"
+          sx={{ width: 32, height: 32, objectFit: 'contain', mr: 1 }}
+        />
+        <Typography variant="subtitle1" fontWeight={800} noWrap sx={{ flex: 1 }}>
+          {MOBILE_TAB_LABELS[activeTab]}
+        </Typography>
+        <IconButton
+          aria-label="Cuenta"
+          onClick={(event) => setAccountAnchor(event.currentTarget)}
+          sx={{ width: 44, height: 44 }}
+        >
+          <Avatar
+            sx={{
+              width: 30,
+              height: 30,
+              fontSize: '0.8rem',
+              fontWeight: 700,
+              bgcolor: 'primary.main',
+            }}
+          >
+            {accountInitial}
+          </Avatar>
+        </IconButton>
+      </Box>
+
+      <Paper
+        component="nav"
+        aria-label="Navegación principal"
+        elevation={8}
+        sx={{
+          display: compactTabs && !hideOnMobile ? 'block' : 'none',
+          position: 'fixed',
+          zIndex: (theme) => theme.zIndex.appBar,
+          left: 'var(--crm-safe-left)',
+          right: 'var(--crm-safe-right)',
+          bottom: 0,
+          pb: 'var(--crm-safe-bottom)',
+          borderRadius: 0,
+        }}
+      >
+        <BottomNavigation
+          showLabels
+          value={mobileNavValue}
+          onChange={(event, value: WhatsAppTabKey | 'more') => {
+            if (value === 'more') return;
+            onTabChange(event, value);
+          }}
+          sx={{ height: 'var(--crm-mobile-nav-height)' }}
+        >
+          <BottomNavigationAction value="inbox" label="Bot" icon={<InboxIcon />} />
+          <BottomNavigationAction value="commercial" label="Comercial" icon={<StorefrontIcon />} />
+          <BottomNavigationAction value="leads" label="Directorio" icon={<ContactPhoneIcon />} />
+          <BottomNavigationAction
+            value="more"
+            label="Más"
+            icon={<MoreHorizIcon />}
+            onClick={(event) => setMobileMoreAnchor(event.currentTarget)}
+          />
+        </BottomNavigation>
+      </Paper>
+
+      <Menu
+        anchorEl={mobileMoreAnchor}
+        open={Boolean(mobileMoreAnchor)}
+        onClose={() => setMobileMoreAnchor(null)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+        transformOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <MenuItem
+          selected={activeTab === 'discounts'}
+          onClick={(event) => {
+            setMobileMoreAnchor(null);
+            onTabChange(event, 'discounts');
+          }}
+        >
+          <ListItemIcon><ConfirmationNumberIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>Descuentos</ListItemText>
+        </MenuItem>
+        {ADMIN_MENU_ITEMS.map((item) => (
+          <MenuItem
+            key={`mobile-${item.key}`}
+            selected={activeTab === item.key}
+            onClick={(event) => {
+              setMobileMoreAnchor(null);
+              onTabChange(event, item.key);
+            }}
+          >
+            <ListItemIcon>{item.icon}</ListItemIcon>
+            <ListItemText>{item.label}</ListItemText>
+          </MenuItem>
+        ))}
+      </Menu>
+
     <Box
       component="header"
       data-tour="whatsapp-header"
       sx={{
-        display: 'flex',
+        display: compactTabs ? 'none' : 'flex',
         alignItems: 'center',
         gap: { xs: 1, md: 1.5 },
         mb: 1.5,
@@ -397,6 +529,7 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
         </Menu>
       </Stack>
     </Box>
+    </>
   );
 };
 

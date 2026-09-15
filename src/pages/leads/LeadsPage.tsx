@@ -59,6 +59,8 @@ import {
   directoryPagingAfterFilterChange,
 } from '@/utils/directoryListPaging';
 import { crmToast } from '@/utils/crmToast';
+import DirectoryMobileList from '@/components/directory/DirectoryMobileList';
+import { usePhoneLayout } from '@/hooks/usePhoneLayout';
 
 const STATUS_CHIP_COLORS: Record<string, 'default' | 'success' | 'error' | 'warning'> = {
   active: 'success',
@@ -141,6 +143,7 @@ export interface LeadsPageProps {
 }
 
 const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, onOpenBulk }) => {
+  const isMobile = usePhoneLayout();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const setSnackbar = ({
     message,
@@ -223,6 +226,21 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, 
       statusFilter,
     ],
   );
+
+  const handleEntryUpdated = useCallback((updated: DirectoryEntry) => {
+    queryClient.setQueryData(
+      inboxQueryKeys.directoryEntries(directoryFilters),
+      (previous: { entries?: DirectoryEntry[]; totalCount?: number } | undefined) =>
+        previous
+          ? {
+              ...previous,
+              entries: (previous.entries ?? []).map((row) =>
+                row.id === updated.id ? updated : row,
+              ),
+            }
+          : previous,
+    );
+  }, [directoryFilters, queryClient]);
 
   const entriesQuery = useQuery({
     queryKey: inboxQueryKeys.directoryEntries(directoryFilters),
@@ -700,6 +718,22 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, 
           overflow: 'hidden',
         }}
       >
+        {isMobile ? (
+          <DirectoryMobileList
+            entries={entries}
+            loading={loading}
+            searchTerm={searchTerm}
+            selectedIds={selectedIds}
+            onToggleSelect={toggleSelect}
+            onOpenEntry={(entry) => {
+              setSelectedEntry(entry);
+              setDrawerOpen(true);
+            }}
+            onEntryUpdated={handleEntryUpdated}
+            onOpenInbox={onOpenInInbox}
+            onCreate={() => setCreateDialogOpen(true)}
+          />
+        ) : (
         <TableContainer>
           <Table size="small">
             <TableHead>
@@ -877,20 +911,7 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, 
                         entry={entry}
                         compact
                         autoSave
-                        onSaved={(updated) => {
-                          queryClient.setQueryData(
-                            inboxQueryKeys.directoryEntries(directoryFilters),
-                            (prev: { entries?: DirectoryEntry[]; totalCount?: number } | undefined) =>
-                              prev
-                                ? {
-                                    ...prev,
-                                    entries: (prev.entries ?? []).map((row) =>
-                                      row.id === updated.id ? updated : row,
-                                    ),
-                                  }
-                                : prev,
-                          );
-                        }}
+                        onSaved={handleEntryUpdated}
                       />
                     </TableCell>
                     <TableCell>
@@ -997,6 +1018,7 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, 
             </TableBody>
           </Table>
         </TableContainer>
+        )}
 
         <Box
           sx={{
@@ -1052,7 +1074,13 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, 
       </>
       )}
 
-      <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog
+        open={createDialogOpen}
+        onClose={() => setCreateDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+        fullScreen={isMobile}
+      >
         <DialogTitle>Nuevo cliente</DialogTitle>
         <DialogContent>
           <DialogContentText sx={{ mb: 2 }}>
@@ -1107,6 +1135,7 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, 
         onClose={() => !seedLoading && setSeedDialogOpen(false)}
         maxWidth="sm"
         fullWidth
+        fullScreen={isMobile}
       >
         <DialogTitle>Importar usuarios de la app</DialogTitle>
         <DialogContent>
