@@ -1,5 +1,6 @@
 import { assertEquals, assertStringIncludes } from 'jsr:@std/assert';
 import {
+  buildDirectoryUpsert,
   composeEmpresasWhatsApp,
   empresasWindowLabelsForDay,
   isEmpresasSendAllowed,
@@ -86,6 +87,39 @@ Deno.test('calendar is Mon-Thu three windows, Friday morning only, weekend off',
   assertEquals(isEmpresasSendAllowed(new Date('2026-09-07T23:05:00.000Z')), true);
   assertEquals(isEmpresasSendAllowed(new Date('2026-09-04T17:40:00.000Z')), false);
   assertEquals(isEmpresasSendAllowed(new Date('2026-09-05T15:00:00.000Z')), false);
+});
+
+Deno.test('blackout blocks Día de la Raza 2026-10-12', () => {
+  assertEquals(empresasWindowLabelsForDay('2026-10-12'), []);
+  assertEquals(isEmpresasSendAllowed(new Date('2026-10-12T13:10:00.000Z'), '08:00'), false);
+  assertEquals(isEmpresasSendAllowed(new Date('2026-10-12T17:40:00.000Z')), false);
+});
+
+Deno.test('buildDirectoryUpsert adds EMAIL when the lead has email', () => {
+  const both = buildDirectoryUpsert({
+    id: 'lead-1',
+    name: 'Empresa Demo',
+    phone_key: '3001234567',
+    email: 'demo@empresa.com',
+    address: null,
+    municipio: 'PEREIRA',
+    nit: null,
+    ciiu: null,
+    sources: ['test'],
+  });
+  assertEquals(both.channels, ['WHATSAPP', 'EMAIL']);
+  const emailOnly = buildDirectoryUpsert({
+    id: 'lead-2',
+    name: 'Solo correo',
+    phone_key: null,
+    email: 'solo@empresa.com',
+    address: null,
+    municipio: null,
+    nit: null,
+    ciiu: null,
+    sources: null,
+  });
+  assertEquals(emailOnly.channels, ['EMAIL']);
 });
 
 Deno.test('resolveEmpresasSendWindow uses Bogotá 08:00 / 12:30 / 18:00', () => {

@@ -96,6 +96,8 @@ Referencia local en `.env.example` (solo para `supabase functions serve`).
 | `GEMINI_MODEL_JSON` | Modelo JSON booking (default `gemini-3.6-flash`) |
 | `GEMINI_MODEL_TRANSCRIBE` | Modelo STT (default `gemini-3.6-flash`) |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | Lectura Firestore (citas para IA, métricas, reminders) |
+| `EMAIL_UNSUBSCRIBE_SECRET` | HMAC del one-click de baja del lote `comercial@` |
+| `EMAIL_UNSUBSCRIBE_URL` | Opcional. Default: `https://djzwjaegxbhlefanmmee.supabase.co/functions/v1/email-unsubscribe` |
 
 Detalle del packer de contexto: [CRM_INBOX_AI_CONTEXTO.md](../prosavis-firebase/docs/whatsapp/CRM_INBOX_AI_CONTEXTO.md).
 

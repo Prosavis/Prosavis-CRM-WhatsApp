@@ -32,6 +32,7 @@ $AllFunctions = @(
   'directory-ai-analyze',
   'directory-monitor',
   'discount-codes-admin',
+  'email-unsubscribe',
   'ensure-whatsapp-conversation-from-lead',
   'get-prosavis-cleaning-wompi-checkout-url',
   'analyze-whatsapp-inbound-image',

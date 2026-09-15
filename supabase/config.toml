@@ -131,11 +131,15 @@ verify_jwt = false
 [functions.run-empresas-outreach]
 verify_jwt = false
 
+# Baja one-click del lote comercial@ (token HMAC, sin JWT).
+[functions.email-unsubscribe]
+verify_jwt = false
+
 [functions.ensure-whatsapp-conversation-from-lead]
 verify_jwt = false
 
 [functions.sync-conversation-to-directory]
-verify_jwt = false
+verify_jwt = true
 
 [functions.backfill-whatsapp-conversation-line]
 verify_jwt = false

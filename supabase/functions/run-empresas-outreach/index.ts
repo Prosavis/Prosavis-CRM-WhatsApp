@@ -46,6 +46,7 @@ import {
   toBase64Url,
   type EmpresasLeadRow,
 } from '../_shared/empresasOutreach.ts';
+import { resolveListUnsubscribe } from '../_shared/emailUnsubscribe.ts';
 
 function verifyApiKey(req: Request): boolean {
   const apiKey = req.headers.get('x-api-key')?.trim();
@@ -268,13 +269,21 @@ async function sendEmailOne(
 ): Promise<{ status: 'sent' | 'failed' | 'skipped'; error?: string }> {
   const email = (row.email || '').trim().toLowerCase();
   if (!email || !email.includes('@')) return { status: 'skipped', error: 'Sin correo' };
-  const composed = composeEmpresasEmail(row, email);
+  const listUnsubscribe = await resolveListUnsubscribe({
+    email,
+    secret: env('EMAIL_UNSUBSCRIBE_SECRET'),
+    baseUrl: env('EMAIL_UNSUBSCRIBE_URL'),
+  });
+  const composed = composeEmpresasEmail(row, email, {
+    unsubscribeUrl: listUnsubscribe.https,
+  });
   const rfc822 = buildRfc822({
     from: gmail.from,
     to: composed.to,
     subject: composed.subject,
     body: composed.body,
     htmlBody: composed.htmlBody,
+    listUnsubscribe,
   });
   const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
     method: 'POST',

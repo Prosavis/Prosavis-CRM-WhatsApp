@@ -56,8 +56,22 @@ function weekdayUtc(ymd: string): number {
   return new Date(Date.UTC(year, month - 1, day)).getUTCDay();
 }
 
-/** Lun–Jue: 08:00 / 12:30 / 18:00. Viernes: solo 08:00. Sáb–dom: ninguna. */
+/** Festivos Colombia restantes 2026. Mantener alineado con Firebase `grokOps/empresasOutreach.ts`. */
+export const EMPRESAS_OUTREACH_BLACKOUT_DATES = new Set([
+  '2026-10-12',
+  '2026-11-02',
+  '2026-11-16',
+  '2026-12-08',
+  '2026-12-25',
+]);
+
+export function isEmpresasBlackoutDate(ymd: string): boolean {
+  return EMPRESAS_OUTREACH_BLACKOUT_DATES.has(ymd);
+}
+
+/** Lun–Jue: 08:00 / 12:30 / 18:00. Viernes: solo 08:00. Sáb–dom y festivos: ninguna. */
 export function empresasWindowLabelsForDay(ymd: string): string[] {
+  if (isEmpresasBlackoutDate(ymd)) return [];
   const dow = weekdayUtc(ymd);
   if (dow === 0 || dow === 6) return [];
   if (dow === 5) return ['08:00'];
@@ -223,7 +237,10 @@ export function buildDirectoryUpsert(row: EmpresasLeadRow): Record<string, unkno
   const entry: Record<string, unknown> = {
     status: 'active',
     source: 'LEAD',
-    channels: row.phone_key ? ['WHATSAPP'] : ['EMAIL'],
+    channels: [
+      ...(row.phone_key ? ['WHATSAPP'] : []),
+      ...(row.email ? ['EMAIL'] : []),
+    ],
   };
   if (name) {
     entry.full_name = name;
@@ -437,9 +454,26 @@ export function empresasEmailCopy(row: Pick<EmpresasLeadRow, 'name' | 'address' 
   return { displayName, greeting, headline, subject, opening: bits.join(' ') };
 }
 
+const FRANCY_SIGN_OFF_HTML =
+  'Francy Olivera<br>' +
+  'Administración comercial<br>' +
+  'Prosavis SAS · Pereira<br>' +
+  `<a href="https://wa.me/573012030253" style="color:#002446;">+57 301 203 0253</a>` +
+  ` · <a href="mailto:comercial@prosavis.com" style="color:#002446;">comercial@prosavis.com</a><br>` +
+  `<a href="https://prosavis.com" style="color:#002446;">prosavis.com</a>`;
+
+const FRANCY_SIGN_OFF_PLAIN =
+  'Francy Olivera\n' +
+  'Administración comercial\n' +
+  'Prosavis SAS · Pereira\n' +
+  '+57 301 203 0253\n' +
+  'comercial@prosavis.com\n' +
+  'https://prosavis.com';
+
 export function composeEmpresasEmail(
   row: Pick<EmpresasLeadRow, 'name' | 'address' | 'municipio' | 'ciiu'>,
   to: string,
+  options?: { unsubscribeUrl?: string },
 ): {
   to: string;
   subject: string;
@@ -447,6 +481,13 @@ export function composeEmpresasEmail(
   htmlBody: string;
 } {
   const copy = empresasEmailCopy(row);
+  const unsubscribeUrl = String(options?.unsubscribeUrl || '').trim();
+  const bajaHtml = unsubscribeUrl
+    ? `Si no desea más correos, <a href="${escapeHtml(unsubscribeUrl)}" style="color:#5A6B7B;">darse de baja</a> o responda BAJA.`
+    : 'Si no desea más correos, responda BAJA.';
+  const bajaPlain = unsubscribeUrl
+    ? `Si no desea más correos, darse de baja: ${unsubscribeUrl} o responda BAJA.`
+    : 'Si no desea más correos, responda BAJA.';
   const htmlBody =
     `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">` +
     `<meta name="viewport" content="width=device-width, initial-scale=1.0">` +
@@ -473,12 +514,10 @@ export function composeEmpresasEmail(
     `<p style="margin:0 0 16px;">Responda este correo o escríbanos al ` +
     `<a href="https://wa.me/573122531271" style="color:#FF7700;font-weight:bold;">312 253 1271</a>. ` +
     `En breve coordinamos una visita o un alcance por escrito.</p>` +
-    `<p style="margin:24px 0 0;font-size:12px;color:#5A6B7B;">Si no desea más correos, responda BAJA.</p>` +
+    `<p style="margin:24px 0 0;font-size:12px;color:#5A6B7B;">${bajaHtml}</p>` +
     `</td></tr>` +
     `<tr><td style="padding:8px 32px 28px;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.5;color:#5A6B7B;">` +
-    `Prosavis SAS · Pereira<br>` +
-    `<a href="https://wa.me/573122531271" style="color:#002446;">+57 312 253 1271</a>` +
-    ` · <a href="https://prosavis.com" style="color:#002446;">prosavis.com</a>` +
+    `${FRANCY_SIGN_OFF_HTML}` +
     `</td></tr></table></td></tr></table></body></html>`;
   if (htmlBody.includes('<img') || /\$\s*\d/.test(htmlBody) || /88\.000|118\.000|148\.000/.test(htmlBody)) {
     throw new Error('El correo B2B no admite <img> ni precios domésticos.');
@@ -493,9 +532,9 @@ export function composeEmpresasEmail(
     'La frecuencia que pidan — una vez, semanal o permanente.',
     '',
     'Responda este correo o WhatsApp 312 253 1271.',
-    'Si no desea más correos, responda BAJA.',
+    bajaPlain,
     '',
-    'Prosavis SAS · Pereira',
+    FRANCY_SIGN_OFF_PLAIN,
   ].join('\n');
   return { to, subject: copy.subject, body, htmlBody };
 }
@@ -537,12 +576,22 @@ export function buildRfc822(input: {
   subject: string;
   body: string;
   htmlBody: string;
+  listUnsubscribe?: { mailto: string; https?: string };
 }): string {
   const boundary = 'prosavis_ops_alt';
+  const unsub = input.listUnsubscribe;
+  const extraHeaders: string[] = [];
+  if (unsub?.mailto) {
+    const refs = [`<${unsub.mailto}>`];
+    if (unsub.https) refs.push(`<${unsub.https}>`);
+    extraHeaders.push(`List-Unsubscribe: ${refs.join(', ')}`);
+    if (unsub.https) extraHeaders.push('List-Unsubscribe-Post: List-Unsubscribe=One-Click');
+  }
   return [
     `From: ${input.from}`,
     `To: ${input.to}`,
     `Subject: ${encodeSubject(input.subject)}`,
+    ...extraHeaders,
     'MIME-Version: 1.0',
     `Content-Type: multipart/alternative; boundary="${boundary}"`,
     '',
