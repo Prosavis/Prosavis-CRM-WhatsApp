@@ -2,6 +2,10 @@
 import { DEFAULT_HISTORY_LIMIT } from './conversationHistory.ts';
 import { DEFAULT_GEMINI_MODEL, getGeminiApiKey, geminiAnalyzeImage, resolveGeminiModel } from './geminiClient.ts';
 import {
+  imageAnalysisStatusFromFinishReason,
+  shouldReuseCachedImageAnalysis,
+} from './imageAnalysisCache.ts';
+import {
   MAX_IMAGE_ANALYSIS_BYTES,
   VISION_REUSE_MODEL_PREFIX,
   countsTowardVisionQuota,
@@ -16,7 +20,7 @@ type SupabaseClient = any;
 
 export interface AnalyzeImageItemResult {
   messageLogId: string;
-  status: 'completed' | 'cached' | 'reused' | 'skipped' | 'failed';
+  status: 'completed' | 'partial' | 'cached' | 'reused' | 'skipped' | 'failed';
   analysis?: string;
   reason?: string;
 }
@@ -82,15 +86,20 @@ async function reuseAnalysisBySha256(
     .filter((id: string | null | undefined): id is string => Boolean(id));
   if (!ids.length) return null;
 
-  const { data: reused } = await supabase
+  const { data: reusedRows } = await supabase
     .from('whatsapp_message_log')
-    .select('media_analysis_text,media_analysis_model,media_analysis_bytes')
+    .select('media_analysis_text,media_analysis_model,media_analysis_bytes,media_analysis_status')
     .in('id', ids)
     .not('media_analysis_text', 'is', null)
-    .limit(1)
-    .maybeSingle();
+    .limit(20);
+  const reused = (reusedRows ?? []).find((row: {
+    media_analysis_text?: unknown;
+    media_analysis_status?: unknown;
+    media_analysis_model?: unknown;
+    media_analysis_bytes?: unknown;
+  }) => shouldReuseCachedImageAnalysis(row));
   const text = typeof reused?.media_analysis_text === 'string' ? reused.media_analysis_text.trim() : '';
-  if (!text) return null;
+  if (!reused || !text) return null;
   return {
     text,
     model: String(reused.media_analysis_model || DEFAULT_GEMINI_MODEL),
@@ -115,7 +124,7 @@ export async function analyzeInboundImageById(
   const { data: row, error } = await supabase
     .from('whatsapp_message_log')
     .select(
-      'id,direction,media_type,storage_path,size_bytes,mime_type,media_analysis_text,conversation_stable_key',
+      'id,direction,media_type,storage_path,size_bytes,mime_type,media_analysis_text,media_analysis_status,conversation_stable_key',
     )
     .eq('id', messageLogId)
     .single();
@@ -128,7 +137,7 @@ export async function analyzeInboundImageById(
     return { messageLogId, status: 'skipped', reason: analyzable.reason };
   }
 
-  if (row.media_analysis_text && !options?.force) {
+  if (shouldReuseCachedImageAnalysis(row, options?.force)) {
     return {
       messageLogId,
       status: 'cached',
@@ -183,17 +192,18 @@ export async function analyzeInboundImageById(
       mimeType: String(row.mime_type || 'image/jpeg'),
       model,
     }));
+    const status = imageAnalysisStatusFromFinishReason(analysis.finishReason);
 
     await persistAnalysis(supabase, messageLogId, {
-      media_analysis_text: analysis,
+      media_analysis_text: analysis.text,
       media_analysis_at: new Date().toISOString(),
       media_analysis_model: model,
       media_analysis_bytes: buffer.byteLength,
-      media_analysis_status: 'completed',
+      media_analysis_status: status,
       media_analysis_error: null,
       media_analysis_failed_at: null,
     });
-    return { messageLogId, status: 'completed', analysis };
+    return { messageLogId, status, analysis: analysis.text };
   } catch (error) {
     const message = formatUnknownError(error);
     await persistAnalysis(supabase, messageLogId, {
@@ -218,7 +228,7 @@ export async function analyzeUncachedInboundImagesForConversation(
   const { data, error } = await supabase
     .from('whatsapp_message_log')
     .select(
-      'id,direction,media_type,storage_path,size_bytes,mime_type,media_analysis_text,hidden_from_panel',
+      'id,direction,media_type,storage_path,size_bytes,mime_type,media_analysis_text,media_analysis_status,hidden_from_panel',
     )
     .eq('conversation_stable_key', stableKey)
     .eq('hidden_from_panel', false)
@@ -243,7 +253,7 @@ export async function analyzeUncachedInboundImagesForConversation(
       if (wanted.size) preSkipped.push({ messageLogId: id, status: 'skipped', reason: analyzable.reason });
       continue;
     }
-    if (row.media_analysis_text && !options?.force) {
+    if (shouldReuseCachedImageAnalysis(row, options?.force)) {
       cachedItems.push({
         messageLogId: id,
         status: 'cached',
@@ -273,7 +283,7 @@ export async function analyzeUncachedInboundImagesForConversation(
   for (const id of picked.selected) {
     const result = await analyzeInboundImageById(supabase, id, { force: options?.force });
     items.push(result);
-    if (result.status === 'completed') analyzed += 1;
+    if (result.status === 'completed' || result.status === 'partial') analyzed += 1;
     if (result.status === 'reused') reused += 1;
     if (result.status === 'failed') failed.push(result);
   }

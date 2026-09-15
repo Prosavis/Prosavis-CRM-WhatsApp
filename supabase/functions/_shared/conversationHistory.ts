@@ -1,4 +1,6 @@
 // deno-lint-ignore-file no-explicit-any
+import { looksIncompleteImageAnalysis } from './imageAnalysisCache.ts';
+
 /** Cliente Supabase tipado de forma laxa para poder testear helpers puros con Vitest. */
 type SupabaseClient = any;
 
@@ -51,6 +53,7 @@ export function resolveConversationTurnText(
   options: boolean | {
     includeVoiceTranscriptions?: boolean;
     includeImageAnalysis?: boolean;
+    includeCachedImageAnalysis?: boolean;
   } = false,
 ): string {
   const includeVoiceTranscriptions = typeof options === 'boolean'
@@ -58,15 +61,19 @@ export function resolveConversationTurnText(
     : options.includeVoiceTranscriptions === true;
   const includeImageAnalysis = typeof options === 'boolean'
     ? false
-    : options.includeImageAnalysis === true;
+    : options.includeImageAnalysis === true
+      || options.includeCachedImageAnalysis === true;
   const mediaType = asTrimmedText(row.media_type) || null;
   const body = asTrimmedText(row.message_body);
   const caption = asTrimmedText(row.caption);
   const transcription = includeVoiceTranscriptions
     ? asTrimmedText(row.voice_transcription)
     : '';
-  const imageAnalysis = includeImageAnalysis
+  const rawImageAnalysis = includeImageAnalysis
     ? asTrimmedText(row.media_analysis_text)
+    : '';
+  const imageAnalysis = rawImageAnalysis && !looksIncompleteImageAnalysis(rawImageAnalysis)
+    ? rawImageAnalysis
     : '';
 
   if (transcription && (mediaType === 'audio' || isMediaPlaceholder(body, mediaType))) {
@@ -96,7 +103,11 @@ export async function getConversationHistory(
   supabase: SupabaseClient,
   stableKey: string,
   limit = DEFAULT_HISTORY_LIMIT,
-  options?: { includeVoiceTranscriptions?: boolean; includeImageAnalysis?: boolean },
+  options?: {
+    includeVoiceTranscriptions?: boolean;
+    includeImageAnalysis?: boolean;
+    includeCachedImageAnalysis?: boolean;
+  },
 ): Promise<ConversationTurn[]> {
   const result = await getConversationHistoryWithMeta(supabase, stableKey, limit, options);
   return result.turns;
@@ -110,7 +121,11 @@ export async function getConversationHistoryWithMeta(
   supabase: SupabaseClient,
   stableKey: string,
   limit = DEFAULT_HISTORY_LIMIT,
-  options?: { includeVoiceTranscriptions?: boolean; includeImageAnalysis?: boolean },
+  options?: {
+    includeVoiceTranscriptions?: boolean;
+    includeImageAnalysis?: boolean;
+    includeCachedImageAnalysis?: boolean;
+  },
 ): Promise<ConversationHistoryResult> {
   const { data, error } = await supabase
     .from('whatsapp_message_log')
@@ -134,6 +149,7 @@ export async function getConversationHistoryWithMeta(
     const text = resolveConversationTurnText(row, {
       includeVoiceTranscriptions: options?.includeVoiceTranscriptions === true,
       includeImageAnalysis: options?.includeImageAnalysis === true,
+      includeCachedImageAnalysis: options?.includeCachedImageAnalysis === true,
     });
     if (!text) continue;
     turns.push({

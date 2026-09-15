@@ -34,6 +34,7 @@ export type InboxAiContextPackRequest =
     stableKey: string;
     includeVoiceTranscriptions: boolean;
     includeImageAnalysis: boolean;
+    includeCachedImageAnalysis: boolean;
     durationMinutes: number;
   }
   | {
@@ -74,6 +75,7 @@ export function parseInboxAiContextPackRequest(
     stableKey,
     includeVoiceTranscriptions: record.includeVoiceTranscriptions !== false,
     includeImageAnalysis: record.includeImageAnalysis === true,
+    includeCachedImageAnalysis: record.includeCachedImageAnalysis !== false,
     durationMinutes: resolveOfficialDuration(asDurationMinutes(record.durationMinutes)),
   };
 }

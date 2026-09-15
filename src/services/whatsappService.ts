@@ -229,6 +229,7 @@ function mapMessageRow(row: MessageRow): WhatsAppMessage {
       | 'completed'
       | 'failed'
       | 'pending'
+      | 'partial'
       | undefined,
     mediaAnalysisError: row.media_analysis_error ?? undefined,
     mediaAnalysisFailedAt: toDate(row.media_analysis_failed_at),
@@ -333,7 +334,7 @@ export interface WhatsAppMessage {
   mediaAnalysisAt?: Date;
   mediaAnalysisModel?: string;
   mediaAnalysisBytes?: number;
-  mediaAnalysisStatus?: 'completed' | 'failed' | 'pending';
+  mediaAnalysisStatus?: 'completed' | 'failed' | 'pending' | 'partial';
   mediaAnalysisError?: string;
   mediaAnalysisFailedAt?: Date;
   hiddenFromPanel?: boolean;
@@ -768,12 +769,22 @@ export async function backfillWhatsAppAudioTranscriptions(limit = 25): Promise<{
 export async function analyzeWhatsAppInboundImage(
   messageLogId: string,
   force = false,
-): Promise<{ success: boolean; analysis: string; cached?: boolean }> {
+): Promise<{
+  success: boolean;
+  analysis: string;
+  cached?: boolean;
+  status?: 'completed' | 'partial' | 'cached' | 'reused';
+}> {
   const data = await invokeFn('analyze-whatsapp-inbound-image', {
     messageLogId,
     ...(force ? { force } : {}),
   });
-  return data as { success: boolean; analysis: string; cached?: boolean };
+  return data as {
+    success: boolean;
+    analysis: string;
+    cached?: boolean;
+    status?: 'completed' | 'partial' | 'cached' | 'reused';
+  };
 }
 
 export async function markAsRead(

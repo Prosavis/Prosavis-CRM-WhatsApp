@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { geminiGenerateJson } from '../../supabase/functions/_shared/geminiClient';
+import {
+  IMAGE_ANALYSIS_MAX_OUTPUT_TOKENS,
+  IMAGE_ANALYSIS_THINKING_LEVEL,
+  geminiAnalyzeImage,
+  geminiGenerateJson,
+} from '../../supabase/functions/_shared/geminiClient';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -110,5 +115,42 @@ describe('geminiGenerateJson HTTP transport', () => {
     };
     expect(body.generationConfig.responseSchema).toEqual(legacySchema);
     expect(body.generationConfig).not.toHaveProperty('responseJsonSchema');
+  });
+});
+
+describe('geminiAnalyzeImage HTTP transport', () => {
+  it('asks for 8192 output tokens and minimal thinking, and returns finishReason', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      candidates: [{
+        content: {
+          parts: [{ text: 'Comprobante Bancolombia. Monto $148.000.' }],
+        },
+        finishReason: 'STOP',
+      }],
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await geminiAnalyzeImage({
+      apiKey: 'test-api-key',
+      buffer: new Uint8Array([1, 2, 3]),
+      mimeType: 'image/jpeg',
+    });
+
+    expect(result).toEqual({
+      text: 'Comprobante Bancolombia. Monto $148.000.',
+      finishReason: 'STOP',
+    });
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const body = JSON.parse(String(request.body)) as {
+      generationConfig: {
+        maxOutputTokens?: number;
+        thinkingConfig?: { thinkingLevel?: string };
+      };
+    };
+    expect(body.generationConfig.maxOutputTokens).toBe(IMAGE_ANALYSIS_MAX_OUTPUT_TOKENS);
+    expect(body.generationConfig.maxOutputTokens).toBe(8192);
+    expect(body.generationConfig.thinkingConfig).toEqual({
+      thinkingLevel: IMAGE_ANALYSIS_THINKING_LEVEL,
+    });
   });
 });

@@ -58,6 +58,7 @@ import {
 } from '@/services/whatsappService';
 import ClientDateText from '@/components/common/ClientDateText';
 import { AnalysisMarkdown } from '@/components/whatsapp/AnalysisMarkdown';
+import { looksIncompleteImageAnalysis } from '../../../supabase/functions/_shared/imageAnalysisCache';
 import { WhatsAppFormattedText } from '@/utils/whatsappTextFormatting';
 import { crmToast } from '@/utils/crmToast';
 import { COLOMBIA_TIME_ZONE } from '@/utils/colombiaTime';
@@ -363,6 +364,7 @@ const MediaContent: React.FC<{
   const [transcribing, setTranscribing] = useState(false);
   const [transcriptionError, setTranscriptionError] = useState('');
   const [imageAnalysis, setImageAnalysis] = useState(message.mediaAnalysisText || '');
+  const [imageAnalysisStatus, setImageAnalysisStatus] = useState(message.mediaAnalysisStatus);
   const [analyzingImage, setAnalyzingImage] = useState(false);
   const [imageAnalysisError, setImageAnalysisError] = useState('');
 
@@ -373,8 +375,9 @@ const MediaContent: React.FC<{
 
   useEffect(() => {
     setImageAnalysis(message.mediaAnalysisText || '');
+    setImageAnalysisStatus(message.mediaAnalysisStatus);
     setImageAnalysisError(message.mediaAnalysisError || '');
-  }, [message.mediaAnalysisText, message.mediaAnalysisError]);
+  }, [message.mediaAnalysisText, message.mediaAnalysisStatus, message.mediaAnalysisError]);
 
   const handleDownload = useCallback(async () => {
     if (!effectiveUrl) return;
@@ -404,6 +407,11 @@ const MediaContent: React.FC<{
     try {
       const result = await analyzeWhatsAppInboundImage(message.id, force);
       setImageAnalysis(result.analysis);
+      setImageAnalysisStatus(
+        result.status === 'partial' || looksIncompleteImageAnalysis(result.analysis)
+          ? 'partial'
+          : 'completed',
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'No se pudo analizar la imagen';
       setImageAnalysisError(msg);
@@ -469,6 +477,11 @@ const MediaContent: React.FC<{
               <ImageIcon sx={{ fontSize: 14 }} />
               Análisis de imagen
             </Typography>
+            {(imageAnalysisStatus === 'partial' || looksIncompleteImageAnalysis(imageAnalysis)) && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                Incompleto — se puede volver a analizar.
+              </Typography>
+            )}
             <AnalysisMarkdown text={imageAnalysis} />
             <Button
               size="small"

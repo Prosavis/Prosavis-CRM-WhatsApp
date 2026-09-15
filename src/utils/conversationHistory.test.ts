@@ -126,6 +126,60 @@ describe('getConversationHistoryWithMeta', () => {
     expect(result.turns[0]?.text).toContain('sala');
   });
 
+  it('includes cached image analysis for Grok without running new vision', async () => {
+    const query = {
+      select: () => query,
+      eq: () => query,
+      order: () => query,
+      limit: () => Promise.resolve({
+        data: [{
+          direction: 'inbound',
+          message_body: '[image]',
+          media_type: 'image',
+          media_analysis_text: 'Comprobante Bancolombia. Monto $148.000. Referencia M23086750.',
+          created_at: '2026-09-15T14:00:00.000Z',
+        }],
+        error: null,
+      }),
+    };
+    const result = await getConversationHistoryWithMeta(
+      { from: () => query },
+      '573150729571__1043086062223440',
+      10,
+      { includeCachedImageAnalysis: true },
+    );
+
+    expect(result.turns[0]?.text).toContain('[Imagen]:');
+    expect(result.turns[0]?.text).toContain('$148.000');
+  });
+
+  it('skips truncated image-analysis stubs even when cache is requested', async () => {
+    const query = {
+      select: () => query,
+      eq: () => query,
+      order: () => query,
+      limit: () => Promise.resolve({
+        data: [{
+          direction: 'inbound',
+          message_body: '[image]',
+          media_type: 'image',
+          media_analysis_text:
+            'Aquí tienes el desglose de la imagen redactado para un operador de un servicio de limpieza en Colombia:\n\n---\n\n### 1. Qué se ve en la imagen\nSe trata de',
+          created_at: '2026-09-15T14:00:00.000Z',
+        }],
+        error: null,
+      }),
+    };
+    const result = await getConversationHistoryWithMeta(
+      { from: () => query },
+      '573150729571__1043086062223440',
+      10,
+      { includeCachedImageAnalysis: true },
+    );
+
+    expect(result.turns[0]?.text).toBe('[image]');
+  });
+
   it('keeps the [image] placeholder when image analysis is disabled', async () => {
     const query = {
       select: () => query,

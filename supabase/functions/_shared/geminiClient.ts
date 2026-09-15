@@ -19,6 +19,16 @@ export const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
 export const GEMINI_TIMEOUT_MS = 75000;
 export const MAX_INLINE_AUDIO_BYTES = 180 * 1024; // 180 KB — inline; mayor usa asset
+export const IMAGE_ANALYSIS_MAX_OUTPUT_TOKENS = 8192;
+export const IMAGE_ANALYSIS_THINKING_LEVEL = 'minimal';
+
+export type GeminiThinkingLevel = 'minimal' | 'low' | 'medium' | 'high';
+
+export interface GeminiThinkingConfig {
+  thinkingLevel?: GeminiThinkingLevel;
+  thinkingBudget?: number;
+  includeThoughts?: boolean;
+}
 
 function readRuntimeEnv(name: string): string | undefined {
   const runtime = globalThis as typeof globalThis & {
@@ -73,6 +83,7 @@ export function geminiLog(
 
 interface GeminiPart {
   text?: string;
+  thought?: boolean;
   inlineData?: {
     mimeType: string;
     data: string;
@@ -96,6 +107,7 @@ interface GeminiGenerateContentRequest {
     responseMimeType?: string;
     responseSchema?: Record<string, unknown>;
     responseJsonSchema?: Record<string, unknown>;
+    thinkingConfig?: GeminiThinkingConfig;
   };
 }
 
@@ -121,6 +133,7 @@ async function geminiRequest(params: {
   responseMimeType?: string;
   responseSchema?: Record<string, unknown>;
   responseJsonSchema?: Record<string, unknown>;
+  thinkingConfig?: GeminiThinkingConfig;
 }): Promise<GeminiGenerateContentResponse> {
   const url = `${GEMINI_BASE_URL}/models/${params.model}:generateContent`;
 
@@ -148,6 +161,10 @@ async function geminiRequest(params: {
 
   if (params.responseJsonSchema) {
     body.generationConfig!.responseJsonSchema = params.responseJsonSchema;
+  }
+
+  if (params.thinkingConfig) {
+    body.generationConfig!.thinkingConfig = params.thinkingConfig;
   }
 
   const response = await fetch(url, {
@@ -197,7 +214,11 @@ export function extractTextResultFromResponse(data: GeminiGenerateContentRespons
     throw new Error('Gemini no devolvió contenido');
   }
 
-  const text = parts.map((p) => p.text ?? '').join('').trim();
+  const text = parts
+    .filter((p) => !p.thought)
+    .map((p) => p.text ?? '')
+    .join('')
+    .trim();
   if (!text) throw new Error('Gemini devolvió contenido vacío');
 
   return { text, finishReason: candidate.finishReason };
@@ -494,13 +515,14 @@ function imageMimeType(mimeType: string): string {
 /**
  * Describe una foto inbound de WhatsApp para el operador / packer de inbox.
  * No inventa precios ni disponibilidad.
+ * thinkingLevel minimal: maxOutputTokens incluye tokens de razonamiento.
  */
 export async function geminiAnalyzeImage(params: {
   apiKey: string;
   buffer: Uint8Array;
   mimeType: string;
   model?: string;
-}): Promise<string> {
+}): Promise<{ text: string; finishReason?: string }> {
   const model = params.model ??
     resolveGeminiModel('GEMINI_MODEL_IMAGE_ANALYSIS', DEFAULT_GEMINI_MODEL);
 
@@ -508,9 +530,10 @@ export async function geminiAnalyzeImage(params: {
   const imageB64 = bytesToBase64(params.buffer);
 
   const instruction =
-    'Describe esta imagen de WhatsApp en español de Colombia para un operador de limpieza. ' +
-    'Incluye: qué se ve, texto visible (OCR) y datos útiles para cotizar o agendar ' +
-    '(dirección, metros, suciedad, tipo de inmueble). ' +
+    'Nota operativa en español de Colombia para un operador de limpieza. ' +
+    'Sin preámbulo ni frases tipo "Aquí tienes el desglose". ' +
+    'Incluye: qué se ve, texto visible (OCR) y datos útiles para cotizar, cobrar o agendar ' +
+    '(dirección, metros, suciedad, tipo de inmueble, monto, banco, referencia). ' +
     'No inventes precios ni disponibilidad. Si no se entiende, dilo sin especular.';
 
   const data = await geminiRequest({
@@ -524,8 +547,9 @@ export async function geminiAnalyzeImage(params: {
       ],
     }],
     temperature: 0,
-    maxOutputTokens: 1024,
+    maxOutputTokens: IMAGE_ANALYSIS_MAX_OUTPUT_TOKENS,
+    thinkingConfig: { thinkingLevel: IMAGE_ANALYSIS_THINKING_LEVEL },
   });
 
-  return extractTextFromResponse(data);
+  return extractTextResultFromResponse(data);
 }

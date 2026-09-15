@@ -25,6 +25,7 @@ Deno.serve(async (req) => {
       ctx = await buildInboxAiContext(auth.supabase, parsed.stableKey, {
         includeVoiceTranscriptions: parsed.includeVoiceTranscriptions,
         includeImageAnalysis: parsed.includeImageAnalysis,
+        includeCachedImageAnalysis: parsed.includeCachedImageAnalysis,
       });
     } catch (err) {
       const msg = String((err as Error)?.message ?? err);

@@ -28,8 +28,19 @@ describe('parseInboxAiContextPackRequest', () => {
       stableKey: '573001112233',
       includeVoiceTranscriptions: true,
       includeImageAnalysis: false,
+      includeCachedImageAnalysis: true,
       durationMinutes: 240,
     });
+  });
+
+  it('can hide cached image analysis when asked', () => {
+    const parsed = parseInboxAiContextPackRequest({
+      phone: '573001112233',
+      includeCachedImageAnalysis: false,
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.includeCachedImageAnalysis).toBe(false);
   });
 
   it('opts into image analysis only when requested', () => {
@@ -54,6 +65,7 @@ describe('parseInboxAiContextPackRequest', () => {
       stableKey: '57abc',
       includeVoiceTranscriptions: false,
       includeImageAnalysis: false,
+      includeCachedImageAnalysis: true,
       durationMinutes: 360,
     });
   });

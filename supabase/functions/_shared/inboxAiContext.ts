@@ -291,6 +291,7 @@ export async function buildInboxAiContext(
   options?: {
     includeVoiceTranscriptions?: boolean;
     includeImageAnalysis?: boolean;
+    includeCachedImageAnalysis?: boolean;
     historyLimit?: number;
     transcriptCharBudget?: number;
   },
@@ -298,6 +299,8 @@ export async function buildInboxAiContext(
   const phone = normalizePhone(customerPhoneFromStableKey(stableKey));
   const historyLimit = options?.historyLimit ?? DEFAULT_HISTORY_LIMIT;
   const charBudget = options?.transcriptCharBudget ?? DEFAULT_TRANSCRIPT_CHAR_BUDGET;
+  const includeCachedImageAnalysis = options?.includeCachedImageAnalysis === true
+    || options?.includeImageAnalysis === true;
 
   if (options?.includeImageAnalysis === true) {
     try {
@@ -312,6 +315,7 @@ export async function buildInboxAiContext(
   const history = await getConversationHistoryWithMeta(supabase, stableKey, historyLimit, {
     includeVoiceTranscriptions: options?.includeVoiceTranscriptions === true,
     includeImageAnalysis: options?.includeImageAnalysis === true,
+    includeCachedImageAnalysis,
   });
   const siblingKey = siblingConversationStableKey(stableKey);
   let siblingTurns: typeof history.turns = [];
@@ -324,6 +328,7 @@ export async function buildInboxAiContext(
         {
           includeVoiceTranscriptions: options?.includeVoiceTranscriptions === true,
           includeImageAnalysis: options?.includeImageAnalysis === true,
+          includeCachedImageAnalysis,
         },
       );
       siblingTurns = sibling.turns;
