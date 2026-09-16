@@ -36,7 +36,9 @@ Deno.serve(async (req) => {
       phoneNumberId,
     });
 
-    const firstDay = bootstrap.completedDaily[0]?.bucket ?? bootstrap.today;
+    const firstDay = bootstrap.appointmentDaily[0]?.bucket
+      ?? bootstrap.completedDaily[0]?.bucket
+      ?? bootstrap.today;
     const lastDay = bootstrap.today;
     const legacy = bootstrapToLegacyMetrics(bootstrap);
 

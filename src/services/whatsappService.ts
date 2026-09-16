@@ -2340,6 +2340,42 @@ export async function listCompletedAppointments(params: {
   );
 }
 
+export async function listAppointmentMetrics(params: {
+  serviceId?: string;
+  limit?: number;
+  offset?: number;
+  from?: string | null;
+  to?: string | null;
+  status?: string | null;
+  statuses?: string[] | null;
+  statusGroup?: string | null;
+} = {}) {
+  return invokeFn<{ items: unknown[]; hasMore: boolean; nextCursor: string | null }>(
+    'list-appointment-metrics',
+    params,
+  );
+}
+
+export async function listAllAppointmentMetrics(params: {
+  serviceId?: string;
+  from?: string | null;
+  to?: string | null;
+  statuses?: string[] | null;
+  statusGroup?: string | null;
+  limit?: number;
+} = {}) {
+  const items: unknown[] = [];
+  let offset = 0;
+  const limit = params.limit ?? 100;
+  for (let page = 0; page < 50; page += 1) {
+    const result = await listAppointmentMetrics({ ...params, offset, limit });
+    items.push(...(result.items ?? []));
+    if (!result.hasMore) break;
+    offset = result.nextCursor ? Number(result.nextCursor) : offset + (result.items?.length ?? 0);
+  }
+  return items;
+}
+
 export async function getClientQualityMetrics(params: {
   from?: string | null;
   to?: string | null;

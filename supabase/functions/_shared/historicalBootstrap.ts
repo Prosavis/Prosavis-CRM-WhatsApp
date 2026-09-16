@@ -1,7 +1,14 @@
-import type { HistoricalMetricsBootstrap, MetricsWindowKey, OutboundFactRow } from './metricsContract.ts';
+import type {
+  AppointmentStatusDayPoint,
+  HistoricalMetricsBootstrap,
+  MetricsWindowKey,
+  OutboundFactRow,
+} from './metricsContract.ts';
 import { METRICS_TIMEZONE } from './metricsContract.ts';
 import {
+  appointmentStatusTimeseriesFromDaily,
   assembleInboundTimeseries,
+  buildAppointmentWindowTotals,
   buildCompletedWindowTotals,
   buildInboundWindowTotals,
   buildOutboundWindowTotals,
@@ -109,17 +116,47 @@ export function mapOutboundFacts(data: unknown): OutboundFactRow[] {
   });
 }
 
-export function mapCompletedDaily(data: unknown) {
+export function mapAppointmentStatusDaily(data: unknown): AppointmentStatusDayPoint[] {
   if (!Array.isArray(data)) return [];
   return data
     .map((row) => {
       const rec = asRecord(row);
+      const counts = {
+        pending: asNumber(rec.pending),
+        pendingReschedule: asNumber(rec.pending_reschedule ?? rec.pendingReschedule),
+        confirmed: asNumber(rec.confirmed),
+        enRoute: asNumber(rec.en_route ?? rec.enRoute),
+        inProgress: asNumber(rec.in_progress ?? rec.inProgress),
+        completed: asNumber(rec.completed),
+        canceled: asNumber(rec.canceled),
+        rejected: asNumber(rec.rejected),
+        total: asNumber(rec.total),
+      };
       return {
         bucket: String(rec.bucket_day ?? rec.bucket ?? '').slice(0, 10),
-        completed: asNumber(rec.completed),
+        ...counts,
+        total: counts.total || (
+          counts.pending +
+          counts.pendingReschedule +
+          counts.confirmed +
+          counts.enRoute +
+          counts.inProgress +
+          counts.completed +
+          counts.canceled +
+          counts.rejected
+        ),
+        collectedCop: asNumber(rec.collected_cop ?? rec.collectedCop),
+        paidCount: asNumber(rec.paid_count ?? rec.paidCount),
       };
     })
     .filter((row) => row.bucket);
+}
+
+export function mapCompletedDaily(data: unknown) {
+  return mapAppointmentStatusDaily(data).map((row) => ({
+    bucket: row.bucket,
+    completed: row.completed,
+  }));
 }
 
 export function mapOutboundWindows(data: unknown) {
@@ -240,9 +277,13 @@ export async function loadHistoricalBootstrap(
   const outboundFacts = mapOutboundFacts(outboundFactsRaw);
   const outboundContactDays = mapOutboundContactDays(outboundContactDaysRaw);
   const outboundLifetime = rollupOutboundFacts(outboundFacts, null);
-  const completedDaily = mapCompletedDaily(bookingsDailyRaw);
+  const appointmentDaily = mapAppointmentStatusDaily(bookingsDailyRaw);
+  const completedDaily = appointmentDaily.map((row) => ({
+    bucket: row.bucket,
+    completed: row.completed,
+  }));
   const lifetimeRow = Array.isArray(lifetimeRaw) ? asRecord(lifetimeRaw[0]) : asRecord(lifetimeRaw);
-  const firstDay = inboundTimeseries.firstDay ?? completedDaily[0]?.bucket ?? today;
+  const firstDay = inboundTimeseries.firstDay ?? appointmentDaily[0]?.bucket ?? today;
   const quality = buildQualityMetricsFromNucleus(mapQualityNucleus(qualityRaw));
   const directory = mapDirectorySnapshot(directoryRaw);
 
@@ -274,6 +315,8 @@ export async function loadHistoricalBootstrap(
     byKind: outboundLifetime.byKind,
     completedDaily,
     completedWindowTotals: buildCompletedWindowTotals(completedDaily, today),
+    appointmentDaily,
+    appointmentWindowTotals: buildAppointmentWindowTotals(appointmentDaily, today),
     lifetimeCollectedTotal: asNumber(lifetimeRow.lifetime_collected_total),
     lifetimePaidAppointmentCount: asNumber(lifetimeRow.lifetime_paid_appointment_count),
     clientSegments: directory,
@@ -343,6 +386,10 @@ export function bootstrapToLegacyMetrics(bootstrap: HistoricalMetricsBootstrap) 
     leads: bootstrap.clientSegments.leads,
     completedServicesTimeseries: completedTimeseriesFromDaily(
       bootstrap.completedDaily,
+      bootstrap.today,
+    ),
+    appointmentTimeseries: appointmentStatusTimeseriesFromDaily(
+      bootstrap.appointmentDaily ?? [],
       bootstrap.today,
     ),
   };

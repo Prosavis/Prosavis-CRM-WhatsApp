@@ -32,12 +32,16 @@ import {
   applyMetricsScope,
   applyMetricsVista,
   metricsPeriodLabel,
+  metricsPeriodRange,
+  persistAndApplyMetricsDays,
+  readMetricsDaysPreferences,
   resolveMetricsDays,
   resolveMetricsVista,
 } from '@/utils/metricsVistas';
 import {
   applyOutboundWindow,
   filterHeatmapPoints,
+  selectAppointmentStatusWindow,
   selectCompletedWindow,
   selectInboundWindow,
 } from '@/utils/metricsHistoricalWindows';
@@ -69,11 +73,12 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const vista = resolveMetricsVista(searchParams);
-  const completedDays = resolveMetricsDays(searchParams, 'completedDays');
-  const mapDays = resolveMetricsDays(searchParams, 'mapDays');
-  const activityDays = resolveMetricsDays(searchParams, 'activityDays');
-  const outboundDays = resolveMetricsDays(searchParams, 'outboundDays');
-  const appDays = resolveMetricsDays(searchParams, 'appDays');
+  const storedDays = readMetricsDaysPreferences();
+  const completedDays = resolveMetricsDays(searchParams, 'completedDays', storedDays.completedDays);
+  const mapDays = resolveMetricsDays(searchParams, 'mapDays', storedDays.mapDays);
+  const activityDays = resolveMetricsDays(searchParams, 'activityDays', storedDays.activityDays);
+  const outboundDays = resolveMetricsDays(searchParams, 'outboundDays', storedDays.outboundDays);
+  const appDays = resolveMetricsDays(searchParams, 'appDays', storedDays.appDays);
   const heatmapPreferGps = searchParams.get('source') !== 'address';
   const heatmapStatus = searchParams.get('status') ?? 'all';
   const heatmapLayer = searchParams.get('layer') ?? 'all';
@@ -93,7 +98,6 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
     qualityQuery,
     heatmapQuery,
     directoryQuery,
-    completedQuery,
     logsQuery,
   } = useWhatsAppMetricsQueries({
     vista,
@@ -271,25 +275,22 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
         <MetricsPageState
           loading={metricsLoading}
           error={metricsError}
-          empty={!metrics?.completedMeta && (metrics?.lifetimeCollectedTotal ?? 0) === 0}
+          empty={!metrics}
           onRetry={() => void loadMetrics()}
         >
           <MetricsPeriodControl
             days={completedDays}
             onDaysChange={(next) => {
-              setSearchParams(
-                applyMetricsScope(searchParams, {
-                  completedDays: next === 30 ? null : String(next),
-                }),
-                { replace: true },
-              );
+              setSearchParams(persistAndApplyMetricsDays(searchParams, 'completedDays', next), {
+                replace: true,
+              });
             }}
           />
           <MetricsViewHeader
             title="Resumen operativo"
-            purpose="Ingresos históricos cobrados y servicios completados. El periodo solo filtra la serie ya cargada."
+            purpose="Ingresos históricos cobrados y agendamientos por estado. El periodo solo filtra la serie ya cargada."
             periodLabel={metricsPeriodLabel(completedDays)}
-            universeLabel={`${(metrics?.completedMeta?.totalCompleted ?? 0).toLocaleString('es-CO')} servicios históricos`}
+            universeLabel={`${(metrics ? selectAppointmentStatusWindow(metrics, completedDays).totals.total : 0).toLocaleString('es-CO')} agendamientos`}
             updatedAt={metricsQuery.dataUpdatedAt}
             insights={[
               {
@@ -309,14 +310,15 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
             loading={false}
           />
           <CompletedServicesSection
-            series={metrics ? selectCompletedWindow(metrics, completedDays).series : undefined}
-            appointments={completedQuery.data}
+            series={metrics ? selectAppointmentStatusWindow(metrics, completedDays).series : undefined}
             meta={metrics?.completedMeta
               ? {
                 ...metrics.completedMeta,
                 inSelectedPeriod: selectCompletedWindow(metrics, completedDays).total,
               }
               : metrics?.completedMeta}
+            serviceId={PROSAVIS_CLEANING_SERVICE_ID}
+            periodRange={metricsPeriodRange(completedDays)}
             loading={false}
           />
         </MetricsPageState>
@@ -333,10 +335,9 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
             data={appQuery.data ?? null}
             days={appDays}
             onDaysChange={(next) => {
-              setSearchParams(
-                applyMetricsScope(searchParams, { appDays: next === 30 ? null : String(next) }),
-                { replace: true },
-              );
+              setSearchParams(persistAndApplyMetricsDays(searchParams, 'appDays', next), {
+                replace: true,
+              });
             }}
             updatedAt={appQuery.dataUpdatedAt}
           />
@@ -348,12 +349,9 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
           <MetricsPeriodControl
             days={mapDays}
             onDaysChange={(next) => {
-              setSearchParams(
-                applyMetricsScope(searchParams, {
-                  mapDays: next === 30 ? null : String(next),
-                }),
-                { replace: true },
-              );
+              setSearchParams(persistAndApplyMetricsDays(searchParams, 'mapDays', next), {
+                replace: true,
+              });
             }}
           />
           <HeatmapSection
@@ -482,12 +480,9 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
           <MetricsPeriodControl
             days={activityDays}
             onDaysChange={(next) => {
-              setSearchParams(
-                applyMetricsScope(searchParams, {
-                  activityDays: next === 30 ? null : String(next),
-                }),
-                { replace: true },
-              );
+              setSearchParams(persistAndApplyMetricsDays(searchParams, 'activityDays', next), {
+                replace: true,
+              });
             }}
           />
           <InboundActivitySection
@@ -540,12 +535,9 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
           <MetricsPeriodControl
             days={outboundDays}
             onDaysChange={(next) => {
-              setSearchParams(
-                applyMetricsScope(searchParams, {
-                  outboundDays: next === 30 ? null : String(next),
-                }),
-                { replace: true },
-              );
+              setSearchParams(persistAndApplyMetricsDays(searchParams, 'outboundDays', next), {
+                replace: true,
+              });
             }}
           />
           <OutboundPerformanceSection

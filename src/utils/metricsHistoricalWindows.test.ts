@@ -3,6 +3,7 @@ import type { WhatsAppMetrics } from '@/types/whatsapp';
 import {
   applyOutboundWindow,
   filterHeatmapPoints,
+  selectAppointmentStatusWindow,
   selectCompletedWindow,
   selectInboundWindow,
 } from './metricsHistoricalWindows';
@@ -27,6 +28,32 @@ const metrics = {
   completedDaily: [
     { bucket: '2026-08-01', completed: 12 },
     { bucket: '2026-09-16', completed: 3 },
+  ],
+  appointmentDaily: [
+    {
+      bucket: '2026-08-01',
+      pending: 0,
+      pendingReschedule: 0,
+      confirmed: 1,
+      enRoute: 0,
+      inProgress: 0,
+      completed: 12,
+      canceled: 2,
+      rejected: 0,
+      total: 15,
+    },
+    {
+      bucket: '2026-09-16',
+      pending: 2,
+      pendingReschedule: 0,
+      confirmed: 1,
+      enRoute: 0,
+      inProgress: 1,
+      completed: 3,
+      canceled: 1,
+      rejected: 0,
+      total: 8,
+    },
   ],
   completedWindowTotals: { '7': 3, '30': 18, all: 337 },
   completedServicesTimeseries: { day: [], week: [], month: [] },
@@ -65,6 +92,8 @@ describe('metricsHistoricalWindows', () => {
     expect(selectInboundWindow(metrics, 7).totals.uniquePeople).toBe(20);
     expect(selectInboundWindow(metrics, 7).series.day).toHaveLength(2);
     expect(selectCompletedWindow(metrics, 7).total).toBe(3);
+    expect(selectAppointmentStatusWindow(metrics, 7).totals.total).toBe(8);
+    expect(selectAppointmentStatusWindow(metrics, 7).groups.scheduled).toBe(3);
     expect(applyOutboundWindow(metrics, 30).totalSent).toBe(90);
     expect(applyOutboundWindow(metrics, 30).outboundTotals.uniqueContacts.messaged).toBe(60);
 

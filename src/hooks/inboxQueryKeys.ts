@@ -16,6 +16,13 @@ export const inboxQueryKeys = {
     ['directory-metrics', serviceId ?? 'default'] as const,
   completedAppointments: (serviceId?: string) =>
     ['completed-appointments', serviceId ?? 'default'] as const,
+  appointmentMetrics: (
+    serviceId?: string,
+    from?: string | null,
+    to?: string | null,
+    statuses?: string[] | null,
+  ) =>
+    ['appointment-metrics', serviceId ?? 'default', from ?? 'all', to ?? 'all', statuses ?? []] as const,
   qualityMetrics: (serviceId?: string) =>
     ['client-quality-metrics', serviceId ?? 'default'] as const,
   appointmentHeatmap: (filters: {

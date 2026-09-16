@@ -8,6 +8,9 @@ import {
   weekKeyFromDay,
 } from './completedServicesCore.ts';
 import type {
+  AppointmentStatusCounts,
+  AppointmentStatusDayPoint,
+  AppointmentStatusGroups,
   CompletedDayPoint,
   HistoricalMetricsBootstrap,
   InboundWindowTotals,
@@ -362,6 +365,121 @@ export function buildOutboundWindowTotals(
   return totals;
 }
 
+export function emptyAppointmentStatusCounts(): AppointmentStatusCounts {
+  return {
+    pending: 0,
+    pendingReschedule: 0,
+    confirmed: 0,
+    enRoute: 0,
+    inProgress: 0,
+    completed: 0,
+    canceled: 0,
+    rejected: 0,
+    total: 0,
+  };
+}
+
+export function addAppointmentStatusCounts(
+  left: AppointmentStatusCounts,
+  right: AppointmentStatusCounts,
+): AppointmentStatusCounts {
+  return {
+    pending: left.pending + right.pending,
+    pendingReschedule: left.pendingReschedule + right.pendingReschedule,
+    confirmed: left.confirmed + right.confirmed,
+    enRoute: left.enRoute + right.enRoute,
+    inProgress: left.inProgress + right.inProgress,
+    completed: left.completed + right.completed,
+    canceled: left.canceled + right.canceled,
+    rejected: left.rejected + right.rejected,
+    total: left.total + right.total,
+  };
+}
+
+export function groupAppointmentStatuses(point: AppointmentStatusCounts): AppointmentStatusGroups {
+  return {
+    scheduled: point.pending + point.pendingReschedule + point.confirmed,
+    inProgress: point.enRoute + point.inProgress,
+    completed: point.completed,
+    canceled: point.canceled,
+    rejected: point.rejected,
+  };
+}
+
+export function completionRate(point: Pick<AppointmentStatusCounts, 'completed' | 'total'>): number {
+  if (point.total <= 0) return 0;
+  return Math.round((point.completed / point.total) * 1000) / 10;
+}
+
+export function sumAppointmentStatus(
+  daily: AppointmentStatusCounts[],
+  range: { start: string; end: string } | null = null,
+): AppointmentStatusCounts {
+  return daily.reduce((totals, point) => {
+    if ('bucket' in point && !inWindow(String((point as AppointmentStatusDayPoint).bucket ?? ''), range)) {
+      return totals;
+    }
+    return addAppointmentStatusCounts(totals, point);
+  }, emptyAppointmentStatusCounts());
+}
+
+export function appointmentTotalsForRange(
+  daily: AppointmentStatusDayPoint[],
+  range: { start: string; end: string } | null,
+): AppointmentStatusCounts {
+  return daily.reduce((totals, point) => {
+    if (!inWindow(point.bucket, range)) return totals;
+    return addAppointmentStatusCounts(totals, point);
+  }, emptyAppointmentStatusCounts());
+}
+
+export function buildAppointmentWindowTotals(
+  daily: AppointmentStatusDayPoint[],
+  todayKey: string,
+): Record<MetricsWindowKey, AppointmentStatusCounts> {
+  const totals = {
+    all: appointmentTotalsForRange(daily, null),
+  } as Record<MetricsWindowKey, AppointmentStatusCounts>;
+  for (const span of METRICS_WINDOW_SPANS) {
+    totals[String(span) as MetricsWindowKey] = appointmentTotalsForRange(
+      daily,
+      windowRange(span, todayKey),
+    );
+  }
+  return totals;
+}
+
+export function appointmentStatusTimeseriesFromDaily(
+  daily: AppointmentStatusDayPoint[],
+  todayKey: string,
+): {
+  day: AppointmentStatusDayPoint[];
+  week: AppointmentStatusDayPoint[];
+  month: AppointmentStatusDayPoint[];
+} {
+  const firstDay = daily[0]?.bucket ?? todayKey;
+  const days = eachDayInclusive(firstDay, todayKey);
+  const weeks = [...new Set(days.map(weekKeyFromDay))].sort();
+  const months = [...new Set(days.map(monthKeyFromDay))].sort();
+  const byWeek = new Map<string, AppointmentStatusCounts>();
+  const byMonth = new Map<string, AppointmentStatusCounts>();
+  for (const point of daily) {
+    const week = weekKeyFromDay(point.bucket);
+    const month = monthKeyFromDay(point.bucket);
+    byWeek.set(week, addAppointmentStatusCounts(byWeek.get(week) ?? emptyAppointmentStatusCounts(), point));
+    byMonth.set(month, addAppointmentStatusCounts(byMonth.get(month) ?? emptyAppointmentStatusCounts(), point));
+  }
+  return {
+    day: daily.filter((point) => point.total > 0),
+    week: weeks
+      .map((bucket) => ({ bucket, ...(byWeek.get(bucket) ?? emptyAppointmentStatusCounts()) }))
+      .filter((point) => point.total > 0),
+    month: months
+      .map((bucket) => ({ bucket, ...(byMonth.get(bucket) ?? emptyAppointmentStatusCounts()) }))
+      .filter((point) => point.total > 0),
+  };
+}
+
 export function completedTotalsForRange(
   daily: CompletedDayPoint[],
   range: { start: string; end: string } | null,
@@ -388,7 +506,6 @@ export function buildCompletedWindowTotals(
 }
 
 export function completedTimeseriesFromDaily(daily: CompletedDayPoint[], todayKey: string) {
-  const byDay = new Map(daily.map((point) => [point.bucket, point.completed]));
   const firstDay = daily[0]?.bucket ?? todayKey;
   const days = eachDayInclusive(firstDay, todayKey);
   const weeks = [...new Set(days.map(weekKeyFromDay))].sort();
@@ -510,6 +627,22 @@ export function selectCompletedWindow(
       filterSeriesByWindow(bootstrap.completedDaily, days, bootstrap.today),
       bootstrap.today,
     ),
+  };
+}
+
+export function selectAppointmentStatusWindow(
+  bootstrap: Pick<HistoricalMetricsBootstrap, 'appointmentDaily' | 'appointmentWindowTotals' | 'today'>,
+  days: MetricsDays,
+) {
+  const key = windowKey(days);
+  const filtered = filterSeriesByWindow(bootstrap.appointmentDaily, days, bootstrap.today);
+  const totals = bootstrap.appointmentWindowTotals[key]
+    ?? appointmentTotalsForRange(filtered, windowRange(days, bootstrap.today));
+  return {
+    totals,
+    groups: groupAppointmentStatuses(totals),
+    completionRate: completionRate(totals),
+    series: appointmentStatusTimeseriesFromDaily(filtered, bootstrap.today),
   };
 }
 

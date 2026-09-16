@@ -1,11 +1,15 @@
 import { assertEquals } from 'jsr:@std/assert';
 import {
+  appointmentStatusTimeseriesFromDaily,
   assembleInboundTimeseries,
+  buildAppointmentWindowTotals,
   buildInboundWindowTotals,
   buildOutboundWindowTotals,
   completedTotalsForRange,
+  groupAppointmentStatuses,
   inboundTotalsForRange,
   rollupOutboundFacts,
+  selectAppointmentStatusWindow,
   selectInboundWindow,
   selectOutboundWindow,
   windowRange,
@@ -88,6 +92,61 @@ Deno.test('completed totals filter locally', () => {
   ];
   assertEquals(completedTotalsForRange(daily, windowRange(30, TODAY)), 2);
   assertEquals(completedTotalsForRange(daily, null), 6);
+});
+
+Deno.test('appointment status groups and windows keep exact counts', () => {
+  const daily = [
+    {
+      bucket: '2026-09-16',
+      pending: 2,
+      pendingReschedule: 1,
+      confirmed: 3,
+      enRoute: 1,
+      inProgress: 1,
+      completed: 4,
+      canceled: 2,
+      rejected: 1,
+      total: 15,
+    },
+    {
+      bucket: '2026-08-01',
+      pending: 0,
+      pendingReschedule: 0,
+      confirmed: 1,
+      enRoute: 0,
+      inProgress: 0,
+      completed: 8,
+      canceled: 1,
+      rejected: 0,
+      total: 10,
+    },
+  ];
+  const groups = groupAppointmentStatuses(daily[0]);
+  assertEquals(groups.scheduled, 6);
+  assertEquals(groups.inProgress, 2);
+  assertEquals(groups.completed, 4);
+  assertEquals(groups.canceled, 2);
+  assertEquals(groups.rejected, 1);
+
+  const windows = buildAppointmentWindowTotals(daily, TODAY);
+  assertEquals(windows['7'].total, 15);
+  assertEquals(windows['7'].completed, 4);
+  assertEquals(windows.all.total, 25);
+  assertEquals(windows.all.completed, 12);
+
+  const series = appointmentStatusTimeseriesFromDaily(daily, TODAY);
+  const september = series.month.find((point) => point.bucket === '2026-09');
+  assertEquals(september?.total, 15);
+  assertEquals(september?.canceled, 2);
+
+  const selected = selectAppointmentStatusWindow({
+    today: TODAY,
+    appointmentDaily: daily,
+    appointmentWindowTotals: windows,
+  }, 30);
+  assertEquals(selected.totals.total, 15);
+  assertEquals(selected.groups.scheduled, 6);
+  assertEquals(selected.completionRate, 26.7);
 });
 
 Deno.test('outbound window totals use contact intersection, not daily unique sums', () => {

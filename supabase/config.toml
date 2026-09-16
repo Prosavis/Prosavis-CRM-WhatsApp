@@ -73,6 +73,9 @@ verify_jwt = false
 [functions.list-completed-appointments]
 verify_jwt = false
 
+[functions.list-appointment-metrics]
+verify_jwt = false
+
 [functions.send-whatsapp-chat-message]
 verify_jwt = false
 

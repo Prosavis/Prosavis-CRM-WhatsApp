@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { PROSAVIS_CLEANING_SERVICE_ID } from '@/constants/cleaningService';
 import { inboxQueryKeys } from '@/hooks/inboxQueryKeys';
 import {
@@ -6,13 +6,12 @@ import {
   getAppointmentHeatmap,
   getClientQualityMetrics,
   getWhatsAppMetrics,
-  listCompletedAppointments,
+  listAppointmentMetrics,
   listDirectoryMetrics,
   listWhatsAppMessageLog,
 } from '@/services/whatsappService';
 import type {
   AppMetricsSnapshot,
-  CompletedAppointmentDetail,
   DirectoryClientMetricRow,
 } from '@/types/whatsapp';
 import type { MetricsVista } from '@/utils/metricsVistas';
@@ -90,16 +89,6 @@ export function useWhatsAppMetricsQueries(input: UseWhatsAppMetricsQueriesInput)
     enabled: input.vista === 'clientes',
   });
 
-  const completedQuery = useQuery({
-    queryKey: inboxQueryKeys.completedAppointments(serviceId),
-    queryFn: async () => {
-      const page = await listCompletedAppointments({ serviceId, limit: 100 });
-      return (page.items ?? []) as CompletedAppointmentDetail[];
-    },
-    staleTime: 60_000,
-    enabled: input.vista === 'resumen',
-  });
-
   const logsQuery = useQuery({
     queryKey: inboxQueryKeys.metricsLogs(input.phoneNumberId),
     queryFn: () => listWhatsAppMessageLog({
@@ -117,7 +106,40 @@ export function useWhatsAppMetricsQueries(input: UseWhatsAppMetricsQueriesInput)
     qualityQuery,
     heatmapQuery,
     directoryQuery,
-    completedQuery,
     logsQuery,
   };
+}
+
+export function useAppointmentMetricsInfiniteQuery(input: {
+  serviceId: string;
+  enabled: boolean;
+  from: string | null;
+  to: string | null;
+  statuses?: string[] | null;
+}) {
+  return useInfiniteQuery({
+    queryKey: inboxQueryKeys.appointmentMetrics(
+      input.serviceId,
+      input.from,
+      input.to,
+      input.statuses,
+    ),
+    queryFn: async ({ pageParam }) => {
+      const page = await listAppointmentMetrics({
+        serviceId: input.serviceId,
+        from: input.from,
+        to: input.to,
+        statuses: input.statuses,
+        offset: pageParam,
+        limit: 50,
+      });
+      return page;
+    },
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) => (
+      lastPage.hasMore && lastPage.nextCursor ? Number(lastPage.nextCursor) : undefined
+    ),
+    enabled: input.enabled && Boolean(input.serviceId),
+    staleTime: 60_000,
+  });
 }

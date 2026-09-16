@@ -49,6 +49,7 @@ $AllFunctions = @(
   'list-whatsapp-message-log',
   'list-directory-metrics',
   'list-completed-appointments',
+  'list-appointment-metrics',
   'list-whatsapp-message-templates',
   'list-whatsapp-snippets',
   'list-whatsapp-stickers',

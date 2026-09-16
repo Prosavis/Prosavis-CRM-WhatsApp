@@ -25,9 +25,9 @@ import CloseIcon from '@mui/icons-material/Close';
 import {
   Bar,
   CartesianGrid,
-  Cell,
   ComposedChart,
   LabelList,
+  Legend,
   Line,
   ResponsiveContainer,
   Tooltip,
@@ -35,21 +35,37 @@ import {
   YAxis,
 } from 'recharts';
 import {
+  METRICS_CHART_AMBER,
   METRICS_CHART_BLUE,
   METRICS_CHART_GREEN,
+  METRICS_CHART_RED,
+  METRICS_CHART_VIOLET,
   METRICS_NEGATIVE_TEXT,
   METRICS_POSITIVE_TEXT,
 } from '@/constants/metricsChartColors';
+import { useAppointmentMetricsInfiniteQuery } from '@/hooks/useWhatsAppMetricsQueries';
+import { listAllAppointmentMetrics } from '@/services/whatsappService';
 import type {
+  AppointmentStatusDayPoint,
   CompletedAppointmentDetail,
-  CompletedServicesTimeseriesPoint,
   MetricsGranularSeries,
   WhatsAppMetrics,
 } from '@/types/whatsapp';
 import {
+  APPOINTMENT_GROUP_LABELS,
+  APPOINTMENT_STATUS_GROUP_VALUES,
+  appointmentStatusLabel,
+  bucketToDateRange,
+  completionRate,
+  groupAppointmentStatuses,
+  labelAppointmentStatusSeries,
+  sumAppointmentStatus,
+  trimEmptyAppointmentEdges,
+  type AppointmentStatusGroupKey,
+  type LabeledAppointmentStatusPoint,
+} from '@/utils/appointmentStatusMetrics';
+import {
   currentBucketKeyForToday,
-  filterAppointmentsToBucket,
-  labelCompletedSeries,
   type MetricsGranularity,
 } from './utils/aggregateBuckets';
 import {
@@ -75,27 +91,16 @@ const GRANULARITY_LABEL: Record<MetricsGranularity, string> = {
 };
 
 interface CompletedServicesSectionProps {
-  series?: MetricsGranularSeries<CompletedServicesTimeseriesPoint>;
+  series?: MetricsGranularSeries<AppointmentStatusDayPoint>;
   appointments?: CompletedAppointmentDetail[];
   meta?: WhatsAppMetrics['completedMeta'];
+  serviceId?: string;
+  periodRange?: { from: string | null; to: string | null };
   loading: boolean;
 }
 
 function formatInt(n: number): string {
   return n.toLocaleString('es-CO');
-}
-
-function formatDay(isoDay: string | null | undefined): string {
-  if (!isoDay) return '—';
-  const day = isoDay.slice(0, 10);
-  const [y, m, d] = day.split('-').map(Number);
-  if (!y || !m || !d) return '—';
-  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('es-CO', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    timeZone: 'UTC',
-  });
 }
 
 function formatCurrency(value: number | null | undefined): string {
@@ -151,7 +156,6 @@ function shortMonthLabel(monthKey: string): string {
   });
 }
 
-/** Una "lente" de comparación honesta: actual vs previo con su explicación. */
 interface ComparisonLens {
   key: string;
   title: string;
@@ -159,7 +163,6 @@ interface ComparisonLens {
   previous: number;
   growth: number | null;
   explanation: string;
-  /** Fuerza color neutro (p. ej. la lente de periodo en curso parcial). */
   neutral?: boolean;
 }
 
@@ -224,36 +227,53 @@ const ComparisonCard: React.FC<{ lens: ComparisonLens }> = ({ lens }) => {
   );
 };
 
-interface CompletedChartTooltipProps {
+interface StatusChartTooltipProps {
   active?: boolean;
-  payload?: Array<{ payload: { label: string; completed: number; isPartial: boolean } }>;
+  payload?: Array<{ payload: LabeledAppointmentStatusPoint }>;
 }
 
-const CompletedChartTooltip: React.FC<CompletedChartTooltipProps> = ({ active, payload }) => {
+const StatusChartTooltip: React.FC<StatusChartTooltipProps> = ({ active, payload }) => {
   if (!active || !payload || payload.length === 0) return null;
   const point = payload[0].payload;
   return (
     <ChartTooltipCard
       title={`${point.label}${point.isPartial ? ' (en curso)' : ''}`}
-      rows={[{ label: 'Completados', value: formatInt(point.completed), color: METRICS_CHART_GREEN }]}
+      rows={[
+        { label: 'Total', value: formatInt(point.total) },
+        { label: 'Completados', value: formatInt(point.completed), color: METRICS_CHART_GREEN },
+        { label: 'Agendados', value: formatInt(point.stackedScheduled), color: METRICS_CHART_BLUE },
+        { label: 'En ejecución', value: formatInt(point.stackedInProgress), color: METRICS_CHART_AMBER },
+        { label: 'Cancelados', value: formatInt(point.canceled), color: METRICS_CHART_RED },
+        { label: 'Rechazados', value: formatInt(point.rejected), color: METRICS_CHART_VIOLET },
+        { label: 'Pendiente / reprogramar / confirmada', value: `${point.pending} / ${point.pendingReschedule} / ${point.confirmed}` },
+        { label: 'En ruta / en curso', value: `${point.enRoute} / ${point.inProgress}` },
+      ]}
       hint="Clic para ver citas"
     />
   );
+};
+
+type DetailScope = {
+  kind: 'bucket' | 'period';
+  bucket?: string;
+  group: AppointmentStatusGroupKey | 'all';
 };
 
 const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
   series,
   appointments,
   meta,
+  serviceId,
+  periodRange,
   loading,
 }) => {
   const theme = useTheme();
   const [granularity, setGranularity] = useState<MetricsGranularity>('month');
-  const [selectedBucket, setSelectedBucket] = useState<string | null>(null);
+  const [detailScope, setDetailScope] = useState<DetailScope | null>(null);
 
   const handleGranularityChange = (next: MetricsGranularity) => {
     setGranularity(next);
-    setSelectedBucket(null);
+    setDetailScope(null);
   };
 
   const currentBucketKey = useMemo(
@@ -263,29 +283,24 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
 
   const data = useMemo(() => {
     if (!series) return [];
-    // Ventana fija ~6 meses del edge (no recortar al periodo global de 30d)
-    return labelCompletedSeries(series[granularity] ?? [], granularity, currentBucketKey);
+    return labelAppointmentStatusSeries(series[granularity] ?? [], granularity, currentBucketKey);
   }, [series, granularity, currentBucketKey]);
 
   const chartData = useMemo(() => {
     if (granularity === 'day') return data;
-    // Semana/mes: ocultar ceros al inicio/fin para legibilidad, conservar huecos internos
-    const first = data.findIndex((r) => r.completed > 0);
-    if (first < 0) return data;
-    let last = data.length - 1;
-    while (last > first && data[last].completed === 0) last -= 1;
-    return data.slice(first, last + 1);
+    return trimEmptyAppointmentEdges(data);
   }, [data, granularity]);
 
-  const totalInView = useMemo(
-    () => chartData.reduce((sum, row) => sum + row.completed, 0),
-    [chartData],
-  );
-
+  const viewTotals = useMemo(() => sumAppointmentStatus(chartData), [chartData]);
+  const viewGroups = useMemo(() => groupAppointmentStatuses(viewTotals), [viewTotals]);
+  const viewRate = completionRate(viewTotals);
   const comparisons = meta?.comparisons;
 
-  const barColor = chartColor(theme, METRICS_CHART_GREEN);
-  const barSelectedColor = chartColor(theme, METRICS_CHART_BLUE, 0.22);
+  const completedColor = chartColor(theme, METRICS_CHART_GREEN);
+  const scheduledColor = chartColor(theme, METRICS_CHART_BLUE);
+  const runningColor = chartColor(theme, METRICS_CHART_AMBER);
+  const canceledColor = chartColor(theme, METRICS_CHART_RED);
+  const rejectedColor = chartColor(theme, METRICS_CHART_VIOLET);
   const lineColor = chartColor(theme, METRICS_CHART_BLUE);
 
   const comparisonLenses = useMemo<ComparisonLens[]>(() => {
@@ -298,7 +313,7 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
         previous: comparisons.mtd.previous,
         growth: comparisons.mtd.growth,
         explanation:
-          'Los días transcurridos de este mes vs los mismos días del mes anterior.',
+          'Completados de los días transcurridos de este mes vs los mismos días del mes anterior.',
       });
       lenses.push({
         key: 'rolling30d',
@@ -306,7 +321,7 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
         current: comparisons.rolling30d.current,
         previous: comparisons.rolling30d.previous,
         growth: comparisons.rolling30d.growth,
-        explanation: 'Los últimos 30 días vs los 30 días inmediatamente previos.',
+        explanation: 'Completados de los últimos 30 días vs los 30 días inmediatamente previos.',
       });
       if (comparisons.lastClosedMonth) {
         lenses.push({
@@ -316,7 +331,7 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
           previous: comparisons.lastClosedMonth.previous,
           growth: comparisons.lastClosedMonth.growth,
           explanation:
-            'El último mes completo vs el mes cerrado anterior — periodos completos, plenamente comparables.',
+            'Completados del último mes completo vs el mes cerrado anterior.',
         });
       }
     }
@@ -331,46 +346,43 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
         growth: last.growth,
         neutral: true,
         explanation:
-          'Compara el periodo en curso (parcial) vs el anterior según la granularidad; puede exagerar caídas/subidas — es otra forma de leer los mismos datos.',
+          'Compara completados del periodo en curso (parcial) vs el anterior según la granularidad.',
       });
     }
     return lenses;
   }, [comparisons, chartData]);
 
-  const renderBarLabel = (props: {
-    x?: number | string;
-    y?: number | string;
-    width?: number | string;
-    value?: number | string | boolean | null;
-  }): React.ReactElement => {
-    const x = Number(props.x ?? 0);
-    const y = Number(props.y ?? 0);
-    const width = Number(props.width ?? 0);
-    const value = Number(props.value ?? 0);
-    if (!value || width < 22) return <g />;
-    return (
-      <text
-        x={x + width / 2}
-        y={y - 6}
-        textAnchor="middle"
-        fontSize={11}
-        fontWeight={600}
-        fill={theme.palette.text.secondary}
-      >
-        {formatInt(value)}
-      </text>
-    );
-  };
-
   const selectedRow = useMemo(
-    () => chartData.find((row) => row.bucket === selectedBucket) ?? null,
-    [chartData, selectedBucket],
+    () => chartData.find((row) => row.bucket === detailScope?.bucket) ?? null,
+    [chartData, detailScope],
   );
 
-  const selectedAppointments = useMemo(() => {
-    if (!selectedBucket || !appointments) return [];
-    return filterAppointmentsToBucket(appointments, selectedBucket, granularity);
-  }, [appointments, selectedBucket, granularity]);
+  const queryRange = useMemo(() => {
+    if (!detailScope) return { from: null as string | null, to: null as string | null };
+    if (detailScope.kind === 'bucket' && detailScope.bucket) {
+      return bucketToDateRange(detailScope.bucket, granularity);
+    }
+    return { from: periodRange?.from ?? null, to: periodRange?.to ?? null };
+  }, [detailScope, granularity, periodRange]);
+
+  const queryStatuses = detailScope && detailScope.group !== 'all'
+    ? [...APPOINTMENT_STATUS_GROUP_VALUES[detailScope.group]]
+    : null;
+
+  const appointmentsQuery = useAppointmentMetricsInfiniteQuery({
+    serviceId: serviceId ?? '',
+    enabled: Boolean(serviceId && detailScope),
+    from: queryRange.from,
+    to: queryRange.to,
+    statuses: queryStatuses,
+  });
+
+  const queriedAppointments = useMemo(
+    () => (appointmentsQuery.data?.pages ?? []).flatMap((page) => page.items ?? []) as CompletedAppointmentDetail[],
+    [appointmentsQuery.data],
+  );
+
+  const selectedAppointments = serviceId ? queriedAppointments : (appointments ?? []);
 
   const handleBarClick = (payload: unknown) => {
     const bucket =
@@ -378,85 +390,74 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
         ? String((payload as { bucket: unknown }).bucket)
         : null;
     if (!bucket) return;
-    setSelectedBucket((prev) => (prev === bucket ? null : bucket));
+    setDetailScope((prev) => (
+      prev?.kind === 'bucket' && prev.bucket === bucket
+        ? null
+        : { kind: 'bucket', bucket, group: 'all' }
+    ));
+  };
+
+  const openPeriodDetail = (group: AppointmentStatusGroupKey | 'all') => {
+    setDetailScope({ kind: 'period', group });
   };
 
   const handleDownload = () => {
     const granLabel = GRANULARITY_LABEL[granularity];
-    void downloadWorkbook(`servicios-completados-${granularity}.xlsx`, (wb) => {
+    void downloadWorkbook(`agendamientos-por-estado-${granularity}.xlsx`, (wb) => {
       addStyledSheet(wb, {
         name: 'Serie',
-        title: 'Servicios completados',
-        subtitle: `Citas COMPLETED agrupadas por ${granLabel.toLowerCase()} (ventana de 6 meses).`,
+        title: 'Agendamientos por estado',
+        subtitle: `Citas agrupadas por ${granLabel.toLowerCase()} y estado.`,
         meta: [
           excelGeneratedAtLine(),
           `Granularidad: ${granLabel}`,
-          `Total en vista: ${formatInt(totalInView)}`,
+          `Total en vista: ${formatInt(viewTotals.total)}`,
+          `Tasa de finalización: ${viewRate}%`,
         ],
         columns: [
           { header: 'Periodo', type: 'text' },
+          { header: 'Total', type: 'int' },
           { header: 'Completados', type: 'int' },
-          { header: 'Crecimiento %', type: 'percent' },
+          { header: 'Agendados', type: 'int' },
+          { header: 'En ejecución', type: 'int' },
+          { header: 'Cancelados', type: 'int' },
+          { header: 'Rechazados', type: 'int' },
+          { header: 'Tasa %', type: 'percent' },
           { header: 'En curso', type: 'text' },
         ],
         rows: chartData.map((row) => [
           row.label,
+          row.total,
           row.completed,
-          row.growth,
+          row.stackedScheduled,
+          row.stackedInProgress,
+          row.canceled,
+          row.rejected,
+          row.completionRate,
           row.isPartial ? 'Sí' : 'No',
         ]),
       });
-      if (comparisonLenses.length > 0) {
-        addStyledSheet(wb, {
-          name: 'Comparaciones',
-          title: 'Comparaciones',
-          subtitle:
-            'Distintas lentes honestas para leer la evolución de servicios completados.',
-          meta: [excelGeneratedAtLine()],
-          columns: [
-            { header: 'Lente', type: 'text' },
-            { header: 'Actual', type: 'int' },
-            { header: 'Previo', type: 'int' },
-            { header: 'Variación %', type: 'percent' },
-            { header: 'Qué mide', type: 'text', width: 62 },
-          ],
-          rows: comparisonLenses.map((lens) => [
-            lens.title,
-            lens.current,
-            lens.previous,
-            lens.growth,
-            lens.explanation,
-          ]),
-        });
-      }
     });
   };
 
-  const handleDrillDownDownload = () => {
-    if (!selectedRow) return;
-    const rows = selectedAppointments.map((appt) => [
-      new Date(appt.scheduledDate),
-      appt.clientName ?? '',
-      appt.clientPhone ?? '',
-      appt.providerName ?? '',
-      appt.duration ?? null,
-      appt.totalAmount ?? null,
-      appt.paidAmount ?? null,
-      appt.pendingAmount ?? null,
-      formatPaymentStatus(appt.paymentStatus),
-      appt.addressLine ?? '',
-      appt.id,
-    ]);
-    void downloadWorkbook(`citas-${selectedRow.bucket}.xlsx`, (wb) => {
+  const handleDrillDownDownload = async () => {
+    const rowsSource = serviceId
+      ? await listAllAppointmentMetrics({
+        serviceId,
+        from: queryRange.from,
+        to: queryRange.to,
+        statuses: queryStatuses,
+      }) as CompletedAppointmentDetail[]
+      : selectedAppointments;
+    void downloadWorkbook(`agendamientos-${detailScope?.bucket ?? 'periodo'}.xlsx`, (wb) => {
       addStyledSheet(wb, {
         name: 'Citas',
-        title: `Citas completadas · ${selectedRow.label}`,
-        subtitle: `${formatInt(
-          selectedAppointments.length,
-        )} cita(s) COMPLETED en el periodo seleccionado.`,
+        title: `Agendamientos · ${selectedRow?.label ?? 'periodo'}`,
+        subtitle: `${formatInt(rowsSource.length)} cita(s) en el recorte seleccionado.`,
         meta: [excelGeneratedAtLine()],
         columns: [
           { header: 'Fecha / hora', type: 'datetime' },
+          { header: 'Estado', type: 'text' },
           { header: 'Cliente', type: 'text' },
           { header: 'Teléfono', type: 'text' },
           { header: 'Profesional', type: 'text' },
@@ -468,27 +469,45 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
           { header: 'Dirección', type: 'text' },
           { header: 'ID', type: 'text' },
         ],
-        rows,
+        rows: rowsSource.map((appt) => [
+          new Date(appt.scheduledDate),
+          appointmentStatusLabel(appt.status),
+          appt.clientName ?? '',
+          appt.clientPhone ?? '',
+          appt.providerName ?? '',
+          appt.duration ?? null,
+          appt.totalAmount ?? null,
+          appt.paidAmount ?? null,
+          appt.pendingAmount ?? null,
+          formatPaymentStatus(appt.paymentStatus),
+          appt.addressLine ?? '',
+          appt.id,
+        ]),
       });
     });
   };
 
   return (
     <MetricsSection
-      title="¿Cómo evolucionan los servicios completados?"
-      subtitle="Serie principal de volumen completado. Selecciona una barra para auditar las citas del periodo."
+      title="¿Cómo se componen los agendamientos por estado?"
+      subtitle="El total de cada barra es todo lo agendado en el periodo. La línea sigue los completados."
       granularity={granularity}
       onGranularityChange={handleGranularityChange}
       onDownload={handleDownload}
       downloadLabel="Descargar Excel"
       detail={
         <TableContainer>
-          <Table size="small">
+          <Table size="small" data-testid="appointments-status-table">
             <TableHead>
               <TableRow>
                 <TableCell>Periodo</TableCell>
+                <TableCell align="right">Total</TableCell>
                 <TableCell align="right">Completados</TableCell>
-                <TableCell align="right">Variación</TableCell>
+                <TableCell align="right">Agendados</TableCell>
+                <TableCell align="right">En ejecución</TableCell>
+                <TableCell align="right">Cancelados</TableCell>
+                <TableCell align="right">Rechazados</TableCell>
+                <TableCell align="right">Tasa</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -505,24 +524,19 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
                       />
                     )}
                   </TableCell>
+                  <TableCell align="right">{formatInt(row.total)}</TableCell>
                   <TableCell align="right">{formatInt(row.completed)}</TableCell>
-                  <TableCell align="right">
-                    {row.isPartial ? (
-                      <MuiTooltip title="Periodo incompleto: la variación no es comparable con periodos cerrados.">
-                        <span>parcial</span>
-                      </MuiTooltip>
-                    ) : row.growth == null ? (
-                      '—'
-                    ) : (
-                      `${row.growth}%`
-                    )}
-                  </TableCell>
+                  <TableCell align="right">{formatInt(row.stackedScheduled)}</TableCell>
+                  <TableCell align="right">{formatInt(row.stackedInProgress)}</TableCell>
+                  <TableCell align="right">{formatInt(row.canceled)}</TableCell>
+                  <TableCell align="right">{formatInt(row.rejected)}</TableCell>
+                  <TableCell align="right">{`${row.completionRate}%`}</TableCell>
                 </TableRow>
               ))}
               {chartData.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={3} align="center">
-                    Sin servicios completados
+                  <TableCell colSpan={8} align="center">
+                    Sin agendamientos en este recorte
                   </TableCell>
                 </TableRow>
               )}
@@ -531,40 +545,42 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
         </TableContainer>
       }
     >
-      <MetricsContextBanner summary="Ventana y fecha de corte de servicios">
-        Esta serie usa una ventana fija de seis meses, independiente del periodo global, y agrupa
-        por fecha programada en America/Bogota. Los periodos en curso se marcan como parciales y
-        no se comparan como si estuvieran cerrados.
+      <MetricsContextBanner summary="Ventana y fecha de corte de agendamientos">
+        El periodo filtra la serie ya cargada. Las comparativas de crecimiento siguen midiendo
+        solo citas COMPLETED; el total, la composición y la tasa usan todos los estados.
       </MetricsContextBanner>
-      {meta && (
-        <Stack direction="row" spacing={1} sx={{ mb: 1.5 }} flexWrap="wrap" useFlexGap>
-          <Chip size="small" label={`Total 6 meses: ${formatInt(meta.totalCompleted)}`} />
-          <Chip
-            size="small"
-            variant="outlined"
-            label={`En periodo del filtro: ${formatInt(meta.inSelectedPeriod)}`}
-          />
-          <Chip
-            size="small"
-            variant="outlined"
-            label={`Última COMPLETED: ${formatDay(meta.lastCompletedDate)}`}
-          />
-        </Stack>
-      )}
-
-      {meta && meta.inSelectedPeriod === 0 && meta.totalCompleted > 0 && (
-        <Alert severity="info" sx={{ mb: 1.5 }}>
-          No hay citas COMPLETED con <code>scheduledDate</code> en el periodo del filtro
-          superior. El gráfico muestra la ventana de 6 meses (última:{' '}
-          {formatDay(meta.lastCompletedDate)}).
-        </Alert>
-      )}
-
-      {!loading && chartData.length > 0 && (
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-          Completados en vista: <strong>{formatInt(totalInView)}</strong>
-        </Typography>
-      )}
+      <Stack direction="row" spacing={1} sx={{ mb: 1.5 }} flexWrap="wrap" useFlexGap>
+        <Chip
+          size="small"
+          color="primary"
+          label={`Total agendado: ${formatInt(viewTotals.total)}`}
+          onClick={() => openPeriodDetail('all')}
+        />
+        <Chip
+          size="small"
+          variant="outlined"
+          label={`Completados: ${formatInt(viewGroups.completed)}`}
+          onClick={() => openPeriodDetail('completed')}
+        />
+        <Chip
+          size="small"
+          variant="outlined"
+          label={`Aún no completados: ${formatInt(viewGroups.scheduled + viewGroups.inProgress)}`}
+          onClick={() => openPeriodDetail('scheduled')}
+        />
+        <Chip
+          size="small"
+          variant="outlined"
+          label={`Cancelados: ${formatInt(viewGroups.canceled)}`}
+          onClick={() => openPeriodDetail('canceled')}
+        />
+        <Chip
+          size="small"
+          variant="outlined"
+          label={`Tasa de finalización: ${viewRate}%`}
+          onClick={() => openPeriodDetail('all')}
+        />
+      </Stack>
 
       {comparisonLenses.length > 0 && (
         <Grid container spacing={1.5} sx={{ mb: 2 }}>
@@ -578,20 +594,22 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
 
       {loading ? (
         <Typography variant="body2" color="text.secondary">
-          Cargando servicios completados…
+          Cargando agendamientos…
         </Typography>
-      ) : chartData.length === 0 || totalInView === 0 ? (
+      ) : chartData.length === 0 || viewTotals.total === 0 ? (
         <Typography variant="body2" color="text.secondary">
-          Sin citas completadas en los últimos 6 meses según{' '}
-          <code>Firestore appointments.scheduledDate</code>.
+          Sin agendamientos en el recorte seleccionado.
         </Typography>
       ) : (
-        <Box sx={{ width: '100%', height: 320 }}>
+        <Box sx={{ width: '100%', height: 340 }} data-testid="appointments-status-chart">
           <ResponsiveContainer>
             <ComposedChart data={chartData} margin={{ top: 24, right: 12, left: 0, bottom: 0 }}>
               <defs>
-                <BarGradient id="completedBar" color={barColor} />
-                <BarGradient id="completedBarSelected" color={barSelectedColor} from={1} to={0.72} />
+                <BarGradient id="statusCompleted" color={completedColor} />
+                <BarGradient id="statusScheduled" color={scheduledColor} />
+                <BarGradient id="statusRunning" color={runningColor} />
+                <BarGradient id="statusCanceled" color={canceledColor} />
+                <BarGradient id="statusRejected" color={rejectedColor} />
               </defs>
               <CartesianGrid
                 vertical={false}
@@ -613,49 +631,79 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
                 tickFormatter={formatAxisInt}
               />
               <Tooltip
-                content={<CompletedChartTooltip />}
+                content={<StatusChartTooltip />}
                 cursor={{ fill: alpha(theme.palette.text.primary, 0.05) }}
               />
+              <Legend />
               <Bar
                 dataKey="completed"
                 name="Completados"
+                stackId="status"
+                fill="url(#statusCompleted)"
+                cursor="pointer"
+                maxBarSize={64}
+                onClick={handleBarClick}
+                isAnimationActive={false}
+              />
+              <Bar
+                dataKey="stackedScheduled"
+                name="Agendados"
+                stackId="status"
+                fill="url(#statusScheduled)"
+                cursor="pointer"
+                maxBarSize={64}
+                onClick={handleBarClick}
+                isAnimationActive={false}
+              />
+              <Bar
+                dataKey="stackedInProgress"
+                name="En ejecución"
+                stackId="status"
+                fill="url(#statusRunning)"
+                cursor="pointer"
+                maxBarSize={64}
+                onClick={handleBarClick}
+                isAnimationActive={false}
+              />
+              <Bar
+                dataKey="canceled"
+                name="Cancelados"
+                stackId="status"
+                fill="url(#statusCanceled)"
+                cursor="pointer"
+                maxBarSize={64}
+                onClick={handleBarClick}
+                isAnimationActive={false}
+              />
+              <Bar
+                dataKey="rejected"
+                name="Rechazados"
+                stackId="status"
+                fill="url(#statusRejected)"
                 radius={[6, 6, 0, 0]}
                 cursor="pointer"
                 maxBarSize={64}
                 onClick={handleBarClick}
                 isAnimationActive={false}
               >
-                {chartData.map((row) => (
-                  <Cell
-                    key={row.bucket}
-                    fill={
-                      row.bucket === selectedBucket
-                        ? 'url(#completedBarSelected)'
-                        : 'url(#completedBar)'
-                    }
-                    fillOpacity={
-                      selectedBucket && row.bucket !== selectedBucket ? 0.4 : 1
-                    }
-                    stroke={row.bucket === selectedBucket ? barSelectedColor : 'transparent'}
-                    strokeWidth={row.bucket === selectedBucket ? 1.5 : 0}
-                  />
-                ))}
-                <LabelList dataKey="completed" content={renderBarLabel} />
+                <LabelList dataKey="total" position="top" fontSize={11} />
               </Bar>
               <Line
                 type="monotone"
                 dataKey="completed"
+                name="Completados"
                 stroke={lineColor}
                 strokeWidth={2}
                 dot={false}
                 isAnimationActive={false}
+                legendType="none"
               />
             </ComposedChart>
           </ResponsiveContainer>
         </Box>
       )}
 
-      {selectedRow && (
+      {detailScope && (
         <Box sx={{ mt: 2 }}>
           <Divider sx={{ mb: 1.5 }} />
           <Stack
@@ -668,34 +716,46 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
             sx={{ mb: 1 }}
           >
             <Typography variant="subtitle2">
-              {selectedRow.label}
-              {selectedRow.isPartial ? ' (en curso)' : ''} ·{' '}
+              {selectedRow?.label ?? 'Periodo seleccionado'}
+              {selectedRow?.isPartial ? ' (en curso)' : ''} ·{' '}
               {formatInt(selectedAppointments.length)}{' '}
               {selectedAppointments.length === 1 ? 'cita' : 'citas'}
             </Typography>
             <Stack direction="row" spacing={1}>
-              <Button
-                size="small"
-                variant="outlined"
-                onClick={handleDrillDownDownload}
-                disabled={selectedAppointments.length === 0}
-              >
+              <Button size="small" variant="outlined" onClick={() => void handleDrillDownDownload()}>
                 Descargar Excel
               </Button>
               <Button
                 size="small"
                 startIcon={<CloseIcon />}
-                onClick={() => setSelectedBucket(null)}
+                onClick={() => setDetailScope(null)}
               >
                 Limpiar
               </Button>
             </Stack>
           </Stack>
+          <Stack direction="row" spacing={1} sx={{ mb: 1.5 }} flexWrap="wrap" useFlexGap>
+            {(['all', 'scheduled', 'inProgress', 'completed', 'canceled', 'rejected'] as const).map((group) => (
+              <Chip
+                key={group}
+                size="small"
+                color={detailScope.group === group ? 'primary' : 'default'}
+                variant={detailScope.group === group ? 'filled' : 'outlined'}
+                label={group === 'all' ? 'Todos' : APPOINTMENT_GROUP_LABELS[group]}
+                onClick={() => setDetailScope((prev) => (prev ? { ...prev, group } : prev))}
+              />
+            ))}
+          </Stack>
 
-          {selectedAppointments.length === 0 ? (
+          {appointmentsQuery.isError && (
+            <Alert severity="error" sx={{ mb: 1.5 }}>
+              No se pudo cargar el detalle de agendamientos.
+            </Alert>
+          )}
+
+          {selectedAppointments.length === 0 && !appointmentsQuery.isFetching ? (
             <Typography variant="body2" color="text.secondary">
-              No hay detalle de citas para este periodo. (El detalle requiere volver a cargar las
-              métricas tras el despliegue del edge.)
+              No hay citas para este recorte y filtro.
             </Typography>
           ) : (
             <TableContainer sx={{ maxHeight: 360 }}>
@@ -703,6 +763,7 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
                 <TableHead>
                   <TableRow>
                     <TableCell>Fecha / hora</TableCell>
+                    <TableCell>Estado</TableCell>
                     <TableCell>Cliente</TableCell>
                     <TableCell>Teléfono</TableCell>
                     <TableCell>Profesional</TableCell>
@@ -716,6 +777,7 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
                   {selectedAppointments.map((appt) => (
                     <TableRow key={appt.id} hover>
                       <TableCell>{formatDateTime(appt.scheduledDate)}</TableCell>
+                      <TableCell>{appointmentStatusLabel(appt.status)}</TableCell>
                       <TableCell>{appt.clientName ?? '—'}</TableCell>
                       <TableCell>{appt.clientPhone ?? '—'}</TableCell>
                       <TableCell>{appt.providerName ?? '—'}</TableCell>
@@ -742,6 +804,16 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
                 </TableBody>
               </Table>
             </TableContainer>
+          )}
+          {appointmentsQuery.hasNextPage && (
+            <Button
+              size="small"
+              sx={{ mt: 1 }}
+              onClick={() => void appointmentsQuery.fetchNextPage()}
+              disabled={appointmentsQuery.isFetchingNextPage}
+            >
+              {appointmentsQuery.isFetchingNextPage ? 'Cargando…' : 'Cargar más'}
+            </Button>
           )}
         </Box>
       )}

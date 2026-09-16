@@ -89,6 +89,33 @@ test('directory, quality and friction do not show a period control', async ({ pa
   }
 });
 
+test('resumen opens on histórico unless a view period is saved or shared', async ({ page }) => {
+  await page.goto('/e2e/metrics-harness.html?vista=resumen&theme=light');
+  await expect(page.getByRole('combobox', { name: 'Periodo' })).toHaveText(/Histórico/);
+  await expect(page.getByTestId('appointments-status-chart')).toBeVisible();
+  await page.getByRole('button', { name: 'Ver detalle' }).click();
+  await expect(page.getByTestId('appointments-status-table')).toContainText('Agendados');
+
+  await page.getByRole('combobox', { name: 'Periodo' }).click();
+  await page.getByRole('option', { name: '60 días' }).click();
+  await expect(page).toHaveURL(/completedDays=60/);
+
+  await page.goto('/e2e/metrics-harness.html?vista=resumen&theme=light');
+  await expect(page.getByRole('combobox', { name: 'Periodo' })).toHaveText(/60/);
+
+  await page.goto('/e2e/metrics-harness.html?vista=resumen&completedDays=14&theme=light');
+  await expect(page.getByRole('combobox', { name: 'Periodo' })).toHaveText(/14/);
+});
+
+test('stacked appointment bars open a status drill-down', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 900 });
+  await page.goto('/e2e/metrics-harness.html?vista=resumen&theme=light');
+  await expect(page.getByTestId('appointments-status-chart')).toBeVisible();
+  await page.getByRole('button', { name: /Total agendado/ }).click();
+  await expect(page.getByRole('columnheader', { name: 'Estado' })).toBeVisible();
+  await expect(page.getByText('Confirmada')).toBeVisible();
+});
+
 test('each temporal view keeps its own period in the URL', async ({ page }) => {
   await page.goto('/e2e/metrics-harness.html?vista=resumen&theme=light');
   await page.getByRole('combobox', { name: 'Periodo' }).click();

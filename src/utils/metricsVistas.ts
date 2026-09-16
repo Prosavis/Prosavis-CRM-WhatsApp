@@ -25,6 +25,63 @@ export type MetricsViewDayParam = (typeof METRICS_VIEW_DAY_PARAMS)[keyof typeof 
 
 const VISTA_SET = new Set<string>(METRICS_VISTA_KEYS);
 const METRICS_DAY_OPTIONS = new Set([7, 14, 30, 60, 90]);
+const METRICS_VIEW_DAY_PARAM_SET = new Set<string>(Object.values(METRICS_VIEW_DAY_PARAMS));
+
+export const METRICS_DAYS_PREF_KEY = 'prosavis.metrics.days.v1';
+
+export type MetricsDaysPreferences = Partial<Record<MetricsViewDayParam, MetricsDays>>;
+
+type MetricsDaysStorage = Pick<Storage, 'getItem' | 'setItem'>;
+
+function metricsDaysStorage(): MetricsDaysStorage | null {
+  try {
+    return typeof localStorage === 'undefined' ? null : localStorage;
+  } catch {
+    return null;
+  }
+}
+
+export function parseMetricsDaysValue(raw: string | null | undefined): MetricsDays | null {
+  if (raw === 'all') return 'all';
+  const parsed = Number.parseInt(raw ?? '', 10);
+  return METRICS_DAY_OPTIONS.has(parsed) ? parsed : null;
+}
+
+export function readMetricsDaysPreferences(
+  storage: Pick<Storage, 'getItem'> | null = metricsDaysStorage(),
+): MetricsDaysPreferences {
+  if (!storage) return {};
+  try {
+    const raw = storage.getItem(METRICS_DAYS_PREF_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: MetricsDaysPreferences = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!METRICS_VIEW_DAY_PARAM_SET.has(key)) continue;
+      const days = parseMetricsDaysValue(value == null ? null : String(value));
+      if (days != null) out[key as MetricsViewDayParam] = days;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+export function writeMetricsDaysPreference(
+  param: MetricsViewDayParam,
+  days: MetricsDays,
+  storage: MetricsDaysStorage | null = metricsDaysStorage(),
+): void {
+  if (!storage) return;
+  try {
+    const current = readMetricsDaysPreferences(storage);
+    current[param] = days;
+    storage.setItem(METRICS_DAYS_PREF_KEY, JSON.stringify(current));
+  } catch {
+    // localStorage puede estar bloqueado
+  }
+}
 
 export function isMetricsVista(value: string | null | undefined): value is MetricsVista {
   return Boolean(value && VISTA_SET.has(value));
@@ -49,11 +106,23 @@ export function applyMetricsVista(
 export function resolveMetricsDays(
   search: URLSearchParams,
   param: MetricsViewDayParam | 'days' = 'days',
+  stored: MetricsDays | null = null,
 ): MetricsDays {
-  const raw = search.get(param);
-  if (raw === 'all') return 'all';
-  const parsed = Number.parseInt(raw ?? '', 10);
-  return METRICS_DAY_OPTIONS.has(parsed) ? parsed : 30;
+  const fromUrl = parseMetricsDaysValue(search.get(param));
+  if (fromUrl != null) return fromUrl;
+  if (stored === 'all' || (typeof stored === 'number' && METRICS_DAY_OPTIONS.has(stored))) {
+    return stored;
+  }
+  return 'all';
+}
+
+export function persistAndApplyMetricsDays(
+  search: URLSearchParams,
+  param: MetricsViewDayParam,
+  days: MetricsDays,
+): URLSearchParams {
+  writeMetricsDaysPreference(param, days);
+  return applyMetricsScope(search, { [param]: String(days) });
 }
 
 export function applyMetricsScope(

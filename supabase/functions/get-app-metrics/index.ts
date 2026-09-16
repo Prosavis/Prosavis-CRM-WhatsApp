@@ -107,7 +107,8 @@ Deno.serve(async (req) => {
       return {
         bucket: String(rec.bucket_day ?? '').slice(0, 10),
         completed: Number(rec.completed) || 0,
-        appointments: (Number(rec.completed) || 0) + (Number(rec.canceled) || 0),
+        appointments: Number(rec.total) ||
+          ((Number(rec.completed) || 0) + (Number(rec.canceled) || 0)),
         revenue: Number(rec.collected_cop) || 0,
       };
     }).filter((row) => row.bucket);

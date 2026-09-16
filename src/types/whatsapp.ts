@@ -136,11 +136,28 @@ export interface CompletedServicesTimeseriesPoint {
   completed: number;
 }
 
-/** Cita COMPLETED inspectable en el drill-down de «Servicios completados». */
+export interface AppointmentStatusCounts {
+  pending: number;
+  pendingReschedule: number;
+  confirmed: number;
+  enRoute: number;
+  inProgress: number;
+  completed: number;
+  canceled: number;
+  rejected: number;
+  total: number;
+}
+
+export interface AppointmentStatusDayPoint extends AppointmentStatusCounts {
+  bucket: string;
+}
+
+/** Cita inspectable en el drill-down de agendamientos. */
 export interface CompletedAppointmentDetail {
   id: string;
   /** ISO de scheduledDate. */
   scheduledDate: string;
+  status?: string | null;
   clientName: string | null;
   clientPhone: string | null;
   providerName: string | null;
@@ -257,6 +274,9 @@ export interface WhatsAppMetrics {
   clientSegments?: ClientSegmentsMetrics;
   directoryClients?: DirectoryClientMetricRow[];
   completedServicesTimeseries?: MetricsGranularSeries<CompletedServicesTimeseriesPoint>;
+  appointmentDaily?: AppointmentStatusDayPoint[];
+  appointmentTimeseries?: MetricsGranularSeries<AppointmentStatusDayPoint>;
+  appointmentWindowTotals?: Record<string, AppointmentStatusCounts>;
   completedAppointments?: CompletedAppointmentDetail[];
   lifetimeCollectedTotal?: number;
   lifetimePaidAppointmentCount?: number;

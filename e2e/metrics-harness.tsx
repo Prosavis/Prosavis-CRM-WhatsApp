@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Box, CssBaseline, ThemeProvider } from '@mui/material';
 import { MemoryRouter } from 'react-router-dom';
 import CalidadSection from '@/components/whatsapp/metrics/CalidadSection';
@@ -27,6 +28,9 @@ import type {
   WhatsAppMetrics,
 } from '@/types/whatsapp';
 import {
+  metricsPeriodLabel,
+  persistAndApplyMetricsDays,
+  readMetricsDaysPreferences,
   resolveMetricsDays,
   vistaDayParam,
   type MetricsDays,
@@ -235,7 +239,52 @@ const metrics: WhatsAppMetrics = {
       { bucket: '2026-09', completed: 21 },
     ],
   },
-  completedAppointments: [],
+  appointmentTimeseries: {
+    day: [],
+    week: [],
+    month: [
+      { bucket: '2026-04', pending: 3, pendingReschedule: 1, confirmed: 6, enRoute: 0, inProgress: 1, completed: 42, canceled: 6, rejected: 1, total: 60 },
+      { bucket: '2026-05', pending: 2, pendingReschedule: 0, confirmed: 5, enRoute: 1, inProgress: 0, completed: 56, canceled: 7, rejected: 0, total: 71 },
+      { bucket: '2026-06', pending: 4, pendingReschedule: 1, confirmed: 4, enRoute: 0, inProgress: 2, completed: 61, canceled: 5, rejected: 1, total: 78 },
+      { bucket: '2026-07', pending: 3, pendingReschedule: 0, confirmed: 7, enRoute: 1, inProgress: 1, completed: 74, canceled: 4, rejected: 0, total: 90 },
+      { bucket: '2026-08', pending: 2, pendingReschedule: 1, confirmed: 8, enRoute: 0, inProgress: 1, completed: 83, canceled: 6, rejected: 1, total: 102 },
+      { bucket: '2026-09', pending: 8, pendingReschedule: 1, confirmed: 5, enRoute: 1, inProgress: 1, completed: 21, canceled: 3, rejected: 1, total: 41 },
+    ],
+  },
+  completedAppointments: [
+    {
+      id: 'appt-1',
+      scheduledDate: '2026-09-06T14:00:00.000Z',
+      status: 'COMPLETED',
+      clientName: 'Ana Pérez',
+      clientPhone: '3001112233',
+      providerName: 'Johanna',
+      teamMemberId: 'tm-1',
+      duration: 180,
+      totalAmount: 180000,
+      paidAmount: 180000,
+      pendingAmount: 0,
+      paymentStatus: 'PAGO_ACEPTADO',
+      addressLine: 'Cra 7 # 12-34',
+      serviceTitle: 'Limpieza',
+    },
+    {
+      id: 'appt-2',
+      scheduledDate: '2026-09-20T15:00:00.000Z',
+      status: 'CONFIRMED',
+      clientName: 'Carlos Ruiz',
+      clientPhone: '3004445566',
+      providerName: 'Jennifer',
+      teamMemberId: 'tm-2',
+      duration: 240,
+      totalAmount: 220000,
+      paidAmount: 0,
+      pendingAmount: 220000,
+      paymentStatus: 'PAGO_PENDIENTE',
+      addressLine: 'Cll 12 # 8-20',
+      serviceTitle: 'Limpieza',
+    },
+  ],
   completedMeta: {
     windowMonths: 6,
     windowFrom: '2026-04-01',
@@ -286,16 +335,16 @@ function HarnessView({
         {periodControl}
         <MetricsViewHeader
           title="Resumen operativo"
-          purpose="Ingresos históricos cobrados y servicios completados."
-          periodLabel="Últimos 30 días"
-          universeLabel="337 servicios en 6 meses"
+          purpose="Ingresos históricos cobrados y agendamientos por estado."
+          periodLabel={metricsPeriodLabel(days)}
+          universeLabel="442 agendamientos históricos"
         />
         <LifetimeRevenueBanner
           lifetimeCollectedTotal={metrics.lifetimeCollectedTotal ?? 0}
           lifetimePaidAppointmentCount={metrics.lifetimePaidAppointmentCount ?? 0}
         />
         <CompletedServicesSection
-          series={metrics.completedServicesTimeseries}
+          series={metrics.appointmentTimeseries}
           appointments={metrics.completedAppointments}
           meta={metrics.completedMeta}
           loading={false}
@@ -424,19 +473,24 @@ function HarnessView({
   );
 }
 
+const harnessQueryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false } },
+});
+
 function App() {
   const params = new URLSearchParams(window.location.search);
   const requested = params.get('vista');
   const initialVista: MetricsVista = HARNESS_VISTAS.includes(requested as MetricsVista)
     ? (requested as MetricsVista)
     : 'resumen';
+  const storedDays = readMetricsDaysPreferences();
   const [vista, setVista] = useState(initialVista);
   const [periods, setPeriods] = useState({
-    completedDays: resolveMetricsDays(params, 'completedDays'),
-    mapDays: resolveMetricsDays(params, 'mapDays'),
-    activityDays: resolveMetricsDays(params, 'activityDays'),
-    outboundDays: resolveMetricsDays(params, 'outboundDays'),
-    appDays: resolveMetricsDays(params, 'appDays'),
+    completedDays: resolveMetricsDays(params, 'completedDays', storedDays.completedDays),
+    mapDays: resolveMetricsDays(params, 'mapDays', storedDays.mapDays),
+    activityDays: resolveMetricsDays(params, 'activityDays', storedDays.activityDays),
+    outboundDays: resolveMetricsDays(params, 'outboundDays', storedDays.outboundDays),
+    appDays: resolveMetricsDays(params, 'appDays', storedDays.appDays),
   });
   const dark = params.get('theme') === 'dark';
   const updateScope = (key: string, value: string) => {
@@ -445,9 +499,10 @@ function App() {
     window.history.replaceState(null, '', nextUrl);
   };
   const dayParam = vistaDayParam(vista);
-  const days = dayParam ? periods[dayParam] : 30;
+  const days = dayParam ? periods[dayParam] : 'all';
 
   return (
+    <QueryClientProvider client={harnessQueryClient}>
     <ThemeProvider theme={dark ? darkTheme : lightTheme}>
       <CssBaseline />
       <MemoryRouter>
@@ -465,6 +520,7 @@ function App() {
               days={days}
               onDaysChange={(nextDays) => {
                 if (!dayParam) return;
+                persistAndApplyMetricsDays(new URLSearchParams(window.location.search), dayParam, nextDays);
                 setPeriods((current) => ({ ...current, [dayParam]: nextDays }));
                 updateScope(dayParam, String(nextDays));
               }}
@@ -473,6 +529,7 @@ function App() {
         </Box>
       </MemoryRouter>
     </ThemeProvider>
+    </QueryClientProvider>
   );
 }
 

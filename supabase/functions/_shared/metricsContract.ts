@@ -18,6 +18,63 @@ export interface CompletedDayPoint {
   completed: number;
 }
 
+export const APPOINTMENT_STATUS_KEYS = [
+  'pending',
+  'pendingReschedule',
+  'confirmed',
+  'enRoute',
+  'inProgress',
+  'completed',
+  'canceled',
+  'rejected',
+] as const;
+
+export type AppointmentStatusKey = (typeof APPOINTMENT_STATUS_KEYS)[number];
+
+export interface AppointmentStatusCounts {
+  pending: number;
+  pendingReschedule: number;
+  confirmed: number;
+  enRoute: number;
+  inProgress: number;
+  completed: number;
+  canceled: number;
+  rejected: number;
+  total: number;
+}
+
+export interface AppointmentStatusDayPoint extends AppointmentStatusCounts {
+  bucket: string;
+  collectedCop?: number;
+  paidCount?: number;
+}
+
+export interface AppointmentStatusGroups {
+  scheduled: number;
+  inProgress: number;
+  completed: number;
+  canceled: number;
+  rejected: number;
+}
+
+export const APPOINTMENT_STATUS_GROUP_KEYS = [
+  'scheduled',
+  'inProgress',
+  'completed',
+  'canceled',
+  'rejected',
+] as const;
+
+export type AppointmentStatusGroupKey = (typeof APPOINTMENT_STATUS_GROUP_KEYS)[number];
+
+export const APPOINTMENT_STATUS_GROUP_VALUES: Record<AppointmentStatusGroupKey, readonly string[]> = {
+  scheduled: ['PENDING', 'PENDING_RESCHEDULE', 'CONFIRMED'],
+  inProgress: ['EN_ROUTE', 'IN_PROGRESS'],
+  completed: ['COMPLETED'],
+  canceled: ['CANCELED'],
+  rejected: ['REJECTED'],
+};
+
 export interface OutboundFactRow {
   bucket: string;
   campaignType: string;
@@ -175,6 +232,8 @@ export interface HistoricalMetricsBootstrap {
   byKind: { session: OutboundBucket; template: OutboundBucket };
   completedDaily: CompletedDayPoint[];
   completedWindowTotals: Record<MetricsWindowKey, number>;
+  appointmentDaily: AppointmentStatusDayPoint[];
+  appointmentWindowTotals: Record<MetricsWindowKey, AppointmentStatusCounts>;
   lifetimeCollectedTotal: number;
   lifetimePaidAppointmentCount: number;
   clientSegments: DirectorySnapshot;

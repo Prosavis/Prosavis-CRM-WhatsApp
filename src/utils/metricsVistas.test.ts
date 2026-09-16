@@ -2,12 +2,34 @@ import { describe, expect, it } from 'vitest';
 import {
   applyMetricsScope,
   applyMetricsVista,
+  METRICS_DAYS_PREF_KEY,
   metricsPeriodLabel,
   metricsPeriodRange,
+  persistAndApplyMetricsDays,
+  readMetricsDaysPreferences,
   resolveMetricsDays,
   resolveMetricsVista,
   vistaDayParam,
+  writeMetricsDaysPreference,
 } from './metricsVistas';
+
+const store = new Map<string, string>();
+
+function installLocalStorage() {
+  store.clear();
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        store.set(key, value);
+      },
+      removeItem: (key: string) => {
+        store.delete(key);
+      },
+    },
+  });
+}
 
 describe('metricsVistas', () => {
   it('defaults to resumen when vista is missing', () => {
@@ -31,12 +53,49 @@ describe('metricsVistas', () => {
     );
   });
 
-  it('reads supported periods and falls back for invalid values', () => {
+  it('reads supported periods and falls back to histórico for invalid values', () => {
     expect(resolveMetricsDays(new URLSearchParams('days=60'))).toBe(60);
     expect(resolveMetricsDays(new URLSearchParams('activityDays=14'), 'activityDays')).toBe(14);
-    expect(resolveMetricsDays(new URLSearchParams('days=365'))).toBe(30);
-    expect(resolveMetricsDays(new URLSearchParams('days=foo'))).toBe(30);
-    expect(resolveMetricsDays(new URLSearchParams())).toBe(30);
+    expect(resolveMetricsDays(new URLSearchParams('days=365'))).toBe('all');
+    expect(resolveMetricsDays(new URLSearchParams('days=foo'))).toBe('all');
+    expect(resolveMetricsDays(new URLSearchParams())).toBe('all');
+  });
+
+  it('prefers an explicit URL period over a saved preference', () => {
+    expect(resolveMetricsDays(new URLSearchParams('completedDays=14'), 'completedDays', 90)).toBe(14);
+    expect(resolveMetricsDays(new URLSearchParams('completedDays=all'), 'completedDays', 30)).toBe('all');
+  });
+
+  it('uses the saved view preference when the URL is empty', () => {
+    expect(resolveMetricsDays(new URLSearchParams(), 'mapDays', 60)).toBe(60);
+    expect(resolveMetricsDays(new URLSearchParams('mapDays=foo'), 'mapDays', 7)).toBe(7);
+  });
+
+  it('keeps independent stored periods per view', () => {
+    installLocalStorage();
+    writeMetricsDaysPreference('completedDays', 'all');
+    writeMetricsDaysPreference('activityDays', 14);
+    writeMetricsDaysPreference('outboundDays', 90);
+    expect(readMetricsDaysPreferences()).toEqual({
+      completedDays: 'all',
+      activityDays: 14,
+      outboundDays: 90,
+    });
+    expect(store.get(METRICS_DAYS_PREF_KEY)).toContain('"completedDays":"all"');
+  });
+
+  it('persists every selection including histórico into the URL and localStorage', () => {
+    installLocalStorage();
+    const next = persistAndApplyMetricsDays(
+      new URLSearchParams('tab=metrics'),
+      'completedDays',
+      'all',
+    );
+    expect(next.get('completedDays')).toBe('all');
+    expect(readMetricsDaysPreferences().completedDays).toBe('all');
+    const thirty = persistAndApplyMetricsDays(next, 'completedDays', 30);
+    expect(thirty.get('completedDays')).toBe('30');
+    expect(readMetricsDaysPreferences().completedDays).toBe(30);
   });
 
   it('maps temporal vistas to independent URL params', () => {
