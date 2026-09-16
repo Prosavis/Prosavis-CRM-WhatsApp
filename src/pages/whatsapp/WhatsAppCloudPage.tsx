@@ -37,6 +37,7 @@ export { PURGE_WHATSAPP_LOG_CONFIRM_PHRASE };
 
 const MetricsTab = lazy(() => import('@/components/whatsapp/metrics/MetricsTab'));
 const DirectoryWorkspacePage = lazy(() => import('../leads/DirectoryWorkspacePage'));
+const JobApplicationsPage = lazy(() => import('../jobs/JobApplicationsPage'));
 const DiscountCodesTab = lazy(() => import('@/components/whatsapp/DiscountCodesTab'));
 const WhatsAppSettingsTab = lazy(() => import('@/components/whatsapp/WhatsAppSettingsTab'));
 const MonitorTab = lazy(() => import('@/components/whatsapp/MonitorTab'));
@@ -323,6 +324,20 @@ const WhatsAppCloudPage: React.FC = () => {
                 onOpenInInbox={handleOpenLeadInInbox}
                 onOpenBulk={() => setBulkOpen(true)}
               />
+            </Suspense>
+          </div>
+        )}
+
+        {activeTab === 'jobs' && (
+          <div data-tour="whatsapp-tab-jobs">
+            <Suspense
+              fallback={
+                <Box display="flex" justifyContent="center" alignItems="center" minHeight={240}>
+                  <CircularProgress />
+                </Box>
+              }
+            >
+              <JobApplicationsPage />
             </Suspense>
           </div>
         )}

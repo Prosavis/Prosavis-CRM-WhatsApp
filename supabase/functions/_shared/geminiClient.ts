@@ -88,6 +88,10 @@ interface GeminiPart {
     mimeType: string;
     data: string;
   };
+  fileData?: {
+    mimeType: string;
+    fileUri: string;
+  };
 }
 
 interface GeminiContent {
@@ -552,4 +556,103 @@ export async function geminiAnalyzeImage(params: {
   });
 
   return extractTextResultFromResponse(data);
+}
+
+export const DOCUMENT_ANALYSIS_MAX_INLINE_BYTES = 18 * 1024 * 1024;
+export const DOCUMENT_ANALYSIS_MAX_FILE_BYTES = 50 * 1024 * 1024;
+
+async function uploadGeminiFile(params: {
+  apiKey: string;
+  buffer: Uint8Array;
+  mimeType: string;
+  displayName: string;
+}): Promise<{ uri: string; mimeType: string }> {
+  const start = await fetch(`${GEMINI_BASE_URL}/upload/v1beta/files`, {
+    method: 'POST',
+    headers: {
+      'x-goog-api-key': params.apiKey,
+      'X-Goog-Upload-Protocol': 'resumable',
+      'X-Goog-Upload-Command': 'start',
+      'X-Goog-Upload-Header-Content-Length': String(params.buffer.byteLength),
+      'X-Goog-Upload-Header-Content-Type': params.mimeType,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ file: { displayName: params.displayName } }),
+  });
+  if (!start.ok) {
+    throw new Error(`Gemini file start failed: ${start.status}`);
+  }
+  const uploadUrl = start.headers.get('x-goog-upload-url');
+  if (!uploadUrl) throw new Error('Gemini no devolvió URL de carga');
+
+  const uploaded = await fetch(uploadUrl, {
+    method: 'POST',
+    headers: {
+      'X-Goog-Upload-Offset': '0',
+      'X-Goog-Upload-Command': 'upload, finalize',
+      'Content-Length': String(params.buffer.byteLength),
+    },
+    body: (() => {
+      const copy = new ArrayBuffer(params.buffer.byteLength);
+      new Uint8Array(copy).set(params.buffer);
+      return copy;
+    })(),
+  });
+  if (!uploaded.ok) {
+    throw new Error(`Gemini file upload failed: ${uploaded.status}`);
+  }
+  const payload = await uploaded.json() as { file?: { uri?: string; mimeType?: string } };
+  const uri = payload.file?.uri;
+  if (!uri) throw new Error('Gemini file upload sin uri');
+  return { uri, mimeType: payload.file?.mimeType || params.mimeType };
+}
+
+export async function geminiGenerateJsonFromFile<T>(params: {
+  apiKey: string;
+  buffer: Uint8Array;
+  mimeType: string;
+  prompt: string;
+  systemInstruction?: string;
+  model?: string;
+  displayName?: string;
+  maxOutputTokens?: number;
+  responseJsonSchema?: Record<string, unknown>;
+}): Promise<T> {
+  const model = params.model ??
+    resolveGeminiModel('GEMINI_MODEL_DOCUMENT_ANALYSIS', DEFAULT_GEMINI_MODEL);
+  const mime = params.mimeType.split(';')[0].trim() || 'application/octet-stream';
+  if (params.buffer.byteLength > DOCUMENT_ANALYSIS_MAX_FILE_BYTES) {
+    throw new Error('El archivo supera el límite de 50 MB');
+  }
+
+  const parts: GeminiPart[] = [];
+  if (params.buffer.byteLength <= DOCUMENT_ANALYSIS_MAX_INLINE_BYTES) {
+    parts.push({
+      inlineData: { mimeType: mime, data: bytesToBase64(params.buffer) },
+    });
+  } else {
+    const file = await uploadGeminiFile({
+      apiKey: params.apiKey,
+      buffer: params.buffer,
+      mimeType: mime,
+      displayName: params.displayName ?? 'document',
+    });
+    parts.push({
+      fileData: { mimeType: file.mimeType, fileUri: file.uri },
+    });
+  }
+  parts.push({ text: params.prompt });
+
+  const data = await geminiRequest({
+    apiKey: params.apiKey,
+    model,
+    contents: [{ role: 'user', parts }],
+    systemInstruction: params.systemInstruction,
+    temperature: 0,
+    maxOutputTokens: params.maxOutputTokens ?? 8192,
+    responseMimeType: 'application/json',
+    responseJsonSchema: params.responseJsonSchema,
+  });
+  const raw = stripCodeFences(extractTextFromResponse(data));
+  return JSON.parse(raw) as T;
 }

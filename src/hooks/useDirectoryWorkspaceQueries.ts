@@ -66,19 +66,28 @@ export function useDirectoryWorkspaceCancellations(directoryId: string | null) {
   });
 }
 
+const DIRECTORY_FOCUS_STALE_MS = 30_000;
+
 export function useDirectoryWorkspaceFocusRefetch() {
   const queryClient = useQueryClient();
   useEffect(() => {
-    const refetch = () => {
+    const refetchIfStale = () => {
+      const queries = queryClient.getQueryCache().findAll({
+        queryKey: inboxQueryKeys.directoryWorkspaceRoot(),
+      });
+      const needsRefresh = queries.some(
+        (query) => Date.now() - (query.state.dataUpdatedAt ?? 0) >= DIRECTORY_FOCUS_STALE_MS,
+      );
+      if (!needsRefresh) return;
       void queryClient.invalidateQueries({ queryKey: inboxQueryKeys.directoryWorkspaceRoot() });
     };
     const onVisibility = () => {
-      if (document.visibilityState === 'visible') refetch();
+      if (document.visibilityState === 'visible') refetchIfStale();
     };
-    window.addEventListener('focus', refetch);
+    window.addEventListener('focus', refetchIfStale);
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
-      window.removeEventListener('focus', refetch);
+      window.removeEventListener('focus', refetchIfStale);
       document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [queryClient]);

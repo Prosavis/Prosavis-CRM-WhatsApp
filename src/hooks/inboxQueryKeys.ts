@@ -47,4 +47,10 @@ export const inboxQueryKeys = {
     ['directory-workspace', 'page', serviceId, view, search, segment, limit, offset] as const,
   directoryWorkspaceCancellations: (serviceId: string, directoryId: string) =>
     ['directory-workspace', 'cancellations', serviceId, directoryId] as const,
+  jobApplicationsRoot: () => ['job-applications'] as const,
+  jobApplicationsList: (filters: unknown) => ['job-applications', 'list', filters] as const,
+  jobApplicationsMetrics: (includeMarian: boolean) =>
+    ['job-applications', 'metrics', includeMarian] as const,
+  jobApplicationDetail: (id: string) => ['job-applications', 'detail', id] as const,
+  jobTeamMembers: () => ['job-applications', 'team'] as const,
 };

@@ -9,6 +9,7 @@ export const WHATSAPP_TAB_KEYS = [
   'commercial',
   'metrics',
   'leads',
+  'jobs',
   'discounts',
   'settings',
   'monitoreo',

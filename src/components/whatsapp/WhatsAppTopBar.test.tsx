@@ -57,12 +57,15 @@ describe('WhatsAppTopBar directory tab', () => {
       expect.stringContaining('Inbox Bot'),
       expect.stringContaining('Inbox Comercial'),
       'Directorio 1.234 contactos',
+      'Solicitudes de empleo',
       'Descuentos',
     ]);
 
     const directory = screen.getByRole('button', { name: 'Directorio 1.234 contactos' });
+    const jobs = screen.getByRole('button', { name: 'Solicitudes de empleo' });
     const discounts = screen.getByRole('button', { name: 'Descuentos' });
-    expect(directory.parentElement).toBe(discounts.parentElement);
+    expect(directory.parentElement).toBe(jobs.parentElement);
+    expect(jobs.parentElement).toBe(discounts.parentElement);
     expect(directory).toHaveTextContent('1.234');
   });
 

@@ -22,6 +22,8 @@ describe('whatsappTabs', () => {
     expect(resolveWhatsAppLineFilter(search)).toBe('bot');
     expect(whatsappTabIndex('inbox')).toBe(0);
     expect(whatsappTabFromIndex(1)).toBe('commercial');
+    expect(whatsappTabIndex('jobs')).toBe(4);
+    expect(whatsappTabFromIndex(4)).toBe('jobs');
   });
 
   it('opens Inbox Comercial from the canonical tab query', () => {
@@ -123,6 +125,7 @@ describe('whatsappTabs', () => {
     expect(isWhatsAppAdminTab('automations')).toBe(true);
     expect(isWhatsAppAdminTab('settings')).toBe(true);
     expect(isWhatsAppAdminTab('leads')).toBe(false);
+    expect(isWhatsAppAdminTab('jobs')).toBe(false);
     expect(isWhatsAppAdminTab('discounts')).toBe(false);
     expect(isWhatsAppAdminTab('inbox')).toBe(false);
   });

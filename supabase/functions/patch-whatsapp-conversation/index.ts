@@ -60,7 +60,7 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
-    const { supabase } = await requireCrmAdmin(req);
+    const { supabase, profile } = await requireCrmAdmin(req);
     const body = await req.json();
     const rawKey = String(body.stableKey ?? body.conversationId ?? '').trim();
     const patch = toDbPatch(body.patch ?? {});
@@ -90,6 +90,23 @@ Deno.serve(async (req) => {
         404,
       );
     }
+
+    if ('tag_ids' in patch) {
+      const { error: ingestError } = await supabase.rpc(
+        'ingest_job_application_from_conversation',
+        {
+          p_stable_key: stableKey,
+          p_actor_kind: 'supabase',
+          p_actor_id: profile.id,
+          p_actor_label: profile.email ?? profile.id,
+          p_origin: 'tag',
+        },
+      );
+      if (ingestError) {
+        console.warn('job application ingest after tag patch failed', ingestError);
+      }
+    }
+
     return jsonResponse({ success: true, stableKey });
   } catch (error) {
     if (error instanceof Response) return error;

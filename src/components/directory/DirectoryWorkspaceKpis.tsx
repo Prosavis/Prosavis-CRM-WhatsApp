@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Paper, Stack, Typography } from '@mui/material';
+import { Box, ButtonBase, Stack, Typography } from '@mui/material';
 import type { DirectoryWorkspaceKpis } from '@/utils/directoryWorkspace';
 import { directoryKpiTarget, type DirectoryCrmView } from '@/utils/directoryViews';
 import type { DirectoryWorkspaceSegment } from '@/utils/directoryWorkspace';
@@ -42,22 +42,22 @@ export const DirectoryWorkspaceKpisBar: React.FC<DirectoryWorkspaceKpisProps> = 
           const target = directoryKpiTarget(card.key);
           const selected = view === target.view && segment === target.segment;
           return (
-            <Paper
+            <ButtonBase
               key={card.key}
-              component="button"
-              type="button"
+              focusRipple
               onClick={() => onSelect(target)}
-              elevation={0}
               data-testid={`directory-kpi-${card.key}`}
               aria-pressed={selected}
               sx={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'flex-start',
                 flex: '1 1 160px',
                 textAlign: 'left',
                 p: 1.75,
                 border: '1px solid',
                 borderColor: selected ? 'primary.main' : 'divider',
                 bgcolor: selected ? 'action.selected' : 'background.paper',
-                cursor: 'pointer',
                 borderRadius: 2,
               }}
             >
@@ -67,7 +67,7 @@ export const DirectoryWorkspaceKpisBar: React.FC<DirectoryWorkspaceKpisProps> = 
               <Typography variant="h5" fontWeight={700}>
                 {loading && !kpis ? '—' : fmt(kpis?.[card.key] ?? 0)}
               </Typography>
-            </Paper>
+            </ButtonBase>
           );
         })}
       </Stack>

@@ -47,7 +47,7 @@ skip_nonce_check = false
 
 [storage]
 enabled = true
-file_size_limit = "25MiB"
+file_size_limit = "50MiB"
 
 # verify_jwt = false porque las funciones ya validan el JWT internamente
 # con requireCrmAdmin(). Si se deja true, el gateway de Supabase rechaza
@@ -286,4 +286,13 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.check-whatsapp-coex-health]
+verify_jwt = false
+
+[functions.job-applications-admin]
+verify_jwt = false
+
+[functions.document-analysis-admin]
+verify_jwt = false
+
+[functions.document-analysis-worker]
 verify_jwt = false

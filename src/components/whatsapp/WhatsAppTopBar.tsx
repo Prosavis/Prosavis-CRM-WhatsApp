@@ -23,6 +23,7 @@ import StorefrontIcon from '@mui/icons-material/Storefront';
 import BarChartIcon from '@mui/icons-material/BarChart';
 import ContactPhoneIcon from '@mui/icons-material/ContactPhone';
 import ConfirmationNumberIcon from '@mui/icons-material/ConfirmationNumber';
+import WorkOutlineIcon from '@mui/icons-material/WorkOutline';
 import SettingsIcon from '@mui/icons-material/Settings';
 import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
@@ -64,6 +65,7 @@ const MOBILE_TAB_LABELS: Record<WhatsAppTabKey, string> = {
   commercial: 'Inbox Comercial',
   metrics: 'Métricas',
   leads: 'Directorio',
+  jobs: 'Solicitudes de empleo',
   discounts: 'Descuentos',
   settings: 'Configuración',
   monitoreo: 'Monitoreo',
@@ -193,6 +195,7 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
   const botSelected = activeTab === 'inbox';
   const commercialSelected = activeTab === 'commercial';
   const discountsSelected = activeTab === 'discounts';
+  const jobsSelected = activeTab === 'jobs';
 
   const mobileNavValue =
     activeTab === 'inbox' || activeTab === 'commercial' || activeTab === 'leads'
@@ -285,6 +288,16 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
         anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
         transformOrigin={{ vertical: 'bottom', horizontal: 'right' }}
       >
+        <MenuItem
+          selected={activeTab === 'jobs'}
+          onClick={(event) => {
+            setMobileMoreAnchor(null);
+            onTabChange(event, 'jobs');
+          }}
+        >
+          <ListItemIcon><WorkOutlineIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>Solicitudes de empleo</ListItemText>
+        </MenuItem>
         <MenuItem
           selected={activeTab === 'discounts'}
           onClick={(event) => {
@@ -392,6 +405,15 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
               {directory.count}
             </Box>
           ) : null}
+        </ButtonBase>
+        <ButtonBase
+          onClick={(event) => onTabChange(event, 'jobs')}
+          aria-label="Solicitudes de empleo"
+          aria-pressed={jobsSelected}
+          sx={plainNavTabSx(jobsSelected)}
+        >
+          <WorkOutlineIcon fontSize="small" />
+          {compactTabs ? null : 'Solicitudes de empleo'}
         </ButtonBase>
         <ButtonBase
           onClick={(event) => onTabChange(event, 'discounts')}

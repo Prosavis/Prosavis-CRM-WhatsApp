@@ -1,5 +1,15 @@
 # Migraciones Supabase — Prosavis CRM WhatsApp
 
+### Solicitudes de empleo (16/09/2026)
+
+- `20260916233000_job_applications_and_documents.sql`: documentos reusables, solicitudes, rúbrica, evidencia, bucket `crm-documents`.
+- `20260916233100_job_applications_rpcs.sql`: ingest, cola durable, embudo, split/merge, hire, backfill, cron worker. El backfill salta directorios que ya tienen solicitud primaria.
+- `20260916234000_job_applications_hardening.sql`: índices de FK y `REVOKE` de `authenticated` en RPCs de escritura (pasan por Edge + `service_role`).
+- Remoto aplicado con MCP (`job_applications_and_documents`, RPCs, `job_applications_hardening`), no `db push`. GitHub Actions sigue apagado.
+- pgTAP: `supabase/tests/job_applications.test.sql`.
+- Edges: `job-applications-admin`, `document-analysis-admin`, `document-analysis-worker`.
+
+
 Proyecto remoto: `djzwjaegxbhlefanmmee` (`prosavis-crm-whatsapp`).
 
 ## Flujo normal
