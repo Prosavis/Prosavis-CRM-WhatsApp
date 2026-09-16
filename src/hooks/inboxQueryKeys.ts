@@ -6,18 +6,23 @@ export const inboxQueryKeys = {
     ['inbox', 'conversations', phoneNumberId ?? 'all', options?.includeOrphans !== false] as const,
   messages: (stableKey: string) => ['inbox', 'messages', stableKey] as const,
   directoryMeta: (signature: string) => ['inbox', 'directory-meta', signature] as const,
-  metrics: (days: number | 'all', phoneNumberId?: string) =>
-    ['whatsapp-metrics', days, phoneNumberId ?? 'all'] as const,
-  metricsLogs: (days: number | 'all', phoneNumberId?: string) =>
-    ['whatsapp-metrics-logs', days, phoneNumberId ?? 'all'] as const,
-  qualityMetrics: (from: string | null, to: string | null) =>
-    ['client-quality-metrics', from ?? 'all', to ?? 'all'] as const,
+  metrics: (phoneNumberId?: string, serviceId?: string) =>
+    ['whatsapp-metrics', phoneNumberId ?? 'all', serviceId ?? 'default'] as const,
+  appMetrics: (serviceId?: string) =>
+    ['app-metrics', serviceId ?? 'default'] as const,
+  metricsLogs: (phoneNumberId?: string) =>
+    ['whatsapp-metrics-logs', phoneNumberId ?? 'all'] as const,
+  directoryMetrics: (serviceId?: string) =>
+    ['directory-metrics', serviceId ?? 'default'] as const,
+  completedAppointments: (serviceId?: string) =>
+    ['completed-appointments', serviceId ?? 'default'] as const,
+  qualityMetrics: (serviceId?: string) =>
+    ['client-quality-metrics', serviceId ?? 'default'] as const,
   appointmentHeatmap: (filters: {
     source: string;
     status: string;
     layer: string;
-    from: string | null;
-    to: string | null;
+    serviceId?: string;
   }) => ['appointment-heatmap', filters] as const,
   directoryEntries: (filters: unknown) => ['directory', 'entries', filters] as const,
   directoryStats: ['directory', 'stats'] as const,

@@ -312,6 +312,70 @@ export async function runFirestoreQuery(
   return docs;
 }
 
+export interface FirestoreAggregation {
+  alias: string;
+  count?: Record<string, never>;
+  sum?: { field: { fieldPath: string } };
+}
+
+function parseAggregateNumber(value: unknown): number {
+  if (!value || typeof value !== 'object') return 0;
+  const record = value as Record<string, unknown>;
+  if (typeof record.integerValue === 'string' || typeof record.integerValue === 'number') {
+    return Number(record.integerValue) || 0;
+  }
+  if (typeof record.doubleValue === 'number') return record.doubleValue;
+  return 0;
+}
+
+/** Count/sum aggregation via Firestore REST. Does not download matching documents. */
+export async function runFirestoreAggregation(
+  collectionId: string,
+  structuredQuery: Record<string, unknown>,
+  aggregations: FirestoreAggregation[],
+): Promise<Record<string, number>> {
+  const account = loadServiceAccount();
+  const accessToken = await getAccessToken(account);
+  const url =
+    `https://firestore.googleapis.com/v1/projects/${account.projectId}` +
+    `/databases/(default)/documents:runAggregationQuery`;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      structuredAggregationQuery: {
+        aggregations: aggregations.map((item) => {
+          if (item.sum) return { alias: item.alias, sum: item.sum };
+          return { alias: item.alias, count: item.count ?? {} };
+        }),
+        structuredQuery: {
+          from: [{ collectionId }],
+          ...structuredQuery,
+        },
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Error en runAggregationQuery(${collectionId}): ${res.status} ${detail}`);
+  }
+
+  const rows = (await res.json()) as Array<{
+    result?: { aggregateFields?: Record<string, unknown> };
+  }>;
+  const fields = rows[0]?.result?.aggregateFields ?? {};
+  const out: Record<string, number> = {};
+  for (const [alias, value] of Object.entries(fields)) {
+    out[alias] = parseAggregateNumber(value);
+  }
+  return out;
+}
+
 /**
  * Lee el teléfono de users/{uid} (phone, phoneNumber o whatsappPhone).
  * Misma lógica que reminderPhoneResolver en Firebase Functions.

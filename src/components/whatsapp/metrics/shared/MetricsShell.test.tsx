@@ -9,12 +9,7 @@ describe('MetricsShell', () => {
     const user = userEvent.setup();
     const onVistaChange = vi.fn();
     render(
-      <MetricsShell
-        vista="calidad"
-        days={30}
-        onVistaChange={onVistaChange}
-        onDaysChange={vi.fn()}
-      >
+      <MetricsShell vista="calidad" onVistaChange={onVistaChange}>
         <p>Vista actual</p>
       </MetricsShell>,
     );
@@ -31,42 +26,26 @@ describe('MetricsShell', () => {
     expect(onVistaChange).toHaveBeenCalledWith('mapa');
   });
 
-  it('keeps the global period in one labelled control', async () => {
-    const user = userEvent.setup();
-    const onDaysChange = vi.fn();
+  it('does not render a global period control', () => {
     render(
-      <MetricsShell
-        vista="actividad"
-        days={30}
-        onVistaChange={vi.fn()}
-        onDaysChange={onDaysChange}
-      >
+      <MetricsShell vista="actividad" onVistaChange={vi.fn()}>
         <p>Vista actual</p>
       </MetricsShell>,
     );
 
-    await user.click(screen.getByRole('combobox', { name: 'Periodo' }));
-    await user.click(screen.getByRole('option', { name: '60 días' }));
-    expect(onDaysChange).toHaveBeenCalledWith(60);
-
-    await user.click(screen.getByRole('combobox', { name: 'Periodo' }));
-    expect(screen.getByRole('option', { name: 'Histórico' })).toBeInTheDocument();
-    await user.click(screen.getByRole('option', { name: 'Histórico' }));
-    expect(onDaysChange).toHaveBeenCalledWith('all');
+    expect(screen.queryByRole('combobox', { name: 'Periodo' })).not.toBeInTheDocument();
   });
 
-  it('defaults the period control to 30 days', () => {
+  it('opens with Resumen then Datos de la app', () => {
     render(
-      <MetricsShell
-        vista="actividad"
-        days={30}
-        onVistaChange={vi.fn()}
-        onDaysChange={vi.fn()}
-      >
+      <MetricsShell vista="resumen" onVistaChange={vi.fn()}>
         <p>Vista actual</p>
       </MetricsShell>,
     );
 
-    expect(screen.getByRole('combobox', { name: 'Periodo' })).toHaveTextContent('30 días');
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs[0]).toHaveAccessibleName('Operación: Resumen');
+    expect(tabs[1]).toHaveAccessibleName('Operación: Datos de la app');
+    expect(tabs[0]).toHaveAttribute('aria-selected', 'true');
   });
 });

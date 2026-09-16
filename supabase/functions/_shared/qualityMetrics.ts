@@ -393,3 +393,130 @@ export function buildQualityMetrics(params: {
     clients,
   };
 }
+
+export interface QualityNucleusRow {
+  directory_id: string;
+  name: string | null;
+  phone: string | null;
+  classification: string | null;
+  tags: string[] | null;
+  completed_count: number;
+  canceled_count: number;
+  pago_pendiente: number;
+  pago_aceptado: number;
+  pago_en_proceso: number;
+}
+
+export function asTagArray(tags: unknown): string[] {
+  if (!tags) return [];
+  if (Array.isArray(tags)) return tags.filter((t): t is string => typeof t === 'string');
+  if (typeof tags === 'string') return tags.split(',').map((t) => t.trim()).filter(Boolean);
+  return [];
+}
+
+export function buildQualityMetricsFromNucleus(
+  rows: QualityNucleusRow[],
+  period: { from: string | null; to: string | null } = { from: null, to: null },
+): ClientQualityMetrics {
+  const clients: QualityClientRow[] = [];
+  let pagoPendiente = 0;
+  let pagoAceptado = 0;
+  let pagoEnProceso = 0;
+
+  for (const row of rows) {
+    const tags = asTagArray(row.tags);
+    const classifiable = { classification: row.classification, tags };
+    const completedCount = Number(row.completed_count) || 0;
+    if (completedCount < 1) continue;
+    if (isTestContact(classifiable)) continue;
+    clients.push({
+      id: row.directory_id,
+      name: row.name,
+      phone: row.phone,
+      layer: qualityLayer(classifiable, completedCount),
+      completedCount,
+      canceledCount: Number(row.canceled_count) || 0,
+      tags,
+      isFavorite: hasFavoritosTag(classifiable),
+      isProblematica: hasProblematicaTag(classifiable),
+      isBloqueado: hasBloqueadoTag(classifiable),
+      isDecline: hasDeclineTag(classifiable),
+      isRecurringTag: isRecurringClient(classifiable),
+      isCompany: isCompanyClient(classifiable),
+      isAgendado: hasAgendadoTag(classifiable),
+      isParar: hasPararTag(classifiable),
+    });
+    pagoPendiente += Number(row.pago_pendiente) || 0;
+    pagoAceptado += Number(row.pago_aceptado) || 0;
+    pagoEnProceso += Number(row.pago_en_proceso) || 0;
+  }
+
+  const nucleusSize = clients.length;
+  const layerOrder: QualityLayer[] = ['favorite', 'recurring', 'standard', 'risk'];
+  const layers = layerOrder.map((key) => {
+    const count = clients.filter((row) => row.layer === key).length;
+    return { key, label: LAYER_LABELS[key], count, pct: pct(count, nucleusSize) };
+  });
+  const tags = TAG_SPECS.map((spec) => {
+    const count = clients.filter(spec.pick).length;
+    return {
+      key: spec.key,
+      label: spec.label,
+      count,
+      pct: pct(count, nucleusSize),
+      ratio: ratioEvery(nucleusSize, count),
+    };
+  });
+  const riskCount = clients.filter((row) => row.layer === 'risk').length;
+  const favorites = clients.filter((row) => row.layer === 'favorite');
+  const rest = clients.filter((row) => row.layer !== 'favorite');
+  const canceledBookings = clients.reduce((sum, row) => sum + row.canceledCount, 0);
+  const clientsWithCanceled = clients.filter((row) => row.canceledCount > 0).length;
+
+  return {
+    nucleusSize,
+    period,
+    tags,
+    layers,
+    riskUnique: {
+      count: riskCount,
+      pct: pct(riskCount, nucleusSize),
+      ratio: ratioEvery(nucleusSize, riskCount),
+    },
+    favoritesVsRest: {
+      favorites: {
+        n: favorites.length,
+        avgCompleted: avg(favorites.map((row) => row.completedCount)),
+        pctTwoPlus: twoPlusPct(favorites.map((row) => row.completedCount)),
+      },
+      rest: {
+        n: rest.length,
+        avgCompleted: avg(rest.map((row) => row.completedCount)),
+        pctTwoPlus: twoPlusPct(rest.map((row) => row.completedCount)),
+      },
+    },
+    cancellations: {
+      clientsWithCanceled,
+      clientsWithCanceledPct: pct(clientsWithCanceled, nucleusSize),
+      canceledBookings,
+      pagoPendiente,
+      pagoAceptado,
+      pagoEnProceso,
+    },
+    crossCancel: CROSS_SPECS.map((spec) => {
+      const subset = clients.filter(spec.pick);
+      return {
+        key: spec.key,
+        label: spec.label,
+        withCanceled: subset.filter((row) => row.canceledCount > 0).length,
+        total: subset.length,
+      };
+    }),
+    clients,
+  };
+}
+
+export function qualitySummaryWithoutClients(metrics: ClientQualityMetrics) {
+  const { clients: _clients, ...summary } = metrics;
+  return summary;
+}

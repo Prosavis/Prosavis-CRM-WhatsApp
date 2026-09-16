@@ -64,6 +64,15 @@ verify_jwt = false
 [functions.list-whatsapp-message-log]
 verify_jwt = false
 
+[functions.get-app-metrics]
+verify_jwt = false
+
+[functions.list-directory-metrics]
+verify_jwt = false
+
+[functions.list-completed-appointments]
+verify_jwt = false
+
 [functions.send-whatsapp-chat-message]
 verify_jwt = false
 

@@ -28,11 +28,18 @@ import {
   Cell,
   ComposedChart,
   LabelList,
+  Line,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts';
+import {
+  METRICS_CHART_BLUE,
+  METRICS_CHART_GREEN,
+  METRICS_NEGATIVE_TEXT,
+  METRICS_POSITIVE_TEXT,
+} from '@/constants/metricsChartColors';
 import type {
   CompletedAppointmentDetail,
   CompletedServicesTimeseriesPoint,
@@ -80,7 +87,9 @@ function formatInt(n: number): string {
 
 function formatDay(isoDay: string | null | undefined): string {
   if (!isoDay) return '—';
-  const [y, m, d] = isoDay.split('-').map(Number);
+  const day = isoDay.slice(0, 10);
+  const [y, m, d] = day.split('-').map(Number);
+  if (!y || !m || !d) return '—';
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('es-CO', {
     day: '2-digit',
     month: 'short',
@@ -163,8 +172,12 @@ const ComparisonCard: React.FC<{ lens: ComparisonLens }> = ({ lens }) => {
     neutral || sign === 0
       ? theme.palette.text.secondary
       : sign > 0
-        ? theme.palette.success.main
-        : theme.palette.error.main;
+        ? theme.palette.mode === 'light'
+          ? METRICS_POSITIVE_TEXT
+          : theme.palette.success.light
+        : theme.palette.mode === 'light'
+          ? METRICS_NEGATIVE_TEXT
+          : theme.palette.error.light;
   const Icon =
     !hasGrowth || sign === 0
       ? TrendingFlatIcon
@@ -222,7 +235,7 @@ const CompletedChartTooltip: React.FC<CompletedChartTooltipProps> = ({ active, p
   return (
     <ChartTooltipCard
       title={`${point.label}${point.isPartial ? ' (en curso)' : ''}`}
-      rows={[{ label: 'Completados', value: formatInt(point.completed), color: '#2e7d32' }]}
+      rows={[{ label: 'Completados', value: formatInt(point.completed), color: METRICS_CHART_GREEN }]}
       hint="Clic para ver citas"
     />
   );
@@ -271,8 +284,9 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
 
   const comparisons = meta?.comparisons;
 
-  const barColor = chartColor(theme, '#2e7d32');
-  const barSelectedColor = chartColor(theme, '#1b5e20', 0.22);
+  const barColor = chartColor(theme, METRICS_CHART_GREEN);
+  const barSelectedColor = chartColor(theme, METRICS_CHART_BLUE, 0.22);
+  const lineColor = chartColor(theme, METRICS_CHART_BLUE);
 
   const comparisonLenses = useMemo<ComparisonLens[]>(() => {
     const lenses: ComparisonLens[] = [];
@@ -628,6 +642,14 @@ const CompletedServicesSection: React.FC<CompletedServicesSectionProps> = ({
                 ))}
                 <LabelList dataKey="completed" content={renderBarLabel} />
               </Bar>
+              <Line
+                type="monotone"
+                dataKey="completed"
+                stroke={lineColor}
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+              />
             </ComposedChart>
           </ResponsiveContainer>
         </Box>

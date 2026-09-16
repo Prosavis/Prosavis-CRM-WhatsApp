@@ -6,11 +6,12 @@ import {
   metricsPeriodRange,
   resolveMetricsDays,
   resolveMetricsVista,
+  vistaDayParam,
 } from './metricsVistas';
 
 describe('metricsVistas', () => {
-  it('defaults to calidad when vista is missing', () => {
-    expect(resolveMetricsVista(new URLSearchParams('tab=metrics'))).toBe('calidad');
+  it('defaults to resumen when vista is missing', () => {
+    expect(resolveMetricsVista(new URLSearchParams('tab=metrics'))).toBe('resumen');
   });
 
   it('reads a valid vista from the query', () => {
@@ -18,11 +19,11 @@ describe('metricsVistas', () => {
   });
 
   it('falls back when vista is unknown', () => {
-    expect(resolveMetricsVista(new URLSearchParams('vista=foo'))).toBe('calidad');
+    expect(resolveMetricsVista(new URLSearchParams('vista=foo'))).toBe('resumen');
   });
 
-  it('omits vista=calidad from the URL and keeps other tabs explicit', () => {
-    const next = applyMetricsVista(new URLSearchParams('tab=metrics&vista=mapa'), 'calidad');
+  it('omits vista=resumen from the URL and keeps other tabs explicit', () => {
+    const next = applyMetricsVista(new URLSearchParams('tab=metrics&vista=mapa'), 'resumen');
     expect(next.get('tab')).toBe('metrics');
     expect(next.get('vista')).toBeNull();
     expect(applyMetricsVista(new URLSearchParams('tab=metrics'), 'friccion').get('vista')).toBe(
@@ -32,9 +33,21 @@ describe('metricsVistas', () => {
 
   it('reads supported periods and falls back for invalid values', () => {
     expect(resolveMetricsDays(new URLSearchParams('days=60'))).toBe(60);
+    expect(resolveMetricsDays(new URLSearchParams('activityDays=14'), 'activityDays')).toBe(14);
     expect(resolveMetricsDays(new URLSearchParams('days=365'))).toBe(30);
     expect(resolveMetricsDays(new URLSearchParams('days=foo'))).toBe(30);
     expect(resolveMetricsDays(new URLSearchParams())).toBe(30);
+  });
+
+  it('maps temporal vistas to independent URL params', () => {
+    expect(vistaDayParam('resumen')).toBe('completedDays');
+    expect(vistaDayParam('app')).toBe('appDays');
+    expect(vistaDayParam('mapa')).toBe('mapDays');
+    expect(vistaDayParam('actividad')).toBe('activityDays');
+    expect(vistaDayParam('outbound')).toBe('outboundDays');
+    expect(vistaDayParam('calidad')).toBeNull();
+    expect(vistaDayParam('friccion')).toBeNull();
+    expect(vistaDayParam('clientes')).toBeNull();
   });
 
   it('treats days=all as the unbounded historic period', () => {

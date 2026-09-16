@@ -1,7 +1,9 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 
-const VISTAS = ['mapa', 'calidad', 'friccion', 'clientes', 'actividad', 'outbound'] as const;
+const VISTAS = ['resumen', 'app', 'mapa', 'calidad', 'friccion', 'clientes', 'actividad', 'outbound'] as const;
+const TEMPORAL_VISTAS = ['resumen', 'app', 'mapa', 'actividad', 'outbound'] as const;
+const SNAPSHOT_VISTAS = ['calidad', 'friccion', 'clientes'] as const;
 const THEMES = ['light', 'dark'] as const;
 const RESPONSIVE_WIDTHS = [320, 375, 768, 1024] as const;
 
@@ -74,7 +76,33 @@ test('keyboard navigation persists the selected view and period in the URL', asy
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/vista=friccion/);
 
+  await page.getByRole('tab', { name: 'Actividad' }).click();
   await page.getByRole('combobox', { name: 'Periodo' }).click();
   await page.getByRole('option', { name: '90 días' }).click();
-  await expect(page).toHaveURL(/days=90/);
+  await expect(page).toHaveURL(/activityDays=90/);
+});
+
+test('directory, quality and friction do not show a period control', async ({ page }) => {
+  for (const vista of SNAPSHOT_VISTAS) {
+    await page.goto(`/e2e/metrics-harness.html?vista=${vista}&theme=light`);
+    await expect(page.getByRole('combobox', { name: 'Periodo' })).toHaveCount(0);
+  }
+});
+
+test('each temporal view keeps its own period in the URL', async ({ page }) => {
+  await page.goto('/e2e/metrics-harness.html?vista=resumen&theme=light');
+  await page.getByRole('combobox', { name: 'Periodo' }).click();
+  await page.getByRole('option', { name: '60 días' }).click();
+  await expect(page).toHaveURL(/completedDays=60/);
+
+  await page.getByRole('tab', { name: 'Outbound' }).click();
+  await page.getByRole('combobox', { name: 'Periodo' }).click();
+  await page.getByRole('option', { name: '14 días' }).click();
+  await expect(page).toHaveURL(/outboundDays=14/);
+  await expect(page).toHaveURL(/completedDays=60/);
+
+  for (const vista of TEMPORAL_VISTAS) {
+    await page.goto(`/e2e/metrics-harness.html?vista=${vista}&theme=light`);
+    await expect(page.getByRole('combobox', { name: 'Periodo' })).toBeVisible();
+  }
 });

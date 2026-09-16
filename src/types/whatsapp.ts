@@ -258,6 +258,9 @@ export interface WhatsAppMetrics {
   directoryClients?: DirectoryClientMetricRow[];
   completedServicesTimeseries?: MetricsGranularSeries<CompletedServicesTimeseriesPoint>;
   completedAppointments?: CompletedAppointmentDetail[];
+  lifetimeCollectedTotal?: number;
+  lifetimePaidAppointmentCount?: number;
+  serviceId?: string;
   completedMeta?: {
     windowMonths: number;
     windowFrom: string;
@@ -280,7 +283,79 @@ export interface WhatsAppMetrics {
     directoryRows: number;
     appointmentRows: number;
     clientAppointmentRows?: number;
+    inboundContactDays?: number;
+    outboundFactRows?: number;
+    completedDays?: number;
   };
+  today?: string;
+  inboundWindowTotals?: Record<string, InboundTotals>;
+  outboundWindowTotals?: Record<string, {
+    sent: number;
+    delivered: number;
+    read: number;
+    failed: number;
+    reachedDevice: number;
+    responses: number;
+    uniqueMessaged: number;
+    uniqueResponded: number;
+    responseRate: number;
+    rawResponseRate: number;
+  }>;
+  completedDaily?: CompletedServicesTimeseriesPoint[];
+  completedWindowTotals?: Record<string, number>;
+  outboundFacts?: Array<{
+    bucket: string;
+    campaignType: string;
+    templateName: string | null;
+    status: string;
+    messageCount: number;
+  }>;
+  qualitySummary?: Omit<ClientQualityMetrics, 'clients'>;
+  heatmapSummary?: {
+    coverage: AppointmentHeatmapResult['coverage'];
+    daily: Array<{ bucket: string; count: number }>;
+  };
+}
+
+export interface AppMetricsSnapshot {
+  serviceId: string;
+  generatedAt: string;
+  today?: string;
+  profile: {
+    name: string | null;
+    rating: number;
+    views: number;
+    health: {
+      score: number;
+      completedCriteria: number;
+      totalCriteria: number;
+      criteria: Array<{
+        key: string;
+        label: string;
+        weight: number;
+        isMet: boolean;
+        suggestion: string;
+      }>;
+    };
+  };
+  funnel: { views: number; favorites: number; contacts: number };
+  chats: { total: number; unread: number; active: number };
+  appointments: {
+    pending: number;
+    confirmed: number;
+    completed: number;
+    upcoming: number;
+    total: number;
+  };
+  weekly: {
+    weekStart: string;
+    weekEnd: string;
+    servicesCompleted: number;
+    totalAppointments: number;
+    totalRevenue: number;
+    comparedToPrevWeek: { servicesChange: number; revenueChange: number };
+  };
+  appointmentDaily: CompletedServicesTimeseriesPoint[];
 }
 
 export type QualityLayer = 'risk' | 'favorite' | 'recurring' | 'standard';

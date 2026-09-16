@@ -14,6 +14,9 @@ import OutboundBreakdownTables from '@/components/whatsapp/metrics/OutboundBreak
 import OutboundMessageLog from '@/components/whatsapp/metrics/OutboundMessageLog';
 import MetricsKpiCard from '@/components/whatsapp/metrics/shared/MetricsKpiCard';
 import MetricsKpiGrid from '@/components/whatsapp/metrics/shared/MetricsKpiGrid';
+import AppDataSection from '@/components/whatsapp/metrics/app/AppDataSection';
+import LifetimeRevenueBanner from '@/components/whatsapp/metrics/shared/LifetimeRevenueBanner';
+import MetricsPeriodControl from '@/components/whatsapp/metrics/shared/MetricsPeriodControl';
 import MetricsShell from '@/components/whatsapp/metrics/shared/MetricsShell';
 import MetricsViewHeader from '@/components/whatsapp/metrics/shared/MetricsViewHeader';
 import { darkTheme, lightTheme } from '@/theme/theme';
@@ -23,7 +26,59 @@ import type {
   DirectoryClientMetricRow,
   WhatsAppMetrics,
 } from '@/types/whatsapp';
-import { resolveMetricsDays, type MetricsDays, type MetricsVista } from '@/utils/metricsVistas';
+import {
+  resolveMetricsDays,
+  vistaDayParam,
+  type MetricsDays,
+  type MetricsVista,
+} from '@/utils/metricsVistas';
+
+const HARNESS_VISTAS: MetricsVista[] = [
+  'resumen',
+  'app',
+  'mapa',
+  'calidad',
+  'friccion',
+  'clientes',
+  'actividad',
+  'outbound',
+];
+
+const appSnapshot = {
+  serviceId: 'nwEMgpEqVwY3o95u3PNE',
+  generatedAt: '2026-09-16T16:00:00.000Z',
+  today: '2026-09-16',
+  profile: {
+    name: 'Prosavis Limpieza',
+    rating: 4.8,
+    views: 1280,
+    health: {
+      score: 86,
+      completedCriteria: 6,
+      totalCriteria: 7,
+      criteria: [
+        { key: 'photos', label: 'Fotos', weight: 20, isMet: true, suggestion: '' },
+        { key: 'rating', label: 'Calificación', weight: 20, isMet: true, suggestion: '' },
+      ],
+    },
+  },
+  funnel: { views: 1280, favorites: 96, contacts: 41 },
+  chats: { total: 54, unread: 3, active: 12 },
+  appointments: { pending: 8, confirmed: 11, completed: 337, upcoming: 6, total: 362 },
+  weekly: {
+    weekStart: '2026-09-10',
+    weekEnd: '2026-09-16',
+    servicesCompleted: 18,
+    totalAppointments: 24,
+    totalRevenue: 4_200_000,
+    comparedToPrevWeek: { servicesChange: 12, revenueChange: 8 },
+  },
+  appointmentDaily: [
+    { bucket: '2026-09-10', completed: 3 },
+    { bucket: '2026-09-11', completed: 2 },
+    { bucket: '2026-09-16', completed: 1 },
+  ],
+};
 
 const quality: ClientQualityMetrics = {
   nucleusSize: 83,
@@ -188,7 +243,17 @@ const metrics: WhatsAppMetrics = {
     totalCompleted: 337,
     inSelectedPeriod: 83,
     lastCompletedDate: '2026-09-06T14:00:00.000Z',
+    today: '2026-09-16',
+    currentMonth: '2026-09',
+    comparisons: {
+      mtd: { current: 21, previous: 18, growth: 16.7 },
+      rolling30d: { current: 83, previous: 74, growth: 12.2 },
+      lastClosedMonth: { current: 83, previous: 74, growth: 12.2, month: '2026-08' },
+    },
   },
+  lifetimeCollectedTotal: 248_500_000,
+  lifetimePaidAppointmentCount: 412,
+  serviceId: 'nwEMgpEqVwY3o95u3PNE',
   dataQuality: { messageLogRows: 500, directoryRows: 240, appointmentRows: 337 },
 };
 
@@ -202,11 +267,57 @@ const logs = Array.from({ length: 18 }, (_, index) => ({
   campaignType: index % 2 === 0 ? 'SEGUIMIENTO' : 'REBOOKING',
 }));
 
-function HarnessView({ vista }: { vista: MetricsVista }) {
+function HarnessView({
+  vista,
+  days,
+  onDaysChange,
+}: {
+  vista: MetricsVista;
+  days: MetricsDays;
+  onDaysChange: (days: MetricsDays) => void;
+}) {
   const [mapMode, setMapMode] = React.useState<HeatmapMode>('density');
+  const periodControl = vistaDayParam(vista)
+    ? <MetricsPeriodControl days={days} onDaysChange={onDaysChange} />
+    : null;
+  if (vista === 'resumen') {
+    return (
+      <>
+        {periodControl}
+        <MetricsViewHeader
+          title="Resumen operativo"
+          purpose="Ingresos históricos cobrados y servicios completados."
+          periodLabel="Últimos 30 días"
+          universeLabel="337 servicios en 6 meses"
+        />
+        <LifetimeRevenueBanner
+          lifetimeCollectedTotal={metrics.lifetimeCollectedTotal ?? 0}
+          lifetimePaidAppointmentCount={metrics.lifetimePaidAppointmentCount ?? 0}
+        />
+        <CompletedServicesSection
+          series={metrics.completedServicesTimeseries}
+          appointments={metrics.completedAppointments}
+          meta={metrics.completedMeta}
+          loading={false}
+        />
+      </>
+    );
+  }
+  if (vista === 'app') {
+    return (
+      <AppDataSection
+        data={appSnapshot}
+        days={days}
+        onDaysChange={onDaysChange}
+        updatedAt={new Date('2026-09-16T16:00:00.000Z').getTime()}
+      />
+    );
+  }
   if (vista === 'mapa') {
     return (
-      <HeatmapSection
+      <>
+        {periodControl}
+        <HeatmapSection
         data={{
           source: 'gps',
           coverage: { total: 83, withGps: 68, withAddressOnly: 10, withoutPoint: 5 },
@@ -232,6 +343,7 @@ function HarnessView({ vista }: { vista: MetricsVista }) {
         periodLabel="2026-08-09 – 2026-09-07"
         updatedAt={new Date('2026-09-07T16:00:00.000Z').getTime()}
       />
+      </>
     );
   }
   if (vista === 'calidad') return <CalidadSection metrics={quality} loading={false} />;
@@ -256,22 +368,17 @@ function HarnessView({ vista }: { vista: MetricsVista }) {
     return (
       <>
         <MetricsViewHeader
-          title="Actividad operativa"
-          purpose="Demanda inbound y servicios completados."
+          title="Actividad inbound"
+          purpose="Demanda recibida por personas y mensajes, sin mezclarla con servicios completados."
           periodLabel="Últimos 30 días"
           universeLabel="126 contactos únicos"
         />
+        {periodControl}
         <InboundActivitySection
           series={metrics.inboundTimeseries}
           totals={metrics.inboundTotals}
           loading={false}
           days={30}
-        />
-        <CompletedServicesSection
-          series={metrics.completedServicesTimeseries}
-          appointments={metrics.completedAppointments}
-          meta={metrics.completedMeta}
-          loading={false}
         />
       </>
     );
@@ -284,6 +391,7 @@ function HarnessView({ vista }: { vista: MetricsVista }) {
         periodLabel="Últimos 30 días"
         universeLabel="207 contactos alcanzados"
       />
+      {periodControl}
       <MetricsKpiGrid>
         <MetricsKpiCard label="Mensajes enviados" value="420" />
         <MetricsKpiCard label="En el dispositivo" value="380" tone="success" />
@@ -319,44 +427,48 @@ function HarnessView({ vista }: { vista: MetricsVista }) {
 function App() {
   const params = new URLSearchParams(window.location.search);
   const requested = params.get('vista');
-  const initialVista: MetricsVista = [
-    'mapa',
-    'calidad',
-    'friccion',
-    'clientes',
-    'actividad',
-    'outbound',
-  ].includes(requested ?? '')
+  const initialVista: MetricsVista = HARNESS_VISTAS.includes(requested as MetricsVista)
     ? (requested as MetricsVista)
-    : 'calidad';
+    : 'resumen';
   const [vista, setVista] = useState(initialVista);
-  const [days, setDays] = useState<MetricsDays>(resolveMetricsDays(params));
+  const [periods, setPeriods] = useState({
+    completedDays: resolveMetricsDays(params, 'completedDays'),
+    mapDays: resolveMetricsDays(params, 'mapDays'),
+    activityDays: resolveMetricsDays(params, 'activityDays'),
+    outboundDays: resolveMetricsDays(params, 'outboundDays'),
+    appDays: resolveMetricsDays(params, 'appDays'),
+  });
   const dark = params.get('theme') === 'dark';
   const updateScope = (key: string, value: string) => {
     const nextUrl = new URL(window.location.href);
     nextUrl.searchParams.set(key, value);
     window.history.replaceState(null, '', nextUrl);
   };
+  const dayParam = vistaDayParam(vista);
+  const days = dayParam ? periods[dayParam] : 30;
 
   return (
     <ThemeProvider theme={dark ? darkTheme : lightTheme}>
       <CssBaseline />
       <MemoryRouter>
-        <Box sx={{ maxWidth: 1440, mx: 'auto', p: { xs: 1.5, sm: 3 } }}>
+        <Box sx={{ maxWidth: 1440, mx: 'auto', p: { xs: 1.5, sm: 3 }, overflowX: 'hidden' }}>
           <MetricsShell
             vista={vista}
-            days={days}
             onVistaChange={(nextVista) => {
               setVista(nextVista);
               updateScope('vista', nextVista);
             }}
-            onDaysChange={(nextDays) => {
-              setDays(nextDays);
-              updateScope('days', String(nextDays));
-            }}
             context="Fixture reproducible · sin dependencias de producción"
           >
-            <HarnessView vista={vista} />
+            <HarnessView
+              vista={vista}
+              days={days}
+              onDaysChange={(nextDays) => {
+                if (!dayParam) return;
+                setPeriods((current) => ({ ...current, [dayParam]: nextDays }));
+                updateScope(dayParam, String(nextDays));
+              }}
+            />
           </MetricsShell>
         </Box>
       </MemoryRouter>

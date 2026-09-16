@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { inboxQueryKeys } from '@/hooks/inboxQueryKeys';
+import { useWhatsAppMetricsQueries } from '@/hooks/useWhatsAppMetricsQueries';
 import { PURGE_WHATSAPP_LOG_CONFIRM_PHRASE } from './metricsConstants';
 import {
   Alert,
@@ -23,35 +24,36 @@ import {
 } from '@mui/material';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
+import { PROSAVIS_CLEANING_SERVICE_ID } from '@/constants/cleaningService';
 import { WHATSAPP_CLOUD_PRODUCTION } from '@/constants/whatsappCloudAccounts';
 import { useSearchParams } from 'react-router-dom';
-import {
-  getAppointmentHeatmap,
-  getClientQualityMetrics,
-  getWhatsAppMetrics,
-  listWhatsAppMessageLog,
-  purgeWhatsAppMessageLog,
-} from '@/services/whatsappService';
+import { purgeWhatsAppMessageLog } from '@/services/whatsappService';
 import {
   applyMetricsScope,
   applyMetricsVista,
   metricsPeriodLabel,
-  metricsPeriodRange,
   resolveMetricsDays,
   resolveMetricsVista,
 } from '@/utils/metricsVistas';
+import {
+  applyOutboundWindow,
+  filterHeatmapPoints,
+  selectCompletedWindow,
+  selectInboundWindow,
+} from '@/utils/metricsHistoricalWindows';
 import ClientSegmentsSection from './ClientSegmentsSection';
 import InboundActivitySection from './InboundActivitySection';
 import CompletedServicesSection from './CompletedServicesSection';
-import OutboundPerformanceSection, {
-  type MessageLogRow,
-} from './OutboundPerformanceSection';
+import OutboundPerformanceSection from './OutboundPerformanceSection';
 import CalidadSection from './CalidadSection';
 import FriccionSection from './FriccionSection';
 import HeatmapSection, { type HeatmapMode } from './HeatmapSection';
+import AppDataSection from './app/AppDataSection';
+import MetricsPeriodControl from './shared/MetricsPeriodControl';
 import MetricsShell from './shared/MetricsShell';
 import MetricsPageState from './shared/MetricsPageState';
 import MetricsViewHeader from './shared/MetricsViewHeader';
+import LifetimeRevenueBanner from './shared/LifetimeRevenueBanner';
 
 const { phoneNumberId, phoneDisplay, botLabel } = WHATSAPP_CLOUD_PRODUCTION;
 
@@ -67,13 +69,16 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const vista = resolveMetricsVista(searchParams);
-  const days = resolveMetricsDays(searchParams);
+  const completedDays = resolveMetricsDays(searchParams, 'completedDays');
+  const mapDays = resolveMetricsDays(searchParams, 'mapDays');
+  const activityDays = resolveMetricsDays(searchParams, 'activityDays');
+  const outboundDays = resolveMetricsDays(searchParams, 'outboundDays');
+  const appDays = resolveMetricsDays(searchParams, 'appDays');
   const heatmapPreferGps = searchParams.get('source') !== 'address';
   const heatmapStatus = searchParams.get('status') ?? 'all';
   const heatmapLayer = searchParams.get('layer') ?? 'all';
   const heatmapMode: HeatmapMode =
     searchParams.get('mapMode') === 'points' ? 'points' : 'density';
-  const metricsPeriod = metricsPeriodRange(days);
   const [logsFetchWarning, setLogsFetchWarning] = useState<string | null>(null);
   const [purgeDialogOpen, setPurgeDialogOpen] = useState(false);
   const [purgeScope, setPurgeScope] = useState<'line' | 'all'>('line');
@@ -82,63 +87,22 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
   const [purgeError, setPurgeError] = useState<string | null>(null);
   const [advancedMenuAnchor, setAdvancedMenuAnchor] = useState<null | HTMLElement>(null);
 
-  const needsOpsMetrics = vista === 'clientes' || vista === 'actividad' || vista === 'outbound';
-  const needsQuality = vista === 'calidad' || vista === 'friccion';
-  const needsHeatmap = vista === 'mapa';
-
-  const metricsQuery = useQuery({
-    queryKey: inboxQueryKeys.metrics(days, phoneNumberId),
-    queryFn: () => getWhatsAppMetrics(days, phoneNumberId),
-    staleTime: 30_000,
-    enabled: needsOpsMetrics,
-  });
-  const qualityQuery = useQuery({
-    queryKey: inboxQueryKeys.qualityMetrics(null, null),
-    queryFn: () => getClientQualityMetrics(),
-    staleTime: 60_000,
-    enabled: needsQuality,
-  });
-  const heatmapQuery = useQuery({
-    queryKey: inboxQueryKeys.appointmentHeatmap({
-      source: heatmapPreferGps ? 'gps' : 'address',
+  const {
+    metricsQuery,
+    appQuery,
+    qualityQuery,
+    heatmapQuery,
+    directoryQuery,
+    completedQuery,
+    logsQuery,
+  } = useWhatsAppMetricsQueries({
+    vista,
+    phoneNumberId,
+    heatmap: {
+      preferGps: heatmapPreferGps,
       status: heatmapStatus,
       layer: heatmapLayer,
-      from: metricsPeriod.from,
-      to: metricsPeriod.to,
-    }),
-    queryFn: () =>
-      getAppointmentHeatmap({
-        source: heatmapPreferGps ? 'gps' : 'address',
-        status: heatmapStatus,
-        layer: heatmapLayer,
-        from: metricsPeriod.from,
-        to: metricsPeriod.to,
-      }),
-    staleTime: 60_000,
-    enabled: needsHeatmap,
-  });
-  const logsQuery = useQuery({
-    queryKey: inboxQueryKeys.metricsLogs(days, phoneNumberId),
-    queryFn: async () => {
-      const rows = await listWhatsAppMessageLog({ days, phoneNumberId, limit: 500 });
-      return rows.map((row) => ({
-        id: row.id,
-        phoneNumberId: row.phoneNumberId,
-        recipientPhone: row.recipientPhone,
-        recipientBsuid: row.recipientBsuid,
-        templateName: row.templateName,
-        messageBody: row.messageBody,
-        status: row.status,
-        direction: row.direction,
-        intent: row.intent,
-        createdAt: row.createdAt,
-        waMessageId: row.waMessageId,
-        errorMessage: row.errorMessage,
-        campaignType: row.campaignType,
-      })) satisfies MessageLogRow[];
     },
-    staleTime: 30_000,
-    enabled: vista === 'outbound',
   });
 
   const metrics = metricsQuery.data ?? null;
@@ -148,6 +112,14 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
   const logsLoading = logsQuery.isPending;
 
   const loadMetrics = () => metricsQuery.refetch();
+  const todayKey = metrics?.today ?? new Date().toISOString().slice(0, 10);
+  const outboundWindowed = metrics ? applyOutboundWindow(metrics, outboundDays) : null;
+  const heatmapWindowed = heatmapQuery.data
+    ? {
+      ...heatmapQuery.data,
+      points: filterHeatmapPoints(heatmapQuery.data.points, mapDays, todayKey),
+    }
+    : heatmapQuery.data;
   const loadLogs = async () => {
     setLogsFetchWarning(null);
     const result = await logsQuery.refetch();
@@ -159,15 +131,8 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
   return (
     <MetricsShell
       vista={vista}
-      days={days}
       onVistaChange={(next) => {
         setSearchParams(applyMetricsVista(searchParams, next), { replace: true });
-      }}
-      onDaysChange={(nextDays) => {
-        setSearchParams(
-          applyMetricsScope(searchParams, { days: nextDays === 30 ? null : String(nextDays) }),
-          { replace: true },
-        );
       }}
       advancedAction={
         <>
@@ -274,8 +239,13 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
                 });
                 setPurgeDialogOpen(false);
                 setPurgeTypedPhrase('');
-                await queryClient.invalidateQueries({ queryKey: inboxQueryKeys.metrics(days, phoneNumberId) });
-                await queryClient.invalidateQueries({ queryKey: inboxQueryKeys.metricsLogs(days, phoneNumberId) });
+                await queryClient.invalidateQueries({
+                  queryKey: inboxQueryKeys.metrics(phoneNumberId, PROSAVIS_CLEANING_SERVICE_ID),
+                });
+                await queryClient.invalidateQueries({ queryKey: inboxQueryKeys.metricsLogs(phoneNumberId) });
+                await queryClient.invalidateQueries({
+                  queryKey: inboxQueryKeys.appMetrics(PROSAVIS_CLEANING_SERVICE_ID),
+                });
                 await loadMetrics();
                 await loadLogs();
               } catch (err: unknown) {
@@ -297,9 +267,97 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
         </DialogActions>
       </Dialog>
 
+      {vista === 'resumen' && (
+        <MetricsPageState
+          loading={metricsLoading}
+          error={metricsError}
+          empty={!metrics?.completedMeta && (metrics?.lifetimeCollectedTotal ?? 0) === 0}
+          onRetry={() => void loadMetrics()}
+        >
+          <MetricsPeriodControl
+            days={completedDays}
+            onDaysChange={(next) => {
+              setSearchParams(
+                applyMetricsScope(searchParams, {
+                  completedDays: next === 30 ? null : String(next),
+                }),
+                { replace: true },
+              );
+            }}
+          />
+          <MetricsViewHeader
+            title="Resumen operativo"
+            purpose="Ingresos históricos cobrados y servicios completados. El periodo solo filtra la serie ya cargada."
+            periodLabel={metricsPeriodLabel(completedDays)}
+            universeLabel={`${(metrics?.completedMeta?.totalCompleted ?? 0).toLocaleString('es-CO')} servicios históricos`}
+            updatedAt={metricsQuery.dataUpdatedAt}
+            insights={[
+              {
+                label: 'Citas pagadas',
+                value: (metrics?.lifetimePaidAppointmentCount ?? 0).toLocaleString('es-CO'),
+                tone: 'positive',
+              },
+              {
+                label: 'Completados en el periodo',
+                value: (metrics ? selectCompletedWindow(metrics, completedDays).total : 0).toLocaleString('es-CO'),
+              },
+            ]}
+          />
+          <LifetimeRevenueBanner
+            lifetimeCollectedTotal={metrics?.lifetimeCollectedTotal ?? 0}
+            lifetimePaidAppointmentCount={metrics?.lifetimePaidAppointmentCount ?? 0}
+            loading={false}
+          />
+          <CompletedServicesSection
+            series={metrics ? selectCompletedWindow(metrics, completedDays).series : undefined}
+            appointments={completedQuery.data}
+            meta={metrics?.completedMeta
+              ? {
+                ...metrics.completedMeta,
+                inSelectedPeriod: selectCompletedWindow(metrics, completedDays).total,
+              }
+              : metrics?.completedMeta}
+            loading={false}
+          />
+        </MetricsPageState>
+      )}
+
+      {vista === 'app' && (
+        <MetricsPageState
+          loading={appQuery.isPending}
+          error={appQuery.error instanceof Error ? appQuery.error.message : null}
+          empty={!appQuery.data}
+          onRetry={() => void appQuery.refetch()}
+        >
+          <AppDataSection
+            data={appQuery.data ?? null}
+            days={appDays}
+            onDaysChange={(next) => {
+              setSearchParams(
+                applyMetricsScope(searchParams, { appDays: next === 30 ? null : String(next) }),
+                { replace: true },
+              );
+            }}
+            updatedAt={appQuery.dataUpdatedAt}
+          />
+        </MetricsPageState>
+      )}
+
       {vista === 'mapa' && (
-        <HeatmapSection
-          data={heatmapQuery.data}
+        <>
+          <MetricsPeriodControl
+            days={mapDays}
+            onDaysChange={(next) => {
+              setSearchParams(
+                applyMetricsScope(searchParams, {
+                  mapDays: next === 30 ? null : String(next),
+                }),
+                { replace: true },
+              );
+            }}
+          />
+          <HeatmapSection
+          data={heatmapWindowed}
           loading={heatmapQuery.isPending}
           error={heatmapQuery.error instanceof Error ? heatmapQuery.error.message : null}
           preferGps={heatmapPreferGps}
@@ -326,14 +384,11 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
               { replace: true },
             );
           }}
-          periodLabel={
-            metricsPeriod.from && metricsPeriod.to
-              ? `${metricsPeriod.from} – ${metricsPeriod.to}`
-              : 'Histórico completo'
-          }
+          periodLabel={metricsPeriodLabel(mapDays)}
           updatedAt={heatmapQuery.dataUpdatedAt}
           onRetry={() => void heatmapQuery.refetch()}
         />
+        </>
       )}
 
       {vista === 'calidad' && (
@@ -388,8 +443,8 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
           />
           <ClientSegmentsSection
             segments={metrics?.clientSegments}
-            clients={metrics?.directoryClients}
-            loading={false}
+            clients={directoryQuery.data}
+            loading={directoryQuery.isPending}
             onReload={() => void loadMetrics()}
           />
         </MetricsPageState>
@@ -399,42 +454,47 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
         <MetricsPageState
           loading={metricsLoading}
           error={metricsError}
-          empty={!metrics?.inboundTotals && !metrics?.completedMeta}
+          empty={!metrics?.inboundTotals}
           onRetry={() => void loadMetrics()}
         >
           <MetricsViewHeader
-            title="Actividad operativa"
-            purpose="Compara demanda inbound y servicios completados sin confundir personas, mensajes ni ventanas temporales."
-            periodLabel={metricsPeriodLabel(days)}
-            universeLabel={`${(metrics?.inboundTotals?.uniquePeople ?? 0).toLocaleString('es-CO')} contactos únicos`}
+            title="Actividad inbound"
+            purpose="Mide demanda recibida por personas, mensajes y ventanas temporales, sin mezclarla con servicios completados."
+            periodLabel={metricsPeriodLabel(activityDays)}
+            universeLabel={`${(metrics ? selectInboundWindow(metrics, activityDays).totals.uniquePeople : 0).toLocaleString('es-CO')} contactos únicos`}
             updatedAt={metricsQuery.dataUpdatedAt}
             insights={[
               {
                 label: 'Contactos inbound',
-                value: (metrics?.inboundTotals?.uniquePeople ?? 0).toLocaleString('es-CO'),
+                value: (metrics ? selectInboundWindow(metrics, activityDays).totals.uniquePeople : 0).toLocaleString('es-CO'),
               },
               {
                 label: 'Nuevos',
-                value: (metrics?.inboundTotals?.newPeople ?? 0).toLocaleString('es-CO'),
+                value: (metrics ? selectInboundWindow(metrics, activityDays).totals.newPeople : 0).toLocaleString('es-CO'),
                 tone: 'positive',
               },
               {
-                label: 'Servicios en el periodo',
-                value: (metrics?.completedMeta?.inSelectedPeriod ?? 0).toLocaleString('es-CO'),
+                label: 'Mensajes recibidos',
+                value: (metrics ? selectInboundWindow(metrics, activityDays).totals.messagesReceived : 0).toLocaleString('es-CO'),
               },
             ]}
           />
-          <InboundActivitySection
-            series={metrics?.inboundTimeseries}
-            totals={metrics?.inboundTotals}
-            loading={false}
-            days={days}
+          <MetricsPeriodControl
+            days={activityDays}
+            onDaysChange={(next) => {
+              setSearchParams(
+                applyMetricsScope(searchParams, {
+                  activityDays: next === 30 ? null : String(next),
+                }),
+                { replace: true },
+              );
+            }}
           />
-          <CompletedServicesSection
-            series={metrics?.completedServicesTimeseries}
-            appointments={metrics?.completedAppointments}
-            meta={metrics?.completedMeta}
+          <InboundActivitySection
+            series={metrics ? selectInboundWindow(metrics, activityDays).series : undefined}
+            totals={metrics ? selectInboundWindow(metrics, activityDays).totals : undefined}
             loading={false}
+            days={activityDays}
           />
         </MetricsPageState>
       )}
@@ -449,37 +509,48 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
           <MetricsViewHeader
             title="Rendimiento outbound"
             purpose="Separa volumen de mensajes, alcance único, respuesta y fallos para evaluar cada campaña con su denominador."
-            periodLabel={metricsPeriodLabel(days)}
+            periodLabel={metricsPeriodLabel(outboundDays)}
             universeLabel={`${(
-              metrics?.outboundTotals?.uniqueContacts.messaged ??
-              metrics?.uniqueContactsMessaged ??
+              outboundWindowed?.outboundTotals?.uniqueContacts.messaged ??
+              outboundWindowed?.uniqueContactsMessaged ??
               0
             ).toLocaleString('es-CO')} contactos alcanzados`}
             updatedAt={metricsQuery.dataUpdatedAt}
             insights={[
               {
                 label: 'Mensajes enviados',
-                value: (metrics?.totalSent ?? 0).toLocaleString('es-CO'),
+                value: (outboundWindowed?.totalSent ?? 0).toLocaleString('es-CO'),
               },
               {
                 label: 'Contactos que respondieron',
                 value: (
-                  metrics?.outboundTotals?.uniqueContacts.responded ??
-                  metrics?.uniqueContactsResponded ??
+                  outboundWindowed?.outboundTotals?.uniqueContacts.responded ??
+                  outboundWindowed?.uniqueContactsResponded ??
                   0
                 ).toLocaleString('es-CO'),
                 tone: 'positive',
               },
               {
                 label: 'Tasa por contacto',
-                value: `${(metrics?.responseRate ?? 0).toLocaleString('es-CO')}%`,
-                tone: metrics?.responseRateWarning ? 'warning' : 'default',
+                value: `${(outboundWindowed?.responseRate ?? 0).toLocaleString('es-CO')}%`,
+                tone: outboundWindowed?.responseRateWarning ? 'warning' : 'default',
               },
             ]}
           />
+          <MetricsPeriodControl
+            days={outboundDays}
+            onDaysChange={(next) => {
+              setSearchParams(
+                applyMetricsScope(searchParams, {
+                  outboundDays: next === 30 ? null : String(next),
+                }),
+                { replace: true },
+              );
+            }}
+          />
           <OutboundPerformanceSection
-            metrics={metrics}
-            days={days}
+            metrics={outboundWindowed}
+            days={outboundDays}
             logs={logs}
             logsLoading={logsLoading}
             logsFetchWarning={logsFetchWarning}

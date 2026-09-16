@@ -12,7 +12,7 @@
     "test:e2e": "playwright test",
     "audit": "node scripts/audit/run.mjs",
     "audit:loop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/audit/loop.ps1",
-    "test:ops-v5": "npx deno test --allow-read --allow-env supabase/functions/_shared/agenda/agendaEngine.test.ts supabase/functions/_shared/agenda/api.test.ts supabase/functions/_shared/agenda/runtimeConfig.test.ts supabase/functions/_shared/opsV5Readiness.test.ts supabase/functions/_shared/visitAttentionAlert.test.ts supabase/functions/_shared/opsMetrics.test.ts supabase/functions/_shared/clientClassification.test.ts supabase/functions/_shared/qualityMetrics.test.ts supabase/functions/_shared/appointmentHeatmap.test.ts",
+    "test:ops-v5": "npx deno test --allow-read --allow-env supabase/functions/_shared/agenda/agendaEngine.test.ts supabase/functions/_shared/agenda/api.test.ts supabase/functions/_shared/agenda/runtimeConfig.test.ts supabase/functions/_shared/opsV5Readiness.test.ts supabase/functions/_shared/visitAttentionAlert.test.ts supabase/functions/_shared/opsMetrics.test.ts supabase/functions/_shared/clientClassification.test.ts supabase/functions/_shared/qualityMetrics.test.ts supabase/functions/_shared/appointmentHeatmap.test.ts supabase/functions/_shared/completedServicesCore.test.ts supabase/functions/_shared/metricsWindows.test.ts supabase/functions/_shared/appMetrics.test.ts",
     "test:ops-v5-sql": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ops-v5-sql-gate.ps1",
     "preview": "vite preview"
   },

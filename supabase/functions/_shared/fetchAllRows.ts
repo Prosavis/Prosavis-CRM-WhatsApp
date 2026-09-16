@@ -35,3 +35,9 @@ export const PROSAVIS_CLEANING_SERVICE_ID_FALLBACK = 'nwEMgpEqVwY3o95u3PNE';
 export function resolveCleaningServiceId(): string {
   return Deno.env.get('PROSAVIS_SERVICE_ID')?.trim() || PROSAVIS_CLEANING_SERVICE_ID_FALLBACK;
 }
+
+/** serviceId explícito del cliente; si no viene, el del servicio de limpieza. */
+export function resolveRequestedServiceId(raw: unknown): string {
+  if (typeof raw === 'string' && raw.trim()) return raw.trim();
+  return resolveCleaningServiceId();
+}

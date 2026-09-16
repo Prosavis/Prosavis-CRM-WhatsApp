@@ -1,4 +1,6 @@
 export const METRICS_VISTA_KEYS = [
+  'resumen',
+  'app',
   'mapa',
   'calidad',
   'friccion',
@@ -11,6 +13,16 @@ export type MetricsVista = (typeof METRICS_VISTA_KEYS)[number];
 
 export type MetricsDays = number | 'all';
 
+export const METRICS_VIEW_DAY_PARAMS = {
+  completedDays: 'completedDays',
+  mapDays: 'mapDays',
+  activityDays: 'activityDays',
+  outboundDays: 'outboundDays',
+  appDays: 'appDays',
+} as const;
+
+export type MetricsViewDayParam = (typeof METRICS_VIEW_DAY_PARAMS)[keyof typeof METRICS_VIEW_DAY_PARAMS];
+
 const VISTA_SET = new Set<string>(METRICS_VISTA_KEYS);
 const METRICS_DAY_OPTIONS = new Set([7, 14, 30, 60, 90]);
 
@@ -20,7 +32,7 @@ export function isMetricsVista(value: string | null | undefined): value is Metri
 
 export function resolveMetricsVista(search: URLSearchParams): MetricsVista {
   const raw = search.get('vista');
-  return isMetricsVista(raw) ? raw : 'calidad';
+  return isMetricsVista(raw) ? raw : 'resumen';
 }
 
 export function applyMetricsVista(
@@ -29,13 +41,16 @@ export function applyMetricsVista(
 ): URLSearchParams {
   const next = new URLSearchParams(search);
   next.set('tab', 'metrics');
-  if (vista === 'calidad') next.delete('vista');
+  if (vista === 'resumen') next.delete('vista');
   else next.set('vista', vista);
   return next;
 }
 
-export function resolveMetricsDays(search: URLSearchParams): MetricsDays {
-  const raw = search.get('days');
+export function resolveMetricsDays(
+  search: URLSearchParams,
+  param: MetricsViewDayParam | 'days' = 'days',
+): MetricsDays {
+  const raw = search.get(param);
   if (raw === 'all') return 'all';
   const parsed = Number.parseInt(raw ?? '', 10);
   return METRICS_DAY_OPTIONS.has(parsed) ? parsed : 30;
@@ -47,7 +62,7 @@ export function applyMetricsScope(
 ): URLSearchParams {
   const next = new URLSearchParams(search);
   for (const [key, value] of Object.entries(updates)) {
-    if (key === 'days' && value === 'all') {
+    if ((key === 'days' || key.endsWith('Days')) && value === 'all') {
       next.set(key, 'all');
       continue;
     }
@@ -84,4 +99,27 @@ export function metricsPeriodLabel(days: MetricsDays): string {
 
 export function metricsPeriodPhrase(days: MetricsDays): string {
   return days === 'all' ? 'el histórico completo' : `los últimos ${days} días`;
+}
+
+export function vistaDayParam(vista: MetricsVista): MetricsViewDayParam | null {
+  switch (vista) {
+    case 'resumen':
+      return 'completedDays';
+    case 'mapa':
+      return 'mapDays';
+    case 'actividad':
+      return 'activityDays';
+    case 'outbound':
+      return 'outboundDays';
+    case 'app':
+      return 'appDays';
+    case 'calidad':
+    case 'friccion':
+    case 'clientes':
+      return null;
+    default: {
+      const _never: never = vista;
+      return _never;
+    }
+  }
 }

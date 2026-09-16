@@ -2292,27 +2292,65 @@ export async function listWhatsAppMessageLog(filters: {
   phoneNumberId?: string;
   limit?: number;
 } = {}): Promise<WhatsAppMessage[]> {
-  const rows = await invokeFn<MessageRow[]>('list-whatsapp-message-log', filters);
-  return (rows ?? []).map(mapMessageRow);
+  const payload = await invokeFn<MessageRow[] | { items?: MessageRow[] }>(
+    'list-whatsapp-message-log',
+    filters,
+  );
+  const rows = Array.isArray(payload) ? payload : (payload.items ?? []);
+  return rows.map(mapMessageRow);
 }
 
 export async function getWhatsAppMetrics(
   days: number | 'all' = 30,
   phoneNumberId?: string,
+  serviceId?: string,
 ): Promise<WhatsAppMetrics> {
   return invokeFn<WhatsAppMetrics>('get-whatsapp-metrics', {
     days,
     phoneNumberId,
+    serviceId,
   });
+}
+
+export async function getAppMetrics(serviceId?: string) {
+  return invokeFn('get-app-metrics', { serviceId });
+}
+
+export async function listDirectoryMetrics(params: {
+  serviceId?: string;
+  limit?: number;
+  offset?: number;
+} = {}) {
+  return invokeFn<{ items: unknown[]; hasMore: boolean; nextCursor: string | null }>(
+    'list-directory-metrics',
+    params,
+  );
+}
+
+export async function listCompletedAppointments(params: {
+  serviceId?: string;
+  limit?: number;
+  offset?: number;
+  from?: string | null;
+  to?: string | null;
+} = {}) {
+  return invokeFn<{ items: unknown[]; hasMore: boolean; nextCursor: string | null }>(
+    'list-completed-appointments',
+    params,
+  );
 }
 
 export async function getClientQualityMetrics(params: {
   from?: string | null;
   to?: string | null;
+  serviceId?: string;
+  mode?: 'summary' | 'detail';
 } = {}): Promise<ClientQualityMetrics> {
   return invokeFn<ClientQualityMetrics>('get-client-quality-metrics', {
     from: params.from ?? undefined,
     to: params.to ?? undefined,
+    serviceId: params.serviceId,
+    mode: params.mode ?? 'detail',
   });
 }
 
@@ -2322,6 +2360,8 @@ export async function getAppointmentHeatmap(params: {
   source?: 'gps' | 'address';
   status?: string;
   layer?: string;
+  serviceId?: string;
+  mode?: 'summary' | 'detail';
 } = {}): Promise<AppointmentHeatmapResult> {
   return invokeFn<AppointmentHeatmapResult>('get-appointment-heatmap', {
     from: params.from ?? undefined,
@@ -2329,6 +2369,8 @@ export async function getAppointmentHeatmap(params: {
     source: params.source ?? 'gps',
     status: params.status ?? 'all',
     layer: params.layer ?? 'all',
+    serviceId: params.serviceId,
+    mode: params.mode ?? 'detail',
   });
 }
 
