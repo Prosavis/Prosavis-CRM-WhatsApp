@@ -45,6 +45,7 @@ $AllFunctions = @(
   'get-client-quality-metrics',
   'get-appointment-heatmap',
   'get-app-metrics',
+  'get-directory-workspace',
   'list-whatsapp-contact-appointments',
   'list-whatsapp-message-log',
   'list-directory-metrics',

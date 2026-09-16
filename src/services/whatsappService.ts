@@ -2316,17 +2316,6 @@ export async function getAppMetrics(serviceId?: string) {
   return invokeFn('get-app-metrics', { serviceId });
 }
 
-export async function listDirectoryMetrics(params: {
-  serviceId?: string;
-  limit?: number;
-  offset?: number;
-} = {}) {
-  return invokeFn<{ items: unknown[]; hasMore: boolean; nextCursor: string | null }>(
-    'list-directory-metrics',
-    params,
-  );
-}
-
 export async function listCompletedAppointments(params: {
   serviceId?: string;
   limit?: number;

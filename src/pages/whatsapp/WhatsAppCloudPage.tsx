@@ -36,7 +36,7 @@ import {
 export { PURGE_WHATSAPP_LOG_CONFIRM_PHRASE };
 
 const MetricsTab = lazy(() => import('@/components/whatsapp/metrics/MetricsTab'));
-const LeadsPage = lazy(() => import('../leads/LeadsPage'));
+const DirectoryWorkspacePage = lazy(() => import('../leads/DirectoryWorkspacePage'));
 const DiscountCodesTab = lazy(() => import('@/components/whatsapp/DiscountCodesTab'));
 const WhatsAppSettingsTab = lazy(() => import('@/components/whatsapp/WhatsAppSettingsTab'));
 const MonitorTab = lazy(() => import('@/components/whatsapp/MonitorTab'));
@@ -318,7 +318,7 @@ const WhatsAppCloudPage: React.FC = () => {
                 </Box>
               }
             >
-              <LeadsPage
+              <DirectoryWorkspacePage
                 embedded
                 onOpenInInbox={handleOpenLeadInInbox}
                 onOpenBulk={() => setBulkOpen(true)}

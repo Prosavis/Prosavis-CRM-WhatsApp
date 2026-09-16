@@ -1,9 +1,9 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 
-const VISTAS = ['resumen', 'app', 'mapa', 'calidad', 'friccion', 'clientes', 'actividad', 'outbound'] as const;
+const VISTAS = ['resumen', 'app', 'mapa', 'calidad', 'friccion', 'actividad', 'outbound'] as const;
 const TEMPORAL_VISTAS = ['resumen', 'app', 'mapa', 'actividad', 'outbound'] as const;
-const SNAPSHOT_VISTAS = ['calidad', 'friccion', 'clientes'] as const;
+const SNAPSHOT_VISTAS = ['calidad', 'friccion'] as const;
 const THEMES = ['light', 'dark'] as const;
 const RESPONSIVE_WIDTHS = [320, 375, 768, 1024] as const;
 

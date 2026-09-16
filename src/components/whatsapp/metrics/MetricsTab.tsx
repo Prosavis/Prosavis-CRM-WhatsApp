@@ -45,7 +45,6 @@ import {
   selectCompletedWindow,
   selectInboundWindow,
 } from '@/utils/metricsHistoricalWindows';
-import ClientSegmentsSection from './ClientSegmentsSection';
 import InboundActivitySection from './InboundActivitySection';
 import CompletedServicesSection from './CompletedServicesSection';
 import OutboundPerformanceSection from './OutboundPerformanceSection';
@@ -97,7 +96,6 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
     appQuery,
     qualityQuery,
     heatmapQuery,
-    directoryQuery,
     logsQuery,
   } = useWhatsAppMetricsQueries({
     vista,
@@ -407,45 +405,6 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
           updatedAt={qualityQuery.dataUpdatedAt}
           onRetry={() => void qualityQuery.refetch()}
         />
-      )}
-
-      {vista === 'clientes' && (
-        <MetricsPageState
-          loading={metricsLoading}
-          error={metricsError}
-          empty={!metrics?.clientSegments || metrics.clientSegments.total === 0}
-          onRetry={() => void loadMetrics()}
-        >
-          <MetricsViewHeader
-            title="Directorio y segmentos"
-            purpose="Entiende la composición de la audiencia y abre el grupo exacto sobre el que vas a actuar."
-            periodLabel="Directorio actual"
-            universeLabel={`${(metrics?.clientSegments?.total ?? 0).toLocaleString('es-CO')} contactos`}
-            updatedAt={metricsQuery.dataUpdatedAt}
-            insights={[
-              {
-                label: 'Clientes con cita',
-                value: (metrics?.clientSegments?.clients ?? 0).toLocaleString('es-CO'),
-              },
-              {
-                label: 'Recurrentes',
-                value: (metrics?.clientSegments?.recurring ?? 0).toLocaleString('es-CO'),
-                tone: 'positive',
-              },
-              {
-                label: 'Para reactivar',
-                value: (metrics?.clientSegments?.inactive ?? 0).toLocaleString('es-CO'),
-                tone: 'warning',
-              },
-            ]}
-          />
-          <ClientSegmentsSection
-            segments={metrics?.clientSegments}
-            clients={directoryQuery.data}
-            loading={directoryQuery.isPending}
-            onReload={() => void loadMetrics()}
-          />
-        </MetricsPageState>
       )}
 
       {vista === 'actividad' && (

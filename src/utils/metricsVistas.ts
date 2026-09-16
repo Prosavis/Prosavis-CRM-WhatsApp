@@ -4,7 +4,6 @@ export const METRICS_VISTA_KEYS = [
   'mapa',
   'calidad',
   'friccion',
-  'clientes',
   'actividad',
   'outbound',
 ] as const;
@@ -184,7 +183,6 @@ export function vistaDayParam(vista: MetricsVista): MetricsViewDayParam | null {
       return 'appDays';
     case 'calidad':
     case 'friccion':
-    case 'clientes':
       return null;
     default: {
       const _never: never = vista;

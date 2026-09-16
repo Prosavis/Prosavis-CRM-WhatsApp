@@ -33,4 +33,18 @@ export const inboxQueryKeys = {
   }) => ['appointment-heatmap', filters] as const,
   directoryEntries: (filters: unknown) => ['directory', 'entries', filters] as const,
   directoryStats: ['directory', 'stats'] as const,
+  directoryWorkspaceRoot: () => ['directory-workspace'] as const,
+  directoryWorkspaceSummary: (serviceId?: string) =>
+    ['directory-workspace', 'summary', serviceId ?? 'default'] as const,
+  directoryWorkspacePage: (
+    serviceId: string,
+    view: string,
+    search: string,
+    segment: string | null,
+    limit: number,
+    offset: number,
+  ) =>
+    ['directory-workspace', 'page', serviceId, view, search, segment, limit, offset] as const,
+  directoryWorkspaceCancellations: (serviceId: string, directoryId: string) =>
+    ['directory-workspace', 'cancellations', serviceId, directoryId] as const,
 };

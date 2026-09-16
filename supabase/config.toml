@@ -70,6 +70,9 @@ verify_jwt = false
 [functions.list-directory-metrics]
 verify_jwt = false
 
+[functions.get-directory-workspace]
+verify_jwt = false
+
 [functions.list-completed-appointments]
 verify_jwt = false
 

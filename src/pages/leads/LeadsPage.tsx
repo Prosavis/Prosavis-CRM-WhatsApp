@@ -140,9 +140,17 @@ export interface LeadsPageProps {
   embedded?: boolean;
   onOpenInInbox?: (phone: string, name?: string) => void;
   onOpenBulk?: () => void;
+  initialClientId?: string | null;
+  onInitialClientHandled?: () => void;
 }
 
-const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, onOpenBulk }) => {
+const LeadsPage: React.FC<LeadsPageProps> = ({
+  embedded = false,
+  onOpenInInbox,
+  onOpenBulk,
+  initialClientId,
+  onInitialClientHandled,
+}) => {
   const isMobile = usePhoneLayout();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const setSnackbar = ({
@@ -277,12 +285,26 @@ const LeadsPage: React.FC<LeadsPageProps> = ({ embedded = false, onOpenInInbox, 
   }, [issueStatsQuery, statsQuery]);
 
   const fetchEntries = useCallback(async () => {
-    await entriesQuery.refetch();
-  }, [entriesQuery]);
+    await Promise.all([
+      entriesQuery.refetch(),
+      queryClient.invalidateQueries({ queryKey: inboxQueryKeys.directoryWorkspaceRoot() }),
+    ]);
+  }, [entriesQuery, queryClient]);
 
   React.useEffect(() => {
     if (issueStatsQuery.data) setIssueOpenTotal(issueStatsQuery.data.openTotal);
   }, [issueStatsQuery.data]);
+
+  React.useEffect(() => {
+    if (!initialClientId) return;
+    void directoryService.getEntryById(initialClientId).then((entry) => {
+      if (entry) {
+        setSelectedEntry(entry);
+        setDrawerOpen(true);
+      }
+      onInitialClientHandled?.();
+    });
+  }, [initialClientId, onInitialClientHandled]);
 
   const handleCreateEntry = async () => {
     try {

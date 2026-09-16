@@ -7,13 +7,9 @@ import {
   getClientQualityMetrics,
   getWhatsAppMetrics,
   listAppointmentMetrics,
-  listDirectoryMetrics,
   listWhatsAppMessageLog,
 } from '@/services/whatsappService';
-import type {
-  AppMetricsSnapshot,
-  DirectoryClientMetricRow,
-} from '@/types/whatsapp';
+import type { AppMetricsSnapshot } from '@/types/whatsapp';
 import type { MetricsVista } from '@/utils/metricsVistas';
 
 export function vistaNeedsQuality(vista: MetricsVista): boolean {
@@ -79,16 +75,6 @@ export function useWhatsAppMetricsQueries(input: UseWhatsAppMetricsQueriesInput)
     enabled: vistaNeedsHeatmap(input.vista),
   });
 
-  const directoryQuery = useQuery({
-    queryKey: inboxQueryKeys.directoryMetrics(serviceId),
-    queryFn: async () => {
-      const page = await listDirectoryMetrics({ serviceId, limit: 200 });
-      return (page.items ?? []) as DirectoryClientMetricRow[];
-    },
-    staleTime: 60_000,
-    enabled: input.vista === 'clientes',
-  });
-
   const logsQuery = useQuery({
     queryKey: inboxQueryKeys.metricsLogs(input.phoneNumberId),
     queryFn: () => listWhatsAppMessageLog({
@@ -105,7 +91,6 @@ export function useWhatsAppMetricsQueries(input: UseWhatsAppMetricsQueriesInput)
     appQuery,
     qualityQuery,
     heatmapQuery,
-    directoryQuery,
     logsQuery,
   };
 }

@@ -32,6 +32,7 @@ export interface DirectoryEntryDrawerProps {
   entry: DirectoryEntry | null;
   onEdit?: (entry: DirectoryEntry) => void;
   onDelete?: (entryId: string) => void;
+  extraContent?: React.ReactNode;
 }
 
 // ── Format helpers ───────────────────────────────────────────────────────
@@ -143,6 +144,7 @@ const DirectoryEntryDrawer: React.FC<DirectoryEntryDrawerProps> = ({
   entry,
   onEdit,
   onDelete,
+  extraContent,
 }) => {
   const isMobile = usePhoneLayout();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -435,6 +437,13 @@ const DirectoryEntryDrawer: React.FC<DirectoryEntryDrawerProps> = ({
             }
           />
         </Section>
+
+        {extraContent ? (
+          <>
+            <Divider sx={{ mb: 2.5 }} />
+            {extraContent}
+          </>
+        ) : null}
 
         <Divider sx={{ mb: 2.5 }} />
 

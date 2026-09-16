@@ -82,6 +82,11 @@ export function normalizeWhatsAppSearchParams(search: URLSearchParams): {
     next.delete('tab');
     changed = true;
   }
+  if (next.get('vista') === 'clientes') {
+    next.set('tab', 'leads');
+    next.delete('vista');
+    changed = true;
+  }
   if (next.get('tab') === 'commercial' && next.has('line')) {
     next.delete('line');
     changed = true;

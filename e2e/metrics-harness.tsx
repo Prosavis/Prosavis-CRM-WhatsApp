@@ -4,7 +4,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Box, CssBaseline, ThemeProvider } from '@mui/material';
 import { MemoryRouter } from 'react-router-dom';
 import CalidadSection from '@/components/whatsapp/metrics/CalidadSection';
-import ClientSegmentsSection from '@/components/whatsapp/metrics/ClientSegmentsSection';
 import CompletedServicesSection from '@/components/whatsapp/metrics/CompletedServicesSection';
 import FriccionSection from '@/components/whatsapp/metrics/FriccionSection';
 import HeatmapSection, {
@@ -23,8 +22,6 @@ import MetricsViewHeader from '@/components/whatsapp/metrics/shared/MetricsViewH
 import { darkTheme, lightTheme } from '@/theme/theme';
 import type {
   ClientQualityMetrics,
-  ClientSegmentsMetrics,
-  DirectoryClientMetricRow,
   WhatsAppMetrics,
 } from '@/types/whatsapp';
 import {
@@ -43,7 +40,6 @@ const HARNESS_VISTAS: MetricsVista[] = [
   'mapa',
   'calidad',
   'friccion',
-  'clientes',
   'actividad',
   'outbound',
 ];
@@ -138,37 +134,6 @@ const quality: ClientQualityMetrics = {
     isParar: false,
   })) as ClientQualityMetrics['clients'],
 };
-
-const clientSegments: ClientSegmentsMetrics = {
-  total: 240,
-  clients: 83,
-  company: 7,
-  recurring: 30,
-  active: 52,
-  inactive: 31,
-  favorites: 3,
-  blacklist: 5,
-};
-
-const directoryClients: DirectoryClientMetricRow[] = Array.from(
-  { length: 36 },
-  (_, index) => ({
-    id: `directory-${index}`,
-    name: `Cliente ${index + 1}`,
-    phone: `300000${String(index).padStart(4, '0')}`,
-    classification: 'Cliente',
-    tags: index < 3 ? ['Favoritos'] : ['Agendado'],
-    isCompany: index % 10 === 0,
-    isRecurring: index % 3 === 0,
-    isAgendado: true,
-    isFavorite: index < 3,
-    isClient: true,
-    isActive: index < 22,
-    isBlacklisted: index >= 31,
-    blacklistReason: index >= 31 ? 'No contactar' : null,
-    lastAppointmentDate: '2026-09-01T14:00:00.000Z',
-  }),
-);
 
 const metrics: WhatsAppMetrics = {
   period: { from: '2026-08-09', to: '2026-09-07' },
@@ -397,22 +362,6 @@ function HarnessView({
   }
   if (vista === 'calidad') return <CalidadSection metrics={quality} loading={false} />;
   if (vista === 'friccion') return <FriccionSection metrics={quality} loading={false} />;
-  if (vista === 'clientes') {
-    return (
-      <>
-        <MetricsViewHeader
-          title="Directorio y segmentos"
-          purpose="Composición operativa del directorio."
-          universeLabel="240 contactos"
-        />
-        <ClientSegmentsSection
-          segments={clientSegments}
-          clients={directoryClients}
-          loading={false}
-        />
-      </>
-    );
-  }
   if (vista === 'actividad') {
     return (
       <>

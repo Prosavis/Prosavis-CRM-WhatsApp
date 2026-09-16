@@ -106,7 +106,6 @@ describe('metricsVistas', () => {
     expect(vistaDayParam('outbound')).toBe('outboundDays');
     expect(vistaDayParam('calidad')).toBeNull();
     expect(vistaDayParam('friccion')).toBeNull();
-    expect(vistaDayParam('clientes')).toBeNull();
   });
 
   it('treats days=all as the unbounded historic period', () => {

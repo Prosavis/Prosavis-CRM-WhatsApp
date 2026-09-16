@@ -15,7 +15,6 @@ const TABS: Array<{ value: MetricsVista; label: string; group: string }> = [
   { value: 'actividad', label: 'Actividad', group: 'Operación' },
   { value: 'calidad', label: 'Calidad', group: 'Clientes' },
   { value: 'friccion', label: 'Fricción', group: 'Clientes' },
-  { value: 'clientes', label: 'Directorio', group: 'Clientes' },
   { value: 'outbound', label: 'Outbound', group: 'Mensajería' },
 ];
 

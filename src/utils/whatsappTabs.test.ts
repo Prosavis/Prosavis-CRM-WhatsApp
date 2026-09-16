@@ -108,6 +108,15 @@ describe('whatsappTabs', () => {
     expect(resolveWhatsAppTabKey(next)).toBe('commercial');
   });
 
+  it('redirects the retired metrics directory to the operational directory', () => {
+    const { next, changed } = normalizeWhatsAppSearchParams(
+      new URLSearchParams('tab=metrics&vista=clientes'),
+    );
+    expect(changed).toBe(true);
+    expect(next.get('tab')).toBe('leads');
+    expect(next.get('vista')).toBeNull();
+  });
+
   it('keeps metrics, monitoreo, automations and settings as admin tabs', () => {
     expect(isWhatsAppAdminTab('metrics')).toBe(true);
     expect(isWhatsAppAdminTab('monitoreo')).toBe(true);
