@@ -4,11 +4,13 @@ import {
   assembleInboundTimeseries,
   buildCompletedWindowTotals,
   buildInboundWindowTotals,
+  buildOutboundWindowTotals,
   completedTimeseriesFromDaily,
   outboundWindowFromSql,
   rollupOutboundFacts,
   todayBogotaKey,
   type InboundContactDayRow,
+  type OutboundContactDayRow,
 } from './metricsWindows.ts';
 import {
   buildQualityMetricsFromNucleus,
@@ -54,9 +56,21 @@ function asNumber(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function asRowArray(data: unknown): unknown[] {
+  if (Array.isArray(data)) return data;
+  if (typeof data === 'string') {
+    try {
+      const parsed = JSON.parse(data);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
 export function mapInboundRows(data: unknown): InboundContactDayRow[] {
-  if (!Array.isArray(data)) return [];
-  return data.map((row) => {
+  return asRowArray(data).map((row) => {
     const rec = asRecord(row);
     return {
       bucket_day: String(rec.bucket_day ?? '').slice(0, 10),
@@ -67,6 +81,16 @@ export function mapInboundRows(data: unknown): InboundContactDayRow[] {
       messages: asNumber(rec.messages),
     };
   });
+}
+
+export function mapOutboundContactDays(data: unknown): OutboundContactDayRow[] {
+  return asRowArray(data).map((row) => {
+    const rec = asRecord(row);
+    return {
+      bucket_day: String(rec.bucket_day ?? rec.bucket ?? '').slice(0, 10),
+      stable_key: typeof rec.stable_key === 'string' ? rec.stable_key : null,
+    };
+  }).filter((row) => row.bucket_day);
 }
 
 export function mapOutboundFacts(data: unknown): OutboundFactRow[] {
@@ -192,7 +216,7 @@ export async function loadHistoricalBootstrap(
   const [
     inboundRaw,
     outboundFactsRaw,
-    outboundWindowsRaw,
+    outboundContactDaysRaw,
     bookingsDailyRaw,
     lifetimeRaw,
     directoryRaw,
@@ -201,7 +225,7 @@ export async function loadHistoricalBootstrap(
   ] = await Promise.all([
     callRpc(supabase, 'metrics_inbound_contact_days', { p_phone_number_id: phone }),
     callRpc(supabase, 'metrics_outbound_facts', { p_phone_number_id: phone }),
-    callRpc(supabase, 'metrics_outbound_window_totals', { p_phone_number_id: phone }),
+    callRpc(supabase, 'metrics_outbound_contact_days', { p_phone_number_id: phone }),
     callRpc(supabase, 'metrics_bookings_daily', { p_service_id: input.serviceId }),
     callRpc(supabase, 'metrics_lifetime_collected', { p_service_id: input.serviceId }),
     callRpc(supabase, 'metrics_directory_snapshot', { p_service_id: input.serviceId }),
@@ -214,6 +238,7 @@ export async function loadHistoricalBootstrap(
   const inboundTimeseries = assembleInboundTimeseries(inboundRows, today);
   const inboundWindowTotals = buildInboundWindowTotals(inboundRows, today);
   const outboundFacts = mapOutboundFacts(outboundFactsRaw);
+  const outboundContactDays = mapOutboundContactDays(outboundContactDaysRaw);
   const outboundLifetime = rollupOutboundFacts(outboundFacts, null);
   const completedDaily = mapCompletedDaily(bookingsDailyRaw);
   const lifetimeRow = Array.isArray(lifetimeRaw) ? asRecord(lifetimeRaw[0]) : asRecord(lifetimeRaw);
@@ -238,7 +263,12 @@ export async function loadHistoricalBootstrap(
     inboundTotals: inboundWindowTotals.all,
     inboundWindowTotals,
     outboundFacts,
-    outboundWindowTotals: mapOutboundWindows(outboundWindowsRaw),
+    outboundWindowTotals: buildOutboundWindowTotals(
+      outboundFacts,
+      inboundRows,
+      outboundContactDays,
+      today,
+    ),
     byCampaign: outboundLifetime.byCampaign,
     byTemplate: outboundLifetime.byTemplate,
     byKind: outboundLifetime.byKind,
@@ -252,6 +282,7 @@ export async function loadHistoricalBootstrap(
     dataQuality: {
       inboundContactDays: inboundRows.length,
       outboundFactRows: outboundFacts.length,
+      outboundContactDays: outboundContactDays.length,
       directoryRows: directory.directoryRows,
       completedDays: completedDaily.length,
     },

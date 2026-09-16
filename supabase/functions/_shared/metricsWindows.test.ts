@@ -2,6 +2,7 @@ import { assertEquals } from 'jsr:@std/assert';
 import {
   assembleInboundTimeseries,
   buildInboundWindowTotals,
+  buildOutboundWindowTotals,
   completedTotalsForRange,
   inboundTotalsForRange,
   rollupOutboundFacts,
@@ -87,6 +88,54 @@ Deno.test('completed totals filter locally', () => {
   ];
   assertEquals(completedTotalsForRange(daily, windowRange(30, TODAY)), 2);
   assertEquals(completedTotalsForRange(daily, null), 6);
+});
+
+Deno.test('outbound window totals use contact intersection, not daily unique sums', () => {
+  const facts = [
+    { bucket: '2026-09-14', campaignType: 'PROMO', templateName: 'hola', status: 'read', messageCount: 2 },
+    { bucket: '2026-09-01', campaignType: 'PROMO', templateName: 'hola', status: 'sent', messageCount: 1 },
+    { bucket: '2026-09-14', campaignType: 'OTHER', templateName: null, status: 'sent', messageCount: 1 },
+    { bucket: '2026-08-20', campaignType: 'PROMO', templateName: 'hola', status: 'delivered', messageCount: 1 },
+    { bucket: '2026-06-01', campaignType: 'PROMO', templateName: 'hola', status: 'sent', messageCount: 4 },
+  ];
+  const inboundRows = [
+    { bucket_day: '2026-09-14', stable_key: 'a', first_contact_day: '2026-09-01', messages: 2 },
+    { bucket_day: '2026-09-01', stable_key: 'a', first_contact_day: '2026-09-01', messages: 1 },
+    { bucket_day: '2026-09-14', stable_key: 'b', first_contact_day: '2026-09-14', messages: 3 },
+    { bucket_day: '2026-08-20', stable_key: 'e', first_contact_day: '2026-08-20', messages: 1 },
+    { bucket_day: '2026-06-01', stable_key: 'f', first_contact_day: '2026-06-01', messages: 2 },
+  ];
+  const outboundContactDays = [
+    { bucket_day: '2026-09-14', stable_key: 'a' },
+    { bucket_day: '2026-09-01', stable_key: 'a' },
+    { bucket_day: '2026-09-14', stable_key: 'c' },
+    { bucket_day: '2026-08-20', stable_key: 'e' },
+    { bucket_day: '2026-06-01', stable_key: 'f' },
+  ];
+
+  const windows = buildOutboundWindowTotals(facts, inboundRows, outboundContactDays, TODAY);
+  const last7 = windows['7'];
+  const last30 = windows['30'];
+  const all = windows.all;
+
+  assertEquals(last7.uniqueMessaged, 2);
+  assertEquals(last7.uniqueResponded, 1);
+  assertEquals(last7.responses, 5);
+  assertEquals(last7.sent, 3);
+
+  assertEquals(last30.uniqueMessaged, 3);
+  assertEquals(last30.uniqueResponded, 2);
+  assertEquals(last30.responses, 7);
+  assertEquals(last30.sent, 5);
+
+  assertEquals(all.uniqueMessaged, 4);
+  assertEquals(all.uniqueResponded, 3);
+  assertEquals(all.responses, 9);
+  assertEquals(all.responseRate, 75);
+  assertEquals(
+    outboundContactDays.filter((row) => row.bucket_day >= '2026-08-18').length,
+    4,
+  );
 });
 
 Deno.test('selectOutboundWindow uses precomputed totals for the chosen span', () => {

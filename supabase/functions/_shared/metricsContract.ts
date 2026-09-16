@@ -183,6 +183,7 @@ export interface HistoricalMetricsBootstrap {
   dataQuality: {
     inboundContactDays: number;
     outboundFactRows: number;
+    outboundContactDays: number;
     directoryRows: number;
     completedDays: number;
   };

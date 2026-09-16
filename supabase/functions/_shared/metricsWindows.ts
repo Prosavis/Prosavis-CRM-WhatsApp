@@ -29,6 +29,11 @@ export interface InboundContactDayRow {
   messages: number;
 }
 
+export interface OutboundContactDayRow {
+  bucket_day: string;
+  stable_key: string | null;
+}
+
 export interface PeopleBucket {
   messagesReceived: number;
   people: Set<string>;
@@ -296,6 +301,65 @@ export function outboundWindowFromSql(row: {
     responseRate: percentage(uniqueResponded, uniqueMessaged),
     rawResponseRate: percentage(responses, sent),
   };
+}
+
+export function outboundTotalsForRange(
+  facts: OutboundFactRow[],
+  inboundRows: InboundContactDayRow[],
+  outboundContactDays: OutboundContactDayRow[],
+  range: { start: string; end: string } | null,
+): OutboundWindowTotals {
+  const rolled = rollupOutboundFacts(facts, range);
+  let responses = 0;
+  const inboundKeys = new Set<string>();
+  for (const row of inboundRows) {
+    const day = row.bucket_day?.slice(0, 10);
+    if (!day || !inWindow(day, range)) continue;
+    responses += Number(row.messages) || 0;
+    if (row.stable_key) inboundKeys.add(row.stable_key);
+  }
+
+  const uniqueMessaged = new Set<string>();
+  for (const row of outboundContactDays) {
+    const day = row.bucket_day?.slice(0, 10);
+    if (!day || !inWindow(day, range) || !row.stable_key) continue;
+    uniqueMessaged.add(row.stable_key);
+  }
+
+  let uniqueResponded = 0;
+  for (const key of inboundKeys) {
+    if (uniqueMessaged.has(key)) uniqueResponded += 1;
+  }
+
+  return outboundWindowFromSql({
+    sent: rolled.totals.sent,
+    delivered: rolled.totals.delivered,
+    read: rolled.totals.read,
+    failed: rolled.totals.failed,
+    responses,
+    unique_messaged: uniqueMessaged.size,
+    unique_responded: uniqueResponded,
+  });
+}
+
+export function buildOutboundWindowTotals(
+  facts: OutboundFactRow[],
+  inboundRows: InboundContactDayRow[],
+  outboundContactDays: OutboundContactDayRow[],
+  todayKey: string,
+): Record<MetricsWindowKey, OutboundWindowTotals> {
+  const totals = {
+    all: outboundTotalsForRange(facts, inboundRows, outboundContactDays, null),
+  } as Record<MetricsWindowKey, OutboundWindowTotals>;
+  for (const span of METRICS_WINDOW_SPANS) {
+    totals[String(span) as MetricsWindowKey] = outboundTotalsForRange(
+      facts,
+      inboundRows,
+      outboundContactDays,
+      windowRange(span, todayKey),
+    );
+  }
+  return totals;
 }
 
 export function completedTotalsForRange(
