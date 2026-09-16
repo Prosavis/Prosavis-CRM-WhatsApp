@@ -8,13 +8,17 @@ import {
   getFirestoreDocument,
   runFirestoreQuery,
 } from "./firebaseAdminRest.ts";
+import { directoryPhoneKey } from "./directoryPhone.ts";
 import {
   applyPostServicePreferences,
   buildPostServiceIdempotencyKey,
+  isPostServiceSettledOutcome,
+  mergePostServiceDashboardEvents,
   phoneKeyFromClientId,
   resolvePostServiceDirectoryId,
   type PostServiceDirectoryLookup,
   type PostServiceFollowUpPayload,
+  type PostServiceMergeableEvent,
 } from "./postServiceAutomation.ts";
 
 const TIMEZONE = "America/Bogota" as const;
@@ -135,9 +139,12 @@ async function loadPostServiceDirectoryLookup(
 
   const clientIds = collectAppointmentClientIds(appointments);
   const uuidIds = clientIds.filter((id) => UUID_RE.test(id));
-  const phoneKeys = clientIds
-    .map((id) => phoneKeyFromClientId(id))
-    .filter((key): key is string => Boolean(key));
+  const phoneKeys = [
+    ...clientIds.map((id) => phoneKeyFromClientId(id)),
+    ...appointments.map((appointment) =>
+      directoryPhoneKey(String(appointment.data.clientPhone ?? ""))
+    ),
+  ].filter((key): key is string => Boolean(key));
   const appointmentIds = appointments.map((appointment) => appointment.id);
 
   for (const ids of chunkIds(uuidIds)) {
@@ -270,21 +277,34 @@ export async function buildPostServiceDashboard(
   const unsent = appointments.filter(
     (appointment) => !appointment.data.postServiceWhatsAppSentAt,
   );
-  const scheduled = unsent.filter(
+  const lastRunAt = lastRunResult.data?.run_at ?? null;
+  const persistedEvents =
+    (recentResult.data ?? []) as Array<
+      PostServiceMergeableEvent & Record<string, unknown>
+    >;
+  const settledAppointmentIds = new Set(
+    persistedEvents
+      .filter((event) => isPostServiceSettledOutcome(String(event.outcome ?? "")))
+      .map((event) => String(event.appointment_id ?? "").trim())
+      .filter(Boolean),
+  );
+  const openAppointments = unsent.filter(
+    (appointment) => !settledAppointmentIds.has(appointment.id),
+  );
+  const scheduled = openAppointments.filter(
     (appointment) => Boolean(appointment.data.postServiceWhatsAppTaskId),
   ).length;
-  const scheduleFailed = unsent.filter(
+  const scheduleFailed = openAppointments.filter(
     (appointment) =>
       String(appointment.data.postServiceWhatsAppLastError ?? "").startsWith(
         "schedule_failed:",
       ),
   ).length;
-  const pending = unsent.filter(
+  const pending = openAppointments.filter(
     (appointment) =>
       !appointment.data.postServiceWhatsAppTaskId &&
       !appointment.data.postServiceWhatsAppLastError,
   ).length;
-  const lastRunAt = lastRunResult.data?.run_at ?? null;
   const directoryLookup = await loadPostServiceDirectoryLookup(supabase, unsent);
   const firestoreEvents = unsent.map((appointment) => {
     const data = appointment.data;
@@ -292,6 +312,7 @@ export async function buildPostServiceDashboard(
     const taskId = String(data.postServiceWhatsAppTaskId ?? "").trim();
     const scheduledDate = String(data.scheduledDate ?? "");
     const outcome = taskId ? "scheduled" : lastError ? "failed" : "pending";
+    const recipientPhone = String(data.clientPhone ?? "").trim() || null;
     return {
       id: `firestore:${appointment.id}`,
       batch_run_id: "",
@@ -301,10 +322,11 @@ export async function buildPostServiceDashboard(
           appointmentId: appointment.id,
           clientId: String(data.clientId ?? "").trim() || null,
           clientAppUserId: String(data.clientAppUserId ?? "").trim() || null,
+          recipientPhone,
         },
         directoryLookup,
       ),
-      recipient_phone: String(data.clientPhone ?? "").trim() || null,
+      recipient_phone: recipientPhone,
       recipient_name: String(data.clientName ?? "").trim() || null,
       service_date: scheduledDate ? formatServiceDate(scheduledDate) : "",
       template_name: TEMPLATE_NAME,
@@ -317,22 +339,10 @@ export async function buildPostServiceDashboard(
         new Date().toISOString(),
     };
   });
-  const unsentAppointmentIds = new Set(
-    unsent.map((appointment) => appointment.id),
-  );
-  const persistedEvents = (
-    (recentResult.data ?? []) as Array<Record<string, unknown>>
-  ).filter(
-    (event) => !unsentAppointmentIds.has(String(event.appointment_id ?? "")),
-  );
-  const mergedEvents = [
-    ...firestoreEvents,
-    ...persistedEvents,
-  ]
-    .sort((a, b) =>
-      String(b.created_at ?? "").localeCompare(String(a.created_at ?? ""))
-    )
-    .slice(0, 100);
+  const mergedEvents = mergePostServiceDashboardEvents(
+    firestoreEvents,
+    persistedEvents,
+  ).slice(0, 100);
   const preferenceMap = await loadPostServicePreferenceMap(
     supabase,
     mergedEvents.map((event) => String(event.directory_id ?? "")),
@@ -361,12 +371,14 @@ export async function buildPostServiceDashboard(
 }
 
 function formatServiceDate(iso: string): string {
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return iso;
   return new Intl.DateTimeFormat("es-CO", {
     timeZone: TIMEZONE,
     day: "numeric",
     month: "long",
     year: "numeric",
-  }).format(new Date(iso));
+  }).format(parsed);
 }
 
 async function buildPayloadFromAppointment(
@@ -519,20 +531,41 @@ export async function loadPostServiceRetryPayload(
 export async function setPostServicePreference(
   supabase: SupabaseClient,
   params: {
-    directoryId: string;
+    directoryId?: string | null;
+    phone?: string | null;
     postServiceEnabled: boolean;
     updatedBy: string | null;
     notes?: string | null;
   },
-): Promise<void> {
+): Promise<{ directoryId: string }> {
+  let directoryId = params.directoryId?.trim() || "";
+  if (!UUID_RE.test(directoryId) && params.phone) {
+    const phoneKey = directoryPhoneKey(params.phone);
+    if (phoneKey) {
+      const { data, error } = await supabase
+        .from("crm_directory")
+        .select("id")
+        .eq("phone_key", phoneKey)
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      directoryId = String(data?.id ?? "").trim();
+    }
+  }
+  if (!UUID_RE.test(directoryId)) {
+    throw new Error(
+      "No se encontró el contacto en el directorio. Busca la ficha o usa un teléfono registrado.",
+    );
+  }
   const { error } = await supabase
     .from("whatsapp_post_service_preferences")
     .upsert({
-      directory_id: params.directoryId,
+      directory_id: directoryId,
       post_service_enabled: params.postServiceEnabled,
       updated_by: params.updatedBy,
       notes: params.notes ?? null,
       updated_at: new Date().toISOString(),
     }, { onConflict: "directory_id" });
   if (error) throw error;
+  return { directoryId };
 }

@@ -106,7 +106,8 @@ export async function runPostServiceDryRun(params: {
 }
 
 export async function setPostServiceRecipientPreference(params: {
-  directoryId: string;
+  directoryId?: string | null;
+  phone?: string | null;
   enabled: boolean;
 }): Promise<void> {
   const { data, error } = await supabase.functions.invoke<{ success?: boolean; error?: string }>(
@@ -114,7 +115,8 @@ export async function setPostServiceRecipientPreference(params: {
     {
       body: {
         action: 'setRecipientPreference',
-        directoryId: params.directoryId,
+        directoryId: params.directoryId ?? '',
+        phone: params.phone ?? '',
         enabled: params.enabled,
       },
     },

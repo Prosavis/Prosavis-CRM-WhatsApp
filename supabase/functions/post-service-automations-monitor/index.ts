@@ -176,8 +176,9 @@ Deno.serve(async (req) => {
 
     if (action === "setRecipientPreference") {
       const directoryId = String(body.directoryId ?? "").trim();
-      if (!directoryId) {
-        return jsonResponse({ error: "directoryId es requerido." }, 400);
+      const phone = String(body.phone ?? "").trim();
+      if (!directoryId && !phone) {
+        return jsonResponse({ error: "directoryId o phone es requerido." }, 400);
       }
       const postServiceEnabled = typeof body.postServiceEnabled === "boolean"
         ? body.postServiceEnabled
@@ -188,15 +189,16 @@ Deno.serve(async (req) => {
         }, 400);
       }
       const updatedBy = actor.kind === "supabase" ? actor.uid : null;
-      await setPostServicePreference(supabase, {
+      const result = await setPostServicePreference(supabase, {
         directoryId,
+        phone: phone || null,
         postServiceEnabled,
         updatedBy,
         notes: typeof body.notes === "string"
           ? body.notes.trim() || null
           : null,
       });
-      return jsonResponse({ success: true });
+      return jsonResponse({ success: true, directoryId: result.directoryId });
     }
 
     return jsonResponse({ error: `Acción no soportada: ${action}` }, 400);

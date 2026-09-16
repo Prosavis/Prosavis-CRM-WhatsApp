@@ -16,6 +16,9 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Tooltip,
   Typography,
 } from '@mui/material';
@@ -23,6 +26,7 @@ import HistoryIcon from '@mui/icons-material/History';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ReplayIcon from '@mui/icons-material/Replay';
 import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined';
+import SearchIcon from '@mui/icons-material/Search';
 import TaskAltIcon from '@mui/icons-material/TaskAlt';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -40,7 +44,14 @@ import {
   type PostServiceAutomationEvent,
   type PostServiceAutomationsDashboard,
 } from '@/types/postServiceAutomations';
-import { isPostServicePreferenceEnabled } from '@/utils/postServicePreference';
+import {
+  formatPostServiceServiceDate,
+  groupPostServiceContacts,
+  isPostServicePreferenceEnabled,
+  isPostServiceQueueOutcome,
+  phoneKeyFromRecipientPhone,
+  postServiceContactKey,
+} from '@/utils/postServicePreference';
 
 const KPI_CONFIG = [
   { key: 'scheduled', label: 'Programados', color: 'info.main' },
@@ -51,7 +62,9 @@ const KPI_CONFIG = [
 
 function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return '—';
-  return new Date(iso).toLocaleString('es-CO', {
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return '—';
+  return parsed.toLocaleString('es-CO', {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
@@ -61,13 +74,23 @@ function formatDateTime(iso: string | null | undefined): string {
   });
 }
 
-function formatServiceDate(iso: string): string {
-  return new Date(`${iso.slice(0, 10)}T12:00:00-05:00`).toLocaleDateString('es-CO', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    timeZone: 'America/Bogota',
-  });
+function matchesContactSearch(event: PostServiceAutomationEvent, query: string): boolean {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  const digits = needle.replace(/\D/g, '');
+  const haystack = [
+    event.recipient_name,
+    event.recipient_phone,
+    event.appointment_id,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  if (haystack.includes(needle)) return true;
+  if (digits.length >= 4) {
+    return (event.recipient_phone ?? '').replace(/\D/g, '').includes(digits);
+  }
+  return false;
 }
 
 function getActionMessage(error: unknown, fallback: string): string {
@@ -86,6 +109,8 @@ const PostServicePanel: React.FC<PostServicePanelProps> = ({ onOpenHistory }) =>
     severity: 'success' | 'error' | 'info';
     message: string;
   } | null>(null);
+  const [search, setSearch] = useState('');
+  const [view, setView] = useState<'queue' | 'all'>('all');
 
   const retryMutation = useMutation({
     mutationFn: retryPostServiceAutomation,
@@ -137,11 +162,19 @@ const PostServicePanel: React.FC<PostServicePanelProps> = ({ onOpenHistory }) =>
           if (!current) return current;
           return {
             ...current,
-            recentEvents: current.recentEvents.map((event) =>
-              event.directory_id === variables.directoryId
+            recentEvents: current.recentEvents.map((event) => {
+              const sameDirectory = Boolean(
+                variables.directoryId && event.directory_id === variables.directoryId,
+              );
+              const samePhone = Boolean(
+                variables.phone &&
+                  phoneKeyFromRecipientPhone(event.recipient_phone) ===
+                    phoneKeyFromRecipientPhone(variables.phone),
+              );
+              return sameDirectory || samePhone
                 ? { ...event, postServiceEnabled: variables.enabled }
-                : event,
-            ),
+                : event;
+            }),
           };
         },
       );
@@ -167,14 +200,19 @@ const PostServicePanel: React.FC<PostServicePanelProps> = ({ onOpenHistory }) =>
     },
   });
 
-  const attemptCountByAppointment = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const event of data?.recentEvents ?? []) {
-      if (!event.appointment_id) continue;
-      counts.set(event.appointment_id, (counts.get(event.appointment_id) ?? 0) + 1);
-    }
-    return counts;
-  }, [data?.recentEvents]);
+  const contactRows = useMemo(() => {
+    const grouped = groupPostServiceContacts(data?.recentEvents ?? []);
+    const filtered = grouped.filter((event) => {
+      if (view === 'queue' && !isPostServiceQueueOutcome(event.outcome)) return false;
+      return matchesContactSearch(event, search);
+    });
+    return [...filtered].sort((left, right) => {
+      const leftQueue = isPostServiceQueueOutcome(left.outcome) ? 0 : 1;
+      const rightQueue = isPostServiceQueueOutcome(right.outcome) ? 0 : 1;
+      if (leftQueue !== rightQueue) return leftQueue - rightQueue;
+      return String(right.created_at ?? '').localeCompare(String(left.created_at ?? ''));
+    });
+  }, [data?.recentEvents, search, view]);
 
   if (isLoading && !data) {
     return (
@@ -187,8 +225,6 @@ const PostServicePanel: React.FC<PostServicePanelProps> = ({ onOpenHistory }) =>
       </Box>
     );
   }
-
-  const recentEvents = data?.recentEvents ?? [];
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -208,8 +244,9 @@ const PostServicePanel: React.FC<PostServicePanelProps> = ({ onOpenHistory }) =>
                 </Typography>
               </Stack>
               <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                Monitorea la plantilla <strong>service_finalizado</strong>. Puedes desactivar el
-                seguimiento por contacto, simular o reintentar fallos individuales.
+                Apaga <strong>Enviar</strong> para que ese cliente no reciba más
+                {' '}<strong>service_finalizado</strong>. Esta tabla es por cliente; el log de cada
+                envío está en Historial.
               </Typography>
               <Typography variant="caption" color="text.secondary">
                 Última ejecución: {formatDateTime(data?.meta.lastRunAt)}
@@ -315,23 +352,53 @@ const PostServicePanel: React.FC<PostServicePanelProps> = ({ onOpenHistory }) =>
       <Card variant="outlined">
         <CardContent>
           <Stack
-            direction={{ xs: 'column', sm: 'row' }}
+            direction={{ xs: 'column', md: 'row' }}
             justifyContent="space-between"
-            spacing={1}
+            spacing={1.5}
             sx={{ mb: 1.5 }}
           >
             <Box>
               <Typography variant="subtitle1" fontWeight={700}>
-                Eventos recientes
+                Clientes
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                {recentEvents.length} evento{recentEvents.length === 1 ? '' : 's'} · simulados{' '}
-                {data?.summary.dryRun ?? 0} · omitidos {data?.summary.skipped ?? 0}
+                {contactRows.length} cliente{contactRows.length === 1 ? '' : 's'} · busca por nombre
+                o teléfono y apaga el envío
               </Typography>
             </Box>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
+              <ToggleButtonGroup
+                exclusive
+                size="small"
+                value={view}
+                onChange={(_, next: 'queue' | 'all' | null) => {
+                  if (next) setView(next);
+                }}
+                aria-label="Filtro de clientes post-servicio"
+              >
+                <ToggleButton value="all" sx={{ textTransform: 'none' }}>
+                  Todos
+                </ToggleButton>
+                <ToggleButton value="queue" sx={{ textTransform: 'none' }}>
+                  Por enviar
+                </ToggleButton>
+              </ToggleButtonGroup>
+              <TextField
+                size="small"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Buscar cliente o teléfono"
+                InputProps={{
+                  startAdornment: (
+                    <SearchIcon fontSize="small" sx={{ mr: 0.5, color: 'text.secondary' }} />
+                  ),
+                }}
+                sx={{ minWidth: { sm: 260 } }}
+              />
+            </Stack>
           </Stack>
 
-          {recentEvents.length === 0 ? (
+          {contactRows.length === 0 ? (
             <Box
               sx={{
                 border: '1px dashed',
@@ -343,49 +410,52 @@ const PostServicePanel: React.FC<PostServicePanelProps> = ({ onOpenHistory }) =>
               }}
             >
               <Typography variant="body1" fontWeight={600}>
-                Aún no hay eventos post-servicio
+                {search ? 'Ningún cliente coincide con la búsqueda' : 'Aún no hay clientes post-servicio'}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Actualiza el panel o ejecuta un dry-run para comprobar una cita elegible.
+                {search
+                  ? 'Prueba con el nombre o los últimos dígitos del teléfono.'
+                  : 'Actualiza el panel o abre Historial para ver envíos anteriores.'}
               </Typography>
             </Box>
           ) : (
             <TableContainer>
-              <Table size="small" aria-label="Eventos recientes post-servicio">
+              <Table size="small" aria-label="Clientes post-servicio">
                 <TableHead>
                   <TableRow>
                     <TableCell>Estado</TableCell>
-                    <TableCell>Cita / servicio</TableCell>
+                    <TableCell>Última cita</TableCell>
                     <TableCell>Cliente</TableCell>
-                    <TableCell>Error</TableCell>
-                    <TableCell align="center">Intentos</TableCell>
-                    <TableCell align="center">Activo</TableCell>
+                    <TableCell>Detalle</TableCell>
+                    <TableCell align="center">Enviar</TableCell>
                     <TableCell align="right">Acción</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {recentEvents.map((event) => (
+                  {contactRows.map((event) => (
                     <PostServiceEventRow
-                      key={event.id}
+                      key={postServiceContactKey(event)}
                       event={event}
-                      attemptCount={
-                        event.appointment_id
-                          ? (attemptCountByAppointment.get(event.appointment_id) ?? 1)
-                          : 0
-                      }
                       retryPending={
                         retryMutation.isPending &&
                         retryMutation.variables.appointmentId === event.appointment_id
                       }
                       preferencePending={
                         preferenceMutation.isPending &&
-                        preferenceMutation.variables.directoryId === event.directory_id
+                        (preferenceMutation.variables.directoryId
+                          ? preferenceMutation.variables.directoryId === event.directory_id
+                          : phoneKeyFromRecipientPhone(preferenceMutation.variables.phone) ===
+                            phoneKeyFromRecipientPhone(event.recipient_phone))
                       }
                       onRetry={(appointmentId) =>
                         retryMutation.mutate({ appointmentId })
                       }
-                      onPreferenceChange={(directoryId, enabled) =>
-                        preferenceMutation.mutate({ directoryId, enabled })
+                      onPreferenceChange={(enabled) =>
+                        preferenceMutation.mutate({
+                          directoryId: event.directory_id,
+                          phone: event.recipient_phone,
+                          enabled,
+                        })
                       }
                     />
                   ))}
@@ -401,23 +471,23 @@ const PostServicePanel: React.FC<PostServicePanelProps> = ({ onOpenHistory }) =>
 
 function PostServiceEventRow({
   event,
-  attemptCount,
   retryPending,
   preferencePending,
   onRetry,
   onPreferenceChange,
 }: {
   event: PostServiceAutomationEvent;
-  attemptCount: number;
   retryPending: boolean;
   preferencePending: boolean;
   onRetry: (appointmentId: string) => void;
-  onPreferenceChange: (directoryId: string, enabled: boolean) => void;
+  onPreferenceChange: (enabled: boolean) => void;
 }) {
-  const canRetry =
-    (event.outcome === 'failed' || event.outcome === 'pending') &&
-    Boolean(event.appointment_id);
   const enabled = isPostServicePreferenceEnabled(event);
+  const canToggle = Boolean(event.directory_id || event.recipient_phone);
+  const canRetry =
+    enabled &&
+    isPostServiceQueueOutcome(event.outcome) &&
+    Boolean(event.appointment_id);
 
   return (
     <TableRow hover>
@@ -434,7 +504,7 @@ function PostServiceEventRow({
           {event.appointment_id ? event.appointment_id.slice(0, 10) : '—'}
         </Typography>
         <Typography variant="caption" color="text.secondary">
-          {formatServiceDate(event.service_date)}
+          {formatPostServiceServiceDate(event.service_date)}
         </Typography>
       </TableCell>
       <TableCell>
@@ -450,25 +520,30 @@ function PostServiceEventRow({
           </Typography>
         </Tooltip>
       </TableCell>
-      <TableCell align="center">{attemptCount || '—'}</TableCell>
       <TableCell align="center">
-        {event.directory_id ? (
-          <Switch
-            size="small"
-            checked={enabled}
-            disabled={preferencePending}
-            inputProps={{
-              'aria-label': `${enabled ? 'Desactivar' : 'Activar'} post-servicio para ${
-                event.recipient_name || 'contacto'
-              }`,
-            }}
-            onChange={(_, checked) =>
-              onPreferenceChange(event.directory_id as string, checked)
+        {canToggle ? (
+          <Tooltip
+            title={
+              enabled
+                ? 'Apaga para que este cliente no reciba más el seguimiento post-servicio'
+                : 'Enciende para volver a enviarle el seguimiento post-servicio'
             }
-          />
+          >
+            <Switch
+              size="small"
+              checked={enabled}
+              disabled={preferencePending}
+              inputProps={{
+                'aria-label': `${enabled ? 'Desactivar' : 'Activar'} post-servicio para ${
+                  event.recipient_name || 'contacto'
+                }`,
+              }}
+              onChange={(_, checked) => onPreferenceChange(checked)}
+            />
+          </Tooltip>
         ) : (
           <Typography variant="caption" color="text.secondary">
-            —
+            Sin ficha
           </Typography>
         )}
       </TableCell>
