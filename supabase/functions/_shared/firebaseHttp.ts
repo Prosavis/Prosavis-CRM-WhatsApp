@@ -4,6 +4,9 @@ export const DEFAULT_FIREBASE_CRM_BRIDGE_URL =
 export const DEFAULT_FIREBASE_CRM_APPOINTMENT_ACTIONS_URL =
   'https://us-central1-prosavis.cloudfunctions.net/crmAppointmentActions';
 
+export const DEFAULT_VISIT_INTELLIGENCE_EVENT_URL =
+  'https://us-central1-prosavis.cloudfunctions.net/visitIntelligenceCrmEvent';
+
 const SLOT_MAX_TIMEOUT_MS = 4_000;
 const APPOINTMENT_MAX_TIMEOUT_MS = 8_000;
 
@@ -147,4 +150,28 @@ export async function postCrmAppointmentAction<T = unknown>(
     APPOINTMENT_MAX_TIMEOUT_MS,
     true,
   );
+}
+
+export async function postVisitIntelligenceEvent<T = unknown>(
+  body: unknown,
+  options: FirebaseHttpOptions = {},
+): Promise<T | null> {
+  const env = options.env ?? readEdgeEnvironment;
+  const url =
+    env('FIREBASE_VISIT_INTELLIGENCE_EVENT_URL')?.trim() ||
+    DEFAULT_VISIT_INTELLIGENCE_EVENT_URL;
+  try {
+    return await postFirebaseBridgeJson<T>(
+      url,
+      body,
+      options,
+      4_000,
+      false,
+    );
+  } catch (error) {
+    console.warn('[visit-intelligence] reanalysis notify failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
 }

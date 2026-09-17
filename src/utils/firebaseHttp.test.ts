@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_FIREBASE_CRM_APPOINTMENT_ACTIONS_URL,
   DEFAULT_FIREBASE_CRM_BRIDGE_URL,
+  DEFAULT_VISIT_INTELLIGENCE_EVENT_URL,
   FirebaseCrmBridgeHttpError,
   postCrmAppointmentAction,
   postFirebaseJson,
+  postVisitIntelligenceEvent,
 } from '../../supabase/functions/_shared/firebaseHttp';
 
 const env = (name: string): string | undefined => ({
@@ -146,5 +148,38 @@ describe('postCrmAppointmentAction', () => {
     await vi.advanceTimersByTimeAsync(1);
     await rejection;
     expect(signal?.aborted).toBe(true);
+  });
+});
+
+describe('postVisitIntelligenceEvent', () => {
+  it('posts a complaint event to the visit intelligence endpoint', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ runId: 'run-1' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ));
+
+    await expect(postVisitIntelligenceEvent(
+      { directoryId: 'dir-1', reason: 'complaint' },
+      { env, fetchImpl },
+    )).resolves.toEqual({ runId: 'run-1' });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      DEFAULT_VISIT_INTELLIGENCE_EVENT_URL,
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-crm-secret': 'server-secret',
+        },
+      }),
+    );
+  });
+
+  it('does not fail the visit when reanalysis notify fails', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('no', { status: 500 }));
+    await expect(postVisitIntelligenceEvent(
+      { directoryId: 'dir-1', reason: 'complaint' },
+      { env, fetchImpl },
+    )).resolves.toBeNull();
   });
 });

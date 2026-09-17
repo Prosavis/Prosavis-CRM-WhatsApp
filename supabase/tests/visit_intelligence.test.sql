@@ -100,7 +100,7 @@ insert into public.visit_intelligence_runs (
   'baseline',
   'queued',
   'test',
-  1
+  3
 );
 
 select is(
@@ -156,6 +156,64 @@ select ok(
     where conname = 'visit_routes_travel_provider_check'
   ),
   'visit_routes rejects arbitrary travel providers'
+);
+
+select has_column(
+  'public',
+  'visit_client_intelligence',
+  'analysis_status',
+  'visit_client_intelligence tracks analysis_status'
+);
+
+select ok(
+  exists(
+    select 1 from pg_constraint
+    where conname = 'visit_client_intelligence_analysis_status_check'
+  ),
+  'analysis_status is constrained'
+);
+
+select results_eq(
+  $$
+    with first as (
+      select public.visit_intelligence_record_item(
+        '31000000-0000-0000-0000-000000000001'::uuid,
+        'processed'
+      ) as payload
+    ),
+    second as (
+      select public.visit_intelligence_record_item(
+        '31000000-0000-0000-0000-000000000001'::uuid,
+        'processed'
+      ) as payload
+      from first
+    ),
+    third as (
+      select public.visit_intelligence_record_item(
+        '31000000-0000-0000-0000-000000000001'::uuid,
+        'failed'
+      ) as payload
+      from second
+    )
+    select
+      (payload->>'processed_count')::int,
+      (payload->>'failed_count')::int,
+      payload->>'status'
+    from third
+  $$,
+  $$ values (2, 1, 'completed') $$,
+  'three run items close the batch at 2 processed + 1 failed'
+);
+
+select is(
+  pg_temp.sqlstate_of($q$
+    select public.visit_intelligence_record_item(
+      '31000000-0000-0000-0000-000000000001'::uuid,
+      'processed'
+    )
+  $q$),
+  'P0001',
+  'a fourth item cannot exceed batch_size'
 );
 
 select finish();

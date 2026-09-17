@@ -8,6 +8,7 @@ import {
   type VisitRegistrationInput,
 } from "../_shared/visitRegistration.ts";
 import { buildVisitAttentionAlert } from "../_shared/visitAttentionAlert.ts";
+import { postVisitIntelligenceEvent } from "../_shared/firebaseHttp.ts";
 
 const MAX_BODY_BYTES = 32_768;
 
@@ -377,6 +378,13 @@ Deno.serve(async (request) => {
       satisfaction: input.satisfaction,
       duplicate: persisted.duplicate,
     });
+    if (complaint && input.directoryId && !persisted.duplicate) {
+      await postVisitIntelligenceEvent({
+        directoryId: input.directoryId,
+        serviceId: input.serviceId,
+        reason: 'complaint',
+      });
+    }
 
     return strictJsonResponse(
       request,
