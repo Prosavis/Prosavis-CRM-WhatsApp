@@ -1,6 +1,8 @@
 export type VisitQuality = "bad" | "standard" | "good" | "unknown";
 export type GeoQuality = "exact" | "approximate" | "missing" | "ambiguous";
 export type VisitNeed = "required_complaint" | "recommended" | "optional" | "none";
+export type VisitUrgency = "critical" | "high" | "medium" | "low";
+export const RECENT_SERVICE_DAYS = 7;
 
 export interface GeoPoint {
   latitude: number;
@@ -23,6 +25,18 @@ export interface VisitCandidate {
   visitReasons?: string[];
   directoryId?: string | null;
   addressLine?: string | null;
+  pendingReply?: boolean;
+  recentServiceAt?: string | null;
+  urgency?: VisitUrgency;
+  grokDecision?: {
+    includeInRoute: boolean;
+    rank?: number;
+    urgency?: VisitUrgency;
+    reason?: string;
+  } | null;
+  googleMapsUrl?: string | null;
+  wazeUrl?: string | null;
+  locationSource?: string | null;
 }
 
 export interface VisitRouteOptions {
@@ -69,6 +83,13 @@ const NEED_PRIORITY: Record<VisitNeed, number> = {
   none: 0,
 };
 
+const URGENCY_PRIORITY: Record<VisitUrgency, number> = {
+  critical: 4,
+  high: 3,
+  medium: 2,
+  low: 1,
+};
+
 const BOGOTA_DATE_FORMATTER = new Intl.DateTimeFormat("en-CA", {
   timeZone: "America/Bogota",
   year: "numeric",
@@ -110,6 +131,43 @@ function resolvedNeed(candidate: VisitCandidate): VisitNeed {
   return candidate.openComplaint ? "required_complaint" : "optional";
 }
 
+function resolvedUrgency(candidate: VisitCandidate): VisitUrgency {
+  if (candidate.grokDecision?.urgency) return candidate.grokDecision.urgency;
+  if (candidate.urgency) return candidate.urgency;
+  if (candidate.openComplaint && candidate.pendingReply) return "critical";
+  if (candidate.openComplaint || candidate.pendingReply) return "high";
+  if (resolvedNeed(candidate) === "recommended" || candidate.quality === "bad") {
+    return "medium";
+  }
+  return "low";
+}
+
+function hasUrgentSignal(candidate: VisitCandidate): boolean {
+  return candidate.openComplaint || candidate.pendingReply === true;
+}
+
+function grokIncludes(candidate: VisitCandidate): boolean {
+  return candidate.grokDecision?.includeInRoute === true;
+}
+
+function grokExcludes(candidate: VisitCandidate): boolean {
+  return candidate.grokDecision?.includeInRoute === false;
+}
+
+function defaultInclude(candidate: VisitCandidate): boolean {
+  if (hasUrgentSignal(candidate) || grokIncludes(candidate)) return true;
+  const need = resolvedNeed(candidate);
+  return need === "required_complaint" || need === "recommended" ||
+    candidate.quality === "bad";
+}
+
+function isRecentService(completedAt: string | null | undefined, now: Date): boolean {
+  if (!completedAt) return false;
+  const elapsed = now.getTime() - Date.parse(completedAt);
+  return Number.isFinite(elapsed) && elapsed >= 0 &&
+    elapsed < RECENT_SERVICE_DAYS * 24 * 60 * 60 * 1000;
+}
+
 function resolvedGeo(candidate: VisitCandidate): GeoQuality {
   if (candidate.geoQuality) return candidate.geoQuality;
   if (
@@ -124,6 +182,14 @@ function resolvedGeo(candidate: VisitCandidate): GeoQuality {
 }
 
 function comparePriority(a: VisitCandidate, b: VisitCandidate): number {
+  const rankA = a.grokDecision?.rank;
+  const rankB = b.grokDecision?.rank;
+  if (Number.isFinite(rankA) && Number.isFinite(rankB) && rankA !== rankB) {
+    return Number(rankA) - Number(rankB);
+  }
+  const byUrgency = URGENCY_PRIORITY[resolvedUrgency(b)] -
+    URGENCY_PRIORITY[resolvedUrgency(a)];
+  if (byUrgency !== 0) return byUrgency;
   if (a.openComplaint !== b.openComplaint) return a.openComplaint ? -1 : 1;
 
   const byNeed = NEED_PRIORITY[resolvedNeed(b)] - NEED_PRIORITY[resolvedNeed(a)];
@@ -144,7 +210,8 @@ function comparePriority(a: VisitCandidate, b: VisitCandidate): number {
 }
 
 function samePriority(a: VisitCandidate, b: VisitCandidate): boolean {
-  return a.openComplaint === b.openComplaint &&
+  return resolvedUrgency(a) === resolvedUrgency(b) &&
+    a.openComplaint === b.openComplaint &&
     resolvedNeed(a) === resolvedNeed(b) &&
     a.quality === b.quality &&
     finiteNonnegative(a.lifetimeValueCop) ===
@@ -288,29 +355,6 @@ export function buildVisitRoute(
       });
       continue;
     }
-    if (
-      !candidate.openComplaint &&
-      isInCooldown(
-        candidate.lastVisitAt,
-        options.now,
-        options.cooldownDays,
-      )
-    ) {
-      excluded.push({
-        clientReference,
-        reason: `Cliente en cooldown de ${
-          normalizeInteger(options.cooldownDays)
-        } días.`,
-      });
-      continue;
-    }
-    if (resolvedNeed(candidate) === "none" && !candidate.openComplaint) {
-      excluded.push({
-        clientReference,
-        reason: "La ficha vigente no recomienda visita.",
-      });
-      continue;
-    }
     if (!candidatePoint(candidate)) {
       excluded.push({
         clientReference,
@@ -320,16 +364,57 @@ export function buildVisitRoute(
       });
       continue;
     }
+    if (grokExcludes(candidate) && !candidate.openComplaint) {
+      excluded.push({
+        clientReference,
+        reason: candidate.grokDecision?.reason ||
+          "Grok lo excluyó de la ruta de relación.",
+      });
+      continue;
+    }
+    const recentService = isRecentService(candidate.recentServiceAt, options.now);
+    const cooled = isInCooldown(
+      candidate.lastVisitAt,
+      options.now,
+      options.cooldownDays,
+    );
+    if (
+      (recentService || cooled) &&
+      !hasUrgentSignal(candidate) &&
+      !grokIncludes(candidate)
+    ) {
+      excluded.push({
+        clientReference,
+        reason: recentService
+          ? `Servicio reciente (≤${RECENT_SERVICE_DAYS} días): queda fuera salvo queja o respuesta pendiente.`
+          : `Cliente en cooldown de ${
+            normalizeInteger(options.cooldownDays)
+          } días.`,
+      });
+      continue;
+    }
+    if (!defaultInclude(candidate)) {
+      excluded.push({
+        clientReference,
+        reason: resolvedNeed(candidate) === "none"
+          ? "La ficha vigente no recomienda visita."
+          : "Opcional: no entra hasta que Grok lo priorice.",
+      });
+      continue;
+    }
     eligible.push({ ...candidate, clientReference });
   }
 
   eligible.sort(comparePriority);
-  const complaints = eligible.filter((candidate) => candidate.openComplaint);
+  const unlimited = eligible.filter((candidate) =>
+    hasUrgentSignal(candidate) || resolvedUrgency(candidate) === "critical" ||
+    resolvedUrgency(candidate) === "high"
+  );
   const normal = eligible
-    .filter((candidate) => !candidate.openComplaint)
+    .filter((candidate) => !unlimited.includes(candidate))
     .slice(0, effectiveQuota);
   const selected = routeEqualPriorityGroups(
-    [...complaints, ...normal],
+    [...unlimited, ...normal],
     options.start,
     options.travelTimeSeconds,
   );

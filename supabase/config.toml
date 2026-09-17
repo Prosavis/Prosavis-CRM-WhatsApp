@@ -282,6 +282,9 @@ verify_jwt = false
 [functions.visitas-registrar]
 verify_jwt = false
 
+[functions.transcribe-visit-feedback]
+verify_jwt = false
+
 [functions.ai-context]
 verify_jwt = false
 

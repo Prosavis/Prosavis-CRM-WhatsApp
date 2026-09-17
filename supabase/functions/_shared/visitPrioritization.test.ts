@@ -20,6 +20,10 @@ function candidate(
     geoQuality: overrides.geoQuality,
     visitNeed: overrides.visitNeed,
     visitReasons: overrides.visitReasons,
+    pendingReply: overrides.pendingReply,
+    recentServiceAt: overrides.recentServiceAt,
+    urgency: overrides.urgency,
+    grokDecision: overrides.grokDecision,
   };
 }
 
@@ -126,10 +130,12 @@ Deno.test("cooldown excludes recent normal visits", () => {
       candidate({
         clientReference: "recent",
         lastVisitAt: "2026-07-20T15:00:00.000Z",
+        visitNeed: "recommended",
       }),
       candidate({
         clientReference: "eligible",
         lastVisitAt: "2026-06-01T15:00:00.000Z",
+        visitNeed: "recommended",
       }),
     ],
     {
@@ -157,6 +163,7 @@ Deno.test("equal-priority candidates route nearest to the starting point", () =>
         riskScore: 10,
         latitude: 6.30,
         longitude: -75.60,
+        visitNeed: "recommended",
       }),
       candidate({
         clientReference: "near",
@@ -165,6 +172,7 @@ Deno.test("equal-priority candidates route nearest to the starting point", () =>
         riskScore: 10,
         latitude: 6.245,
         longitude: -75.575,
+        visitNeed: "recommended",
       }),
     ],
     {
@@ -238,9 +246,9 @@ Deno.test("visitNeed none stays out while recommended beats optional", () => {
 
   assertEquals(
     result.stops.map((stop) => stop.clientReference),
-    ["first", "later"],
+    ["first"],
   );
-  assertMatch(result.excluded[0].reason, /no recomienda/);
+  assertMatch(result.excluded.map((item) => item.reason).join(" "), /no recomienda|Opcional/);
 });
 
 Deno.test("travel times replace euclidean when provided", () => {
@@ -253,6 +261,7 @@ Deno.test("travel times replace euclidean when provided", () => {
         riskScore: 10,
         latitude: 6.245,
         longitude: -75.575,
+        visitNeed: "recommended",
       }),
       candidate({
         clientReference: "far-but-fast",
@@ -261,6 +270,7 @@ Deno.test("travel times replace euclidean when provided", () => {
         riskScore: 10,
         latitude: 6.30,
         longitude: -75.60,
+        visitNeed: "recommended",
       }),
     ],
     {
@@ -278,4 +288,24 @@ Deno.test("travel times replace euclidean when provided", () => {
     ["far-but-fast", "near-but-slow"],
   );
   assertEquals(result.travelProvider, "google_routes");
+});
+
+Deno.test("recent completed service stays out unless Grok or complaint overrides", () => {
+  const result = buildVisitRoute(
+    [
+      candidate({
+        clientReference: "marco",
+        visitNeed: "recommended",
+        recentServiceAt: "2026-08-05T15:00:00.000Z",
+      }),
+    ],
+    {
+      now: NOW,
+      weeklyQuota: 8,
+      completedThisWeek: 0,
+      cooldownDays: 30,
+    },
+  );
+  assertEquals(result.stops, []);
+  assertMatch(result.excluded[0].reason, /Servicio reciente/);
 });
