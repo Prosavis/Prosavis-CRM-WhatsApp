@@ -1,4 +1,6 @@
 export type VisitQuality = "bad" | "standard" | "good" | "unknown";
+export type GeoQuality = "exact" | "approximate" | "missing" | "ambiguous";
+export type VisitNeed = "required_complaint" | "recommended" | "optional" | "none";
 
 export interface GeoPoint {
   latitude: number;
@@ -16,6 +18,11 @@ export interface VisitCandidate {
   lastVisitAt: string | null;
   latitude: number | null;
   longitude: number | null;
+  geoQuality?: GeoQuality;
+  visitNeed?: VisitNeed;
+  visitReasons?: string[];
+  directoryId?: string | null;
+  addressLine?: string | null;
 }
 
 export interface VisitRouteOptions {
@@ -24,6 +31,10 @@ export interface VisitRouteOptions {
   completedThisWeek: number;
   cooldownDays: number;
   start?: GeoPoint;
+  travelTimeSeconds?: (
+    from: GeoPoint,
+    to: GeoPoint,
+  ) => number;
 }
 
 export interface VisitRouteStop extends VisitCandidate {
@@ -41,6 +52,7 @@ export interface VisitRoutePlan {
   effectiveQuota: number;
   stops: VisitRouteStop[];
   excluded: VisitRouteExclusion[];
+  travelProvider: "google_routes" | "euclidean_fallback";
 }
 
 const QUALITY_PRIORITY: Record<VisitQuality, number> = {
@@ -48,6 +60,13 @@ const QUALITY_PRIORITY: Record<VisitQuality, number> = {
   standard: 2,
   unknown: 1,
   good: 0,
+};
+
+const NEED_PRIORITY: Record<VisitNeed, number> = {
+  required_complaint: 4,
+  recommended: 3,
+  optional: 2,
+  none: 0,
 };
 
 const BOGOTA_DATE_FORMATTER = new Intl.DateTimeFormat("en-CA", {
@@ -86,8 +105,29 @@ function isInCooldown(
     elapsedMs < normalizeInteger(cooldownDays) * 24 * 60 * 60 * 1000;
 }
 
+function resolvedNeed(candidate: VisitCandidate): VisitNeed {
+  if (candidate.visitNeed) return candidate.visitNeed;
+  return candidate.openComplaint ? "required_complaint" : "optional";
+}
+
+function resolvedGeo(candidate: VisitCandidate): GeoQuality {
+  if (candidate.geoQuality) return candidate.geoQuality;
+  if (
+    candidate.latitude !== null &&
+    candidate.longitude !== null &&
+    Number.isFinite(candidate.latitude) &&
+    Number.isFinite(candidate.longitude)
+  ) {
+    return "exact";
+  }
+  return "missing";
+}
+
 function comparePriority(a: VisitCandidate, b: VisitCandidate): number {
   if (a.openComplaint !== b.openComplaint) return a.openComplaint ? -1 : 1;
+
+  const byNeed = NEED_PRIORITY[resolvedNeed(b)] - NEED_PRIORITY[resolvedNeed(a)];
+  if (byNeed !== 0) return byNeed;
 
   const byQuality = QUALITY_PRIORITY[b.quality] - QUALITY_PRIORITY[a.quality];
   if (byQuality !== 0) return byQuality;
@@ -105,6 +145,7 @@ function comparePriority(a: VisitCandidate, b: VisitCandidate): number {
 
 function samePriority(a: VisitCandidate, b: VisitCandidate): boolean {
   return a.openComplaint === b.openComplaint &&
+    resolvedNeed(a) === resolvedNeed(b) &&
     a.quality === b.quality &&
     finiteNonnegative(a.lifetimeValueCop) ===
       finiteNonnegative(b.lifetimeValueCop) &&
@@ -112,6 +153,9 @@ function samePriority(a: VisitCandidate, b: VisitCandidate): boolean {
 }
 
 function candidatePoint(candidate: VisitCandidate): GeoPoint | null {
+  if (resolvedGeo(candidate) === "missing" || resolvedGeo(candidate) === "ambiguous") {
+    return null;
+  }
   if (
     candidate.latitude === null ||
     candidate.longitude === null ||
@@ -126,17 +170,26 @@ function candidatePoint(candidate: VisitCandidate): GeoPoint | null {
   };
 }
 
-function distanceSquared(from: GeoPoint, candidate: VisitCandidate): number {
+function euclideanSeconds(from: GeoPoint, to: GeoPoint): number {
+  const latitudeDelta = to.latitude - from.latitude;
+  const longitudeDelta = to.longitude - from.longitude;
+  return Math.hypot(latitudeDelta, longitudeDelta) * 100_000;
+}
+
+function travelCost(
+  from: GeoPoint,
+  candidate: VisitCandidate,
+  travelTimeSeconds?: VisitRouteOptions["travelTimeSeconds"],
+): number {
   const point = candidatePoint(candidate);
   if (!point) return Number.POSITIVE_INFINITY;
-  const latitudeDelta = point.latitude - from.latitude;
-  const longitudeDelta = point.longitude - from.longitude;
-  return latitudeDelta * latitudeDelta + longitudeDelta * longitudeDelta;
+  return (travelTimeSeconds ?? euclideanSeconds)(from, point);
 }
 
 function nearestNeighborOrder(
   candidates: VisitCandidate[],
   startingPoint: GeoPoint | undefined,
+  travelTimeSeconds?: VisitRouteOptions["travelTimeSeconds"],
 ): VisitCandidate[] {
   if (!startingPoint || candidates.length < 2) return candidates;
 
@@ -145,9 +198,9 @@ function nearestNeighborOrder(
   let cursor = startingPoint;
   while (remaining.length > 0) {
     let nearestIndex = 0;
-    let nearestDistance = distanceSquared(cursor, remaining[0]);
+    let nearestDistance = travelCost(cursor, remaining[0], travelTimeSeconds);
     for (let index = 1; index < remaining.length; index += 1) {
-      const distance = distanceSquared(cursor, remaining[index]);
+      const distance = travelCost(cursor, remaining[index], travelTimeSeconds);
       if (distance < nearestDistance) {
         nearestDistance = distance;
         nearestIndex = index;
@@ -163,6 +216,7 @@ function nearestNeighborOrder(
 function routeEqualPriorityGroups(
   candidates: VisitCandidate[],
   start: GeoPoint | undefined,
+  travelTimeSeconds?: VisitRouteOptions["travelTimeSeconds"],
 ): VisitCandidate[] {
   const ordered: VisitCandidate[] = [];
   let cursor = start;
@@ -178,6 +232,7 @@ function routeEqualPriorityGroups(
     const group = nearestNeighborOrder(
       candidates.slice(groupStart, groupEnd),
       cursor,
+      travelTimeSeconds,
     );
     ordered.push(...group);
     cursor = candidatePoint(group[group.length - 1]) ?? cursor;
@@ -187,6 +242,7 @@ function routeEqualPriorityGroups(
 }
 
 function reasonsFor(candidate: VisitCandidate): string[] {
+  if (candidate.visitReasons?.length) return [...candidate.visitReasons];
   const reasons: string[] = [];
   if (candidate.openComplaint) {
     reasons.push("Queja abierta: atención prioritaria hoy.");
@@ -248,6 +304,22 @@ export function buildVisitRoute(
       });
       continue;
     }
+    if (resolvedNeed(candidate) === "none" && !candidate.openComplaint) {
+      excluded.push({
+        clientReference,
+        reason: "La ficha vigente no recomienda visita.",
+      });
+      continue;
+    }
+    if (!candidatePoint(candidate)) {
+      excluded.push({
+        clientReference,
+        reason: resolvedGeo(candidate) === "ambiguous"
+          ? "Dirección ambigua: queda fuera de la ruta."
+          : "Geocodificación débil o ausente: queda fuera de la ruta.",
+      });
+      continue;
+    }
     eligible.push({ ...candidate, clientReference });
   }
 
@@ -259,11 +331,15 @@ export function buildVisitRoute(
   const selected = routeEqualPriorityGroups(
     [...complaints, ...normal],
     options.start,
+    options.travelTimeSeconds,
   );
   const scheduledFor = bogotaDate(options.now);
 
   return {
     effectiveQuota,
+    travelProvider: options.travelTimeSeconds
+      ? "google_routes"
+      : "euclidean_fallback",
     stops: selected.map((candidate, index) => ({
       ...candidate,
       sequence: index + 1,
@@ -271,5 +347,40 @@ export function buildVisitRoute(
       reasons: reasonsFor(candidate),
     })),
     excluded,
+  };
+}
+
+export async function fetchGoogleRouteSeconds(
+  points: GeoPoint[],
+  apiKey: string,
+): Promise<VisitRouteOptions["travelTimeSeconds"] | null> {
+  if (points.length < 2 || !apiKey) return null;
+  const origins = points.map((point) => `${point.latitude},${point.longitude}`)
+    .join("|");
+  const url =
+    `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${
+      encodeURIComponent(origins)
+    }&destinations=${encodeURIComponent(origins)}&mode=driving&key=${
+      encodeURIComponent(apiKey)
+    }`;
+  const response = await fetch(url);
+  if (!response.ok) return null;
+  const payload = await response.json() as {
+    rows?: Array<
+      { elements?: Array<{ duration?: { value?: number }; status?: string }> }
+    >;
+  };
+  const matrix = payload.rows ?? [];
+  const keyOf = (point: GeoPoint) =>
+    `${point.latitude.toFixed(5)},${point.longitude.toFixed(5)}`;
+  const index = new Map(points.map((point, i) => [keyOf(point), i]));
+  return (from, to) => {
+    const fromIndex = index.get(keyOf(from));
+    const toIndex = index.get(keyOf(to));
+    if (fromIndex === undefined || toIndex === undefined) {
+      return Number.POSITIVE_INFINITY;
+    }
+    const seconds = matrix[fromIndex]?.elements?.[toIndex]?.duration?.value;
+    return Number.isFinite(seconds) ? Number(seconds) : Number.POSITIVE_INFINITY;
   };
 }

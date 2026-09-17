@@ -15,8 +15,11 @@ function candidate(
     openComplaint: overrides.openComplaint ?? false,
     optOut: overrides.optOut ?? false,
     lastVisitAt: overrides.lastVisitAt ?? null,
-    latitude: overrides.latitude ?? null,
-    longitude: overrides.longitude ?? null,
+    latitude: overrides.latitude ?? 4.6097,
+    longitude: overrides.longitude ?? -74.0817,
+    geoQuality: overrides.geoQuality,
+    visitNeed: overrides.visitNeed,
+    visitReasons: overrides.visitReasons,
   };
 }
 
@@ -177,4 +180,102 @@ Deno.test("equal-priority candidates route nearest to the starting point", () =>
     result.stops.map((stop) => stop.clientReference),
     ["near", "far"],
   );
+});
+
+Deno.test("missing or ambiguous geo is excluded with a visible reason", () => {
+  const result = buildVisitRoute(
+    [
+      candidate({
+        clientReference: "no-geo",
+        latitude: null,
+        longitude: null,
+        geoQuality: "missing",
+      }),
+      candidate({
+        clientReference: "ambiguous",
+        latitude: 4.6,
+        longitude: -74.08,
+        geoQuality: "ambiguous",
+      }),
+    ],
+    {
+      now: NOW,
+      weeklyQuota: 8,
+      completedThisWeek: 0,
+      cooldownDays: 30,
+    },
+  );
+
+  assertEquals(result.stops, []);
+  assertMatch(result.excluded[0].reason, /Geocodificación|Dirección/);
+});
+
+Deno.test("visitNeed none stays out while recommended beats optional", () => {
+  const result = buildVisitRoute(
+    [
+      candidate({
+        clientReference: "skip",
+        visitNeed: "none",
+      }),
+      candidate({
+        clientReference: "later",
+        visitNeed: "optional",
+        lifetimeValueCop: 10,
+      }),
+      candidate({
+        clientReference: "first",
+        visitNeed: "recommended",
+        lifetimeValueCop: 1,
+      }),
+    ],
+    {
+      now: NOW,
+      weeklyQuota: 8,
+      completedThisWeek: 0,
+      cooldownDays: 30,
+    },
+  );
+
+  assertEquals(
+    result.stops.map((stop) => stop.clientReference),
+    ["first", "later"],
+  );
+  assertMatch(result.excluded[0].reason, /no recomienda/);
+});
+
+Deno.test("travel times replace euclidean when provided", () => {
+  const result = buildVisitRoute(
+    [
+      candidate({
+        clientReference: "near-but-slow",
+        quality: "standard",
+        lifetimeValueCop: 100_000,
+        riskScore: 10,
+        latitude: 6.245,
+        longitude: -75.575,
+      }),
+      candidate({
+        clientReference: "far-but-fast",
+        quality: "standard",
+        lifetimeValueCop: 100_000,
+        riskScore: 10,
+        latitude: 6.30,
+        longitude: -75.60,
+      }),
+    ],
+    {
+      now: NOW,
+      weeklyQuota: 5,
+      completedThisWeek: 0,
+      cooldownDays: 30,
+      start: { latitude: 6.244, longitude: -75.574 },
+      travelTimeSeconds: (_from, to) => (to.latitude > 6.27 ? 60 : 900),
+    },
+  );
+
+  assertEquals(
+    result.stops.map((stop) => stop.clientReference),
+    ["far-but-fast", "near-but-slow"],
+  );
+  assertEquals(result.travelProvider, "google_routes");
 });

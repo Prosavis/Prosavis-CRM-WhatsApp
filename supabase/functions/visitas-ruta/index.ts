@@ -5,6 +5,7 @@ import {
 } from "../_shared/strictCors.ts";
 import {
   buildVisitRoute,
+  fetchGoogleRouteSeconds,
   type VisitCandidate,
 } from "../_shared/visitPrioritization.ts";
 
@@ -320,7 +321,7 @@ Deno.serve(async (request) => {
 
   const now = new Date();
   const weekStart = startOfBogotaWeek(now);
-  const [directory, bookings, complaints, visits] = await Promise.all([
+  const [directory, bookings, complaints, visits, intelligence] = await Promise.all([
     context.supabase
       .from("crm_directory")
       .select(
@@ -346,6 +347,13 @@ Deno.serve(async (request) => {
       .eq("service_id", input.serviceId)
       .order("visited_at", { ascending: false })
       .limit(10_000),
+    context.supabase
+      .from("visit_client_intelligence")
+      .select(
+        "directory_id,profile,visit_need,geo_quality,last_analyzed_at",
+      )
+      .eq("service_id", input.serviceId)
+      .limit(2_000),
   ]);
 
   if (
@@ -390,23 +398,68 @@ Deno.serve(async (request) => {
     if (row.visited_at.slice(0, 10) >= weekStart) completedThisWeek += 1;
   }
 
+  const intelligenceByDirectory = new Map<string, Record<string, unknown>>();
+  for (const row of (intelligence.error ? [] : intelligence.data ?? []) as Array<Record<string, unknown>>) {
+    if (typeof row.directory_id === "string") {
+      intelligenceByDirectory.set(row.directory_id, row);
+    }
+  }
+
   const candidates = ((directory.data ?? []) as DirectoryRow[]).map((row) => {
     const reference = clientReference(row);
     const pendingAmount = Math.max(0, Number(row.pending_amount ?? 0));
+    const sheet = intelligenceByDirectory.get(row.id);
+    const profile = isRecord(sheet?.profile) ? sheet.profile : null;
+    const route = isRecord(profile?.route) ? profile.route : null;
+    const latitude = typeof route?.latitude === "number"
+      ? route.latitude
+      : numericMetadata(row.metadata, "latitude");
+    const longitude = typeof route?.longitude === "number"
+      ? route.longitude
+      : numericMetadata(row.metadata, "longitude");
+    const visitNeed = typeof sheet?.visit_need === "string"
+      ? sheet.visit_need
+      : undefined;
+    const geoQuality = typeof sheet?.geo_quality === "string"
+      ? sheet.geo_quality
+      : undefined;
     return {
       clientReference: reference,
+      directoryId: row.id,
       displayName: row.display_name?.trim() || row.full_name?.trim() ||
         "Cliente",
       quality: normalizeQuality(row.quality_tag),
       lifetimeValueCop: bookingValue.get(reference) ?? 0,
       riskScore: Math.min(100, Math.round(pendingAmount / 10_000)),
-      openComplaint: complaintClients.has(reference),
+      openComplaint: complaintClients.has(reference) ||
+        visitNeed === "required_complaint",
       optOut: row.opt_out === true,
       lastVisitAt: lastVisit.get(reference) ?? null,
-      latitude: numericMetadata(row.metadata, "latitude"),
-      longitude: numericMetadata(row.metadata, "longitude"),
+      latitude,
+      longitude,
+      geoQuality: geoQuality as VisitCandidate["geoQuality"],
+      visitNeed: visitNeed as VisitCandidate["visitNeed"],
+      visitReasons: Array.isArray(profile?.visitReasons)
+        ? profile.visitReasons.filter((item): item is string =>
+          typeof item === "string"
+        )
+        : undefined,
+      addressLine: typeof route?.addressLine === "string"
+        ? route.addressLine
+        : null,
     } satisfies VisitCandidate;
   });
+
+  const points = candidates.flatMap((candidate) =>
+    candidate.latitude !== null && candidate.longitude !== null
+      ? [{ latitude: candidate.latitude, longitude: candidate.longitude }]
+      : []
+  );
+  if (input.start) points.unshift(input.start);
+  const mapsKey = Deno.env.get("GOOGLE_MAPS_API_KEY") ?? "";
+  const travelTimeSeconds = mapsKey
+    ? await fetchGoogleRouteSeconds(points, mapsKey)
+    : null;
 
   const plan = buildVisitRoute(candidates, {
     now,
@@ -414,7 +467,18 @@ Deno.serve(async (request) => {
     completedThisWeek,
     cooldownDays: input.cooldownDays,
     start: input.start,
+    travelTimeSeconds: travelTimeSeconds ?? undefined,
   });
+  const analyzedAt = (intelligence.data ?? [])
+    .map((row) =>
+      typeof (row as { last_analyzed_at?: unknown }).last_analyzed_at ===
+          "string"
+        ? (row as { last_analyzed_at: string }).last_analyzed_at
+        : null
+    )
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1) ?? null;
   const inserted = await context.supabase
     .from("visit_routes")
     .insert({
@@ -428,6 +492,15 @@ Deno.serve(async (request) => {
       excluded: plan.excluded,
       generated_by: context.actor.uid,
       idempotency_key: input.idempotencyKey,
+      intelligence_generated_at: analyzedAt,
+      travel_provider: plan.travelProvider,
+      estimated_duration_minutes: travelTimeSeconds ? null : null,
+      geo_notes: {
+        travelProvider: plan.travelProvider,
+        excludedWithoutGeo: plan.excluded.filter((item) =>
+          /Geocodificación|Dirección/.test(item.reason)
+        ).length,
+      },
     })
     .select("*")
     .single();
