@@ -1,0 +1,49 @@
+# Review only. Do not add deploy, Vercel, or Edge publish here.
+# Leaves crm-quality, ops-v5-sql-gate, and deploy-vercel unchanged.
+name: Review
+
+# Quote "on" so YAML 1.1 does not coerce it to true. Empty maps (not null)
+# so pull_request always matches and is never dropped by a path filter.
+"on":
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+  push:
+    branches:
+      - master
+
+concurrency:
+  group: review-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    name: typecheck + tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      ENABLE_META_SEND: "false"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Typecheck
+        run: npm run type-check
+      - name: Test
+        run: npm test
