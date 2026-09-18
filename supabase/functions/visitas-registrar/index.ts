@@ -353,36 +353,65 @@ Deno.serve(async (request) => {
   }
 
   try {
+    let directoryId = input.directoryId;
+    if (!directoryId && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.clientReference)) {
+      const existing = await context.supabase
+        .from("crm_directory")
+        .select("id")
+        .eq("id", input.clientReference)
+        .maybeSingle();
+      directoryId = typeof existing.data?.id === "string" ? existing.data.id : null;
+    }
+    const resolvedInput = { ...input, directoryId };
     const persisted = await persistVisit(
       context,
-      input,
+      resolvedInput,
       new Date().toISOString(),
     );
     const complaint = await persistComplaint(
       context,
-      input,
+      resolvedInput,
       persisted.visit.id,
     );
     const referralLead = await persistReferral(
       context,
-      input,
+      resolvedInput,
       persisted.visit.id,
     );
     const opportunity = await persistOpportunity(
       context,
-      input,
+      resolvedInput,
       persisted.visit.id,
     );
     await sendAttentionTodayAlertBestEffort({
       complaint,
-      satisfaction: input.satisfaction,
+      satisfaction: resolvedInput.satisfaction,
       duplicate: persisted.duplicate,
     });
-    if (complaint && input.directoryId && !persisted.duplicate) {
+    if (directoryId && !persisted.duplicate) {
+      const outcomeComment = [
+        `Visita ${resolvedInput.satisfaction} de 5.`,
+        resolvedInput.notes,
+      ]
+        .filter(Boolean)
+        .join(" ");
+      await context.supabase.from("visit_feedback_requests").insert({
+        service_id: resolvedInput.serviceId,
+        directory_id: directoryId,
+        rating: resolvedInput.satisfaction,
+        comment: outcomeComment,
+        requested_by: context.actor.uid,
+        status: "received",
+        scope: "client",
+        context_snapshot: {
+          visitId: persisted.visit.id,
+          source: "visit_outcome",
+        },
+      });
       await postVisitIntelligenceEvent({
-        directoryId: input.directoryId,
-        serviceId: input.serviceId,
-        reason: 'complaint',
+        directoryId,
+        serviceId: resolvedInput.serviceId,
+        reason: complaint ? "complaint" : "feedback",
       });
     }
 

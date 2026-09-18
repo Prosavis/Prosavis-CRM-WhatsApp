@@ -3,11 +3,7 @@ import {
   strictJsonResponse,
   strictPreflightResponse,
 } from "../_shared/strictCors.ts";
-import {
-  buildVisitRoute,
-  fetchGoogleRouteSeconds,
-  type VisitCandidate,
-} from "../_shared/visitPrioritization.ts";
+import { presentVisitPayment } from "../_shared/visitFinance.ts";
 
 const MAX_BODY_BYTES = 16_384;
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
@@ -26,32 +22,6 @@ interface RouteRequest {
   idempotencyKey: string;
   routeId?: string;
   start?: { latitude: number; longitude: number };
-}
-
-interface DirectoryRow {
-  id: string;
-  display_name: string | null;
-  full_name: string | null;
-  quality_tag: string | null;
-  opt_out: boolean | null;
-  pending_amount: number | null;
-  app_user_id: string | null;
-  metadata: Record<string, unknown> | null;
-}
-
-interface BookingValueRow {
-  client_id: string | null;
-  total_cop: number | null;
-}
-
-interface ComplaintRow {
-  client_reference: string;
-}
-
-interface VisitHistoryRow {
-  client_reference: string;
-  visited_at: string | null;
-  status: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -150,48 +120,6 @@ function bogotaDate(value: Date): string {
   return `${part("year")}-${part("month")}-${part("day")}`;
 }
 
-function startOfBogotaWeek(now: Date): string {
-  const localDate = new Date(`${bogotaDate(now)}T12:00:00.000Z`);
-  const day = localDate.getUTCDay();
-  const daysFromMonday = day === 0 ? 6 : day - 1;
-  localDate.setUTCDate(localDate.getUTCDate() - daysFromMonday);
-  return bogotaDate(localDate);
-}
-
-function numericMetadata(
-  metadata: Record<string, unknown> | null,
-  key: string,
-): number | null {
-  const direct = metadata?.[key];
-  if (typeof direct === "number" && Number.isFinite(direct)) return direct;
-  const address = metadata?.address;
-  if (isRecord(address)) {
-    const nested = address[key];
-    if (typeof nested === "number" && Number.isFinite(nested)) return nested;
-  }
-  return null;
-}
-
-function clientReference(row: DirectoryRow): string {
-  const sourceIds = row.metadata?.source_ids;
-  const firebaseReference = isRecord(sourceIds)
-    ? sourceIds.firebase_crmClient_docId
-    : null;
-  return typeof firebaseReference === "string" && firebaseReference.trim()
-    ? firebaseReference.trim()
-    : row.app_user_id?.trim() || row.id;
-}
-
-function normalizeQuality(
-  value: string | null,
-): VisitCandidate["quality"] {
-  const normalized = value?.trim().toLowerCase();
-  if (normalized === "bad") return "bad";
-  if (normalized === "standard") return "standard";
-  if (normalized === "good") return "good";
-  return "unknown";
-}
-
 async function buildDashboardResponse(
   request: Request,
   context: Awaited<ReturnType<typeof requireAdmin>>,
@@ -211,8 +139,8 @@ async function buildDashboardResponse(
   }
 
   const today = bogotaDate(new Date());
-  const [routes, visits, complaints, opportunities, referrals, collections, feedback] = await Promise
-    .all([
+  const [routes, visits, complaints, opportunities, referrals, collections, history, feedback] =
+    await Promise.all([
       context.supabase
         .from("visit_routes")
         .select("*")
@@ -248,15 +176,17 @@ async function buildDashboardResponse(
         .eq("service_id", serviceId)
         .order("created_at", { ascending: false })
         .limit(50),
-      context.supabase
-        .from("crm_directory")
-        .select(
-          "id,display_name,full_name,phone,pending_amount,payment_status,pending_appointments_count",
-        )
-        .eq("service_id", serviceId)
-        .gt("pending_amount", 0)
-        .order("pending_amount", { ascending: false })
-        .limit(100),
+      context.supabase.rpc("visit_clients_workspace", {
+        p_service_id: serviceId,
+        p_limit: 100,
+        p_offset: 0,
+        p_filter: "cobro",
+        p_search: null,
+      }),
+      context.supabase.rpc("visit_history_timeline", {
+        p_service_id: serviceId,
+        p_limit: 80,
+      }),
       context.supabase
         .from("visit_feedback_requests")
         .select(
@@ -287,14 +217,26 @@ async function buildDashboardResponse(
       complaints: complaints.data ?? [],
       opportunities: opportunities.data ?? [],
       referrals: referrals.data ?? [],
-      collections: (collections.data ?? []).map((row) => ({
-        directoryId: row.id,
-        displayName: row.display_name || row.full_name || "Cliente",
-        phone: row.phone,
-        outstandingTotalCOP: Number(row.pending_amount ?? 0),
-        paymentStatus: row.payment_status,
-        pendingAppointmentsCount: Number(row.pending_appointments_count ?? 0),
-      })),
+      collections: ((collections.data ?? []) as Array<Record<string, unknown>>).map((row) => {
+        const outstanding = Math.max(0, Number(row.outstanding_total_cop ?? 0));
+        const presented = presentVisitPayment({
+          outstandingTotalCOP: outstanding,
+          pendingCount: Number(row.pending_count ?? 0),
+          partialCount: Number(row.partial_count ?? 0),
+          rejectedCount: Number(row.rejected_count ?? 0),
+          headline: typeof row.payment_headline === "string" ? row.payment_headline : null,
+        });
+        return {
+          directoryId: String(row.directory_id ?? ""),
+          displayName: String(row.display_name || "Cliente"),
+          phone: typeof row.phone === "string" ? row.phone : null,
+          outstandingTotalCOP: outstanding,
+          paymentStatus: presented.headline,
+          paymentHeadlineLabel: presented.headlineLabel,
+          pendingAppointmentsCount: Number(row.completed_service_count ?? 0),
+        };
+      }),
+      history: history.data ?? [],
       feedback: feedback.data ?? [],
     },
   });
@@ -404,254 +346,33 @@ Deno.serve(async (request) => {
       error: "No fue posible consultar la ruta.",
     }, 500);
   }
-  if (existing.data) {
+  if (existing.data && existing.data.generated_by_source === "grok") {
     return strictJsonResponse(request, {
-      data: { route: existing.data, duplicate: true },
+      data: { route: existing.data, duplicate: true, waiting: false },
     });
   }
 
-  const now = new Date();
-  const weekStart = startOfBogotaWeek(now);
-  const [directory, bookings, complaints, visits, intelligence] = await Promise.all([
-    context.supabase
-      .from("crm_directory")
-      .select(
-        "id,display_name,full_name,quality_tag,opt_out,pending_amount,app_user_id,metadata",
-      )
-      .eq("service_id", input.serviceId)
-      .eq("status", "active")
-      .limit(2_000),
-    context.supabase
-      .from("bookings")
-      .select("client_id,total_cop")
-      .eq("service_id", input.serviceId)
-      .is("source_deleted_at", null)
-      .limit(10_000),
-    context.supabase
-      .from("quejas")
-      .select("client_reference")
-      .eq("service_id", input.serviceId)
-      .in("status", ["open", "in_progress"]),
-    context.supabase
-      .from("client_visits")
-      .select("client_reference,visited_at,status")
-      .eq("service_id", input.serviceId)
-      .order("visited_at", { ascending: false })
-      .limit(10_000),
-    context.supabase
-      .from("visit_client_intelligence")
-      .select(
-        "directory_id,profile,visit_need,geo_quality,last_analyzed_at",
-      )
-      .eq("service_id", input.serviceId)
-      .limit(2_000),
-  ]);
-
-  if (
-    directory.error ||
-    bookings.error ||
-    complaints.error ||
-    visits.error
-  ) {
-    console.error("[visitas-ruta] candidate query failed", {
-      request_id: crypto.randomUUID(),
-      spec_version: "v5",
-      error_type: "candidate_query_error",
-    });
-    return strictJsonResponse(
-      request,
-      { error: "No fue posible construir la ruta." },
-      500,
-    );
-  }
-
-  const bookingValue = new Map<string, number>();
-  for (const row of (bookings.data ?? []) as BookingValueRow[]) {
-    if (!row.client_id) continue;
-    bookingValue.set(
-      row.client_id,
-      (bookingValue.get(row.client_id) ?? 0) +
-        Math.max(0, Number(row.total_cop ?? 0)),
-    );
-  }
-  const complaintClients = new Set(
-    ((complaints.data ?? []) as ComplaintRow[]).map(
-      (row) => row.client_reference,
-    ),
-  );
-  const lastVisit = new Map<string, string>();
-  let completedThisWeek = 0;
-  for (const row of (visits.data ?? []) as VisitHistoryRow[]) {
-    if (row.status !== "completed" || !row.visited_at) continue;
-    if (!lastVisit.has(row.client_reference)) {
-      lastVisit.set(row.client_reference, row.visited_at);
-    }
-    if (row.visited_at.slice(0, 10) >= weekStart) completedThisWeek += 1;
-  }
-
-  const intelligenceByDirectory = new Map<string, Record<string, unknown>>();
-  for (const row of (intelligence.error ? [] : intelligence.data ?? []) as Array<Record<string, unknown>>) {
-    if (typeof row.directory_id === "string") {
-      intelligenceByDirectory.set(row.directory_id, row);
-    }
-  }
-
-  const candidates = ((directory.data ?? []) as DirectoryRow[]).map((row) => {
-    const reference = clientReference(row);
-    const pendingAmount = Math.max(0, Number(row.pending_amount ?? 0));
-    const sheet = intelligenceByDirectory.get(row.id);
-    const profile = isRecord(sheet?.profile) ? sheet.profile : null;
-    const route = isRecord(profile?.route) ? profile.route : null;
-    const latitude = typeof route?.latitude === "number"
-      ? route.latitude
-      : numericMetadata(row.metadata, "latitude");
-    const longitude = typeof route?.longitude === "number"
-      ? route.longitude
-      : numericMetadata(row.metadata, "longitude");
-    const visitNeed = typeof sheet?.visit_need === "string"
-      ? sheet.visit_need
-      : undefined;
-    const geoQuality = typeof sheet?.geo_quality === "string"
-      ? sheet.geo_quality
-      : undefined;
-    const grokDecision = isRecord(profile?.grokDecision)
-      ? {
-        includeInRoute: profile.grokDecision.includeInRoute === true,
-        rank: typeof profile.grokDecision.rank === "number"
-          ? profile.grokDecision.rank
-          : undefined,
-        urgency: typeof profile.grokDecision.urgency === "string"
-          ? profile.grokDecision.urgency as VisitCandidate["urgency"]
-          : undefined,
-        reason: typeof profile.grokDecision.reason === "string"
-          ? profile.grokDecision.reason
-          : undefined,
-      }
-      : null;
-    const recurrence = isRecord(profile?.recurrence) ? profile.recurrence : null;
-    return {
-      clientReference: reference,
-      directoryId: row.id,
-      displayName: row.display_name?.trim() || row.full_name?.trim() ||
-        "Cliente",
-      quality: normalizeQuality(row.quality_tag),
-      lifetimeValueCop: bookingValue.get(reference) ?? 0,
-      riskScore: Math.min(100, Math.round(pendingAmount / 10_000)),
-      openComplaint: complaintClients.has(reference) ||
-        visitNeed === "required_complaint",
-      optOut: row.opt_out === true,
-      lastVisitAt: lastVisit.get(reference) ?? null,
-      latitude,
-      longitude,
-      geoQuality: geoQuality as VisitCandidate["geoQuality"],
-      visitNeed: visitNeed as VisitCandidate["visitNeed"],
-      visitReasons: Array.isArray(profile?.visitReasons)
-        ? profile.visitReasons.filter((item): item is string =>
-          typeof item === "string"
-        )
-        : undefined,
-      addressLine: typeof route?.addressLine === "string"
-        ? route.addressLine
-        : null,
-      pendingReply: profile?.pendingReply === true,
-      recentServiceAt: typeof recurrence?.lastCompletedAt === "string"
-        ? recurrence.lastCompletedAt
-        : null,
-      urgency: typeof profile?.urgency === "string"
-        ? profile.urgency as VisitCandidate["urgency"]
-        : undefined,
-      grokDecision,
-      googleMapsUrl: isRecord(profile?.location) &&
-          typeof profile.location.googleMapsUrl === "string"
-        ? profile.location.googleMapsUrl
-        : null,
-      wazeUrl: isRecord(profile?.location) &&
-          typeof profile.location.wazeUrl === "string"
-        ? profile.location.wazeUrl
-        : null,
-    } satisfies VisitCandidate;
-  });
-
-  const points = candidates.flatMap((candidate) =>
-    candidate.latitude !== null && candidate.longitude !== null
-      ? [{ latitude: candidate.latitude, longitude: candidate.longitude }]
-      : []
-  );
-  if (input.start) points.unshift(input.start);
-  const mapsKey = Deno.env.get("GOOGLE_MAPS_API_KEY") ?? "";
-  const travelTimeSeconds = mapsKey
-    ? await fetchGoogleRouteSeconds(points, mapsKey)
-    : null;
-
-  const plan = buildVisitRoute(candidates, {
-    now,
-    weeklyQuota: input.weeklyQuota,
-    completedThisWeek,
-    cooldownDays: input.cooldownDays,
-    start: input.start,
-    travelTimeSeconds: travelTimeSeconds ?? undefined,
-  });
-  const analyzedAt = (intelligence.data ?? [])
-    .map((row) =>
-      typeof (row as { last_analyzed_at?: unknown }).last_analyzed_at ===
-          "string"
-        ? (row as { last_analyzed_at: string }).last_analyzed_at
-        : null
-    )
-    .filter((value): value is string => Boolean(value))
-    .sort()
-    .at(-1) ?? null;
-  const inserted = await context.supabase
+  const todayDraft = await context.supabase
     .from("visit_routes")
-    .insert({
-      service_id: input.serviceId,
-      route_date: bogotaDate(now),
-      status: "draft",
-      analysis_version: 2,
-      generated_by_source: "system",
-      weekly_quota: input.weeklyQuota,
-      completed_this_week: completedThisWeek,
-      effective_quota: plan.effectiveQuota,
-      cooldown_days: input.cooldownDays,
-      stops: plan.stops,
-      excluded: plan.excluded,
-      generated_by: context.actor.uid,
-      idempotency_key: input.idempotencyKey,
-      intelligence_generated_at: analyzedAt,
-      travel_provider: plan.travelProvider,
-      estimated_duration_minutes: travelTimeSeconds ? null : null,
-      geo_notes: {
-        travelProvider: plan.travelProvider,
-        excludedWithoutGeo: plan.excluded.filter((item) =>
-          /Geocodificación|Dirección/.test(item.reason)
-        ).length,
-      },
-    })
     .select("*")
-    .single();
-
-  if (inserted.error) {
-    if (inserted.error.code === "23505") {
-      const duplicate = await context.supabase
-        .from("visit_routes")
-        .select("*")
-        .eq("service_id", input.serviceId)
-        .eq("idempotency_key", input.idempotencyKey)
-        .single();
-      if (!duplicate.error) {
-        return strictJsonResponse(request, {
-          data: { route: duplicate.data, duplicate: true },
-        });
-      }
-    }
-    return strictJsonResponse(
-      request,
-      { error: "No fue posible guardar la ruta." },
-      500,
-    );
+    .eq("service_id", input.serviceId)
+    .eq("route_date", bogotaDate(new Date()))
+    .neq("status", "canceled")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (todayDraft.data && todayDraft.data.generated_by_source === "grok") {
+    return strictJsonResponse(request, {
+      data: { route: todayDraft.data, duplicate: true, waiting: false },
+    });
   }
 
   return strictJsonResponse(request, {
-    data: { route: inserted.data, duplicate: false },
-  }, 201);
+    data: {
+      route: null,
+      waiting: true,
+      duplicate: false,
+      reason: "Esperando decisión de Grok",
+    },
+  });
 });
