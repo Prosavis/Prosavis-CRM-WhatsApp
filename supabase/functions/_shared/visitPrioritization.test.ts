@@ -1,5 +1,11 @@
 import { assertEquals, assertMatch } from "jsr:@std/assert";
-import { buildVisitRoute, type VisitCandidate } from "./visitPrioritization.ts";
+import {
+  applyDeviceOriginToDraftStops,
+  buildVisitRoute,
+  normalizeDraftStops,
+  type VisitCandidate,
+  type VisitRouteStop,
+} from "./visitPrioritization.ts";
 
 const NOW = new Date("2026-08-06T15:00:00.000Z");
 
@@ -308,4 +314,228 @@ Deno.test("recent completed service stays out unless Grok or complaint overrides
   );
   assertEquals(result.stops, []);
   assertMatch(result.excluded[0].reason, /Servicio reciente/);
+});
+
+function stop(
+  overrides: Partial<VisitRouteStop> & Pick<VisitRouteStop, "clientReference" | "sequence">,
+): VisitRouteStop {
+  return {
+    ...candidate(overrides),
+    sequence: overrides.sequence,
+    scheduledFor: overrides.scheduledFor ?? "2026-09-18",
+    reasons: overrides.reasons ?? ["Prioridad de relación."],
+  };
+}
+
+Deno.test("reorders existing equal-urgency stops from the device start", () => {
+  const result = applyDeviceOriginToDraftStops({
+    stops: [
+      stop({
+        clientReference: "far",
+        urgency: "high",
+        latitude: 6.30,
+        longitude: -75.60,
+        sequence: 1,
+      }),
+      stop({
+        clientReference: "near",
+        urgency: "high",
+        latitude: 6.245,
+        longitude: -75.575,
+        sequence: 2,
+      }),
+    ],
+    start: { latitude: 6.244, longitude: -75.574 },
+  });
+
+  assertEquals(result.changed, true);
+  assertEquals(result.travelProvider, "euclidean_fallback");
+  assertEquals(
+    result.stops.map((item) => item.clientReference),
+    ["near", "far"],
+  );
+  assertEquals(
+    result.stops.map((item) => item.sequence),
+    [1, 2],
+  );
+});
+
+Deno.test("does not mix different urgencies when applying device start", () => {
+  const result = applyDeviceOriginToDraftStops({
+    stops: [
+      stop({
+        clientReference: "critical-far",
+        urgency: "critical",
+        latitude: 6.40,
+        longitude: -75.70,
+        sequence: 1,
+      }),
+      stop({
+        clientReference: "high-near",
+        urgency: "high",
+        latitude: 6.245,
+        longitude: -75.575,
+        sequence: 2,
+      }),
+      stop({
+        clientReference: "high-far",
+        urgency: "high",
+        latitude: 6.30,
+        longitude: -75.60,
+        sequence: 3,
+      }),
+    ],
+    start: { latitude: 6.244, longitude: -75.574 },
+  });
+
+  assertEquals(result.stops[0].clientReference, "critical-far");
+  assertEquals(result.stops[0].urgency, "critical");
+  assertEquals(
+    result.stops.slice(1).map((item) => item.urgency),
+    ["high", "high"],
+  );
+  assertEquals(
+    result.stops.map((item) => item.clientReference),
+    ["critical-far", "high-far", "high-near"],
+  );
+});
+
+Deno.test("returns the draft unchanged for (0,0) or unusable destinations", () => {
+  const original = [
+    stop({
+      clientReference: "far",
+      urgency: "high",
+      latitude: 6.30,
+      longitude: -75.60,
+      sequence: 1,
+    }),
+    stop({
+      clientReference: "near",
+      urgency: "high",
+      latitude: 6.245,
+      longitude: -75.575,
+      sequence: 2,
+    }),
+  ];
+  const rejectedStart = applyDeviceOriginToDraftStops({
+    stops: original,
+    start: { latitude: 0, longitude: 0 },
+  });
+  assertEquals(rejectedStart.changed, false);
+  assertEquals(rejectedStart.originApplied, false);
+  assertEquals(
+    rejectedStart.stops.map((item) => item.clientReference),
+    ["far", "near"],
+  );
+
+  const noDestinations = applyDeviceOriginToDraftStops({
+    stops: [
+      stop({
+        clientReference: "null-island",
+        urgency: "high",
+        latitude: 0,
+        longitude: 0,
+        sequence: 1,
+      }),
+      stop({
+        clientReference: "missing",
+        urgency: "high",
+        latitude: null,
+        longitude: null,
+        geoQuality: "missing",
+        sequence: 2,
+      }),
+    ],
+    start: { latitude: 6.244, longitude: -75.574 },
+  });
+  assertEquals(noDestinations.changed, false);
+  assertEquals(noDestinations.originApplied, false);
+});
+
+Deno.test("applying the same start twice is idempotent", () => {
+  const start = { latitude: 6.244, longitude: -75.574 };
+  const first = applyDeviceOriginToDraftStops({
+    stops: [
+      stop({
+        clientReference: "far",
+        urgency: "high",
+        latitude: 6.30,
+        longitude: -75.60,
+        sequence: 1,
+      }),
+      stop({
+        clientReference: "near",
+        urgency: "high",
+        latitude: 6.245,
+        longitude: -75.575,
+        sequence: 2,
+      }),
+    ],
+    start,
+  });
+  const second = applyDeviceOriginToDraftStops({
+    stops: first.stops,
+    start,
+  });
+  assertEquals(
+    second.stops.map((item) => item.clientReference),
+    first.stops.map((item) => item.clientReference),
+  );
+  assertEquals(second.changed, false);
+  assertEquals(second.originApplied, true);
+});
+
+Deno.test("normalizes draft JSON stops before applying a device origin", () => {
+  const result = applyDeviceOriginToDraftStops({
+    stops: normalizeDraftStops([
+      {
+        client_reference: "far",
+        displayName: "Far",
+        urgency: "high",
+        latitude: 6.30,
+        longitude: -75.60,
+        sequence: 1,
+      },
+      {
+        clientReference: "near",
+        urgency: "high",
+        latitude: 6.245,
+        longitude: -75.575,
+        sequence: 2,
+      },
+    ]),
+    start: { latitude: 6.244, longitude: -75.574 },
+  });
+  assertEquals(
+    result.stops.map((item) => item.clientReference),
+    ["near", "far"],
+  );
+});
+
+Deno.test("prefers supplied Google travel times when reordering a draft", () => {
+  const result = applyDeviceOriginToDraftStops({
+    stops: [
+      stop({
+        clientReference: "near-but-slow",
+        urgency: "high",
+        latitude: 6.245,
+        longitude: -75.575,
+        sequence: 1,
+      }),
+      stop({
+        clientReference: "far-but-fast",
+        urgency: "high",
+        latitude: 6.30,
+        longitude: -75.60,
+        sequence: 2,
+      }),
+    ],
+    start: { latitude: 6.244, longitude: -75.574 },
+    travelTimeSeconds: (_from, to) => (to.latitude > 6.27 ? 60 : 900),
+  });
+  assertEquals(result.travelProvider, "google_routes");
+  assertEquals(
+    result.stops.map((item) => item.clientReference),
+    ["far-but-fast", "near-but-slow"],
+  );
 });

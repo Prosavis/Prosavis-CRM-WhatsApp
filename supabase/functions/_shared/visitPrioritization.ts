@@ -226,8 +226,10 @@ function candidatePoint(candidate: VisitCandidate): GeoPoint | null {
   if (
     candidate.latitude === null ||
     candidate.longitude === null ||
-    !Number.isFinite(candidate.latitude) ||
-    !Number.isFinite(candidate.longitude)
+    !isUsableGeoPoint({
+      latitude: candidate.latitude,
+      longitude: candidate.longitude,
+    })
   ) {
     return null;
   }
@@ -432,6 +434,215 @@ export function buildVisitRoute(
       reasons: reasonsFor(candidate),
     })),
     excluded,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asFiniteNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function asVisitQuality(value: unknown): VisitQuality {
+  return value === "bad" || value === "good" || value === "unknown"
+    ? value
+    : "standard";
+}
+
+function asVisitNeed(value: unknown): VisitNeed | undefined {
+  return value === "required_complaint" || value === "recommended" ||
+      value === "optional" || value === "none"
+    ? value
+    : undefined;
+}
+
+function asVisitUrgency(value: unknown): VisitUrgency | undefined {
+  return value === "critical" || value === "high" || value === "medium" ||
+      value === "low"
+    ? value
+    : undefined;
+}
+
+function asGeoQuality(value: unknown): GeoQuality | undefined {
+  return value === "exact" || value === "approximate" || value === "missing" ||
+      value === "ambiguous"
+    ? value
+    : undefined;
+}
+
+export function normalizeDraftStops(value: unknown): VisitRouteStop[] {
+  if (!Array.isArray(value)) return [];
+  const stops: VisitRouteStop[] = [];
+  for (const [index, item] of value.entries()) {
+    if (!isRecord(item)) continue;
+    const clientReference = String(
+      item.clientReference ?? item.client_reference ?? "",
+    ).trim();
+    if (!clientReference) continue;
+    const latitude = asFiniteNumber(item.latitude);
+    const longitude = asFiniteNumber(item.longitude);
+    const grokDecision = isRecord(item.grokDecision)
+      ? {
+        includeInRoute: item.grokDecision.includeInRoute === true,
+        rank: asFiniteNumber(item.grokDecision.rank) ?? undefined,
+        urgency: asVisitUrgency(item.grokDecision.urgency),
+        reason: typeof item.grokDecision.reason === "string"
+          ? item.grokDecision.reason
+          : undefined,
+      }
+      : null;
+    stops.push({
+      clientReference,
+      displayName: typeof item.displayName === "string" && item.displayName.trim()
+        ? item.displayName
+        : clientReference,
+      quality: asVisitQuality(item.quality),
+      lifetimeValueCop: asFiniteNumber(item.lifetimeValueCop) ?? 0,
+      riskScore: asFiniteNumber(item.riskScore) ?? 0,
+      openComplaint: item.openComplaint === true,
+      optOut: item.optOut === true,
+      lastVisitAt: typeof item.lastVisitAt === "string" ? item.lastVisitAt : null,
+      latitude,
+      longitude,
+      geoQuality: asGeoQuality(item.geoQuality),
+      visitNeed: asVisitNeed(item.visitNeed),
+      visitReasons: Array.isArray(item.visitReasons)
+        ? item.visitReasons.filter((reason): reason is string =>
+          typeof reason === "string"
+        )
+        : undefined,
+      directoryId: typeof item.directoryId === "string"
+        ? item.directoryId
+        : typeof item.directory_id === "string"
+        ? item.directory_id
+        : null,
+      addressLine: typeof item.addressLine === "string" ? item.addressLine : null,
+      pendingReply: item.pendingReply === true,
+      recentServiceAt: typeof item.recentServiceAt === "string"
+        ? item.recentServiceAt
+        : null,
+      urgency: asVisitUrgency(item.urgency),
+      grokDecision,
+      googleMapsUrl: typeof item.googleMapsUrl === "string"
+        ? item.googleMapsUrl
+        : null,
+      wazeUrl: typeof item.wazeUrl === "string" ? item.wazeUrl : null,
+      locationSource: typeof item.locationSource === "string"
+        ? item.locationSource
+        : null,
+      sequence: asFiniteNumber(item.sequence) ?? index + 1,
+      scheduledFor: typeof item.scheduledFor === "string"
+        ? item.scheduledFor
+        : "",
+      reasons: Array.isArray(item.reasons)
+        ? item.reasons.filter((reason): reason is string =>
+          typeof reason === "string"
+        )
+        : [],
+    });
+  }
+  return stops;
+}
+
+export function isUsableGeoPoint(
+  point: GeoPoint | null | undefined,
+): point is GeoPoint {
+  if (!point) return false;
+  if (!Number.isFinite(point.latitude) || !Number.isFinite(point.longitude)) {
+    return false;
+  }
+  if (point.latitude === 0 && point.longitude === 0) return false;
+  return point.latitude >= -90 &&
+    point.latitude <= 90 &&
+    point.longitude >= -180 &&
+    point.longitude <= 180;
+}
+
+export interface DeviceOriginDraftResult {
+  stops: VisitRouteStop[];
+  travelProvider: VisitRoutePlan["travelProvider"];
+  changed: boolean;
+  originApplied: boolean;
+}
+
+export function applyDeviceOriginToDraftStops(input: {
+  stops: readonly VisitRouteStop[];
+  start: GeoPoint;
+  travelTimeSeconds?: VisitRouteOptions["travelTimeSeconds"];
+}): DeviceOriginDraftResult {
+  const original = input.stops.map((stop) => ({ ...stop }));
+  if (!isUsableGeoPoint(input.start)) {
+    return {
+      stops: original,
+      travelProvider: input.travelTimeSeconds
+        ? "google_routes"
+        : "euclidean_fallback",
+      changed: false,
+      originApplied: false,
+    };
+  }
+
+  const usable = original.filter((stop) => candidatePoint(stop));
+  if (usable.length === 0) {
+    return {
+      stops: original,
+      travelProvider: input.travelTimeSeconds
+        ? "google_routes"
+        : "euclidean_fallback",
+      changed: false,
+      originApplied: false,
+    };
+  }
+
+  const grouped: VisitRouteStop[][] = [];
+  let current: VisitRouteStop[] = [];
+  for (const stop of original) {
+    if (
+      current.length === 0 ||
+      resolvedUrgency(current[0]) === resolvedUrgency(stop)
+    ) {
+      current.push(stop);
+      continue;
+    }
+    grouped.push(current);
+    current = [stop];
+  }
+  if (current.length > 0) grouped.push(current);
+
+  const reordered: VisitRouteStop[] = [];
+  let cursor: GeoPoint | undefined = input.start;
+  for (const group of grouped) {
+    const ordered = nearestNeighborOrder(
+      group,
+      cursor,
+      input.travelTimeSeconds,
+    ) as VisitRouteStop[];
+    reordered.push(...ordered);
+    cursor = candidatePoint(ordered[ordered.length - 1]) ?? cursor;
+  }
+
+  const sequenced = reordered.map((stop, index) => ({
+    ...stop,
+    sequence: index + 1,
+  }));
+  const changed = sequenced.some((stop, index) =>
+    stop.clientReference !== original[index]?.clientReference
+  );
+
+  return {
+    stops: sequenced,
+    travelProvider: input.travelTimeSeconds
+      ? "google_routes"
+      : "euclidean_fallback",
+    changed,
+    originApplied: true,
   };
 }
 

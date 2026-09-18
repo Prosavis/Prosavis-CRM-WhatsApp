@@ -4,6 +4,13 @@ import {
   strictPreflightResponse,
 } from "../_shared/strictCors.ts";
 import { presentVisitPayment } from "../_shared/visitFinance.ts";
+import {
+  applyDeviceOriginToDraftStops,
+  fetchGoogleRouteSeconds,
+  isUsableGeoPoint,
+  normalizeDraftStops,
+  type GeoPoint,
+} from "../_shared/visitPrioritization.ts";
 
 const MAX_BODY_BYTES = 16_384;
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
@@ -89,10 +96,13 @@ function parseRouteRequest(value: unknown): RouteRequest {
     ) {
       throw new Error("Punto inicial inválido.");
     }
-    start = {
+    const parsedStart = {
       latitude: value.start.latitude,
       longitude: value.start.longitude,
     };
+    if (isUsableGeoPoint(parsedStart)) {
+      start = parsedStart;
+    }
   }
   return {
     serviceId: requiredId(value.serviceId, "Servicio"),
@@ -111,6 +121,79 @@ function parseRouteRequest(value: unknown): RouteRequest {
     start,
     action,
   };
+}
+
+function geoNotesWithoutStart(value: unknown): Record<string, unknown> {
+  const notes = isRecord(value) ? { ...value } : {};
+  delete notes.start;
+  delete notes.deviceStart;
+  delete notes.origin;
+  delete notes.latitude;
+  delete notes.longitude;
+  return notes;
+}
+
+async function applyDeviceOriginToGrokDraft(
+  supabase: Awaited<ReturnType<typeof requireAdmin>>["supabase"],
+  route: Record<string, unknown>,
+  start: GeoPoint | undefined,
+): Promise<Record<string, unknown>> {
+  if (!start || !isUsableGeoPoint(start)) return route;
+  const stops = normalizeDraftStops(route.stops);
+  const points: GeoPoint[] = [
+    start,
+    ...stops.flatMap((stop) => {
+      if (stop.latitude == null || stop.longitude == null) return [];
+      const point = { latitude: stop.latitude, longitude: stop.longitude };
+      return isUsableGeoPoint(point) ? [point] : [];
+    }),
+  ];
+  const apiKey = Deno.env.get("GOOGLE_MAPS_API_KEY")?.trim() ?? "";
+  const travelTimeSeconds = apiKey
+    ? await fetchGoogleRouteSeconds(points, apiKey)
+    : null;
+  const result = applyDeviceOriginToDraftStops({
+    stops,
+    start,
+    travelTimeSeconds: travelTimeSeconds ?? undefined,
+  });
+  if (!result.originApplied) return route;
+
+  const geoNotes = {
+    ...geoNotesWithoutStart(route.geo_notes),
+    originApplied: true,
+    travelProvider: result.travelProvider,
+  };
+  const alreadyApplied = isRecord(route.geo_notes) &&
+    route.geo_notes.originApplied === true;
+  if (!result.changed && alreadyApplied) {
+    return {
+      ...route,
+      stops: result.stops,
+      travel_provider: result.travelProvider,
+      geo_notes: geoNotes,
+    };
+  }
+
+  const updated = await supabase
+    .from("visit_routes")
+    .update({
+      stops: result.stops,
+      travel_provider: result.travelProvider,
+      geo_notes: geoNotes,
+    })
+    .eq("id", route.id)
+    .select("*")
+    .single();
+  if (updated.error || !updated.data) {
+    return {
+      ...route,
+      stops: result.stops,
+      travel_provider: result.travelProvider,
+      geo_notes: geoNotes,
+    };
+  }
+  return updated.data as Record<string, unknown>;
 }
 
 function bogotaDate(value: Date): string {
@@ -347,8 +430,13 @@ Deno.serve(async (request) => {
     }, 500);
   }
   if (existing.data && existing.data.generated_by_source === "grok") {
+    const route = await applyDeviceOriginToGrokDraft(
+      context.supabase,
+      existing.data as Record<string, unknown>,
+      input.start,
+    );
     return strictJsonResponse(request, {
-      data: { route: existing.data, duplicate: true, waiting: false },
+      data: { route, duplicate: true, waiting: false },
     });
   }
 
@@ -362,8 +450,13 @@ Deno.serve(async (request) => {
     .limit(1)
     .maybeSingle();
   if (todayDraft.data && todayDraft.data.generated_by_source === "grok") {
+    const route = await applyDeviceOriginToGrokDraft(
+      context.supabase,
+      todayDraft.data as Record<string, unknown>,
+      input.start,
+    );
     return strictJsonResponse(request, {
-      data: { route: todayDraft.data, duplicate: true, waiting: false },
+      data: { route, duplicate: true, waiting: false },
     });
   }
 
