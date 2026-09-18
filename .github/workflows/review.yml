@@ -2,10 +2,18 @@
 # Leaves crm-quality, ops-v5-sql-gate, and deploy-vercel unchanged.
 name: Review
 
-on:
+# Quote "on" so YAML 1.1 does not coerce it to true. Empty maps (not null)
+# so pull_request always matches and is never dropped by a path filter.
+"on":
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
   push:
-    branches: [master]
+    branches:
+      - master
 
 concurrency:
   group: review-${{ github.workflow }}-${{ github.ref }}
@@ -17,18 +25,25 @@ permissions:
 jobs:
   review:
     name: typecheck + tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 20
+    permissions:
+      contents: read
     env:
-      ENABLE_META_SEND: 'false'
+      ENABLE_META_SEND: "false"
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
           cache: npm
-      - run: npm ci
-      - run: npm run type-check
-      - run: npm test
+      - name: Install
+        run: npm ci
+      - name: Typecheck
+        run: npm run type-check
+      - name: Test
+        run: npm test
