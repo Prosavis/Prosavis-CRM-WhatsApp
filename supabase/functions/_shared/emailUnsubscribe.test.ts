@@ -85,7 +85,7 @@ Deno.test('applyEmailUnsubscribe only touches that email via the store', async (
   assertEquals(seen, ['dir:lead@empresa.com', 'out:lead@empresa.com']);
 });
 
-Deno.test('composeEmpresasEmail signs as Francy 301 and keeps 312 only in the CTA', () => {
+Deno.test('composeEmpresasEmail signs as Francy 311 and keeps 312 only in the CTA', () => {
   const out = composeEmpresasEmail(
     {
       name: 'Consultando Tributos S.A.S.',
@@ -97,10 +97,15 @@ Deno.test('composeEmpresasEmail signs as Francy 301 and keeps 312 only in the CT
     { unsubscribeUrl: 'https://example.test/unsub?t=v1.abc' },
   );
   assertStringIncludes(out.htmlBody, 'Francy Olivera');
-  assertStringIncludes(out.htmlBody, '301 203 0253');
+  assertStringIncludes(out.htmlBody, 'https://wa.me/573112121108');
+  assertStringIncludes(out.htmlBody, '311 212 1108');
+  assertEquals(out.htmlBody.includes('301 203 0253'), false);
+  assertEquals(out.htmlBody.includes('wa.me/573012030253'), false);
   assertStringIncludes(out.htmlBody, 'https://example.test/unsub?t=v1.abc');
   assertStringIncludes(out.htmlBody, '312 253 1271');
   assertStringIncludes(out.body, 'Francy Olivera');
+  assertStringIncludes(out.body, '+57 311 212 1108');
+  assertEquals(out.body.includes('301 203 0253'), false);
   assertEquals(out.htmlBody.includes('Nicolás'), false);
   const footer = out.htmlBody.slice(out.htmlBody.lastIndexOf('Francy Olivera'));
   assertEquals(footer.includes('312 253 1271'), false);
