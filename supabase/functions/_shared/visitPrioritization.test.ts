@@ -2,7 +2,12 @@ import { assertEquals, assertMatch } from "jsr:@std/assert";
 import {
   applyDeviceOriginToDraftStops,
   buildVisitRoute,
+  euclideanDirectionsOverlay,
+  existingDirectionsOverlay,
+  hydrateStopCoordinates,
+  hydrateStopsFromKnownSources,
   normalizeDraftStops,
+  parseLatLngFromNavUrl,
   type VisitCandidate,
   type VisitRouteStop,
 } from "./visitPrioritization.ts";
@@ -30,6 +35,10 @@ function candidate(
     recentServiceAt: overrides.recentServiceAt,
     urgency: overrides.urgency,
     grokDecision: overrides.grokDecision,
+    googleMapsUrl: overrides.googleMapsUrl ?? null,
+    wazeUrl: overrides.wazeUrl ?? null,
+    addressLine: overrides.addressLine ?? null,
+    locationSource: overrides.locationSource ?? null,
   };
 }
 
@@ -538,4 +547,109 @@ Deno.test("prefers supplied Google travel times when reordering a draft", () => 
     result.stops.map((item) => item.clientReference),
     ["far-but-fast", "near-but-slow"],
   );
+});
+
+Deno.test("extracts coordinates from Maps and Waze URLs and rejects 0,0", () => {
+  assertEquals(
+    parseLatLngFromNavUrl("https://waze.com/ul?ll=4.814812,-75.694005&navigate=yes"),
+    { latitude: 4.814812, longitude: -75.694005 },
+  );
+  assertEquals(
+    parseLatLngFromNavUrl("https://www.google.com/maps?q=4.8052261,-75.7204113"),
+    { latitude: 4.8052261, longitude: -75.7204113 },
+  );
+  assertEquals(parseLatLngFromNavUrl("https://waze.com/ul?ll=0,0&navigate=yes"), null);
+});
+
+Deno.test("hydrates a 0,0 stop from its Maps URL when it is inside coverage", () => {
+  const hydrated = hydrateStopCoordinates(stop({
+    clientReference: "kua",
+    sequence: 2,
+    latitude: 0,
+    longitude: 0,
+    geoQuality: "exact",
+    addressLine: "MZ D CS 4",
+    googleMapsUrl: "https://www.google.com/maps?q=4.8052261,-75.7204113",
+  }));
+  assertEquals(hydrated.latitude, 4.8052261);
+  assertEquals(hydrated.longitude, -75.7204113);
+  assertEquals(hydrated.geoQuality, "exact");
+});
+
+Deno.test("clears 0,0 when the URL and address cannot yield a covered point", () => {
+  const hydrated = hydrateStopCoordinates(stop({
+    clientReference: "ghost",
+    sequence: 3,
+    latitude: 0,
+    longitude: 0,
+    geoQuality: "exact",
+    addressLine: null,
+    googleMapsUrl: "https://maps.app.goo.gl/short",
+    wazeUrl: "https://waze.com/ul?ll=0,0&navigate=yes",
+  }));
+  assertEquals(hydrated.latitude, null);
+  assertEquals(hydrated.longitude, null);
+  assertEquals(hydrated.geoQuality, "missing");
+});
+
+Deno.test("uses a geocoded address inside coverage and keeps list order", () => {
+  const { stops, changed } = hydrateStopsFromKnownSources([
+    stop({
+      clientReference: "marco",
+      sequence: 1,
+      latitude: 4.814812,
+      longitude: -75.694005,
+    }),
+    stop({
+      clientReference: "nando",
+      sequence: 2,
+      latitude: 0,
+      longitude: 0,
+      addressLine: "calle 106 # 13-75 apto 3057",
+    }),
+  ], {
+    "calle 106 # 13-75 apto 3057": { latitude: 4.82, longitude: -75.69 },
+  });
+  assertEquals(changed, true);
+  assertEquals(stops.map((item) => item.clientReference), ["marco", "nando"]);
+  assertEquals(stops[1].latitude, 4.82);
+  assertEquals(stops[1].longitude, -75.69);
+});
+
+Deno.test("builds euclidean legs without mixing missing destinations into the polyline", () => {
+  const overlay = euclideanDirectionsOverlay(
+    { latitude: 4.813, longitude: -75.694 },
+    [
+      stop({
+        clientReference: "usable",
+        sequence: 1,
+        latitude: 4.8063654,
+        longitude: -75.8029909,
+      }),
+      stop({
+        clientReference: "no-geo",
+        sequence: 2,
+        latitude: null,
+        longitude: null,
+      }),
+    ],
+  );
+  assertEquals(overlay.legs.length, 1);
+  assertEquals(overlay.travelProvider, "euclidean_fallback");
+  assertEquals(overlay.legs[0].distanceMeters > 0, true);
+});
+
+Deno.test("reuses a persisted directions overlay without inventing a start point", () => {
+  const overlay = existingDirectionsOverlay({
+    travelProvider: "google_routes",
+    overviewPolyline: "abcd",
+    legs: [{ distanceMeters: 12500, durationSeconds: 900 }],
+    totalDistanceMeters: 12500,
+    totalDurationSeconds: 900,
+    start: { latitude: 4.813, longitude: -75.694 },
+  });
+  assertEquals(overlay?.travelProvider, "google_routes");
+  assertEquals(overlay?.overviewPolyline, "abcd");
+  assertEquals(overlay?.legs.length, 1);
+  assertEquals(existingDirectionsOverlay({ legs: [] }), null);
 });

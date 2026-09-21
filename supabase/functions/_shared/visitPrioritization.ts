@@ -680,3 +680,303 @@ export async function fetchGoogleRouteSeconds(
     return Number.isFinite(seconds) ? Number(seconds) : Number.POSITIVE_INFINITY;
   };
 }
+
+const COVERAGE_ZONES = [
+  { lat: 4.813, lng: -75.696, radiusKm: 15 },
+  { lat: 4.839, lng: -75.667, radiusKm: 10 },
+  { lat: 4.817, lng: -75.917, radiusKm: 8 },
+  { lat: 4.868, lng: -75.742, radiusKm: 8 },
+  { lat: 4.7467, lng: -75.9117, radiusKm: 8 },
+] as const;
+
+const LAT_LNG_RE = /(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)/;
+
+function haversineKm(from: GeoPoint, to: GeoPoint): number {
+  const toRad = (value: number) => value * (Math.PI / 180);
+  const dLat = toRad(to.latitude - from.latitude);
+  const dLng = toRad(to.longitude - from.longitude);
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(from.latitude)) *
+      Math.cos(toRad(to.latitude)) *
+      Math.sin(dLng / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+export function isInCleaningCoverage(point: GeoPoint): boolean {
+  if (!isUsableGeoPoint(point)) return false;
+  return COVERAGE_ZONES.some((zone) =>
+    haversineKm(point, { latitude: zone.lat, longitude: zone.lng }) <=
+      zone.radiusKm
+  );
+}
+
+export function parseLatLngFromNavUrl(url: string): GeoPoint | null {
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  const at = trimmed.match(new RegExp(`@${LAT_LNG_RE.source}`));
+  if (at) {
+    const latitude = Number(at[1]);
+    const longitude = Number(at[2]);
+    const point = { latitude, longitude };
+    return isUsableGeoPoint(point) && isInCleaningCoverage(point) ? point : null;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    for (const key of ["ll", "q", "query", "destination", "daddr"]) {
+      const raw = parsed.searchParams.get(key);
+      if (!raw) continue;
+      const pair = raw.match(LAT_LNG_RE);
+      if (!pair) continue;
+      const point = { latitude: Number(pair[1]), longitude: Number(pair[2]) };
+      if (isUsableGeoPoint(point) && isInCleaningCoverage(point)) return point;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export function hydrateStopCoordinates(
+  stop: VisitRouteStop,
+  geocoded?: GeoPoint | null,
+): VisitRouteStop {
+  const current = candidatePoint(stop);
+  if (current && isInCleaningCoverage(current)) {
+    return { ...stop, geoQuality: stop.geoQuality === "missing" ? "exact" : stop.geoQuality };
+  }
+
+  const fromUrl = (stop.googleMapsUrl && parseLatLngFromNavUrl(stop.googleMapsUrl)) ||
+    (stop.wazeUrl && parseLatLngFromNavUrl(stop.wazeUrl)) ||
+    null;
+  if (fromUrl) {
+    return {
+      ...stop,
+      latitude: fromUrl.latitude,
+      longitude: fromUrl.longitude,
+      geoQuality: "exact",
+      locationSource: stop.locationSource ?? "maps_url",
+    };
+  }
+
+  if (geocoded && isUsableGeoPoint(geocoded) && isInCleaningCoverage(geocoded)) {
+    return {
+      ...stop,
+      latitude: geocoded.latitude,
+      longitude: geocoded.longitude,
+      geoQuality: "approximate",
+      locationSource: "geocode",
+    };
+  }
+
+  if (current) {
+    return { ...stop, latitude: null, longitude: null, geoQuality: "ambiguous" };
+  }
+  return { ...stop, latitude: null, longitude: null, geoQuality: "missing" };
+}
+
+export function hydrateStopsFromKnownSources(
+  stops: readonly VisitRouteStop[],
+  geocodes: Record<string, GeoPoint> = {},
+): { stops: VisitRouteStop[]; changed: boolean } {
+  const next = stops.map((stop) => {
+    const address = stop.addressLine?.trim() ?? "";
+    return hydrateStopCoordinates(stop, address ? geocodes[address] ?? null : null);
+  });
+  const changed = next.some((stop, index) =>
+    stop.latitude !== stops[index]?.latitude ||
+    stop.longitude !== stops[index]?.longitude ||
+    stop.geoQuality !== stops[index]?.geoQuality
+  );
+  return { stops: next, changed };
+}
+
+export interface RouteLegMetrics {
+  distanceMeters: number;
+  durationSeconds: number;
+}
+
+export interface RouteDirectionsOverlay {
+  overviewPolyline: string | null;
+  legs: RouteLegMetrics[];
+  totalDistanceMeters: number;
+  totalDurationSeconds: number;
+  travelProvider: VisitRoutePlan["travelProvider"];
+}
+
+export function usableRoutePoints(stops: readonly VisitRouteStop[]): GeoPoint[] {
+  return stops.flatMap((stop) => {
+    const point = candidatePoint(stop);
+    return point && isInCleaningCoverage(point) ? [point] : [];
+  });
+}
+
+export function existingDirectionsOverlay(value: unknown): RouteDirectionsOverlay | null {
+  if (!isRecord(value) || !Array.isArray(value.legs) || value.legs.length === 0) {
+    return null;
+  }
+  const legs = value.legs.flatMap((item) => {
+    if (!isRecord(item)) return [];
+    const distanceMeters = Number(item.distanceMeters ?? 0);
+    const durationSeconds = Number(item.durationSeconds ?? 0);
+    if (!Number.isFinite(distanceMeters) || distanceMeters < 0) return [];
+    return [{
+      distanceMeters,
+      durationSeconds: Number.isFinite(durationSeconds) ? durationSeconds : 0,
+    }];
+  });
+  if (legs.length === 0) return null;
+  const travelProvider = value.travelProvider === "google_routes"
+    ? "google_routes"
+    : "euclidean_fallback";
+  return {
+    overviewPolyline: typeof value.overviewPolyline === "string" ? value.overviewPolyline : null,
+    legs,
+    totalDistanceMeters: Number(value.totalDistanceMeters ?? legs.reduce((sum, leg) => sum + leg.distanceMeters, 0)),
+    totalDurationSeconds: Number(value.totalDurationSeconds ?? legs.reduce((sum, leg) => sum + leg.durationSeconds, 0)),
+    travelProvider,
+  };
+}
+
+export function euclideanDirectionsOverlay(
+  origin: GeoPoint | null,
+  stops: readonly VisitRouteStop[],
+): RouteDirectionsOverlay {
+  const points = [
+    ...(origin && isUsableGeoPoint(origin) ? [origin] : []),
+    ...usableRoutePoints(stops),
+  ];
+  const legs: RouteLegMetrics[] = [];
+  for (let index = 1; index < points.length; index += 1) {
+    const distanceMeters = Math.round(haversineKm(points[index - 1], points[index]) * 1000);
+    legs.push({
+      distanceMeters,
+      durationSeconds: Math.round(euclideanSeconds(points[index - 1], points[index])),
+    });
+  }
+  return {
+    overviewPolyline: null,
+    legs,
+    totalDistanceMeters: legs.reduce((sum, leg) => sum + leg.distanceMeters, 0),
+    totalDurationSeconds: legs.reduce((sum, leg) => sum + leg.durationSeconds, 0),
+    travelProvider: "euclidean_fallback",
+  };
+}
+
+export async function geocodeAddress(
+  address: string,
+  apiKey: string,
+): Promise<GeoPoint | null> {
+  const trimmed = address.trim();
+  if (!trimmed || !apiKey) return null;
+  const url =
+    `https://maps.googleapis.com/maps/api/geocode/json?address=${
+      encodeURIComponent(`${trimmed}, Risaralda, Colombia`)
+    }&key=${encodeURIComponent(apiKey)}`;
+  const response = await fetch(url);
+  if (!response.ok) return null;
+  const payload = await response.json() as {
+    results?: Array<{ geometry?: { location?: { lat?: number; lng?: number } } }>;
+  };
+  const location = payload.results?.[0]?.geometry?.location;
+  if (typeof location?.lat !== "number" || typeof location?.lng !== "number") {
+    return null;
+  }
+  const point = { latitude: location.lat, longitude: location.lng };
+  return isUsableGeoPoint(point) && isInCleaningCoverage(point) ? point : null;
+}
+
+export async function hydrateStopsWithGeocode(
+  stops: readonly VisitRouteStop[],
+  apiKey: string,
+): Promise<{ stops: VisitRouteStop[]; changed: boolean }> {
+  const geocodes: Record<string, GeoPoint> = {};
+  if (apiKey) {
+    for (const stop of stops) {
+      const address = stop.addressLine?.trim() ?? "";
+      if (!address || geocodes[address]) continue;
+      const preview = hydrateStopCoordinates(stop);
+      if (candidatePoint(preview)) continue;
+      if (stop.geoQuality === "missing" || stop.geoQuality === "ambiguous") {
+        continue;
+      }
+      const geocoded = await geocodeAddress(address, apiKey);
+      if (geocoded) geocodes[address] = geocoded;
+    }
+  }
+  return hydrateStopsFromKnownSources(stops, geocodes);
+}
+
+export async function fetchGoogleDirectionsOverlay(
+  origin: GeoPoint | null,
+  stops: readonly VisitRouteStop[],
+  apiKey: string,
+): Promise<RouteDirectionsOverlay | null> {
+  const destinations = usableRoutePoints(stops);
+  const points = [
+    ...(origin && isUsableGeoPoint(origin) ? [origin] : []),
+    ...destinations,
+  ];
+  if (points.length < 2 || !apiKey) return null;
+  const originPoint = points[0];
+  const destination = points[points.length - 1];
+  const waypoints = points.slice(1, -1)
+    .map((point) => `${point.latitude},${point.longitude}`)
+    .join("|");
+  const params = new URLSearchParams({
+    origin: `${originPoint.latitude},${originPoint.longitude}`,
+    destination: `${destination.latitude},${destination.longitude}`,
+    mode: "driving",
+    key: apiKey,
+  });
+  if (waypoints) params.set("waypoints", waypoints);
+  const response = await fetch(
+    `https://maps.googleapis.com/maps/api/directions/json?${params.toString()}`,
+  );
+  if (!response.ok) return null;
+  const payload = await response.json() as {
+    status?: string;
+    routes?: Array<{
+      overview_polyline?: { points?: string };
+      legs?: Array<{
+        distance?: { value?: number };
+        duration?: { value?: number };
+      }>;
+    }>;
+  };
+  const route = payload.routes?.[0];
+  if (!route || payload.status !== "OK") return null;
+  const legs = (route.legs ?? []).map((leg) => ({
+    distanceMeters: Number(leg.distance?.value ?? 0),
+    durationSeconds: Number(leg.duration?.value ?? 0),
+  })).filter((leg) => Number.isFinite(leg.distanceMeters));
+  if (legs.length === 0) return null;
+  return {
+    overviewPolyline: route.overview_polyline?.points ?? null,
+    legs,
+    totalDistanceMeters: legs.reduce((sum, leg) => sum + leg.distanceMeters, 0),
+    totalDurationSeconds: legs.reduce((sum, leg) => sum + leg.durationSeconds, 0),
+    travelProvider: "google_routes",
+  };
+}
+
+export function mergeRouteGeoNotes(
+  value: unknown,
+  overlay: RouteDirectionsOverlay,
+  extras: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const notes = isRecord(value) ? { ...value } : {};
+  delete notes.start;
+  delete notes.deviceStart;
+  delete notes.origin;
+  delete notes.latitude;
+  delete notes.longitude;
+  return {
+    ...notes,
+    ...extras,
+    travelProvider: overlay.travelProvider,
+    overviewPolyline: overlay.overviewPolyline,
+    legs: overlay.legs,
+    totalDistanceMeters: overlay.totalDistanceMeters,
+    totalDurationSeconds: overlay.totalDurationSeconds,
+  };
+}

@@ -6,9 +6,15 @@ import {
 import { presentVisitPayment } from "../_shared/visitFinance.ts";
 import {
   applyDeviceOriginToDraftStops,
+  euclideanDirectionsOverlay,
+  existingDirectionsOverlay,
+  fetchGoogleDirectionsOverlay,
   fetchGoogleRouteSeconds,
+  hydrateStopsWithGeocode,
   isUsableGeoPoint,
+  mergeRouteGeoNotes,
   normalizeDraftStops,
+  usableRoutePoints,
   type GeoPoint,
 } from "../_shared/visitPrioritization.ts";
 
@@ -133,44 +139,70 @@ function geoNotesWithoutStart(value: unknown): Record<string, unknown> {
   return notes;
 }
 
-async function applyDeviceOriginToGrokDraft(
+async function enrichVisitRoute(
   supabase: Awaited<ReturnType<typeof requireAdmin>>["supabase"],
   route: Record<string, unknown>,
   start: GeoPoint | undefined,
+  reorder: boolean,
 ): Promise<Record<string, unknown>> {
-  if (!start || !isUsableGeoPoint(start)) return route;
-  const stops = normalizeDraftStops(route.stops);
-  const points: GeoPoint[] = [
-    start,
-    ...stops.flatMap((stop) => {
-      if (stop.latitude == null || stop.longitude == null) return [];
-      const point = { latitude: stop.latitude, longitude: stop.longitude };
-      return isUsableGeoPoint(point) ? [point] : [];
-    }),
-  ];
   const apiKey = Deno.env.get("GOOGLE_MAPS_API_KEY")?.trim() ?? "";
-  const travelTimeSeconds = apiKey
-    ? await fetchGoogleRouteSeconds(points, apiKey)
-    : null;
-  const result = applyDeviceOriginToDraftStops({
-    stops,
-    start,
-    travelTimeSeconds: travelTimeSeconds ?? undefined,
-  });
-  if (!result.originApplied) return route;
-
-  const geoNotes = {
-    ...geoNotesWithoutStart(route.geo_notes),
-    originApplied: true,
-    travelProvider: result.travelProvider,
-  };
-  const alreadyApplied = isRecord(route.geo_notes) &&
+  const hydrated = await hydrateStopsWithGeocode(
+    normalizeDraftStops(route.stops),
+    apiKey,
+  );
+  let stops = hydrated.stops;
+  let originApplied = isRecord(route.geo_notes) &&
     route.geo_notes.originApplied === true;
-  if (!result.changed && alreadyApplied) {
+  let travelProvider =
+    typeof route.travel_provider === "string" && route.travel_provider
+      ? route.travel_provider
+      : "euclidean_fallback";
+  let orderChanged = false;
+
+  if (reorder && start && isUsableGeoPoint(start)) {
+    const points: GeoPoint[] = [start, ...usableRoutePoints(stops)];
+    const travelTimeSeconds = apiKey
+      ? await fetchGoogleRouteSeconds(points, apiKey)
+      : null;
+    const result = applyDeviceOriginToDraftStops({
+      stops,
+      start,
+      travelTimeSeconds: travelTimeSeconds ?? undefined,
+    });
+    if (result.originApplied) {
+      stops = result.stops;
+      originApplied = true;
+      travelProvider = result.travelProvider;
+      orderChanged = result.changed;
+    }
+  }
+
+  const routeOrigin = reorder && start && isUsableGeoPoint(start) ? start : null;
+  const reused = !hydrated.changed && !orderChanged
+    ? existingDirectionsOverlay(route.geo_notes)
+    : null;
+  const shouldUpgradeToGoogle = Boolean(apiKey) && reused?.travelProvider === "euclidean_fallback";
+  const overlay = (!shouldUpgradeToGoogle && reused) || (apiKey
+    ? await fetchGoogleDirectionsOverlay(routeOrigin, stops, apiKey)
+    : null);
+  const directions = overlay ?? euclideanDirectionsOverlay(routeOrigin, stops);
+  travelProvider = directions.travelProvider;
+  const geoNotes = mergeRouteGeoNotes(geoNotesWithoutStart(route.geo_notes), directions, {
+    originApplied,
+    includesOrigin: Boolean(routeOrigin) ||
+      Boolean(reused && isRecord(route.geo_notes) && route.geo_notes.includesOrigin === true),
+    excludedWithoutGeo: stops.length - usableRoutePoints(stops).length,
+  });
+
+  const alreadySameOrder = !orderChanged && !hydrated.changed;
+  const alreadySameNotes = isRecord(route.geo_notes) &&
+    route.geo_notes.overviewPolyline === geoNotes.overviewPolyline &&
+    route.geo_notes.totalDistanceMeters === geoNotes.totalDistanceMeters;
+  if (alreadySameOrder && alreadySameNotes) {
     return {
       ...route,
-      stops: result.stops,
-      travel_provider: result.travelProvider,
+      stops,
+      travel_provider: travelProvider,
       geo_notes: geoNotes,
     };
   }
@@ -178,8 +210,8 @@ async function applyDeviceOriginToGrokDraft(
   const updated = await supabase
     .from("visit_routes")
     .update({
-      stops: result.stops,
-      travel_provider: result.travelProvider,
+      stops,
+      travel_provider: travelProvider,
       geo_notes: geoNotes,
     })
     .eq("id", route.id)
@@ -188,8 +220,8 @@ async function applyDeviceOriginToGrokDraft(
   if (updated.error || !updated.data) {
     return {
       ...route,
-      stops: result.stops,
-      travel_provider: result.travelProvider,
+      stops,
+      travel_provider: travelProvider,
       geo_notes: geoNotes,
     };
   }
@@ -293,9 +325,17 @@ async function buildDashboardResponse(
       500,
     );
   }
+  const todayRoute = routes.data?.[0]
+    ? await enrichVisitRoute(
+      context.supabase,
+      routes.data[0] as Record<string, unknown>,
+      undefined,
+      false,
+    )
+    : null;
   return strictJsonResponse(request, {
     data: {
-      route: routes.data?.[0] ?? null,
+      route: todayRoute,
       visits: visits.data ?? [],
       complaints: complaints.data ?? [],
       opportunities: opportunities.data ?? [],
@@ -430,10 +470,11 @@ Deno.serve(async (request) => {
     }, 500);
   }
   if (existing.data && existing.data.generated_by_source === "grok") {
-    const route = await applyDeviceOriginToGrokDraft(
+    const route = await enrichVisitRoute(
       context.supabase,
       existing.data as Record<string, unknown>,
       input.start,
+      true,
     );
     return strictJsonResponse(request, {
       data: { route, duplicate: true, waiting: false },
@@ -450,10 +491,11 @@ Deno.serve(async (request) => {
     .limit(1)
     .maybeSingle();
   if (todayDraft.data && todayDraft.data.generated_by_source === "grok") {
-    const route = await applyDeviceOriginToGrokDraft(
+    const route = await enrichVisitRoute(
       context.supabase,
       todayDraft.data as Record<string, unknown>,
       input.start,
+      true,
     );
     return strictJsonResponse(request, {
       data: { route, duplicate: true, waiting: false },
