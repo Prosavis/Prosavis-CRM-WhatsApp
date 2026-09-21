@@ -1,5 +1,5 @@
 export type VisitQuality = "bad" | "standard" | "good" | "unknown";
-export type GeoQuality = "exact" | "approximate" | "missing" | "ambiguous";
+export type GeoQuality = "exact" | "approximate" | "missing" | "ambiguous" | "unresolved";
 export type VisitNeed = "required_complaint" | "recommended" | "optional" | "none";
 export type VisitUrgency = "critical" | "high" | "medium" | "low";
 export const RECENT_SERVICE_DAYS = 7;
@@ -37,6 +37,7 @@ export interface VisitCandidate {
   googleMapsUrl?: string | null;
   wazeUrl?: string | null;
   locationSource?: string | null;
+  addressHint?: string | null;
 }
 
 export interface VisitRouteOptions {
@@ -472,7 +473,7 @@ function asVisitUrgency(value: unknown): VisitUrgency | undefined {
 
 function asGeoQuality(value: unknown): GeoQuality | undefined {
   return value === "exact" || value === "approximate" || value === "missing" ||
-      value === "ambiguous"
+      value === "ambiguous" || value === "unresolved"
     ? value
     : undefined;
 }
@@ -524,6 +525,11 @@ export function normalizeDraftStops(value: unknown): VisitRouteStop[] {
         ? item.directory_id
         : null,
       addressLine: typeof item.addressLine === "string" ? item.addressLine : null,
+      addressHint: typeof item.addressHint === "string"
+        ? item.addressHint
+        : typeof item.addressReference === "string"
+        ? item.addressReference
+        : null,
       pendingReply: item.pendingReply === true,
       recentServiceAt: typeof item.recentServiceAt === "string"
         ? item.recentServiceAt
@@ -736,38 +742,81 @@ export function parseLatLngFromNavUrl(url: string): GeoPoint | null {
   return null;
 }
 
+export function navLinksFromPoint(point: GeoPoint): { googleMapsUrl: string; wazeUrl: string } {
+  return {
+    googleMapsUrl:
+      `https://www.google.com/maps/search/?api=1&query=${point.latitude},${point.longitude}`,
+    wazeUrl: `https://www.waze.com/ul?ll=${point.latitude},${point.longitude}&navigate=yes`,
+  };
+}
+
+export function isZeroCoordNavUrl(url?: string | null): boolean {
+  if (!url?.trim()) return false;
+  try {
+    const parsed = new URL(url);
+    for (const key of ["ll", "q", "query", "destination", "daddr"]) {
+      const raw = parsed.searchParams.get(key);
+      if (!raw) continue;
+      const pair = raw.match(LAT_LNG_RE);
+      if (pair && Number(pair[1]) === 0 && Number(pair[2]) === 0) return true;
+    }
+  } catch {
+    return false;
+  }
+  return /@0(?:\.0*)?,0(?:\.0*)?(?:,|$)/.test(url);
+}
+
+function withPointLinks(stop: VisitRouteStop, point: GeoPoint, extra: Partial<VisitRouteStop>): VisitRouteStop {
+  const links = navLinksFromPoint(point);
+  return {
+    ...stop,
+    ...extra,
+    latitude: point.latitude,
+    longitude: point.longitude,
+    googleMapsUrl: isZeroCoordNavUrl(stop.googleMapsUrl) || !stop.googleMapsUrl
+      ? links.googleMapsUrl
+      : stop.googleMapsUrl,
+    wazeUrl: isZeroCoordNavUrl(stop.wazeUrl) || !stop.wazeUrl ? links.wazeUrl : stop.wazeUrl,
+  };
+}
+
 export function hydrateStopCoordinates(
   stop: VisitRouteStop,
   geocoded?: GeoPoint | null,
 ): VisitRouteStop {
   const current = candidatePoint(stop);
   if (current && isInCleaningCoverage(current)) {
-    return { ...stop, geoQuality: stop.geoQuality === "missing" ? "exact" : stop.geoQuality };
+    return withPointLinks(stop, current, {
+      geoQuality: stop.geoQuality === "missing" ? "exact" : stop.geoQuality,
+    });
   }
 
   const fromUrl = (stop.googleMapsUrl && parseLatLngFromNavUrl(stop.googleMapsUrl)) ||
     (stop.wazeUrl && parseLatLngFromNavUrl(stop.wazeUrl)) ||
     null;
   if (fromUrl) {
-    return {
-      ...stop,
-      latitude: fromUrl.latitude,
-      longitude: fromUrl.longitude,
+    return withPointLinks(stop, fromUrl, {
       geoQuality: "exact",
       locationSource: stop.locationSource ?? "maps_url",
-    };
+    });
   }
 
   if (geocoded && isUsableGeoPoint(geocoded) && isInCleaningCoverage(geocoded)) {
+    const links = navLinksFromPoint(geocoded);
     return {
       ...stop,
       latitude: geocoded.latitude,
       longitude: geocoded.longitude,
       geoQuality: "approximate",
       locationSource: "geocode",
+      googleMapsUrl: links.googleMapsUrl,
+      wazeUrl: links.wazeUrl,
     };
   }
 
+  if (stop.geoQuality === "unresolved") {
+    return { ...stop, latitude: null, longitude: null, geoQuality: "unresolved" };
+  }
   if (current) {
     return { ...stop, latitude: null, longitude: null, geoQuality: "ambiguous" };
   }
@@ -865,12 +914,16 @@ export function euclideanDirectionsOverlay(
 export async function geocodeAddress(
   address: string,
   apiKey: string,
+  hint?: string | null,
 ): Promise<GeoPoint | null> {
   const trimmed = address.trim();
   if (!trimmed || !apiKey) return null;
+  const query = [trimmed, hint?.trim(), "Pereira, Risaralda, Colombia"]
+    .filter((part) => part)
+    .join(", ");
   const url =
     `https://maps.googleapis.com/maps/api/geocode/json?address=${
-      encodeURIComponent(`${trimmed}, Risaralda, Colombia`)
+      encodeURIComponent(query)
     }&key=${encodeURIComponent(apiKey)}`;
   const response = await fetch(url);
   if (!response.ok) return null;
@@ -890,20 +943,92 @@ export async function hydrateStopsWithGeocode(
   apiKey: string,
 ): Promise<{ stops: VisitRouteStop[]; changed: boolean }> {
   const geocodes: Record<string, GeoPoint> = {};
+  const failedAddresses = new Set<string>();
   if (apiKey) {
     for (const stop of stops) {
       const address = stop.addressLine?.trim() ?? "";
-      if (!address || geocodes[address]) continue;
+      if (!address || geocodes[address] || failedAddresses.has(address)) continue;
+      if (stop.geoQuality === "unresolved") continue;
       const preview = hydrateStopCoordinates(stop);
       if (candidatePoint(preview)) continue;
-      if (stop.geoQuality === "missing" || stop.geoQuality === "ambiguous") {
-        continue;
-      }
-      const geocoded = await geocodeAddress(address, apiKey);
+      const geocoded = await geocodeAddress(address, apiKey, stop.addressHint);
       if (geocoded) geocodes[address] = geocoded;
+      else failedAddresses.add(address);
     }
   }
-  return hydrateStopsFromKnownSources(stops, geocodes);
+  const hydrated = hydrateStopsFromKnownSources(stops, geocodes);
+  const next = hydrated.stops.map((stop, index) => {
+    const address = stop.addressLine?.trim() ?? "";
+    if (!apiKey || !address || candidatePoint(stop) || stops[index]?.geoQuality === "unresolved") {
+      return stop;
+    }
+    if (failedAddresses.has(address) && !geocodes[address]) {
+      return {
+        ...stop,
+        latitude: null,
+        longitude: null,
+        geoQuality: "unresolved" as const,
+        locationSource: "geocode_failed",
+      };
+    }
+    return stop;
+  });
+  const changed = next.some((stop, index) =>
+    stop.latitude !== stops[index]?.latitude ||
+    stop.longitude !== stops[index]?.longitude ||
+    stop.geoQuality !== stops[index]?.geoQuality ||
+    stop.googleMapsUrl !== stops[index]?.googleMapsUrl ||
+    stop.wazeUrl !== stops[index]?.wazeUrl
+  );
+  return { stops: next, changed };
+}
+
+export function applyGeocodeToDirectoryAddresses(
+  addresses: unknown,
+  stop: VisitRouteStop,
+): {
+  serviceAddresses: Array<Record<string, unknown>>;
+  preferredGoogleMapsUrl: string;
+  preferredWazeUrl: string;
+} | null {
+  const point = candidatePoint(stop);
+  if (!point || !isInCleaningCoverage(point) || !stop.directoryId) return null;
+  const links = navLinksFromPoint(point);
+  const rows = Array.isArray(addresses) ? addresses.filter(isRecord) : [];
+  const address = stop.addressLine?.trim() ?? "";
+  let matched = false;
+  const serviceAddresses = (rows.length > 0 ? rows : [{
+    addressLine: address,
+    isDefault: true,
+  }]).map((row) => {
+    const sameLine = typeof row.addressLine === "string" &&
+      row.addressLine.trim() === address;
+    const take = sameLine || (!matched && row.isDefault === true);
+    if (!take) return row;
+    matched = true;
+    return {
+      ...row,
+      lat: point.latitude,
+      lng: point.longitude,
+      googleMapsUrl: links.googleMapsUrl,
+      wazeUrl: links.wazeUrl,
+    };
+  });
+  if (!matched && address) {
+    serviceAddresses.push({
+      addressLine: address,
+      isDefault: serviceAddresses.length === 0,
+      lat: point.latitude,
+      lng: point.longitude,
+      googleMapsUrl: links.googleMapsUrl,
+      wazeUrl: links.wazeUrl,
+    });
+  }
+  return {
+    serviceAddresses,
+    preferredGoogleMapsUrl: links.googleMapsUrl,
+    preferredWazeUrl: links.wazeUrl,
+  };
 }
 
 export async function fetchGoogleDirectionsOverlay(

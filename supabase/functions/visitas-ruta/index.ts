@@ -6,6 +6,7 @@ import {
 import { presentVisitPayment } from "../_shared/visitFinance.ts";
 import {
   applyDeviceOriginToDraftStops,
+  applyGeocodeToDirectoryAddresses,
   euclideanDirectionsOverlay,
   existingDirectionsOverlay,
   fetchGoogleDirectionsOverlay,
@@ -16,6 +17,7 @@ import {
   normalizeDraftStops,
   usableRoutePoints,
   type GeoPoint,
+  type VisitRouteStop,
 } from "../_shared/visitPrioritization.ts";
 
 const MAX_BODY_BYTES = 16_384;
@@ -139,6 +141,79 @@ function geoNotesWithoutStart(value: unknown): Record<string, unknown> {
   return notes;
 }
 
+async function attachAddressHints(
+  supabase: Awaited<ReturnType<typeof requireAdmin>>["supabase"],
+  stops: VisitRouteStop[],
+): Promise<VisitRouteStop[]> {
+  const ids = [...new Set(
+    stops
+      .filter((stop) =>
+        stop.directoryId &&
+        stop.addressLine?.trim() &&
+        stop.geoQuality !== "unresolved"
+      )
+      .map((stop) => stop.directoryId as string),
+  )];
+  if (ids.length === 0) return stops;
+  const { data } = await supabase
+    .from("crm_directory")
+    .select("id, service_addresses")
+    .in("id", ids);
+  const hints = new Map<string, string>();
+  for (const row of data ?? []) {
+    if (!isRecord(row) || typeof row.id !== "string") continue;
+    const addresses = Array.isArray(row.service_addresses)
+      ? row.service_addresses.filter(isRecord)
+      : [];
+    const match = addresses.find((item) => item.isDefault === true) ??
+      addresses[0];
+    const reference = typeof match?.reference === "string"
+      ? match.reference.trim()
+      : "";
+    if (reference) hints.set(row.id, reference);
+  }
+  return stops.map((stop) => {
+    const hint = stop.directoryId ? hints.get(stop.directoryId) : undefined;
+    return hint && !stop.addressHint ? { ...stop, addressHint: hint } : stop;
+  });
+}
+
+async function persistGeocodedDirectoryStops(
+  supabase: Awaited<ReturnType<typeof requireAdmin>>["supabase"],
+  previous: VisitRouteStop[],
+  next: VisitRouteStop[],
+): Promise<void> {
+  for (const stop of next) {
+    if (stop.locationSource !== "geocode" || !stop.directoryId) continue;
+    const before = previous.find((item) =>
+      item.clientReference === stop.clientReference
+    );
+    if (
+      before &&
+      before.latitude === stop.latitude &&
+      before.longitude === stop.longitude &&
+      before.locationSource === "geocode"
+    ) {
+      continue;
+    }
+    const { data } = await supabase
+      .from("crm_directory")
+      .select("service_addresses")
+      .eq("id", stop.directoryId)
+      .maybeSingle();
+    const patched = applyGeocodeToDirectoryAddresses(
+      data?.service_addresses,
+      stop,
+    );
+    if (!patched) continue;
+    await supabase.from("crm_directory").update({
+      service_addresses: patched.serviceAddresses,
+      preferred_google_maps_url: patched.preferredGoogleMapsUrl,
+      preferred_waze_url: patched.preferredWazeUrl,
+    }).eq("id", stop.directoryId);
+  }
+}
+
 async function enrichVisitRoute(
   supabase: Awaited<ReturnType<typeof requireAdmin>>["supabase"],
   route: Record<string, unknown>,
@@ -146,10 +221,14 @@ async function enrichVisitRoute(
   reorder: boolean,
 ): Promise<Record<string, unknown>> {
   const apiKey = Deno.env.get("GOOGLE_MAPS_API_KEY")?.trim() ?? "";
-  const hydrated = await hydrateStopsWithGeocode(
+  const draftStops = await attachAddressHints(
+    supabase,
     normalizeDraftStops(route.stops),
-    apiKey,
   );
+  const hydrated = await hydrateStopsWithGeocode(draftStops, apiKey);
+  if (hydrated.changed) {
+    await persistGeocodedDirectoryStops(supabase, draftStops, hydrated.stops);
+  }
   let stops = hydrated.stops;
   let originApplied = isRecord(route.geo_notes) &&
     route.geo_notes.originApplied === true;
@@ -325,10 +404,29 @@ async function buildDashboardResponse(
       500,
     );
   }
-  const todayRoute = routes.data?.[0]
+  let routeRow = routes.data?.[0] as Record<string, unknown> | undefined;
+  if (!routeRow) {
+    const latestPublished = await context.supabase
+      .from("visit_routes")
+      .select("*")
+      .eq("service_id", serviceId)
+      .eq("status", "published")
+      .order("route_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(1);
+    if (latestPublished.error) {
+      return strictJsonResponse(
+        request,
+        { error: "No fue posible consultar las visitas." },
+        500,
+      );
+    }
+    routeRow = latestPublished.data?.[0] as Record<string, unknown> | undefined;
+  }
+  const todayRoute = routeRow
     ? await enrichVisitRoute(
       context.supabase,
-      routes.data[0] as Record<string, unknown>,
+      routeRow,
       undefined,
       false,
     )

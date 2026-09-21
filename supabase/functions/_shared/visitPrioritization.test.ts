@@ -1,11 +1,14 @@
 import { assertEquals, assertMatch } from "jsr:@std/assert";
 import {
   applyDeviceOriginToDraftStops,
+  applyGeocodeToDirectoryAddresses,
   buildVisitRoute,
   euclideanDirectionsOverlay,
   existingDirectionsOverlay,
   hydrateStopCoordinates,
   hydrateStopsFromKnownSources,
+  hydrateStopsWithGeocode,
+  isZeroCoordNavUrl,
   normalizeDraftStops,
   parseLatLngFromNavUrl,
   type VisitCandidate,
@@ -26,8 +29,8 @@ function candidate(
     openComplaint: overrides.openComplaint ?? false,
     optOut: overrides.optOut ?? false,
     lastVisitAt: overrides.lastVisitAt ?? null,
-    latitude: overrides.latitude ?? 4.6097,
-    longitude: overrides.longitude ?? -74.0817,
+    latitude: "latitude" in overrides ? overrides.latitude ?? null : 4.6097,
+    longitude: "longitude" in overrides ? overrides.longitude ?? null : -74.0817,
     geoQuality: overrides.geoQuality,
     visitNeed: overrides.visitNeed,
     visitReasons: overrides.visitReasons,
@@ -38,6 +41,8 @@ function candidate(
     googleMapsUrl: overrides.googleMapsUrl ?? null,
     wazeUrl: overrides.wazeUrl ?? null,
     addressLine: overrides.addressLine ?? null,
+    addressHint: overrides.addressHint ?? null,
+    directoryId: overrides.directoryId ?? null,
     locationSource: overrides.locationSource ?? null,
   };
 }
@@ -653,3 +658,109 @@ Deno.test("reuses a persisted directions overlay without inventing a start point
   assertEquals(overlay?.legs.length, 1);
   assertEquals(existingDirectionsOverlay({ legs: [] }), null);
 });
+
+Deno.test("geocodes a missing stop that still has an address and rewrites 0,0 links", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = () =>
+    Promise.resolve(
+      new Response(JSON.stringify({
+        results: [{ geometry: { location: { lat: 4.82, lng: -75.69 } } }],
+      })),
+    );
+  try {
+    const { stops, changed } = await hydrateStopsWithGeocode([
+      stop({
+        clientReference: "nando",
+        sequence: 5,
+        latitude: null,
+        longitude: null,
+        geoQuality: "missing",
+        addressLine: "calle 106 # 13-75 apto 3057",
+        addressHint: "Senderos de San Silvestre",
+        googleMapsUrl: "https://www.google.com/maps/search/?api=1&query=0,0",
+        wazeUrl: "https://waze.com/ul?ll=0,0&navigate=yes",
+      }),
+    ], "test-key");
+    assertEquals(changed, true);
+    assertEquals(stops[0].latitude, 4.82);
+    assertEquals(stops[0].longitude, -75.69);
+    assertEquals(stops[0].geoQuality, "approximate");
+    assertEquals(stops[0].locationSource, "geocode");
+    assertEquals(stops[0].googleMapsUrl?.includes("4.82"), true);
+    assertEquals(isZeroCoordNavUrl(stops[0].googleMapsUrl), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("does not retry an unresolved address on later refetches", async () => {
+  let calls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = () => {
+    calls += 1;
+    return Promise.resolve(new Response(JSON.stringify({ results: [] })));
+  };
+  try {
+    const { stops } = await hydrateStopsWithGeocode([
+      stop({
+        clientReference: "carmenza",
+        sequence: 4,
+        latitude: null,
+        longitude: null,
+        geoQuality: "unresolved",
+        addressLine: "Calle 3b #13-20 Edificio Laura apto 701",
+      }),
+    ], "test-key");
+    assertEquals(calls, 0);
+    assertEquals(stops[0].geoQuality, "unresolved");
+    assertEquals(stops[0].latitude, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("marks a failed geocode as unresolved so (0,0) stays out of the overlay", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = () =>
+    Promise.resolve(new Response(JSON.stringify({ results: [] })));
+  try {
+    const { stops } = await hydrateStopsWithGeocode([
+      stop({
+        clientReference: "ghost",
+        sequence: 9,
+        latitude: null,
+        longitude: null,
+        geoQuality: "missing",
+        addressLine: "direccion inventada 999",
+      }),
+    ], "test-key");
+    assertEquals(stops[0].geoQuality, "unresolved");
+    const overlay = euclideanDirectionsOverlay(null, stops);
+    assertEquals(overlay.legs.length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("writes geocoded coords back onto the matching directory address", () => {
+  const patched = applyGeocodeToDirectoryAddresses(
+    [{
+      id: "addr-1",
+      addressLine: "calle 106 # 13-75 apto 3057",
+      isDefault: true,
+      reference: "Senderos de San Silvestre",
+    }],
+    stop({
+      clientReference: "nando",
+      directoryId: "6bca1e61-151e-4e3e-86ab-615cf60ebf90",
+      sequence: 5,
+      latitude: 4.82,
+      longitude: -75.69,
+      addressLine: "calle 106 # 13-75 apto 3057",
+      locationSource: "geocode",
+    }),
+  );
+  assertEquals(patched?.serviceAddresses[0].lat, 4.82);
+  assertEquals(patched?.preferredWazeUrl.includes("-75.69"), true);
+});
+
