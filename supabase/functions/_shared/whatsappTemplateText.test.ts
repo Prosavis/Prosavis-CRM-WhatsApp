@@ -1,6 +1,9 @@
 import { assertEquals, assertFalse } from 'jsr:@std/assert';
 import {
   buildProfessionalReminderAddress,
+  buildReminderPaymentText,
+  buildReminderPaymentWarning,
+  classifyReminderPayment,
   sanitizeWhatsAppTemplateParam,
   WHATSAPP_TEMPLATE_EMPTY,
   WHATSAPP_TEMPLATE_PARAM_MAX_LEN,
@@ -52,4 +55,45 @@ Deno.test('professional address without mapsLink is just the sanitized street', 
 Deno.test('overlong params are truncated', () => {
   const text = sanitizeWhatsAppTemplateParam('x'.repeat(WHATSAPP_TEMPLATE_PARAM_MAX_LEN + 40));
   assertEquals(text.length, WHATSAPP_TEMPLATE_PARAM_MAX_LEN);
+});
+
+Deno.test('pago pendiente sin abono is pendiente, not parcial', () => {
+  const input = { totalAmount: 148000, paymentStatus: 'PAGO_PENDIENTE', paidAmount: 0 };
+  assertEquals(classifyReminderPayment(input), 'pendiente');
+  assertEquals(buildReminderPaymentText(input).includes('Pendiente'), true);
+  assertEquals(buildReminderPaymentText(input).includes('Parcial'), false);
+  assertEquals(buildReminderPaymentWarning(input).includes('aún está pendiente'), true);
+});
+
+Deno.test('pago aceptado is completo / pagado', () => {
+  const input = { totalAmount: 148000, paymentStatus: 'PAGO_ACEPTADO', paidAmount: 148000 };
+  assertEquals(classifyReminderPayment(input), 'completo');
+  assertEquals(buildReminderPaymentText(input).includes('Pagado'), true);
+  assertEquals(buildReminderPaymentWarning(input).includes('pago ya está confirmado'), true);
+});
+
+Deno.test('pago en proceso never reads as pendiente and shows abono vs saldo', () => {
+  const input = {
+    totalAmount: 148000,
+    paymentStatus: 'PAGO_EN_PROCESO',
+    paidAmount: 63379,
+    pendingAmount: 84621,
+  };
+  assertEquals(classifyReminderPayment(input), 'parcial');
+  const text = buildReminderPaymentText(input);
+  const warning = buildReminderPaymentWarning(input);
+  assertEquals(text.includes('Parcial'), true);
+  assertEquals(text.includes('abonado'), true);
+  assertEquals(text.includes(' - Pendiente'), false);
+  assertEquals(text.includes(' - Pagado'), false);
+  assertEquals(warning.includes('aún está pendiente'), false);
+  assertEquals(warning.includes('pago ya está confirmado'), false);
+  assertEquals(warning.includes('84621') || warning.includes('84.621') || warning.includes('84,621'), true);
+  assertEquals(warning.includes('63379') || warning.includes('63.379') || warning.includes('63,379'), true);
+});
+
+Deno.test('abono with PAGO_PENDIENTE status is still parcial, never pendiente', () => {
+  const input = { totalAmount: 148000, paymentStatus: 'PAGO_PENDIENTE', paidAmount: 50000 };
+  assertEquals(classifyReminderPayment(input), 'parcial');
+  assertEquals(buildReminderPaymentWarning(input).includes('aún está pendiente'), false);
 });

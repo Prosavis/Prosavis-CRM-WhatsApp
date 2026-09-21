@@ -69,10 +69,11 @@ describe('formatPricingCatalogBlock', () => {
     const block = formatPricingCatalogBlock();
 
     expect(block).toContain('4 horas (240 min) → COP 88.000');
-    expect(block).toContain('hasta 2 habitaciones');
+    expect(block).toContain('apto 1 habitación');
     expect(block).toContain('6 horas (360 min) → COP 118.000');
-    expect(block).toContain('3+ habitaciones');
+    expect(block).toContain('2 habitaciones');
     expect(block).toContain('8 horas (480 min) → COP 148.000');
+    expect(block).toContain('más de 100 m²');
     expect(block).toContain('Kit profesional → COP 30.000 adicionales');
     expect(block).toMatch(/no ofrezcas 2 horas ni 3 horas/i);
     expect(block).not.toContain('120 minutos → COP 58.000');

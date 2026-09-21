@@ -25,9 +25,9 @@ export const BOOKABLE_CLEANING_DURATIONS_MINUTES = [240, 360, 480] as const;
 const BOOKABLE_DURATION_HINTS: Readonly<
   Record<(typeof BOOKABLE_CLEANING_DURATIONS_MINUTES)[number], string>
 > = {
-  240: 'hasta 2 habitaciones; el más solicitado',
-  360: 'casa / apto grande (3+ habitaciones)',
-  480: 'casa grande / oficina / grandes superficies',
+  240: 'apto 1 habitación, 1–2 baños; oficina o consultorio pequeño',
+  360: 'casa / apto 2 habitaciones, 2–3 baños, hasta 80 m²',
+  480: '3 o más habitaciones y más de 100 m²',
 };
 
 export interface ResolvedDurationPrice {

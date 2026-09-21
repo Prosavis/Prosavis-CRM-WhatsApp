@@ -16,7 +16,7 @@ import {
   normalizePhone,
   resolveRecipient,
 } from '../_shared/whatsappIdentity.ts';
-import { sanitizeWhatsAppTemplateParam } from '../_shared/whatsappTemplateText.ts';
+import { sanitizeWhatsAppTemplateParam, buildReminderPaymentText } from '../_shared/whatsappTemplateText.ts';
 
 const DEFAULT_TIMEZONE = 'America/Bogota';
 const TEMPLATE_NAME = 'confirmacion_cita';
@@ -38,24 +38,6 @@ function formatTime(isoString: string): string {
     minute: '2-digit',
     timeZone: DEFAULT_TIMEZONE,
   });
-}
-
-function formatCurrencyCop(amount: number): string {
-  return new Intl.NumberFormat('es-CO', {
-    style: 'currency',
-    currency: 'COP',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
-
-function buildPaymentText(totalAmount: number, paymentStatus: string): string {
-  const amount = formatCurrencyCop(totalAmount);
-  const status = (paymentStatus || '').trim().toUpperCase();
-  if (status === 'PAGO_PENDIENTE' || status === 'PENDING') {
-    return `${amount} - Pendiente`;
-  }
-  return `${amount} - Pagado`;
 }
 
 function validateE164ishPhone(input: string): string {
@@ -82,6 +64,8 @@ Deno.serve(async (req) => {
     const address = body.address ? String(body.address).trim() : '';
     const totalAmount = Number(body.totalAmount ?? 0);
     const paymentStatus = body.paymentStatus ? String(body.paymentStatus).trim() : '';
+    const paidAmount = body.paidAmount != null ? Number(body.paidAmount) : undefined;
+    const pendingAmount = body.pendingAmount != null ? Number(body.pendingAmount) : undefined;
 
     if (!appointmentId || !recipientPhone || !clientName || !scheduledDate) {
       return jsonResponse(
@@ -109,7 +93,12 @@ Deno.serve(async (req) => {
     // 4. Construir parámetros de la plantilla (mismo orden que el flujo legacy).
     const dateStr = formatDate(scheduledDate);
     const timeStr = formatTime(scheduledDate);
-    const paymentText = buildPaymentText(totalAmount, paymentStatus);
+    const paymentText = buildReminderPaymentText({
+      totalAmount,
+      paymentStatus,
+      paidAmount,
+      pendingAmount,
+    });
     const displayAddress = sanitizeWhatsAppTemplateParam(address);
     const displayMessageBody = `Confirmación: ${clientName} - ${dateStr} ${timeStr}`;
 

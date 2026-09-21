@@ -31,6 +31,8 @@ import {
 } from '../_shared/whatsappIdentity.ts';
 import {
   buildProfessionalReminderAddress,
+  buildReminderPaymentText,
+  buildReminderPaymentWarning,
   sanitizeWhatsAppTemplateParam,
 } from '../_shared/whatsappTemplateText.ts';
 
@@ -48,6 +50,8 @@ interface AppointmentData {
   durationMinutes: number;
   totalAmount: number;
   paymentStatus: string;
+  paidAmount?: number;
+  pendingAmount?: number;
   appointmentId: string;
   /** Opcional: link de Google Maps */
   mapsLink?: string;
@@ -95,34 +99,13 @@ function formatDuration(minutes: number): string {
   return `${hours} ${hours === 1 ? 'hora' : 'horas'} ${mins} minutos`;
 }
 
-function formatCurrencyCop(amount: number): string {
-  return new Intl.NumberFormat('es-CO', {
-    style: 'currency',
-    currency: 'COP',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
-
-function buildPaymentText(totalAmount: number, paymentStatus: string): string {
-  const amount = formatCurrencyCop(totalAmount);
-  const status = (paymentStatus || '').trim().toUpperCase();
-  if (status === 'PAGO_PENDIENTE' || status === 'PENDING' || status === '') {
-    return `${amount} - Pendiente`;
-  }
-  return `${amount} - Pagado`;
-}
-
-/**
- * Construye el texto de advertencia de pago para el cliente.
- * Si el pago está pendiente, muestra alerta; si está pagado, mensaje positivo.
- */
-function buildPaymentWarning(totalAmount: number, paymentStatus: string): string {
-  const status = (paymentStatus || '').trim().toUpperCase();
-  if (status === 'PAGO_PENDIENTE' || status === 'PENDING' || status === '') {
-    return '⚠️ Tu pago aún está pendiente. Para asegurar tu cita, te invitamos a realizar el pago lo antes posible.';
-  }
-  return '✅ Tu pago ya está confirmado. Gracias por confiar en Prosavis.';
+function reminderPaymentInput(appointmentData: AppointmentData) {
+  return {
+    totalAmount: appointmentData.totalAmount,
+    paymentStatus: appointmentData.paymentStatus,
+    paidAmount: appointmentData.paidAmount,
+    pendingAmount: appointmentData.pendingAmount,
+  };
 }
 
 /**
@@ -172,7 +155,7 @@ function buildDisplayBody(
       `Fecha: ${formatSchedule(appointmentData.scheduledDate)}\n` +
       `Dirección: ${appointmentData.address || '—'}\n` +
       `Duración: ${formatDuration(appointmentData.durationMinutes)}\n` +
-      `Valor: ${buildPaymentText(appointmentData.totalAmount, appointmentData.paymentStatus)}`
+      `Valor: ${buildReminderPaymentText(reminderPaymentInput(appointmentData))}`
     );
   }
   // Professional
@@ -278,13 +261,13 @@ Deno.serve(async (req) => {
             {
               type: 'text',
               text: sanitizeWhatsAppTemplateParam(
-                buildPaymentText(appointmentData.totalAmount, appointmentData.paymentStatus),
+                buildReminderPaymentText(reminderPaymentInput(appointmentData)),
               ),
             },
             {
               type: 'text',
               text: sanitizeWhatsAppTemplateParam(
-                buildPaymentWarning(appointmentData.totalAmount, appointmentData.paymentStatus),
+                buildReminderPaymentWarning(reminderPaymentInput(appointmentData)),
               ),
             },
           ],

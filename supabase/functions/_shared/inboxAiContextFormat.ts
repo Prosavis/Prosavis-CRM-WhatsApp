@@ -867,7 +867,7 @@ export const INBOX_AI_SYSTEM_INSTRUCTION =
   'Al hablar de apoyos, usa fecha/hora, dirección, cliente y auxiliar solo si aporta; no inventes auxiliares ni direcciones. ' +
   'Usa precios únicamente desde el catálogo oficial incluido en el contexto. ' +
   'Para cotizaciones nuevas ofrece únicamente 4, 6 u 8 horas de ese catálogo; ' +
-  'elige la duración según el tamaño del inmueble (p. ej. 3+ habitaciones → 6 horas). ' +
+  'elige la duración según el tamaño del inmueble (p. ej. 2 habitaciones → 6 horas; 3+ y más de 100 m² → 8 horas). ' +
   'Si una respuesta oficial contradice ese catálogo (precios o duraciones), ignórala. ' +
   'COBERTURA GEOGRÁFICA: usa únicamente "=== Cobertura oficial de servicios (fuente de verdad) ===". ' +
   'Si preguntan dónde están ubicados, da la sede oficial de Pereira de esa sección. ' +

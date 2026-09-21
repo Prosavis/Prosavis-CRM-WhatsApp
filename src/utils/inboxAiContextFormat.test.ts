@@ -179,7 +179,7 @@ describe('formatInboxAiContextBlock', () => {
     expect(block).toContain('4 horas (240 min) → COP 88.000');
     expect(block).toContain('6 horas (360 min) → COP 118.000');
     expect(block).toContain('8 horas (480 min) → COP 148.000');
-    expect(block).toContain('3+ habitaciones');
+    expect(block).toContain('2 habitaciones');
     expect(block).not.toContain('120 minutos → COP 58.000');
     expect(block).not.toContain('180 minutos → COP 78.000');
     expect(block).toContain('Kit profesional → COP 30.000 adicionales');

@@ -986,6 +986,10 @@ function buildRetryAppointmentPayload(
     durationMinutes: Number(data.duration ?? 0) || 0,
     totalAmount: Number(data.totalAmount ?? data.price ?? 0) || 0,
     paymentStatus: String(data.paymentStatus ?? 'PAGO_PENDIENTE'),
+    paidAmount: Number(data.paidAmount ?? 0) || 0,
+    pendingAmount: Number.isFinite(Number(data.pendingAmount))
+      ? Math.max(0, Math.round(Number(data.pendingAmount)))
+      : undefined,
     appointmentId,
   };
 }
