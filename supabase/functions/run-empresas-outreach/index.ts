@@ -27,6 +27,9 @@ import {
   EMPRESAS_WA_TEMPLATE,
   EMPRESAS_WA_TEMPLATE_V3,
   EMPRESAS_WA_ATTEMPT_CAP,
+  EMPRESAS_BURST_COUNT_SINCE,
+  EMPRESAS_BURST_COUNT_UNTIL,
+  EMPRESAS_BURST_SCHEDULER,
   EMPRESAS_OUTREACH_BATCH,
   EMPRESAS_OUTREACH_EMAIL_PASS,
   EMPRESAS_OUTREACH_PASS,
@@ -41,6 +44,7 @@ import {
   nextWhatsAppNeed,
   passLimit,
   remainingForQuota,
+  resolveEmpresasBurst,
   resolveEmpresasSendWindow,
   shouldContinueWhatsAppQuota,
   toBase64Url,
@@ -60,6 +64,10 @@ function verifyApiKey(req: Request): boolean {
 const DELAY_WA_MS = 3_000;
 const DELAY_EMAIL_MS = 400;
 const TIME_BUDGET_MS = 120_000;
+
+function isProviderLimit(error: string | undefined): boolean {
+  return /429|rate|quota|too many|throughput|131056|130429|limit exceeded/i.test(error ?? '');
+}
 
 type SupabaseClient = ReturnType<typeof getServiceClient>;
 
@@ -335,10 +343,21 @@ Deno.serve(async (req) => {
     const limit = Math.min(Math.max(Number(body.limit) || EMPRESAS_OUTREACH_EMAIL_PASS, 1), EMPRESAS_OUTREACH_EMAIL_PASS);
     const doWa = channel === 'whatsapp' || channel === 'both';
     const doEmail = channel === 'email' || channel === 'both';
+    const schedulerName = body.schedulerName ?? null;
+    const burst = resolveEmpresasBurst({
+      schedulerName,
+      waCap: body.waCap,
+      emailCap: body.emailCap,
+    });
+    if (String(schedulerName ?? '') === EMPRESAS_BURST_SCHEDULER && !burst) {
+      return jsonResponse({
+        error: 'Burst inválido: waCap (0–495) y emailCap (0–1809) explícitos, y no ambos en cero.',
+      }, 400);
+    }
     const supabase = getServiceClient();
     const started = Date.now();
     const now = new Date();
-    if (!dryRun && !isEmpresasSendAllowed(now)) {
+    if (!dryRun && !burst && !isEmpresasSendAllowed(now)) {
       return jsonResponse({
         success: true,
         skipped: 'outside_schedule',
@@ -361,10 +380,18 @@ Deno.serve(async (req) => {
           emailSkipped: 0,
           emailSkippedNoSecrets: 0,
         },
-        schedulerName: body.schedulerName ?? null,
+        schedulerName,
       });
     }
-    const sendWindow = resolveEmpresasSendWindow(now);
+    const sendWindow = burst
+      ? {
+        label: 'burst' as const,
+        startIso: EMPRESAS_BURST_COUNT_SINCE,
+        endIso: EMPRESAS_BURST_COUNT_UNTIL,
+      }
+      : resolveEmpresasSendWindow(now);
+    const quotaWa = burst ? burst.waCap : EMPRESAS_OUTREACH_BATCH;
+    const quotaEmail = burst ? burst.emailCap : EMPRESAS_OUTREACH_BATCH;
     const waAlready = await countSentInWindow(
       supabase,
       'last_wa_at',
@@ -379,8 +406,8 @@ Deno.serve(async (req) => {
       sendWindow.startIso,
       sendWindow.endIso,
     );
-    const remainingWa = remainingForQuota(EMPRESAS_OUTREACH_BATCH, waAlready);
-    const remainingEmail = remainingForQuota(EMPRESAS_OUTREACH_BATCH, emailAlready);
+    const remainingWa = remainingForQuota(quotaWa, waAlready);
+    const remainingEmail = remainingForQuota(quotaEmail, emailAlready);
     const waTarget = doWa ? passLimit(remainingWa, limit, EMPRESAS_OUTREACH_PASS) : 0;
     const emailTarget = doEmail
       ? Math.min(remainingEmail, Math.max(0, limit), EMPRESAS_OUTREACH_EMAIL_PASS)
@@ -412,9 +439,12 @@ Deno.serve(async (req) => {
         remainingWa,
         remainingEmail,
         stats,
-        schedulerName: body.schedulerName ?? null,
+        schedulerName,
+        burst: burst != null,
       });
     }
+
+    let halt: string | null = null;
 
     if (doWa) {
       if (dryRun) {
@@ -432,6 +462,7 @@ Deno.serve(async (req) => {
         const graph = getGraphCredentials(BOT_PHONE_NUMBER_ID);
         assertBotOnlyAutomation(graph.phoneNumberId);
         while (
+          !halt &&
           shouldContinueWhatsAppQuota({
             target: waTarget,
             sent: stats.waSent,
@@ -449,6 +480,7 @@ Deno.serve(async (req) => {
           if (rows.length === 0) break;
           stats.waRounds += 1;
           for (const row of rows) {
+            if (halt) break;
             if (Date.now() - started > TIME_BUDGET_MS) break;
             if (stats.waAttempts >= EMPRESAS_WA_ATTEMPT_CAP) break;
             const result = await sendWhatsAppOne(supabase, graph, row);
@@ -456,6 +488,10 @@ Deno.serve(async (req) => {
             if (result.status === 'sent') stats.waSent += 1;
             else if (result.status === 'failed') stats.waFailed += 1;
             else stats.waSkipped += 1;
+            if (burst && result.status === 'failed' && isProviderLimit(result.error)) {
+              halt = result.error ?? 'Meta limit';
+              break;
+            }
             await sleep(DELAY_WA_MS);
           }
         }
@@ -478,11 +514,16 @@ Deno.serve(async (req) => {
             stats.emailSkippedNoSecrets = rows.length;
           } else {
             for (const row of rows) {
+              if (halt) break;
               if (Date.now() - started > TIME_BUDGET_MS) break;
               const result = await sendEmailOne(supabase, gmail, row);
               if (result.status === 'sent') stats.emailSent += 1;
               else if (result.status === 'failed') stats.emailFailed += 1;
               else stats.emailSkipped += 1;
+              if (burst && result.status === 'failed' && isProviderLimit(result.error)) {
+                halt = result.error ?? 'Gmail limit';
+                break;
+              }
               await sleep(DELAY_EMAIL_MS);
             }
           }
@@ -500,11 +541,13 @@ Deno.serve(async (req) => {
       window: sendWindow,
       waSentInWindow,
       emailSentInWindow,
-      remainingWa: remainingForQuota(EMPRESAS_OUTREACH_BATCH, waSentInWindow),
-      remainingEmail: remainingForQuota(EMPRESAS_OUTREACH_BATCH, emailSentInWindow),
+      remainingWa: remainingForQuota(quotaWa, waSentInWindow),
+      remainingEmail: remainingForQuota(quotaEmail, emailSentInWindow),
       secretsOk: stats.emailSkippedNoSecrets === 0,
       stats,
-      schedulerName: body.schedulerName ?? null,
+      schedulerName,
+      burst: burst != null,
+      halt,
     });
   } catch (error) {
     if (error instanceof Response) return error;

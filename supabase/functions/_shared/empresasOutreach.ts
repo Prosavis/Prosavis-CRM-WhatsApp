@@ -13,6 +13,34 @@ export const EMPRESAS_OUTREACH_BATCH = 100;
 export const EMPRESAS_OUTREACH_PASS = 20;
 /** Tope email por invocación Edge (2–3 pases cierran 100). */
 export const EMPRESAS_OUTREACH_EMAIL_PASS = 50;
+/** Un solo adelanto. No lo usa el cron. Topes duros: 495 WA y 1.809 correos. */
+export const EMPRESAS_BURST_SCHEDULER = 'manual-burst-2026-09-22';
+export const EMPRESAS_BURST_WA_CAP = 495;
+export const EMPRESAS_BURST_EMAIL_CAP = 1809;
+/** Después del lote 08:00 de hoy. Lo enviado desde aquí cuenta contra el burst, no contra la cuota de 100. */
+export const EMPRESAS_BURST_COUNT_SINCE = '2026-09-22T15:30:00.000Z';
+/** Hasta el 23/09 08:00 Bogotá, cuando el hold del cron ya venció. */
+export const EMPRESAS_BURST_COUNT_UNTIL = '2026-09-23T13:00:00.000Z';
+
+export type EmpresasBurstRequest = {
+  waCap: number;
+  emailCap: number;
+};
+
+/** Null si no es el burst. El caller rechaza el nombre del burst sin topes válidos. */
+export function resolveEmpresasBurst(input: {
+  schedulerName?: unknown;
+  waCap?: unknown;
+  emailCap?: unknown;
+}): EmpresasBurstRequest | null {
+  if (String(input.schedulerName ?? '') !== EMPRESAS_BURST_SCHEDULER) return null;
+  const waCap = Number(input.waCap);
+  const emailCap = Number(input.emailCap);
+  if (!Number.isInteger(waCap) || waCap < 0 || waCap > EMPRESAS_BURST_WA_CAP) return null;
+  if (!Number.isInteger(emailCap) || emailCap < 0 || emailCap > EMPRESAS_BURST_EMAIL_CAP) return null;
+  if (waCap === 0 && emailCap === 0) return null;
+  return { waCap, emailCap };
+}
 
 const BOGOTA_OFFSET = '-05:00';
 

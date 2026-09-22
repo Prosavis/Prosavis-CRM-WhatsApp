@@ -2,11 +2,15 @@ import { assertEquals, assertStringIncludes } from 'jsr:@std/assert';
 import {
   buildDirectoryUpsert,
   composeEmpresasWhatsApp,
+  EMPRESAS_BURST_EMAIL_CAP,
+  EMPRESAS_BURST_SCHEDULER,
+  EMPRESAS_BURST_WA_CAP,
   empresasWindowLabelsForDay,
   isEmpresasSendAllowed,
   nextWhatsAppNeed,
   passLimit,
   remainingForQuota,
+  resolveEmpresasBurst,
   resolveEmpresasSendWindow,
   sectorHookFromCiiu,
   shouldContinueWhatsAppQuota,
@@ -131,4 +135,22 @@ Deno.test('resolveEmpresasSendWindow uses Bogotá 08:00 / 12:30 / 18:00', () => 
   assertEquals(evening.label, '18:00');
   const beforeOpen = resolveEmpresasSendWindow(new Date('2026-09-02T12:00:00.000Z'));
   assertEquals(beforeOpen.label, '18:00');
+});
+
+Deno.test('burst only accepts the named scheduler and explicit caps', () => {
+  assertEquals(resolveEmpresasBurst({ schedulerName: 'sendEmpresasOutreach.08:00', waCap: 495, emailCap: 1809 }), null);
+  assertEquals(resolveEmpresasBurst({ schedulerName: EMPRESAS_BURST_SCHEDULER, waCap: 496, emailCap: 100 }), null);
+  assertEquals(resolveEmpresasBurst({ schedulerName: EMPRESAS_BURST_SCHEDULER, waCap: 495, emailCap: 1810 }), null);
+  assertEquals(resolveEmpresasBurst({ schedulerName: EMPRESAS_BURST_SCHEDULER, waCap: 0, emailCap: 0 }), null);
+  assertEquals(resolveEmpresasBurst({ schedulerName: EMPRESAS_BURST_SCHEDULER }), null);
+  assertEquals(
+    resolveEmpresasBurst({ schedulerName: EMPRESAS_BURST_SCHEDULER, waCap: EMPRESAS_BURST_WA_CAP, emailCap: 1200 }),
+    { waCap: 495, emailCap: 1200 },
+  );
+  assertEquals(
+    resolveEmpresasBurst({ schedulerName: EMPRESAS_BURST_SCHEDULER, waCap: 495, emailCap: EMPRESAS_BURST_EMAIL_CAP }),
+    { waCap: 495, emailCap: 1809 },
+  );
+  assertEquals(remainingForQuota(100, 100), 0);
+  assertEquals(passLimit(remainingForQuota(495, 480), 50, 20), 15);
 });
