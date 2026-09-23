@@ -52,26 +52,32 @@ function finiteCoord(value: number | null | undefined): number | null {
   return value;
 }
 
+function usablePair(
+  latitude: number | null,
+  longitude: number | null,
+): { lat: number; lng: number } | null {
+  if (latitude == null || longitude == null) return null;
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null;
+  if (latitude === 0 && longitude === 0) return null;
+  return { lat: latitude, lng: longitude };
+}
+
 export function resolveHeatmapPoint(
   booking: HeatmapBookingInput,
   preferGps: boolean,
 ): { lat: number; lng: number; source: HeatmapPointSource } | null {
-  const startLat = finiteCoord(booking.startLatitude);
-  const startLng = finiteCoord(booking.startLongitude);
-  const addrLat = finiteCoord(booking.addressLatitude);
-  const addrLng = finiteCoord(booking.addressLongitude);
-  if (preferGps && startLat != null && startLng != null) {
-    return { lat: startLat, lng: startLng, source: 'gps' };
-  }
-  if (!preferGps && addrLat != null && addrLng != null) {
-    return { lat: addrLat, lng: addrLng, source: 'address' };
-  }
-  if (preferGps && addrLat != null && addrLng != null) {
-    return null;
-  }
-  if (startLat != null && startLng != null) {
-    return { lat: startLat, lng: startLng, source: 'gps' };
-  }
+  const start = usablePair(
+    finiteCoord(booking.startLatitude),
+    finiteCoord(booking.startLongitude),
+  );
+  const address = usablePair(
+    finiteCoord(booking.addressLatitude),
+    finiteCoord(booking.addressLongitude),
+  );
+  if (preferGps && start) return { ...start, source: 'gps' };
+  if (!preferGps && address) return { ...address, source: 'address' };
+  if (preferGps && address) return null;
+  if (start) return { ...start, source: 'gps' };
   return null;
 }
 
@@ -80,12 +86,14 @@ export function coverageForBookings(bookings: HeatmapBookingInput[]): HeatmapCov
   let withAddressOnly = 0;
   let withoutPoint = 0;
   for (const booking of bookings) {
-    const hasGps =
-      finiteCoord(booking.startLatitude) != null &&
-      finiteCoord(booking.startLongitude) != null;
-    const hasAddress =
-      finiteCoord(booking.addressLatitude) != null &&
-      finiteCoord(booking.addressLongitude) != null;
+    const hasGps = usablePair(
+      finiteCoord(booking.startLatitude),
+      finiteCoord(booking.startLongitude),
+    ) != null;
+    const hasAddress = usablePair(
+      finiteCoord(booking.addressLatitude),
+      finiteCoord(booking.addressLongitude),
+    ) != null;
     if (hasGps) withGps += 1;
     else if (hasAddress) withAddressOnly += 1;
     else withoutPoint += 1;

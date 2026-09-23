@@ -56,6 +56,38 @@ Deno.test('coverageForBookings splits GPS, address-only and missing', () => {
   });
 });
 
+Deno.test('resolveHeatmapPoint rejects the (0, 0) sentinel', () => {
+  const point = resolveHeatmapPoint(
+    {
+      ...booking,
+      startLatitude: 0,
+      startLongitude: 0,
+      addressLatitude: 0,
+      addressLongitude: 0,
+    },
+    false,
+  );
+  assertEquals(point, null);
+});
+
+Deno.test('coverageForBookings counts (0, 0) as missing', () => {
+  const coverage = coverageForBookings([
+    {
+      ...booking,
+      startLatitude: 0,
+      startLongitude: 0,
+      addressLatitude: 0,
+      addressLongitude: 0,
+    },
+  ]);
+  assertEquals(coverage, {
+    total: 1,
+    withGps: 0,
+    withAddressOnly: 0,
+    withoutPoint: 1,
+  });
+});
+
 Deno.test('buildAppointmentHeatmap keeps city centroids out of GPS mode', () => {
   const result = buildAppointmentHeatmap({
     preferGps: true,

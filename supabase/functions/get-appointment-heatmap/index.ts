@@ -20,6 +20,28 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function asCoord(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function textField(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function appointmentDetail(row: Record<string, unknown>) {
+  const address = [textField(row.location_address), textField(row.barrio), textField(row.comuna)]
+    .filter((part): part is string => Boolean(part))
+    .join(' · ');
+  return {
+    clientName: textField(row.client_name),
+    address: address || null,
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return strictPreflightResponse(req);
 
@@ -76,6 +98,7 @@ Deno.serve(async (req) => {
     }
 
     const layerByAppointment = new Map<string, QualityLayer>();
+    const detailByAppointment = new Map<string, ReturnType<typeof appointmentDetail>>();
     const bookings: HeatmapBookingInput[] = [];
     for (const raw of pointsRaw ?? []) {
       const row = asRecord(raw);
@@ -88,14 +111,15 @@ Deno.serve(async (req) => {
         || 'standard';
       if (layerFilter && layer !== layerFilter) continue;
       layerByAppointment.set(appointmentId, layer);
+      detailByAppointment.set(appointmentId, appointmentDetail(row));
       bookings.push({
         appointmentId,
         status: String(row.status ?? ''),
         scheduledStart: typeof row.scheduled_start === 'string' ? row.scheduled_start : null,
-        startLatitude: typeof row.start_latitude === 'number' ? row.start_latitude : Number(row.start_latitude),
-        startLongitude: typeof row.start_longitude === 'number' ? row.start_longitude : Number(row.start_longitude),
-        addressLatitude: typeof row.latitude === 'number' ? row.latitude : Number(row.latitude),
-        addressLongitude: typeof row.longitude === 'number' ? row.longitude : Number(row.longitude),
+        startLatitude: asCoord(row.start_latitude),
+        startLongitude: asCoord(row.start_longitude),
+        addressLatitude: asCoord(row.latitude),
+        addressLongitude: asCoord(row.longitude),
         clientPhone: typeof row.client_phone === 'string' ? row.client_phone : null,
         clientId,
       });
@@ -106,9 +130,14 @@ Deno.serve(async (req) => {
       layerByAppointment,
       preferGps,
     });
+    const points = heatmap.points.map((point) => ({
+      ...point,
+      ...detailByAppointment.get(point.id),
+    }));
 
     return strictJsonResponse(req, {
       ...heatmap,
+      points,
       coverage: summary.coverage,
       daily: summary.daily,
       source: preferGps ? 'gps' : 'address',
