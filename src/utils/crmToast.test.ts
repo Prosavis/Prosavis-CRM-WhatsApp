@@ -9,8 +9,8 @@ import {
 } from './crmToast';
 
 describe('crmToast fills', () => {
-  it('defaults toasts to bottom-center', () => {
-    expect(CRM_TOAST_POSITION).toBe('bottom-center');
+  it('defaults toasts to top-center', () => {
+    expect(CRM_TOAST_POSITION).toBe('top-center');
   });
 
   it('uses a light surface and tinted severity fills in day mode', () => {

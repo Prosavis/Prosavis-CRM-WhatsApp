@@ -2,7 +2,7 @@ import { sileo } from 'sileo';
 import { inboxLineHex } from '@/utils/inboxLineVisual';
 import type { WhatsAppLineId } from '@/utils/whatsappLines';
 
-export const CRM_TOAST_POSITION = 'bottom-center' as const;
+export const CRM_TOAST_POSITION = 'top-center' as const;
 
 export type CrmToastMode = 'light' | 'dark';
 export type CrmToastSeverity = 'success' | 'error' | 'warning' | 'info';
