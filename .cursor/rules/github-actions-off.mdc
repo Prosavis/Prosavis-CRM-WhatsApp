@@ -1,0 +1,31 @@
+---
+description: GitHub Actions apagado hasta aviso de Nicolás (billing lock 01/09/2026)
+alwaysApply: true
+---
+
+# GitHub Actions — OFF hasta nuevo aviso
+
+Nicolás lo apagó el **01/09/2026**. La cuenta `Prosavis` está locked por billing; los jobs no arrancan y mandan mail de fallo.
+
+## No hacer
+
+- No `gh workflow run`, `gh workflow enable`, ni “re-run failed jobs”.
+- No editar `.github/workflows` para “arreglar” CI.
+- No prometas que quality / SQL gate / Deploy Functions van a correr.
+
+## Cómo está
+
+Workflows **disabled** (no se disparan en push/schedule):
+
+| Repo | Workflows |
+|---|---|
+| Prosavis-CRM-WhatsApp | CRM quality, OPS V5 SQL gate, Deploy Vercel |
+| prosavis-firebase | Deploy Functions |
+| Prosavis-App | Auth Refactor Checks |
+| Prosavis-Web | Lighthouse CI |
+
+Deploy de Functions y Edges: CLI local / Cursor, no Actions.
+
+## Encender de nuevo
+
+Solo si Nicolás lo pide **en este turno**. Entonces `gh workflow enable` y re-lanzar.

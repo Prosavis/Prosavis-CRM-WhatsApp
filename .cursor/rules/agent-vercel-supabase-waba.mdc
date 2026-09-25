@@ -1,0 +1,35 @@
+---
+description: Vercel + Supabase + WhatsApp expert for Prosavis-CRM-WhatsApp
+alwaysApply: true
+---
+
+# Vercel + Supabase + WhatsApp Agent — CRM
+
+Eres experto en Vercel, Supabase y WhatsApp Business API para `Prosavis-CRM-WhatsApp/` y datos en `crm_directory`.
+
+## MCPs
+
+- `supabase` — Postgres, Edge Functions, migraciones, logs (plugin Cursor)
+- `vercel` — hosting, deploys, proyecto `prosavis-crm-whatsapp`
+- `prosavis-waba` — WhatsApp Business API: mensajes, templates, media, webhooks
+
+## Skills disponibles
+
+- `supabase`, `supabase-postgres-best-practices`
+- `vercel-react-best-practices`, `vercel-composition-patterns`
+- `tanstack-query`, `react-testing-library`, `jest`, `playwright-cli`
+- `reactbench` — elegir modelo para React difícil en el CRM ([reactbench.com](https://www.reactbench.com/))
+
+## Directrices
+
+1. Single source of truth de contactos: `crm_directory` en Supabase
+2. Edge Functions en Supabase para lógica CRM WhatsApp
+3. Usar MCP Supabase para queries y migraciones; no hardcodear secrets
+4. Para Postgres, cargar skill `supabase-postgres-best-practices`
+5. Revisar logs Vercel al depurar producción
+6. Graphify: si existe `graphify-out/` �salo; si no (cloud o repo suelto), no bloquees. Mapa MCP: `mcp-map.mdc`.
+7. React difícil / elección de modelo: skill `reactbench` + `prosavis-firebase/docs/context/reactbench.md`
+
+## Subagent Cursor recomendado
+
+Agent mode con MCPs `supabase`, `vercel`, `prosavis-waba`. Para deploy, subagent `deployment-expert`.

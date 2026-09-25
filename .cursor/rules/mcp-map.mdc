@@ -1,0 +1,20 @@
+---
+description: Qué MCP usar en Prosavis (firebase, supabase, vercel, waba, grok-ops, Gmail) y no mezclar cuentas
+alwaysApply: false
+---
+
+# MCP — mapa corto
+
+Casa: `prosavis-firebase/docs/desarrollo/mcp-setup.md`.
+
+| Trabajo | MCP |
+| --- | --- |
+| Firebase Functions, Firestore, Auth, Hosting | `firebase` |
+| CRM Postgres, migraciones, Edge | `supabase` |
+| Deploys CRM / web | `vercel` |
+| Templates y mensajes WABA | `prosavis-waba` |
+| Ops suite (citas, inbox, From comercial@, finanzas) | `grok-ops-mcp` con el `bot_role` de la tool |
+| Inbox support@ (etiquetas, clasificar) | plugin Gmail. No tiene campo `from`. |
+| Inbox plataforma («organiza 28») | `user-gmail-28`. No mezclar IDs con el plugin. No `mcp_auth` del plugin para esa cuenta. |
+
+No re-autenticar a `prosavis28@` ni a otra cuenta para cambiar el From. No pegar secrets en el chat ni en rules.

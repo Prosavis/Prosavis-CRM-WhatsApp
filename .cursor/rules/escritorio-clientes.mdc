@@ -1,0 +1,14 @@
+---
+description: Escritorio Clientes de Prosavis Limpieza — ficha crm_directory, inbox WhatsApp, citas, notas y cobros. Usar cuando pregunten por un cliente, citas de una semana, inbox, notas o este chat Clientes.
+alwaysApply: false
+---
+
+# Escritorio Clientes — Prosavis Limpieza
+
+Leer e invocar la skill `clientes-limpieza` y el playbook `prosavis-firebase/docs/context/clientes-escritorio.md`.
+
+- Reloj `America/Bogota`. Servicio `nwEMgpEqVwY3o95u3PNE`. No inventar COP.
+- `bot_role` por tool. Escritura: `confirm_ok` + `user_order` de este turno.
+- SSOT: directorio = Supabase `crm_directory`; citas = Firestore `appointments`; WhatsApp = packer `crm_booking_context`.
+- Notas: A ficha permanente (`internal_notes`), C hilo (`admin_notes`), D visita (cita). No duplicar. Cero sufijos Grok/Cursor.
+- 2+ matches de nombre → listar y parar. Brief de agenda = hechos; el calendario no aplica solo; nivel 2/3 bloqueado. Francy no sugerir; Jennifer última opción.

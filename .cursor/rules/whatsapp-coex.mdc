@@ -1,0 +1,10 @@
+---
+description: Coex WhatsApp 311 — no vincular historial ni agenda Meta (history, smb_app_data, smb_app_state_sync, re-onboard)
+alwaysApply: false
+---
+
+# Coex 311 — no historial
+
+No vincular historial ni agenda Meta. No suscribir ni disparar `history`, `smb_app_data` (`sync_type: history`), `smb_app_state_sync`, ni re-onboard / Disconnect para recuperar historial.
+
+Decisión permanente: `prosavis-firebase/docs/context/whatsapp-coex-no-historial.md`.

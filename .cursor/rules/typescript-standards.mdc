@@ -1,0 +1,10 @@
+---
+description: Imports al inicio del módulo y switch exhaustivo en uniones TypeScript
+globs: "**/*.{ts,tsx}"
+alwaysApply: false
+---
+
+# TypeScript
+
+- Imports al inicio del archivo. Sin imports inline en funciones, anotaciones o campos, salvo dependencia circular documentada.
+- En `switch` sobre uniones discriminadas o enums, el `default` asigna el valor a `never` para que una variante nueva falle en compilación.

@@ -1,0 +1,33 @@
+---
+description: Rama de trabajo por repo; feature branches solo en implementaciones grandes de Prosavis-App
+alwaysApply: true
+---
+
+# Flujo de ramas por repo
+
+Salvo que el usuario pida **explícitamente** otra cosa (hotfix paralelo, PR desde rama aparte):
+
+## Rama de trabajo por repo
+
+| Repo | Rama de trabajo |
+|------|-----------------|
+| **Prosavis-App** | `develop` (diario). `master` solo en release. `feature/<slug>` solo si la implementación es grande; merge a `develop` y borrar. |
+| **prosavis-firebase** | `main` |
+| Otros (Panel, Web, UserConsole, CRM) | `main` / `master` según `origin/HEAD` |
+
+## Prosavis-App (multiplataforma)
+
+- Un solo código para web, iOS y Android. No hay ramas por plataforma.
+- Diario: commits y PRs contra `develop`.
+- Implementación grande: `feature/<slug>` desde `develop` → probar → merge a `develop` → borrar la feature.
+- Release: merge `develop` → `master`, bump, tag `vX.Y.Z` en `master`, deploy.
+- **No recrear** `android/dev`, `android/prod`, `ios/dev`, `ios/prod`, `web`, `IOS-dev` ni `IOS-prod`.
+- Detalle: `Prosavis-App/docs/GIT_BRANCHING.md`.
+
+## Otros repos
+
+1. Commits, pushes y PRs van contra la rama de trabajo de la tabla.
+2. **No crees** ramas `feature/`, `fix/`, `chore/`, etc. salvo pedido explícito.
+3. Si hay WIP en otra rama, intégralo a la de trabajo y elimina la rama extra cuando ya no haga falta.
+
+Si el usuario dice "haz una rama" / "abre PR desde feature" / "sube a master", respeta esa excepción solo para esa tarea.

@@ -1,0 +1,20 @@
+---
+description: Cuando Nicolás diga «organiza mis emails», clasifica / vacía inbox / llegaron mails raros — clasificar Gmail support@, etiquetar, tagear CRM solo si aplica, y actualizar docs.
+alwaysApply: false
+---
+
+# Organiza mis emails
+
+Playbook canónico **`support@`**: `publicidad/docs/messaging/gmail-estructura.md` (sección «organiza mis emails»). DSN: `publicidad/docs/messaging/mail-marketing-mcp.md`. Lote vigente: `publicidad/docs/messaging/lote-2026-08-26-promo-pro.md`.
+
+Si Nicolás dice **«organiza 28»** / inbox de plataforma: `user-gmail-28` + `publicidad/docs/messaging/gmail-28.md`. No mezclar IDs. No `mcp_auth` del plugin.
+
+1. Leer las 12 etiquetas y sus IDs. **No crear** etiquetas. `label_thread` usa `labelIds` (array).
+2. `search_threads`: `in:inbox`, `is:unread newer_than:2d`, `from:mailer-daemon newer_than:2d`.
+3. Etiquetar. Quitar `INBOX` y `UNREAD` solo al ruido (Failure, Delay, calendario, SaaS, CV, OTP). Respuesta humana y correspondencia oficial se quedan en el inbox. BAJA va a la carpeta **Bajas** (`Label_4`) y sale del inbox. No vaciar Spam/Trash. No reenviar `promo_pro`.
+4. CRM: **Failure** (5.x.x) → merge SQL `email bounce`. **Delay** (4.x.x) → no bounce. **BAJA** → `opt_out=true` y etiqueta Gmail `Label_4`. Nunca `crm_set_tags`.
+5. Actualizar `gmail-estructura.md` + lote/contexto de la oleada. Ficha de cliente solo si hay respuesta humana, BAJA, factura o cuenta nombrada (Detektor, etc.). No una nota por cada Delay masivo.
+
+Si Nicolás pide **enviar** un correo (no solo clasificar): preguntar support@ vs comercial@ — `.cursor/rules/gmail-linea-envio.mdc`.
+
+Grok no inventar tags `email fallido` / `failed to be sent`.

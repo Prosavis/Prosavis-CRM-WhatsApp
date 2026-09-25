@@ -1,0 +1,29 @@
+---
+description: Antes de enviar o redactar un correo, preguntar si sale por support@ o por comercial@.
+alwaysApply: true
+---
+
+# Dos líneas de correo (obligatorio preguntar)
+
+Prosavis tiene **dos From** en el mismo Workspace. No son intercambiables.
+
+| Línea | Uso típico (pista, no default) |
+|---|---|
+| `support@prosavis.com` | Ops, peticiones, recibos, Workspace, lo técnico. El plugin Gmail de este PC autentica **esta** cuenta. |
+| `comercial@prosavis.com` | Marca / marketing / cotizaciones a clientes. Alias send-as del mismo buzón. |
+
+El goteo `promo_pro` (26/08) salió por **`support@`** porque el plugin no tiene campo `from`. No asumir que el próximo envío va igual.
+
+## Cada vez que Nicolás pida enviar o redactar un correo
+
+1. **Preguntar antes** (una línea, sin enviar): «¿Lo mando por **support@** o por **comercial@**?»
+2. No elegir en silencio. No usar la pista de la tabla como default.
+3. Esperar su respuesta de **este** turno. Sin línea elegida: borrador como mucho, **no** enviar.
+4. **Cómo poner el From**
+   - Plugin Gmail (`create_draft` / `send_message` / `reply`): **no tiene `from`**. Sale `support@`. Úsalo para inbox, etiquetas y ops 1:1 por support@.
+   - Personalizado / comercial@: **`grok-ops-mcp`** (`bot_role=publicidad` u otro rol con la tool) → `gmail_create_draft` / `gmail_send` / `gmail_send_draft` con `from=comercial@prosavis.com`. Allowlist: solo `support@` o `comercial@`.
+   - Tras un draft del puente, Cursor **sí** puede `send_message(draftId)` del plugin: manda el draft tal cual (From ya puesto).
+5. Lote empresas / cron: From `comercial@` (`GMAIL_OPS_FROM` en Supabase). El 1:1 de Grok sigue preguntando. No fingir From. No re-autenticar a `prosavis28@` ni a otra cuenta para «cambiar el From».
+6. Enviar solo si Nicolás dice **manda** + línea en **ese** turno. Firma Francy si toca.
+
+Casa: `publicidad/docs/messaging/gmail-estructura.md` (§ Dos líneas). Conexión: `publicidad/docs/messaging/conexiones.md`. Puente: `prosavis-firebase/docs/desarrollo/grok-ops-puente.md`.
