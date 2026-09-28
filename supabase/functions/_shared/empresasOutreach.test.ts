@@ -7,6 +7,7 @@ import {
   EMPRESAS_BURST_WA_CAP,
   EMPRESAS_GROK_SCHEDULER,
   EMPRESAS_OUTREACH_EMAIL_DAY_CAP,
+  EMPRESAS_OUTREACH_WA_DAY_CAP,
   empresasBogotaDayBounds,
   empresasWindowLabelsForDay,
   isEmpresasSendAllowed,
@@ -15,6 +16,7 @@ import {
   remainingForQuota,
   resolveEmpresasBurst,
   resolveEmpresasEmailDayCap,
+  resolveEmpresasWaDayCap,
   resolveEmpresasSendWindow,
   sectorHookFromCiiu,
   shouldContinueWhatsAppQuota,
@@ -188,4 +190,32 @@ Deno.test('email day cap is only the grok email tool, not the cron', () => {
   const bounds = empresasBogotaDayBounds(new Date('2026-09-28T15:07:00.000Z'));
   assertEquals(bounds.startIso, '2026-09-28T05:00:00.000Z');
   assertEquals(bounds.endIso, '2026-09-29T05:00:00.000Z');
+});
+
+Deno.test('whatsapp day cap is only the grok whatsapp tool, not the cron', () => {
+  assertEquals(resolveEmpresasWaDayCap({
+    schedulerName: 'sendEmpresasOutreach.18:00',
+    channel: 'whatsapp',
+    waDayCap: 902,
+  }), null);
+  assertEquals(resolveEmpresasWaDayCap({
+    schedulerName: EMPRESAS_GROK_SCHEDULER,
+    channel: 'email',
+    waDayCap: 902,
+  }), null);
+  assertEquals(resolveEmpresasWaDayCap({
+    schedulerName: EMPRESAS_GROK_SCHEDULER,
+    channel: 'both',
+    waDayCap: 902,
+  }), null);
+  assertEquals(resolveEmpresasWaDayCap({
+    schedulerName: EMPRESAS_GROK_SCHEDULER,
+    channel: 'whatsapp',
+    waDayCap: EMPRESAS_OUTREACH_WA_DAY_CAP + 1,
+  }), null);
+  assertEquals(resolveEmpresasWaDayCap({
+    schedulerName: EMPRESAS_GROK_SCHEDULER,
+    channel: 'whatsapp',
+    waDayCap: 902,
+  }), 902);
 });

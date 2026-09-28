@@ -48,6 +48,7 @@ import {
   resolveEmpresasBurst,
   resolveEmpresasEmailDayCap,
   resolveEmpresasSendWindow,
+  resolveEmpresasWaDayCap,
   shouldContinueWhatsAppQuota,
   toBase64Url,
   type EmpresasLeadRow,
@@ -356,6 +357,11 @@ Deno.serve(async (req) => {
       channel,
       emailDayCap: body.emailDayCap,
     });
+    const waDayCap = resolveEmpresasWaDayCap({
+      schedulerName,
+      channel,
+      waDayCap: body.waDayCap,
+    });
     if (String(schedulerName ?? '') === EMPRESAS_BURST_SCHEDULER && !burst) {
       return jsonResponse({
         error: 'Burst inválido: waCap (0–495) y emailCap (0–1809) explícitos, y no ambos en cero.',
@@ -397,17 +403,20 @@ Deno.serve(async (req) => {
         endIso: EMPRESAS_BURST_COUNT_UNTIL,
       }
       : resolveEmpresasSendWindow(now);
-    const quotaWa = burst ? burst.waCap : EMPRESAS_OUTREACH_BATCH;
+    const quotaWa = waDayCap ?? (burst ? burst.waCap : EMPRESAS_OUTREACH_BATCH);
     const quotaEmail = emailDayCap ?? (burst ? burst.emailCap : EMPRESAS_OUTREACH_BATCH);
     const emailBounds = emailDayCap != null
+      ? empresasBogotaDayBounds(now)
+      : { startIso: sendWindow.startIso, endIso: sendWindow.endIso };
+    const waBounds = waDayCap != null
       ? empresasBogotaDayBounds(now)
       : { startIso: sendWindow.startIso, endIso: sendWindow.endIso };
     const waAlready = await countSentInWindow(
       supabase,
       'last_wa_at',
       'wa_status',
-      sendWindow.startIso,
-      sendWindow.endIso,
+      waBounds.startIso,
+      waBounds.endIso,
     );
     const emailAlready = await countSentInWindow(
       supabase,
@@ -498,7 +507,7 @@ Deno.serve(async (req) => {
             if (result.status === 'sent') stats.waSent += 1;
             else if (result.status === 'failed') stats.waFailed += 1;
             else stats.waSkipped += 1;
-            if (burst && result.status === 'failed' && isProviderLimit(result.error)) {
+            if ((burst || waDayCap != null) && result.status === 'failed' && isProviderLimit(result.error)) {
               halt = result.error ?? 'Meta limit';
               break;
             }
