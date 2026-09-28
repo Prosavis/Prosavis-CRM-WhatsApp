@@ -13,6 +13,10 @@ export const EMPRESAS_OUTREACH_BATCH = 100;
 export const EMPRESAS_OUTREACH_PASS = 20;
 /** Tope email por invocación Edge (2–3 pases cierran 100). */
 export const EMPRESAS_OUTREACH_EMAIL_PASS = 50;
+/** Tool Grok/Cursor. El cron usa sendEmpresasOutreach.<ventana> y no entra aquí. */
+export const EMPRESAS_GROK_SCHEDULER = 'grokOpsMcp.ops_empresas_outreach';
+/** Tope Workspace del día para el correo de la tool. El cron sigue en 100 por ventana. */
+export const EMPRESAS_OUTREACH_EMAIL_DAY_CAP = 2000;
 /** Un solo adelanto. No lo usa el cron. Topes duros: 495 WA y 1.809 correos. */
 export const EMPRESAS_BURST_SCHEDULER = 'manual-burst-2026-09-22';
 export const EMPRESAS_BURST_WA_CAP = 495;
@@ -40,6 +44,31 @@ export function resolveEmpresasBurst(input: {
   if (!Number.isInteger(emailCap) || emailCap < 0 || emailCap > EMPRESAS_BURST_EMAIL_CAP) return null;
   if (waCap === 0 && emailCap === 0) return null;
   return { waCap, emailCap };
+}
+
+/**
+ * Cuota del día para un run_next de correo. Null = el cron o un pase normal (cuota 100 de la ventana).
+ * WhatsApp no usa este tope.
+ */
+export function resolveEmpresasEmailDayCap(input: {
+  schedulerName?: unknown;
+  channel?: unknown;
+  emailDayCap?: unknown;
+}): number | null {
+  if (String(input.schedulerName ?? '') !== EMPRESAS_GROK_SCHEDULER) return null;
+  if (String(input.channel ?? '').trim().toLowerCase() !== 'email') return null;
+  const cap = Number(input.emailDayCap);
+  if (!Number.isInteger(cap) || cap < 1 || cap > EMPRESAS_OUTREACH_EMAIL_DAY_CAP) return null;
+  return cap;
+}
+
+/** Día calendario Bogotá [00:00, 24:00). El cierre de correo cuenta contra esto, no contra la ventana de 100. */
+export function empresasBogotaDayBounds(now: Date): { startIso: string; endIso: string } {
+  const { ymd } = bogotaYmdHm(now);
+  return {
+    startIso: bogotaInstant(ymd, '00:00'),
+    endIso: bogotaInstant(addCalendarDays(ymd, 1), '00:00'),
+  };
 }
 
 const BOGOTA_OFFSET = '-05:00';

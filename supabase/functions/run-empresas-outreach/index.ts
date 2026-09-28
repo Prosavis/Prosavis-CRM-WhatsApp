@@ -33,6 +33,7 @@ import {
   EMPRESAS_OUTREACH_BATCH,
   EMPRESAS_OUTREACH_EMAIL_PASS,
   EMPRESAS_OUTREACH_PASS,
+  empresasBogotaDayBounds,
   isEmpresasSendAllowed,
   EMAIL_ENVIADO_TAG,
   EMAIL_ENVIADO_TAG_ID,
@@ -45,6 +46,7 @@ import {
   passLimit,
   remainingForQuota,
   resolveEmpresasBurst,
+  resolveEmpresasEmailDayCap,
   resolveEmpresasSendWindow,
   shouldContinueWhatsAppQuota,
   toBase64Url,
@@ -349,6 +351,11 @@ Deno.serve(async (req) => {
       waCap: body.waCap,
       emailCap: body.emailCap,
     });
+    const emailDayCap = resolveEmpresasEmailDayCap({
+      schedulerName,
+      channel,
+      emailDayCap: body.emailDayCap,
+    });
     if (String(schedulerName ?? '') === EMPRESAS_BURST_SCHEDULER && !burst) {
       return jsonResponse({
         error: 'Burst inválido: waCap (0–495) y emailCap (0–1809) explícitos, y no ambos en cero.',
@@ -391,7 +398,10 @@ Deno.serve(async (req) => {
       }
       : resolveEmpresasSendWindow(now);
     const quotaWa = burst ? burst.waCap : EMPRESAS_OUTREACH_BATCH;
-    const quotaEmail = burst ? burst.emailCap : EMPRESAS_OUTREACH_BATCH;
+    const quotaEmail = emailDayCap ?? (burst ? burst.emailCap : EMPRESAS_OUTREACH_BATCH);
+    const emailBounds = emailDayCap != null
+      ? empresasBogotaDayBounds(now)
+      : { startIso: sendWindow.startIso, endIso: sendWindow.endIso };
     const waAlready = await countSentInWindow(
       supabase,
       'last_wa_at',
@@ -403,8 +413,8 @@ Deno.serve(async (req) => {
       supabase,
       'last_email_at',
       'email_status',
-      sendWindow.startIso,
-      sendWindow.endIso,
+      emailBounds.startIso,
+      emailBounds.endIso,
     );
     const remainingWa = remainingForQuota(quotaWa, waAlready);
     const remainingEmail = remainingForQuota(quotaEmail, emailAlready);
