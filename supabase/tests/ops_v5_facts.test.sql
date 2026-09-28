@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(18);
+select plan(20);
 
 select has_table('public', 'booking_facts', 'booking facts table exists');
 select has_table(
@@ -328,6 +328,36 @@ select is(
   ),
   0.875::numeric,
   'no-entry minutes reduce available capacity'
+);
+
+update public.bookings
+set
+  source_deleted_at = now(),
+  source_revision = 3
+where id = '11111111-1111-4111-8111-111111111111';
+
+select is(
+  (
+    select completed_count
+    from public.daily_ops_rollup
+    where service_id = 'service-facts-test'
+      and operational_date =
+        (now() at time zone 'America/Bogota')::date + 1
+  ),
+  0,
+  'soft-deleted completed booking leaves the daily completed count'
+);
+
+select is(
+  (
+    select bookings_count
+    from public.daily_ops_rollup
+    where service_id = 'service-facts-test'
+      and operational_date =
+        (now() at time zone 'America/Bogota')::date + 1
+  ),
+  1,
+  'soft-deleted booking leaves the daily booking count'
 );
 
 select * from finish();
