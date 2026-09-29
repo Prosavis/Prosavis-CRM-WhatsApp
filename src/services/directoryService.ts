@@ -18,6 +18,20 @@ import {
 
 type DirectoryRow = Database['public']['Tables']['crm_directory']['Row'];
 
+const DIRECTORY_SEARCH_URL =
+  'https://us-central1-prosavis.cloudfunctions.net/directorySearchAlgoliaHttp';
+
+export function orderDirectoryEntries(
+  entries: DirectoryEntry[],
+  ids: string[],
+): DirectoryEntry[] {
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  return ids.flatMap((id) => {
+    const entry = byId.get(id);
+    return entry ? [entry] : [];
+  });
+}
+
 /** Tags / tokens de lista negra (alineado con directory_has_blacklist_tag). */
 const BLACKLIST_TAG_VALUES = ['Bloqueado', 'Decline', '🚫'] as const;
 
@@ -481,19 +495,37 @@ export const directoryService = {
   },
 
   /**
-   * Search for directory entries by name, phone, or email.
+   * Typeahead global por nombre, teléfono o correo. Algolia rankea; las filas
+   * salen de Supabase para conservar opt_out y el resto de la ficha.
    */
   async search(query: string) {
-    if (!query.trim()) return [];
-    const term = `%${query.trim()}%`;
-    const { data, error } = await supabase
-      .from('crm_directory')
-      .select('*')
-      .or(`full_name.ilike.${term},phone.ilike.${term},email.ilike.${term},display_name.ilike.${term}`)
-      .order('created_at', { ascending: false })
-      .limit(20);
+    const term = query.trim();
+    if (!term) return [];
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) throw new Error('Sesión de CRM requerida');
+
+    const response = await fetch(DIRECTORY_SEARCH_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ query: term }),
+    });
+    if (!response.ok) throw new Error('No se pudo buscar en el directorio');
+
+    const body = (await response.json()) as { ids?: unknown };
+    const ids = Array.isArray(body.ids)
+      ? body.ids.filter((id): id is string => typeof id === 'string' && id.length > 0)
+      : [];
+    if (ids.length === 0) return [];
+
+    const { data, error } = await supabase.from('crm_directory').select('*').in('id', ids);
     if (error) throw error;
-    return (data ?? []).map((row) => mapRowToEntry(row as DirectoryRow));
+    const entries = (data ?? []).map((row) => mapRowToEntry(row as DirectoryRow));
+    return orderDirectoryEntries(entries, ids);
   },
 
   /**
