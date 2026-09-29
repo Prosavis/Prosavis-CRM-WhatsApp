@@ -90,12 +90,13 @@ import { coloredChipSx } from '@/utils/coloredChipStyles';
 import { formatRelativeColombiaTime } from '@/utils/colombiaTime';
 import { conversationPreviewText } from '@/utils/whatsappCoexStub';
 import {
-  clampInboxListWidth,
-  INBOX_LIST_WIDTH_DEFAULT,
+  clampInboxListRatio,
+  INBOX_LIST_RATIO_DEFAULT,
+  INBOX_LIST_RATIO_MAX,
   INBOX_LIST_WIDTH_KEY,
-  INBOX_LIST_WIDTH_MAX,
   INBOX_LIST_WIDTH_MIN,
-  readStoredInboxListWidth,
+  inboxListWidthForViewport,
+  readStoredInboxListRatio,
 } from '@/utils/whatsappInboxListWidth';
 
 /** Diff applied to each selected conversation: add new tags, remove deselected common tags. */
@@ -414,9 +415,11 @@ const ConversationList: React.FC<ConversationListProps> = ({
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<InboxCategoryId>(readStoredInboxFilter);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readStoredSidebarCollapsed);
-  const [listWidth, setListWidth] = useState(readStoredInboxListWidth);
+  const [listRatio, setListRatio] = useState(readStoredInboxListRatio);
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [resizingList, setResizingList] = useState(false);
-  const listDragRef = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
+  const listDragRef = useRef<{ pointerId: number; startX: number; startRatio: number } | null>(null);
+  const listWidth = inboxListWidthForViewport(listRatio, viewportWidth);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -450,12 +453,18 @@ const ConversationList: React.FC<ConversationListProps> = ({
   }, [sidebarCollapsed]);
 
   useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  useEffect(() => {
     try {
-      localStorage.setItem(INBOX_LIST_WIDTH_KEY, String(listWidth));
+      localStorage.setItem(INBOX_LIST_WIDTH_KEY, listRatio.toFixed(4));
     } catch {
       // localStorage puede estar bloqueado
     }
-  }, [listWidth]);
+  }, [listRatio]);
 
   useEffect(() => {
     if (!resizingList) return;
@@ -475,16 +484,17 @@ const ConversationList: React.FC<ConversationListProps> = ({
     listDragRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
-      startWidth: listWidth,
+      startRatio: listRatio,
     };
     setResizingList(true);
-  }, [listWidth]);
+  }, [listRatio]);
 
   const handleListResizePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const drag = listDragRef.current;
     if (!drag || event.pointerId !== drag.pointerId) return;
-    setListWidth(clampInboxListWidth(drag.startWidth + (event.clientX - drag.startX)));
-  }, []);
+    const deltaRatio = (event.clientX - drag.startX) / Math.max(viewportWidth, 1);
+    setListRatio(clampInboxListRatio(drag.startRatio + deltaRatio));
+  }, [viewportWidth]);
 
   const handleListResizePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (listDragRef.current?.pointerId !== event.pointerId) return;
@@ -496,7 +506,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
   }, []);
 
   const handleListResizeDoubleClick = useCallback(() => {
-    setListWidth(INBOX_LIST_WIDTH_DEFAULT);
+    setListRatio(INBOX_LIST_RATIO_DEFAULT);
   }, []);
 
   const directoryMeta = useDirectoryContactMeta(conversations);
@@ -1415,7 +1425,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
           aria-orientation="vertical"
           aria-label="Ancho de la lista de chats"
           aria-valuemin={INBOX_LIST_WIDTH_MIN}
-          aria-valuemax={INBOX_LIST_WIDTH_MAX}
+          aria-valuemax={Math.max(INBOX_LIST_WIDTH_MIN, Math.round(viewportWidth * INBOX_LIST_RATIO_MAX))}
           aria-valuenow={listWidth}
           onPointerDown={handleListResizePointerDown}
           onPointerMove={handleListResizePointerMove}

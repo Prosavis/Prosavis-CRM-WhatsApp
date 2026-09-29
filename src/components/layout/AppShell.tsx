@@ -25,7 +25,7 @@ export default function AppShell({ children }: PropsWithChildren) {
         maxWidth={false}
         disableGutters
         sx={{
-          maxWidth: 1920,
+          maxWidth: '100%',
           height: phoneLayout ? '100%' : 'auto',
           px: phoneLayout ? 0 : 3,
         }}
