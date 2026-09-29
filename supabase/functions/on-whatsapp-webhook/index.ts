@@ -17,7 +17,7 @@ import {
 import { directoryPhoneKey } from '../_shared/directoryPhone.ts';
 import { REACTIVATION_SEQUENCE } from '../_shared/reactivationCadence.ts';
 import { applyColdFailureTag, removeColdFailureTags } from '../_shared/coldAppUserOutreach.ts';
-import { conversationStableKey } from '../_shared/whatsappLines.ts';
+import { conversationStableKey, envString } from '../_shared/whatsappLines.ts';
 import {
   persistCommercialOrphanStatus,
   processHistory,
@@ -36,6 +36,11 @@ import {
   isReplayUnprocessedRequest,
   replaySinceFromPayload,
 } from '../_shared/whatsappWebhookReplay.ts';
+import { scheduleBackgroundWork } from '../_shared/edgeBackground.ts';
+import {
+  buildFrancyNotice,
+  postFrancyAssistantNotice,
+} from '../_shared/francyAssistantGate.ts';
 
 const encoder = new TextEncoder();
 type JsonRecord = Record<string, unknown>;
@@ -667,6 +672,8 @@ async function processPayload(
         continue;
       }
 
+      const phoneNumberId = getString(asRecord(value.metadata).phone_number_id) || null;
+
       for (const rawMessage of asArray(value.messages)) {
         try {
           const processed = await processInboundMessage({
@@ -677,13 +684,36 @@ async function processPayload(
           });
 
           if (processed === 'duplicate' || processed === 'skipped') result.skippedDuplicates += 1;
-          else if (processed === 'inserted') result.inboundMessages += 1;
+          else if (processed === 'inserted') {
+            result.inboundMessages += 1;
+            const raw = asRecord(rawMessage);
+            const content = getMessageContent(raw);
+            const notice = buildFrancyNotice({
+              field: 'messages',
+              from: getString(raw.from),
+              phoneNumberId,
+              waMessageId: getString(raw.id),
+              messageType: getString(raw.type) || 'text',
+              text: content.messageBody,
+              caption: content.caption,
+              mediaId: content.mediaId,
+              mimeType: content.mimeType,
+              filename: content.filename,
+            });
+            if (notice) {
+              scheduleBackgroundWork(
+                postFrancyAssistantNotice(notice, {
+                  secret: envString('FRANCY_ASSISTANT_WEBHOOK_SECRET'),
+                  url: envString('FRANCY_ASSISTANT_URL'),
+                }),
+                'francy-assistant',
+              );
+            }
+          }
         } catch (error) {
           result.errors.push(`message: ${formatWebhookError(error)}`);
         }
       }
-
-      const phoneNumberId = getString(asRecord(value.metadata).phone_number_id) || null;
 
       for (const rawStatus of asArray(value.statuses)) {
         try {
