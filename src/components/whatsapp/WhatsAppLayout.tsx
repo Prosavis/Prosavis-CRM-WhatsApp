@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Box, Button, Drawer, useMediaQuery } from '@mui/material';
+import { Alert, Box, Button, Drawer } from '@mui/material';
 import { crmToast } from '@/utils/crmToast';
 import { alpha, useTheme } from '@mui/material/styles';
 import ConversationList from './ConversationList';
@@ -201,8 +201,6 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
 }) => {
   const theme = useTheme();
   const isMobile = usePhoneLayout();
-  const belowLarge = useMediaQuery(theme.breakpoints.down('lg'));
-  const dockSidePanels = !isMobile && !belowLarge;
   const { user, profile, session, loading: authLoading } = useAuth();
   const [selectedConversation, setSelectedConversation] = useState<WhatsAppConversation | null>(null);
   const [loadedConversationInbound, setLoadedConversationInbound] =
@@ -1096,36 +1094,22 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
           )}
         </Box>
 
-        {dockSidePanels && showRightColumn && selectedConversation && rightPanel === 'templates' && canShowTemplates && activeWabaId && activePhoneNumberId && (
-          <Box
-            sx={{
-              width: 'clamp(300px, 24vw, 460px)',
-              minWidth: 300,
-              maxWidth: 460,
-              flexShrink: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              minHeight: 0,
-              borderLeft: 1,
-              borderColor: 'divider',
-            }}
-          >
-            <TemplatesSidePanel
-              wabaId={activeWabaId}
-              phoneNumberId={activePhoneNumberId}
-              recipientPhone={recipientPhoneForTemplates}
-              onApplyDraftToComposer={setComposerDraft}
-              snippets={snippets}
-              onSnippetsChanged={loadSnippets}
-              conversationStableKey={selectedConversation.id}
-              conversationDisplayName={contactCtx.displayName ?? undefined}
-              lastInboundAt={templateLastInboundAt}
-              lastMessageDirection={selectedConversation.lastMessageDirection}
-            />
-          </Box>
+        {!isMobile && showRightColumn && selectedConversation && rightPanel === 'templates' && canShowTemplates && activeWabaId && activePhoneNumberId && (
+          <TemplatesSidePanel
+            wabaId={activeWabaId}
+            phoneNumberId={activePhoneNumberId}
+            recipientPhone={recipientPhoneForTemplates}
+            onApplyDraftToComposer={setComposerDraft}
+            snippets={snippets}
+            onSnippetsChanged={loadSnippets}
+            conversationStableKey={selectedConversation.id}
+            conversationDisplayName={contactCtx.displayName ?? undefined}
+            lastInboundAt={templateLastInboundAt}
+            lastMessageDirection={selectedConversation.lastMessageDirection}
+          />
         )}
 
-        {dockSidePanels && showRightColumn && selectedConversation && rightPanel === 'contact' && (
+        {!isMobile && showRightColumn && selectedConversation && rightPanel === 'contact' && (
           <WhatsAppContactSidePanel
             conversation={selectedConversation}
             contact={contactCtx}
@@ -1134,11 +1118,11 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
 
         <Drawer
           anchor="right"
-          open={!dockSidePanels && showRightColumn && rightPanel === 'templates' && canShowTemplates}
+          open={isMobile && showRightColumn && rightPanel === 'templates' && canShowTemplates}
           onClose={() => setRightPanel('none')}
           PaperProps={{
             sx: {
-              width: isMobile ? '100%' : 'min(440px, 92vw)',
+              width: '100%',
               maxWidth: '100%',
               pt: 'var(--crm-safe-top)',
               pb: 'var(--crm-safe-bottom)',
@@ -1168,11 +1152,11 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
 
         <Drawer
           anchor="right"
-          open={!dockSidePanels && showRightColumn && rightPanel === 'contact'}
+          open={isMobile && showRightColumn && rightPanel === 'contact'}
           onClose={() => setRightPanel('none')}
           PaperProps={{
             sx: {
-              width: isMobile ? '100%' : 'min(440px, 92vw)',
+              width: '100%',
               maxWidth: '100%',
               pt: 'var(--crm-safe-top)',
               pb: 'var(--crm-safe-bottom)',

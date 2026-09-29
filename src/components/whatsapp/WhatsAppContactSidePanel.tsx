@@ -649,9 +649,9 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
   return (
     <Box
       sx={{
-        width: mobile ? '100%' : 'clamp(280px, 22vw, 440px)',
-        minWidth: mobile ? 0 : 280,
-        maxWidth: mobile ? '100%' : 440,
+        width: mobile ? '100%' : 360,
+        minWidth: mobile ? 0 : 300,
+        maxWidth: mobile ? '100%' : 400,
         flexShrink: 0,
         display: 'flex',
         flexDirection: 'column',
