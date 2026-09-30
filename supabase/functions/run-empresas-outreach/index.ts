@@ -41,10 +41,12 @@ import {
   buildRfc822,
   composeEmpresasEmail,
   composeEmpresasWhatsApp,
+  cotizadoFrancyHoldRpcArgs,
   e164FromPhoneKey,
   nextWhatsAppNeed,
   passLimit,
   remainingForQuota,
+  resolveCotizadoFrancyHoldFromRpc,
   resolveEmpresasBurst,
   resolveEmpresasEmailDayCap,
   resolveEmpresasSendWindow,
@@ -73,6 +75,23 @@ function isProviderLimit(error: string | undefined): boolean {
 }
 
 type SupabaseClient = ReturnType<typeof getServiceClient>;
+
+async function isCotizadoFrancyHold(
+  supabase: SupabaseClient,
+  phoneKey: string | null | undefined,
+  email: string | null | undefined,
+): Promise<boolean> {
+  const args = cotizadoFrancyHoldRpcArgs(phoneKey, email);
+  if (!args.p_phone_key && !args.p_email) return false;
+  const { data, error } = await supabase.rpc('empresas_outreach_has_cotizado_francy', args);
+  if (error) {
+    console.warn('[empresas-outreach] cotizado-francy check', error.message);
+  }
+  return resolveCotizadoFrancyHoldFromRpc({
+    data: data === true,
+    error: error ? { message: error.message } : null,
+  });
+}
 
 async function countSentInWindow(
   supabase: SupabaseClient,
@@ -195,6 +214,9 @@ async function sendWhatsAppOne(
     }).eq('id', row.id);
     return { status: 'skipped', error: 'Destinatario bloqueado' };
   }
+  if (await isCotizadoFrancyHold(supabase, phoneKey, row.email)) {
+    return { status: 'skipped', error: 'Cotizado - Francy' };
+  }
   const directoryId = await promoteLead(supabase, row);
   const useV3 = EMPRESAS_WA_TEMPLATE === EMPRESAS_WA_TEMPLATE_V3;
   const wa = useV3 ? composeEmpresasWhatsApp(row) : null;
@@ -280,6 +302,9 @@ async function sendEmailOne(
 ): Promise<{ status: 'sent' | 'failed' | 'skipped'; error?: string }> {
   const email = (row.email || '').trim().toLowerCase();
   if (!email || !email.includes('@')) return { status: 'skipped', error: 'Sin correo' };
+  if (await isCotizadoFrancyHold(supabase, row.phone_key, email)) {
+    return { status: 'skipped', error: 'Cotizado - Francy' };
+  }
   const listUnsubscribe = await resolveListUnsubscribe({
     email,
     secret: env('EMAIL_UNSUBSCRIBE_SECRET'),

@@ -258,6 +258,59 @@ export const EMPRESAS_TAG = 'Empresas';
 export const EMPRESAS_TAG_ID = '656473d8-4ae3-4c53-a5e3-81d9217537c2';
 export const EMAIL_ENVIADO_TAG = 'email enviado';
 export const EMAIL_ENVIADO_TAG_ID = '96d31954-4022-4136-b966-a254d784da4b';
+/** Inbox/directory tag: no automated empresas outreach without per-chat authorization. */
+export const COTIZADO_FRANCY_TAG_NAME = 'Cotizado - Francy';
+
+export function isCotizadoFrancyTagName(name: string | null | undefined): boolean {
+  return (name ?? '').trim().toLowerCase() === COTIZADO_FRANCY_TAG_NAME.toLowerCase();
+}
+
+export type CotizadoFrancyHoldEvidence = {
+  directoryTags?: Array<string | null> | null;
+  conversationTagNames?: Array<string | null> | null;
+  rpcHold?: boolean | null;
+};
+
+export function isEmpresasOutreachCotizadoFrancyHold(
+  evidence: CotizadoFrancyHoldEvidence,
+): boolean {
+  if (evidence.rpcHold === true) return true;
+  const directoryTags = evidence.directoryTags ?? [];
+  for (const tag of directoryTags) {
+    if (isCotizadoFrancyTagName(tag)) return true;
+  }
+  const conversationTagNames = evidence.conversationTagNames ?? [];
+  for (const tag of conversationTagNames) {
+    if (isCotizadoFrancyTagName(tag)) return true;
+  }
+  return false;
+}
+
+export function cotizadoFrancyHoldRpcArgs(
+  phoneKey: string | null | undefined,
+  email: string | null | undefined,
+): { p_phone_key: string | null; p_email: string | null } {
+  const phone = (phoneKey ?? '').trim();
+  const mail = (email ?? '').trim().toLowerCase();
+  return {
+    p_phone_key: phone || null,
+    p_email: mail || null,
+  };
+}
+
+export function resolveCotizadoFrancyHoldFromRpc(input: {
+  data: boolean | null;
+  error: { message?: string } | null;
+}): boolean {
+  if (input.error) {
+    const message = input.error.message ?? '';
+    if (/empresas_outreach_has_cotizado_francy|could not find the function|42883/i.test(message)) {
+      return false;
+    }
+    return true;
+  }
+  return input.data === true;
+}
 
 export const EMPRESAS_WA_BODY =
   'Buenos días, somos Prosavis SAS.\n\n' +

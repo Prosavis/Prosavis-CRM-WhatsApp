@@ -2,6 +2,7 @@ import { assertEquals, assertStringIncludes } from 'jsr:@std/assert';
 import {
   buildDirectoryUpsert,
   composeEmpresasWhatsApp,
+  cotizadoFrancyHoldRpcArgs,
   EMPRESAS_BURST_EMAIL_CAP,
   EMPRESAS_BURST_SCHEDULER,
   EMPRESAS_BURST_WA_CAP,
@@ -10,10 +11,13 @@ import {
   EMPRESAS_OUTREACH_WA_DAY_CAP,
   empresasBogotaDayBounds,
   empresasWindowLabelsForDay,
+  isCotizadoFrancyTagName,
+  isEmpresasOutreachCotizadoFrancyHold,
   isEmpresasSendAllowed,
   nextWhatsAppNeed,
   passLimit,
   remainingForQuota,
+  resolveCotizadoFrancyHoldFromRpc,
   resolveEmpresasBurst,
   resolveEmpresasEmailDayCap,
   resolveEmpresasWaDayCap,
@@ -218,4 +222,52 @@ Deno.test('whatsapp day cap is only the grok whatsapp tool, not the cron', () =>
     channel: 'whatsapp',
     waDayCap: 902,
   }), 902);
+});
+
+Deno.test('Cotizado - Francy tag matches name case-insensitively and trimmed', () => {
+  assertEquals(isCotizadoFrancyTagName('Cotizado - Francy'), true);
+  assertEquals(isCotizadoFrancyTagName('  COTIZADO - francy  '), true);
+  assertEquals(isCotizadoFrancyTagName('Cotizado-Francy'), false);
+  assertEquals(isCotizadoFrancyTagName('FRANCY'), false);
+  assertEquals(isCotizadoFrancyTagName('Empresas'), false);
+  assertEquals(isCotizadoFrancyTagName(null), false);
+});
+
+Deno.test('Cotizado - Francy hold is true from directory tags, conversation names, or RPC', () => {
+  assertEquals(isEmpresasOutreachCotizadoFrancyHold({
+    directoryTags: ['Empresas', '  cotizado - francy'],
+  }), true);
+  assertEquals(isEmpresasOutreachCotizadoFrancyHold({
+    conversationTagNames: ['Agendado', 'COTIZADO - FRANCY'],
+  }), true);
+  assertEquals(isEmpresasOutreachCotizadoFrancyHold({ rpcHold: true }), true);
+  assertEquals(isEmpresasOutreachCotizadoFrancyHold({
+    directoryTags: ['Empresas'],
+    conversationTagNames: ['email enviado'],
+    rpcHold: false,
+  }), false);
+});
+
+Deno.test('RPC Cotizado hold fails closed unless the helper is missing', () => {
+  assertEquals(resolveCotizadoFrancyHoldFromRpc({ data: true, error: null }), true);
+  assertEquals(resolveCotizadoFrancyHoldFromRpc({ data: false, error: null }), false);
+  assertEquals(resolveCotizadoFrancyHoldFromRpc({
+    data: null,
+    error: { message: 'Could not find the function public.empresas_outreach_has_cotizado_francy' },
+  }), false);
+  assertEquals(resolveCotizadoFrancyHoldFromRpc({
+    data: null,
+    error: { message: 'timeout connecting to database' },
+  }), true);
+});
+
+Deno.test('cotizado hold RPC args pass trimmed phone_key and email', () => {
+  assertEquals(cotizadoFrancyHoldRpcArgs(' 3001234567 ', '  Ops@Empresa.com '), {
+    p_phone_key: '3001234567',
+    p_email: 'ops@empresa.com',
+  });
+  assertEquals(cotizadoFrancyHoldRpcArgs('', '  '), {
+    p_phone_key: null,
+    p_email: null,
+  });
 });
