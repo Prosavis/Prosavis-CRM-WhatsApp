@@ -2,9 +2,14 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '@/config/supabase';
 import {
   INBOX_CONVERSATION_SELECT,
+  type ConversationPreviewMessage,
   type InboxConversationRowLike,
 } from '@/utils/inboxConversationCache';
-import { subscribeInboxConversations, subscribeInboxMessages } from '@/utils/inboxRealtimeSync';
+import {
+  subscribeInboxConversations,
+  subscribeInboxMessageInserts,
+  subscribeInboxMessages,
+} from '@/utils/inboxRealtimeSync';
 import { getCachedMediaUrl, mediaUrlCacheKey, setCachedMediaUrl } from '@/utils/mediaUrlCache';
 import type { Database } from '@/types/database';
 import type {
@@ -540,6 +545,13 @@ export async function fetchConversationMessages(
   const { data, error } = await query;
   if (error) throw error;
   return dedupeWhatsAppMessagesByWaMessageId((data ?? []).map(mapMessageRow).reverse());
+}
+
+export function subscribeToMessageInserts(
+  onInsert: (message: ConversationPreviewMessage) => void,
+  channelName: string,
+): Unsubscribe {
+  return subscribeInboxMessageInserts({ supabase, channelName, onInsert });
 }
 
 export function subscribeToMessages(

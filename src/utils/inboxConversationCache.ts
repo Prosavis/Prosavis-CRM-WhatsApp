@@ -77,6 +77,182 @@ export function sortInboxConversations(
   });
 }
 
+export interface ConversationPreviewMessage {
+  stableKey: string;
+  text: string;
+  at: Date;
+  direction: 'inbound' | 'outbound';
+  outboundStatus?: string;
+}
+
+function trimmedString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+/** Misma prioridad que `recomputeWhatsAppConversationPreview`: cuerpo, caption, `[tipo]`. */
+export function previewTextFromMessageParts(
+  messageBody: unknown,
+  caption: unknown,
+  mediaType: unknown,
+): string {
+  const body = trimmedString(messageBody);
+  if (body) return body;
+  const cap = trimmedString(caption);
+  if (cap) return cap;
+  const media = trimmedString(mediaType);
+  return media ? `[${media}]` : '';
+}
+
+export function previewFromMessageInsert(
+  row: Record<string, unknown> | null | undefined,
+): ConversationPreviewMessage | null {
+  if (!row || row.hidden_from_panel === true) return null;
+  if (trimmedString(row.reaction_to)) return null;
+  const stableKey = trimmedString(row.conversation_stable_key);
+  const direction = row.direction === 'inbound' || row.direction === 'outbound' ? row.direction : null;
+  const createdAt = typeof row.created_at === 'string' ? new Date(row.created_at) : null;
+  if (!stableKey || !direction || !createdAt || Number.isNaN(createdAt.getTime())) return null;
+  const text = previewTextFromMessageParts(row.message_body, row.caption, row.media_type);
+  if (!text) return null;
+  return {
+    stableKey,
+    text,
+    at: createdAt,
+    direction,
+    outboundStatus: direction === 'outbound' ? trimmedString(row.status) || undefined : undefined,
+  };
+}
+
+function laterDate(a?: Date, b?: Date): Date | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  return a.getTime() >= b.getTime() ? a : b;
+}
+
+/** El preview local gana si es más nuevo. A igualdad de fecha, el entrante rellena huecos y actualiza el tick. */
+export function keepNewerPreview(
+  current: WhatsAppConversation,
+  incoming: WhatsAppConversation,
+): WhatsAppConversation {
+  const currentAt = current.lastMessageAt?.getTime() ?? 0;
+  const incomingAt = incoming.lastMessageAt?.getTime() ?? 0;
+  const base: WhatsAppConversation = {
+    ...incoming,
+    id: incoming.id || current.id,
+    lastInboundAt: laterDate(current.lastInboundAt, incoming.lastInboundAt),
+  };
+
+  if (incomingAt > currentAt) {
+    const direction = incoming.lastMessageDirection ?? current.lastMessageDirection;
+    return {
+      ...base,
+      lastMessageText: incoming.lastMessageText ?? current.lastMessageText,
+      lastMessageAt: incoming.lastMessageAt ?? current.lastMessageAt,
+      lastMessageDirection: direction,
+      lastMessageOutboundStatus:
+        direction === 'outbound'
+          ? incoming.lastMessageOutboundStatus ?? current.lastMessageOutboundStatus
+          : undefined,
+    };
+  }
+
+  if (incomingAt < currentAt) {
+    const sameText =
+      Boolean(incoming.lastMessageText) && incoming.lastMessageText === current.lastMessageText;
+    return {
+      ...base,
+      lastMessageText: current.lastMessageText,
+      lastMessageAt: current.lastMessageAt,
+      lastMessageDirection: current.lastMessageDirection,
+      lastMessageOutboundStatus:
+        sameText && current.lastMessageDirection === 'outbound'
+          ? incoming.lastMessageOutboundStatus ?? current.lastMessageOutboundStatus
+          : current.lastMessageOutboundStatus,
+    };
+  }
+
+  const direction = incoming.lastMessageDirection ?? current.lastMessageDirection;
+  return {
+    ...base,
+    lastMessageText: incoming.lastMessageText ?? current.lastMessageText,
+    lastMessageAt: incoming.lastMessageAt ?? current.lastMessageAt,
+    lastMessageDirection: direction,
+    lastMessageOutboundStatus:
+      direction === 'outbound'
+        ? incoming.lastMessageOutboundStatus ?? current.lastMessageOutboundStatus
+        : undefined,
+  };
+}
+
+export function mergeNewerConversationPreviews(
+  fetched: WhatsAppConversation[],
+  local: WhatsAppConversation[],
+): WhatsAppConversation[] {
+  if (local.length === 0) return fetched;
+  const localById = new Map(local.map((row) => [row.id, row]));
+  let resort = false;
+  const merged = fetched.map((row) => {
+    const prev = localById.get(row.id);
+    if (!prev) return row;
+    const next = keepNewerPreview(prev, row);
+    if ((next.lastMessageAt?.getTime() ?? 0) !== (row.lastMessageAt?.getTime() ?? 0)) resort = true;
+    return next;
+  });
+  return resort ? sortInboxConversations(merged) : merged;
+}
+
+export function patchConversationPreview(
+  conversations: WhatsAppConversation[],
+  message: ConversationPreviewMessage,
+): WhatsAppConversation[] {
+  const key = message.stableKey.trim();
+  const text = message.text.trim();
+  if (!key || !text || Number.isNaN(message.at.getTime())) return conversations;
+  const idx = conversations.findIndex((row) => row.id === key);
+  if (idx === -1) return conversations;
+  const prev = conversations[idx];
+  const prevAt = prev.lastMessageAt?.getTime() ?? 0;
+  const nextAt = message.at.getTime();
+  if (nextAt < prevAt) return conversations;
+  const outboundStatus = message.direction === 'outbound' ? message.outboundStatus : undefined;
+  if (
+    nextAt === prevAt &&
+    prev.lastMessageText === text &&
+    prev.lastMessageDirection === message.direction &&
+    prev.lastMessageOutboundStatus === outboundStatus
+  ) {
+    return conversations;
+  }
+  const next = [...conversations];
+  next[idx] = {
+    ...prev,
+    lastMessageText: text,
+    lastMessageAt: message.at,
+    lastMessageDirection: message.direction,
+    lastMessageOutboundStatus: outboundStatus,
+    lastInboundAt:
+      message.direction === 'inbound' ? laterDate(prev.lastInboundAt, message.at) : prev.lastInboundAt,
+  };
+  return sortInboxConversations(next);
+}
+
+export function markConversationPreviewFailed(
+  conversations: WhatsAppConversation[],
+  stableKey: string,
+  text: string,
+): WhatsAppConversation[] {
+  const key = stableKey.trim();
+  const preview = text.trim();
+  const idx = conversations.findIndex((row) => row.id === key);
+  if (idx === -1 || !preview) return conversations;
+  const prev = conversations[idx];
+  if (prev.lastMessageText !== preview || prev.lastMessageDirection !== 'outbound') return conversations;
+  if (prev.lastMessageOutboundStatus && prev.lastMessageOutboundStatus !== 'pending') return conversations;
+  const next = [...conversations];
+  next[idx] = { ...prev, lastMessageOutboundStatus: 'failed' };
+  return next;
+}
+
 export function shouldRefetchOnVisibility(
   lastFullFetchAt: number | null,
   now: number,
@@ -142,11 +318,12 @@ export function applyInboxRealtimeEvent(
         changed = true;
       } else {
         const prev = next[idx];
+        const merged = keepNewerPreview(prev, mapped);
         const samePreview =
-          prev.lastMessageAt?.getTime() === mapped.lastMessageAt?.getTime() &&
-          prev.isPinned === mapped.isPinned;
+          prev.lastMessageAt?.getTime() === merged.lastMessageAt?.getTime() &&
+          prev.isPinned === merged.isPinned;
         const replaced = [...next];
-        replaced[idx] = mapped;
+        replaced[idx] = merged;
         next = samePreview ? replaced : sortInboxConversations(replaced);
         changed = true;
       }

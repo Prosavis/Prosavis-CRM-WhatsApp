@@ -4,6 +4,11 @@ import {
   applyInboxRealtimeEvent,
   conversationMatchesListFilter,
   createInboxRealtimeCoalescer,
+  keepNewerPreview,
+  markConversationPreviewFailed,
+  mergeNewerConversationPreviews,
+  patchConversationPreview,
+  previewFromMessageInsert,
   INBOX_CONVERSATION_SELECT,
   INBOX_REALTIME_DEBOUNCE_MS,
   shouldRefetchOnVisibility,
@@ -243,5 +248,188 @@ describe('inboxConversationCache', () => {
     expect(INBOX_CONVERSATION_SELECT).toContain('stable_key');
     expect(INBOX_CONVERSATION_SELECT).toContain('last_inbound_at');
     expect(INBOX_CONVERSATION_SELECT).not.toContain('metadata');
+  });
+
+  it('a newer message moves that chat up and replaces the preview', () => {
+    const next = patchConversationPreview(
+      [
+        conv({ id: 'old', lastMessageAt: new Date('2026-08-01T00:00:00Z'), lastMessageText: 'antes' }),
+        conv({ id: 'chat', lastMessageAt: new Date('2026-07-01T00:00:00Z'), lastMessageText: 'viejo' }),
+      ],
+      {
+        stableKey: 'chat',
+        text: 'nuevo',
+        at: new Date('2026-08-02T00:00:00Z'),
+        direction: 'inbound',
+      },
+    );
+    expect(next.map((row) => row.id)).toEqual(['chat', 'old']);
+    expect(next[0].lastMessageText).toBe('nuevo');
+    expect(next[0].lastMessageDirection).toBe('inbound');
+  });
+
+  it('an older message does not overwrite the preview', () => {
+    const current = [
+      conv({
+        id: 'chat',
+        lastMessageAt: new Date('2026-08-02T00:00:00Z'),
+        lastMessageText: 'nuevo',
+      }),
+    ];
+    const next = patchConversationPreview(current, {
+      stableKey: 'chat',
+      text: 'viejo',
+      at: new Date('2026-08-01T00:00:00Z'),
+      direction: 'outbound',
+      outboundStatus: 'sent',
+    });
+    expect(next).toBe(current);
+  });
+
+  it('a stale refetch keeps the newer local preview and still takes other row fields', () => {
+    const local = [
+      conv({
+        id: 'chat',
+        lastMessageAt: new Date('2026-08-02T00:00:00Z'),
+        lastMessageText: 'local',
+        lastMessageDirection: 'outbound',
+        lastMessageOutboundStatus: 'pending',
+      }),
+    ];
+    const fetched = [
+      conv({
+        id: 'chat',
+        lastMessageAt: new Date('2026-08-01T00:00:00Z'),
+        lastMessageText: 'servidor',
+        unreadCount: 4,
+      }),
+    ];
+    const next = mergeNewerConversationPreviews(fetched, local);
+    expect(next[0].lastMessageText).toBe('local');
+    expect(next[0].lastMessageAt?.toISOString()).toBe('2026-08-02T00:00:00.000Z');
+    expect(next[0].unreadCount).toBe(4);
+  });
+
+  it('a conversation UPDATE without a newer preview keeps the local text', () => {
+    const current = [
+      conv({
+        id: 'a',
+        lastMessageAt: new Date('2026-08-02T00:00:00Z'),
+        lastMessageText: 'optimista',
+        lastMessageDirection: 'outbound',
+        lastMessageOutboundStatus: 'pending',
+        unreadCount: 1,
+      }),
+    ];
+    const result = applyInboxRealtimeEvent(
+      current,
+      new Map(),
+      {
+        eventType: 'UPDATE',
+        new: {
+          id: 'uuid-a',
+          stable_key: 'a',
+          phone_number_id: bot,
+          last_message_at: '2026-08-01T00:00:00Z',
+          last_message_text: 'anterior',
+          unread_count: 0,
+        },
+      },
+      filter,
+      mapRow,
+    );
+    expect(result.conversations[0].lastMessageText).toBe('optimista');
+    expect(result.conversations[0].unreadCount).toBe(0);
+  });
+
+  it('the same text on an older row still updates the delivery tick', () => {
+    const next = keepNewerPreview(
+      conv({
+        id: 'a',
+        lastMessageText: 'hola',
+        lastMessageAt: new Date('2026-08-02T00:00:05Z'),
+        lastMessageDirection: 'outbound',
+        lastMessageOutboundStatus: 'pending',
+      }),
+      conv({
+        id: 'a',
+        lastMessageText: 'hola',
+        lastMessageAt: new Date('2026-08-02T00:00:00Z'),
+        lastMessageDirection: 'outbound',
+        lastMessageOutboundStatus: 'delivered',
+        unreadCount: 0,
+      }),
+    );
+    expect(next.lastMessageText).toBe('hola');
+    expect(next.lastMessageAt?.toISOString()).toBe('2026-08-02T00:00:05.000Z');
+    expect(next.lastMessageOutboundStatus).toBe('delivered');
+  });
+
+  it('a failed send marks only a still-pending preview with the same text', () => {
+    const pending = [
+      conv({
+        id: 'a',
+        lastMessageText: 'hola',
+        lastMessageDirection: 'outbound',
+        lastMessageOutboundStatus: 'pending',
+      }),
+    ];
+    expect(markConversationPreviewFailed(pending, 'a', 'hola')[0].lastMessageOutboundStatus).toBe('failed');
+    const sent = [
+      conv({
+        id: 'a',
+        lastMessageText: 'hola',
+        lastMessageDirection: 'outbound',
+        lastMessageOutboundStatus: 'sent',
+      }),
+    ];
+    expect(markConversationPreviewFailed(sent, 'a', 'hola')).toBe(sent);
+  });
+
+  it('message inserts become a preview and reactions stay out', () => {
+    expect(
+      previewFromMessageInsert({
+        conversation_stable_key: 'chat',
+        direction: 'inbound',
+        message_body: 'respuesta',
+        created_at: '2026-08-02T00:00:00Z',
+      }),
+    ).toMatchObject({ stableKey: 'chat', text: 'respuesta', direction: 'inbound' });
+    expect(
+      previewFromMessageInsert({
+        conversation_stable_key: 'chat',
+        direction: 'outbound',
+        caption: 'foto',
+        media_type: 'image',
+        created_at: '2026-08-02T00:00:00Z',
+        status: 'sent',
+      })?.text,
+    ).toBe('foto');
+    expect(
+      previewFromMessageInsert({
+        conversation_stable_key: 'chat',
+        direction: 'outbound',
+        media_type: 'sticker',
+        created_at: '2026-08-02T00:00:00Z',
+      })?.text,
+    ).toBe('[sticker]');
+    expect(
+      previewFromMessageInsert({
+        conversation_stable_key: 'chat',
+        direction: 'inbound',
+        message_body: '👍',
+        reaction_to: 'wamid.1',
+        created_at: '2026-08-02T00:00:00Z',
+      }),
+    ).toBeNull();
+    expect(
+      previewFromMessageInsert({
+        conversation_stable_key: 'chat',
+        direction: 'inbound',
+        message_body: 'oculto',
+        hidden_from_panel: true,
+        created_at: '2026-08-02T00:00:00Z',
+      }),
+    ).toBeNull();
   });
 });

@@ -6,6 +6,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   Box,
@@ -56,6 +57,12 @@ import {
   prependOlderMessages,
 } from '@/utils/inboxMessageCache';
 import { INBOX_PERF_MARKS, markInboxPerf } from '@/utils/inboxPerfMarks';
+import {
+  markConversationPreviewFailed,
+  patchConversationPreview,
+  previewTextFromMessageParts,
+  type ConversationPreviewMessage,
+} from '@/utils/inboxConversationCache';
 import MessageBubble, { type MessageReaction } from './MessageBubble';
 import type { AdminSenderProfile } from '@/utils/outboundSenderLabel';
 import ForwardMessageDialog from './ForwardMessageDialog';
@@ -263,6 +270,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   onBack,
 }) => {
   const theme = useTheme();
+  const queryClient = useQueryClient();
   const isMobile = usePhoneLayout();
   const messageSubscriptionIdRef = useRef(0);
   const [messageHistory, dispatchMessageHistory] = useReducer(
@@ -632,6 +640,20 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     phoneNumberId,
   ]);
 
+  const patchListPreview = useCallback((message: ConversationPreviewMessage) => {
+    queryClient.setQueriesData<WhatsAppConversation[]>(
+      { queryKey: ['inbox', 'conversations'] },
+      (current) => (current ? patchConversationPreview(current, message) : current),
+    );
+  }, [queryClient]);
+
+  const failListPreview = useCallback((text: string) => {
+    queryClient.setQueriesData<WhatsAppConversation[]>(
+      { queryKey: ['inbox', 'conversations'] },
+      (current) => (current ? markConversationPreviewFailed(current, stableKey, text) : current),
+    );
+  }, [queryClient, stableKey]);
+
   const handleSend = useCallback(
     async (text: string) => {
       if (sessionWindowClosed) {
@@ -659,6 +681,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       };
       pinToBottomRef.current = true;
       setOptimisticMessages((current) => mergeInboxMessages(current, [optimistic]));
+      patchListPreview({
+        stableKey,
+        text,
+        at: optimistic.createdAt,
+        direction: 'outbound',
+        outboundStatus: 'pending',
+      });
       markInboxPerf(INBOX_PERF_MARKS.sendOptimistic);
       try {
         await sendMessage(
@@ -673,6 +702,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       } catch (error) {
         const message = error instanceof Error ? error.message : 'No se pudo enviar el mensaje';
         setOptimisticMessages((current) => markOptimisticFailed(current, optimisticId, message));
+        failListPreview(text);
         throw error;
       }
 
@@ -694,7 +724,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         }
       }
     },
-    [customerPhone, sendPhoneNumberId, replyToMessage, sessionWindowClosed, myUid],
+    [customerPhone, failListPreview, patchListPreview, sendPhoneNumberId, replyToMessage, sessionWindowClosed, stableKey, myUid],
   );
 
   const handleLoadOlder = useCallback(async () => {
@@ -739,20 +769,32 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
       const replyId = replyToMessage?.waMessageId;
       setReplyToMessage(null);
+      const preview = previewTextFromMessageParts(undefined, caption, mediaType);
 
-      // La URL pública se usa como fallback; la Edge Function crea su propio signed URL
-      // desde storagePath usando service_role, por lo que incluso si url está vacío funciona.
-      await sendMedia(customerPhone, mediaType, url || `wa://${storagePath}`, {
-        caption,
-        storagePath,
-        mimeType: file.type || undefined,
-        sizeBytes: file.size,
-        ...(mediaType === 'document' ? { filename: file.name } : {}),
-        ...(sendPhoneNumberId ? { phoneNumberId: sendPhoneNumberId } : {}),
-        ...(replyId ? { replyToWaMessageId: replyId } : {}),
+      patchListPreview({
+        stableKey,
+        text: preview,
+        at: new Date(),
+        direction: 'outbound',
+        outboundStatus: 'pending',
       });
+      try {
+        // La URL pública es fallback; la Edge Function firma storagePath con service_role.
+        await sendMedia(customerPhone, mediaType, url || `wa://${storagePath}`, {
+          caption,
+          storagePath,
+          mimeType: file.type || undefined,
+          sizeBytes: file.size,
+          ...(mediaType === 'document' ? { filename: file.name } : {}),
+          ...(sendPhoneNumberId ? { phoneNumberId: sendPhoneNumberId } : {}),
+          ...(replyId ? { replyToWaMessageId: replyId } : {}),
+        });
+      } catch (error) {
+        failListPreview(preview);
+        throw error;
+      }
     },
-    [customerPhone, sendPhoneNumberId, replyToMessage, sessionWindowClosed],
+    [customerPhone, failListPreview, patchListPreview, sendPhoneNumberId, replyToMessage, sessionWindowClosed, stableKey],
   );
 
   const handleUploadSticker = useCallback(async (
@@ -787,15 +829,28 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     }
     const replyId = replyToMessage?.waMessageId;
     setReplyToMessage(null);
-    await sendMedia(customerPhone, 'sticker', sticker.downloadUrl, {
-      ...(sendPhoneNumberId ? { phoneNumberId: sendPhoneNumberId } : {}),
-      ...(replyId ? { replyToWaMessageId: replyId } : {}),
-      storagePath: sticker.storagePath,
-      mimeType: sticker.mimeType,
-      sizeBytes: sticker.sizeBytes,
-      isAnimatedSticker: sticker.isAnimated === true,
+    const preview = previewTextFromMessageParts(undefined, undefined, 'sticker');
+    patchListPreview({
+      stableKey,
+      text: preview,
+      at: new Date(),
+      direction: 'outbound',
+      outboundStatus: 'pending',
     });
-  }, [sendPhoneNumberId, replyToMessage, customerPhone, sessionWindowClosed]);
+    try {
+      await sendMedia(customerPhone, 'sticker', sticker.downloadUrl, {
+        ...(sendPhoneNumberId ? { phoneNumberId: sendPhoneNumberId } : {}),
+        ...(replyId ? { replyToWaMessageId: replyId } : {}),
+        storagePath: sticker.storagePath,
+        mimeType: sticker.mimeType,
+        sizeBytes: sticker.sizeBytes,
+        isAnimatedSticker: sticker.isAnimated === true,
+      });
+    } catch (error) {
+      failListPreview(preview);
+      throw error;
+    }
+  }, [customerPhone, failListPreview, patchListPreview, sendPhoneNumberId, replyToMessage, sessionWindowClosed, stableKey]);
 
   const handleSendMediaBatch = useCallback(
     async (

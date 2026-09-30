@@ -3,10 +3,15 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   refetchConversations,
   subscribeToConversations,
+  subscribeToMessageInserts,
   type FetchConversationsOptions,
   type WhatsAppConversation,
 } from '@/services/whatsappService';
-import { shouldRefetchOnVisibility } from '@/utils/inboxConversationCache';
+import {
+  mergeNewerConversationPreviews,
+  patchConversationPreview,
+  shouldRefetchOnVisibility,
+} from '@/utils/inboxConversationCache';
 import { markInboxPerf, INBOX_PERF_MARKS } from '@/utils/inboxPerfMarks';
 import { inboxQueryKeys } from '@/hooks/inboxQueryKeys';
 
@@ -28,7 +33,8 @@ export function useInboxConversations(
     queryFn: async () => {
       const rows = await refetchConversations(phoneNumberId, options);
       lastFullFetchAtRef.current = Date.now();
-      return rows;
+      const local = queryClient.getQueryData<WhatsAppConversation[]>(queryKey) ?? [];
+      return mergeNewerConversationPreviews(rows, local);
     },
     enabled,
     staleTime: 30_000,
@@ -54,6 +60,15 @@ export function useInboxConversations(
       },
     );
   }, [enabled, options, phoneNumberId, queryClient, queryKey]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    return subscribeToMessageInserts((message) => {
+      queryClient.setQueryData<WhatsAppConversation[]>(queryKey, (current) =>
+        current ? patchConversationPreview(current, message) : current,
+      );
+    }, `whatsapp-message-inserts:${queryKey.join(':')}`);
+  }, [enabled, phoneNumberId, queryClient, queryKey]);
 
   useEffect(() => {
     if (!enabled) return;

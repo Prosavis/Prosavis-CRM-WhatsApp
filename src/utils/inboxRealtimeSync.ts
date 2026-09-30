@@ -3,6 +3,8 @@ import type { WhatsAppConversation, WhatsAppMessage } from '@/services/whatsappS
 import {
   applyInboxRealtimeEvent,
   createInboxRealtimeCoalescer,
+  previewFromMessageInsert,
+  type ConversationPreviewMessage,
   type InboxConversationRowLike,
   type InboxListFilter,
   type InboxRealtimeEvent,
@@ -164,5 +166,30 @@ export function subscribeInboxMessages(options: {
   return () => {
     disposed = true;
     if (channel) void supabase.removeChannel(channel);
+  };
+}
+
+export function subscribeInboxMessageInserts(options: {
+  supabase: SupabaseClient;
+  channelName: string;
+  onInsert: (message: ConversationPreviewMessage) => void;
+}): Unsubscribe {
+  let disposed = false;
+  const channel = options.supabase
+    .channel(options.channelName)
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'whatsapp_message_log' },
+      (payload) => {
+        if (disposed) return;
+        const message = previewFromMessageInsert(payload.new as Record<string, unknown>);
+        if (message) options.onInsert(message);
+      },
+    )
+    .subscribe();
+
+  return () => {
+    disposed = true;
+    void options.supabase.removeChannel(channel);
   };
 }
