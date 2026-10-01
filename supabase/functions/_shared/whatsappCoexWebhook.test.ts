@@ -6,6 +6,7 @@ import {
 } from './whatsappLines.ts';
 import {
   COMMERCIAL_ORPHAN_STATUS_STUB,
+  ctwaReferralFromMessage,
   parseCoexCustomerPhone,
   persistCoexMessage,
   shouldIgnoreBotCoexField,
@@ -296,6 +297,52 @@ Deno.test('image echo stores media_id without throwing', async () => {
   assertEquals(db.tables.whatsapp_message_log[0].media_id, 'media-123');
   assertEquals(db.tables.whatsapp_message_log[0].media_type, 'image');
   assertEquals(db.tables.whatsapp_message_log[0].message_body, 'foto del local');
+});
+
+Deno.test('ctwa_clid is stored from an ad referral and not overwritten', async () => {
+  assertEquals(
+    ctwaReferralFromMessage({
+      referral: { source_type: 'ad', source_id: '111', ctwa_clid: 'clid-1' },
+    }),
+    { ctwaClid: 'clid-1', sourceId: '111' },
+  );
+  assertEquals(ctwaReferralFromMessage({ referral: { source_type: 'post', ctwa_clid: 'x' } }), null);
+  assertEquals(ctwaReferralFromMessage({}), null);
+
+  const db = createMemorySupabase();
+  const stableKey = conversationStableKey('573146283332', COMMERCIAL_PHONE_NUMBER_ID);
+  const first = await persistCoexMessage({
+    supabase: db as never,
+    phoneNumberId: COMMERCIAL_PHONE_NUMBER_ID,
+    defaultDirection: 'inbound',
+    message: {
+      id: 'wamid.ctwa.1',
+      from: '573146283332',
+      timestamp: '1756300003',
+      type: 'text',
+      text: { body: 'hola desde el anuncio' },
+      referral: { source_type: 'ad', source_id: '111', ctwa_clid: 'clid-1' },
+    },
+  });
+  assertEquals(first, 'inserted');
+  assertEquals(db.tables.whatsapp_conversations[0].ctwa_clid, 'clid-1');
+  assertEquals(db.tables.whatsapp_conversations[0].ctwa_source_id, '111');
+
+  const second = await persistCoexMessage({
+    supabase: db as never,
+    phoneNumberId: COMMERCIAL_PHONE_NUMBER_ID,
+    defaultDirection: 'inbound',
+    message: {
+      id: 'wamid.ctwa.2',
+      from: '573146283332',
+      timestamp: '1756300004',
+      type: 'text',
+      text: { body: 'segundo mensaje' },
+      referral: { source_type: 'ad', source_id: '222', ctwa_clid: 'clid-2' },
+    },
+  });
+  assertEquals(second, 'inserted');
+  assertEquals(db.tables.whatsapp_conversations[0].ctwa_clid, 'clid-1');
 });
 
 Deno.test('echo without to does not throw', async () => {

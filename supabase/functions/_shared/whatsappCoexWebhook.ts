@@ -79,6 +79,55 @@ function getString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+export function ctwaReferralFromMessage(message: JsonRecord): {
+  ctwaClid: string;
+  sourceId: string;
+} | null {
+  const referral = asRecord(message.referral);
+  const ctwaClid = getString(referral.ctwa_clid);
+  if (!ctwaClid) return null;
+  const sourceType = getString(referral.source_type);
+  if (sourceType && sourceType !== 'ad') return null;
+  return {
+    ctwaClid,
+    sourceId: getString(referral.source_id),
+  };
+}
+
+async function captureCtwaClick(params: {
+  supabase: SupabaseClient;
+  message: JsonRecord;
+  stableKey: string;
+  direction: 'inbound' | 'outbound';
+}): Promise<void> {
+  if (params.direction !== 'inbound') return;
+  const referral = ctwaReferralFromMessage(params.message);
+  if (!referral) return;
+  try {
+    const { data, error } = await params.supabase
+      .from('whatsapp_conversations')
+      .select('ctwa_clid')
+      .eq('stable_key', params.stableKey)
+      .maybeSingle();
+    if (error) {
+      console.error('ctwa_clid read skipped', error.message);
+      return;
+    }
+    if (getString((data as { ctwa_clid?: unknown } | null)?.ctwa_clid)) return;
+    const { error: updateError } = await params.supabase
+      .from('whatsapp_conversations')
+      .update({
+        ctwa_clid: referral.ctwaClid,
+        ctwa_source_id: referral.sourceId || null,
+        ctwa_captured_at: new Date().toISOString(),
+      })
+      .eq('stable_key', params.stableKey);
+    if (updateError) console.error('ctwa_clid write skipped', updateError.message);
+  } catch (err) {
+    console.error('ctwa_clid persist skipped', err);
+  }
+}
+
 function getUnixDate(value: unknown): string {
   const timestamp = Number(value);
   if (!Number.isFinite(timestamp) || timestamp <= 0) return new Date().toISOString();
@@ -308,6 +357,12 @@ export async function persistCoexMessage(params: {
       mediaType: content.mediaType,
       mimeType: content.mimeType,
     });
+    await captureCtwaClick({
+      supabase: params.supabase,
+      message: params.message,
+      stableKey: conversationKey,
+      direction,
+    });
     return 'updated';
   }
 
@@ -373,6 +428,12 @@ export async function persistCoexMessage(params: {
     mediaId: content.mediaId,
     mediaType: content.mediaType,
     mimeType: content.mimeType,
+  });
+  await captureCtwaClick({
+    supabase: params.supabase,
+    message: params.message,
+    stableKey,
+    direction,
   });
   return 'inserted';
 }
