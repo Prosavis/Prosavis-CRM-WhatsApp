@@ -19,6 +19,7 @@ import { REACTIVATION_SEQUENCE } from '../_shared/reactivationCadence.ts';
 import { applyColdFailureTag, removeColdFailureTags } from '../_shared/coldAppUserOutreach.ts';
 import { conversationStableKey, envString } from '../_shared/whatsappLines.ts';
 import {
+  captureCtwaClick,
   persistCommercialOrphanStatus,
   processHistory,
   processSmbAppStateSync,
@@ -281,6 +282,12 @@ async function processInboundMessage(params: {
     throw new Error('Mensaje entrante sin from o id.');
   }
 
+  const metadata = asRecord(params.value.metadata);
+  const phoneNumberId = getString(metadata.phone_number_id) || null;
+  const isLid = identity.kind === 'lid';
+  const customerKey = identity.customerKey;
+  const stableKey = conversationStableKey(customerKey, phoneNumberId);
+
   const { data: existingMessage, error: existingError } = await params.supabase
     .from('whatsapp_message_log')
     .select('id')
@@ -288,12 +295,15 @@ async function processInboundMessage(params: {
     .maybeSingle();
 
   if (existingError) throw existingError;
-  if (existingMessage) return 'duplicate';
-
-  const metadata = asRecord(params.value.metadata);
-  const phoneNumberId = getString(metadata.phone_number_id) || null;
-  const isLid = identity.kind === 'lid';
-  const customerKey = identity.customerKey;
+  if (existingMessage) {
+    await captureCtwaClick({
+      supabase: params.supabase,
+      message: params.message,
+      stableKey,
+      direction: 'inbound',
+    });
+    return 'duplicate';
+  }
 
   if (identity.kind === 'phone' && identity.userId) {
     await remapLidConversationToPhone({
@@ -303,8 +313,6 @@ async function processInboundMessage(params: {
       phoneNumberId,
     });
   }
-
-  const stableKey = conversationStableKey(customerKey, phoneNumberId);
   const unsupported = cloudApiUnsupportedDisposition(params.message);
   if (unsupported?.kind === 'revoke' && unsupported.originalMessageId) {
     const createdAtForRevoke = getUnixDate(params.message.timestamp);
@@ -389,6 +397,13 @@ async function processInboundMessage(params: {
     .upsert(conversationPatch, { onConflict: 'stable_key' });
 
   if (conversationError) throw conversationError;
+
+  await captureCtwaClick({
+    supabase: params.supabase,
+    message: params.message,
+    stableKey,
+    direction: 'inbound',
+  });
 
   const { data: insertedMessage, error: insertError } = await params.supabase
     .from('whatsapp_message_log')

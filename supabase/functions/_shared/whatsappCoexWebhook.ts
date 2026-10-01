@@ -94,7 +94,7 @@ export function ctwaReferralFromMessage(message: JsonRecord): {
   };
 }
 
-async function captureCtwaClick(params: {
+export async function captureCtwaClick(params: {
   supabase: SupabaseClient;
   message: JsonRecord;
   stableKey: string;

@@ -6,6 +6,7 @@ import {
 } from './whatsappLines.ts';
 import {
   COMMERCIAL_ORPHAN_STATUS_STUB,
+  captureCtwaClick,
   ctwaReferralFromMessage,
   parseCoexCustomerPhone,
   persistCoexMessage,
@@ -343,6 +344,40 @@ Deno.test('ctwa_clid is stored from an ad referral and not overwritten', async (
   });
   assertEquals(second, 'inserted');
   assertEquals(db.tables.whatsapp_conversations[0].ctwa_clid, 'clid-1');
+});
+
+Deno.test('bot thread stores the first ad click and a retry does not overwrite it', async () => {
+  assertEquals(
+    ctwaReferralFromMessage({ referral: { ctwa_clid: 'clid-bot' } }),
+    { ctwaClid: 'clid-bot', sourceId: '' },
+  );
+  const db = createMemorySupabase({
+    conversations: [{
+      stable_key: conversationStableKey('573001112233', BOT_PHONE_NUMBER_ID),
+      phone_number_id: BOT_PHONE_NUMBER_ID,
+    }],
+  });
+  const stableKey = conversationStableKey('573001112233', BOT_PHONE_NUMBER_ID);
+  const message = {
+    id: 'wamid.bot.ctwa',
+    referral: { source_id: 'simple-2', ctwa_clid: 'clid-bot' },
+  };
+  await captureCtwaClick({
+    supabase: db as never,
+    message,
+    stableKey,
+    direction: 'inbound',
+  });
+  assertEquals(db.tables.whatsapp_conversations[0].ctwa_clid, 'clid-bot');
+  assertEquals(db.tables.whatsapp_conversations[0].ctwa_source_id, 'simple-2');
+
+  await captureCtwaClick({
+    supabase: db as never,
+    message: { referral: { source_type: 'ad', source_id: 'otro', ctwa_clid: 'clid-nuevo' } },
+    stableKey,
+    direction: 'inbound',
+  });
+  assertEquals(db.tables.whatsapp_conversations[0].ctwa_clid, 'clid-bot');
 });
 
 Deno.test('echo without to does not throw', async () => {
