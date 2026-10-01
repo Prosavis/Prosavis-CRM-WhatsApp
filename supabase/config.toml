@@ -55,6 +55,9 @@ file_size_limit = "50MiB"
 [functions.get-whatsapp-metrics]
 verify_jwt = false
 
+[functions.get-whatsapp-delivery-cost]
+verify_jwt = false
+
 [functions.get-client-quality-metrics]
 verify_jwt = false
 

@@ -56,6 +56,7 @@ import MetricsPeriodControl from './shared/MetricsPeriodControl';
 import MetricsShell from './shared/MetricsShell';
 import MetricsPageState from './shared/MetricsPageState';
 import MetricsViewHeader from './shared/MetricsViewHeader';
+import WhatsAppDeliveryCostCard from './WhatsAppDeliveryCostCard';
 import LifetimeRevenueBanner from './shared/LifetimeRevenueBanner';
 
 const { phoneNumberId, phoneDisplay, botLabel } = WHATSAPP_CLOUD_PRODUCTION;
@@ -268,6 +269,8 @@ const MetricsTab: React.FC<MetricsTabProps> = ({
           </Button>
         </DialogActions>
       </Dialog>
+
+      <WhatsAppDeliveryCostCard />
 
       {vista === 'resumen' && (
         <MetricsPageState

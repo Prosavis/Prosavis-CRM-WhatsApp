@@ -8,6 +8,7 @@ export const inboxQueryKeys = {
   directoryMeta: (signature: string) => ['inbox', 'directory-meta', signature] as const,
   metrics: (phoneNumberId?: string, serviceId?: string) =>
     ['whatsapp-metrics', phoneNumberId ?? 'all', serviceId ?? 'default'] as const,
+  deliveryCost: () => ['whatsapp-delivery-cost'] as const,
   appMetrics: (serviceId?: string) =>
     ['app-metrics', serviceId ?? 'default'] as const,
   metricsLogs: (phoneNumberId?: string) =>

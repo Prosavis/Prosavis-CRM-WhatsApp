@@ -12,6 +12,7 @@ import {
 } from '@/utils/inboxRealtimeSync';
 import { getCachedMediaUrl, mediaUrlCacheKey, setCachedMediaUrl } from '@/utils/mediaUrlCache';
 import type { Database } from '@/types/database';
+import type { WhatsAppDeliveryCostMonth } from '@/types/whatsappDeliveryCost';
 import type {
   AppointmentHeatmapResult,
   ClientQualityMetrics,
@@ -2322,6 +2323,10 @@ export async function getWhatsAppMetrics(
     phoneNumberId,
     serviceId,
   });
+}
+
+export async function getWhatsAppDeliveryCost(): Promise<WhatsAppDeliveryCostMonth> {
+  return invokeFn<WhatsAppDeliveryCostMonth>('get-whatsapp-delivery-cost', {});
 }
 
 export async function getAppMetrics(serviceId?: string) {

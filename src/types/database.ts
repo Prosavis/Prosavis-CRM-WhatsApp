@@ -92,6 +92,9 @@ export interface Database {
           template_name: string | null;
           campaign_type: string | null;
           phone_number_id: string | null;
+          pricing_category: string | null;
+          pricing_type: string | null;
+          pricing_billable: boolean | null;
           client_request_id: string | null;
           reply_to_wa_message_id: string | null;
           filename: string | null;

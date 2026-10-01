@@ -1003,6 +1003,9 @@ export type Database = {
           message_body: string | null
           mime_type: string | null
           phone_number_id: string | null
+          pricing_billable: boolean | null
+          pricing_category: string | null
+          pricing_type: string | null
           raw_payload: Json | null
           recipient_bsuid: string | null
           recipient_phone: string | null
@@ -1040,6 +1043,9 @@ export type Database = {
           message_body?: string | null
           mime_type?: string | null
           phone_number_id?: string | null
+          pricing_billable?: boolean | null
+          pricing_category?: string | null
+          pricing_type?: string | null
           raw_payload?: Json | null
           recipient_bsuid?: string | null
           recipient_phone?: string | null
@@ -1077,6 +1083,9 @@ export type Database = {
           message_body?: string | null
           mime_type?: string | null
           phone_number_id?: string | null
+          pricing_billable?: boolean | null
+          pricing_category?: string | null
+          pricing_type?: string | null
           raw_payload?: Json | null
           recipient_bsuid?: string | null
           recipient_phone?: string | null

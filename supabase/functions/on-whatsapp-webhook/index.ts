@@ -41,6 +41,7 @@ import {
   buildFrancyNotice,
   postFrancyAssistantNotice,
 } from '../_shared/francyAssistantGate.ts';
+import { pricingPatchForStatus } from '../_shared/whatsappStatusPricing.ts';
 
 const encoder = new TextEncoder();
 type JsonRecord = Record<string, unknown>;
@@ -568,6 +569,8 @@ async function processStatus(params: {
   };
 
   const messageUpdate: JsonRecord = { status, raw_payload: rawPayload };
+  const pricingPatch = pricingPatchForStatus(params.status);
+  if (pricingPatch) Object.assign(messageUpdate, pricingPatch);
   if (isFailure && errorMessage) messageUpdate.error_message = errorMessage;
   // Si Meta recupera la entrega (o el failed llegó fuera de orden), no dejar
   // error_message/tags de fallo pegados en un mensaje que sí llegó.
