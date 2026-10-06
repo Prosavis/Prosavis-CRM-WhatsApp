@@ -225,7 +225,7 @@ const ReminderTrackingTable: React.FC<ReminderTrackingTableProps> = ({
                             </span>
                           </Tooltip>
                         )}
-                        <Tooltip title="Ver detalle">
+                        <Tooltip title={row.previewBody && !row.messageBody ? 'Ver mensaje' : 'Ver detalle'}>
                           <IconButton size="small" onClick={() => onViewDetail(row)}>
                             <VisibilityIcon fontSize="small" />
                           </IconButton>

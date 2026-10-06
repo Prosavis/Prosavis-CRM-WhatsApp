@@ -190,10 +190,10 @@ const ReminderMessageDetailDialog: React.FC<ReminderMessageDetailDialogProps> = 
             </Box>
           )}
 
-          {row.messageBody && (
+          {(row.messageBody || row.previewBody) && (
             <Box>
               <Typography variant="overline" color="text.secondary">
-                Mensaje
+                {row.messageBody ? 'Mensaje enviado' : 'Mensaje que saldrá a las 6:00 p. m.'}
               </Typography>
               <Typography
                 variant="body2"
@@ -205,8 +205,13 @@ const ReminderMessageDetailDialog: React.FC<ReminderMessageDetailDialogProps> = 
                   fontSize: '0.8125rem',
                 }}
               >
-                {row.messageBody}
+                {row.messageBody || row.previewBody}
               </Typography>
+              {row.teamDurationLabel && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
+                  Equipo: {row.teamDurationLabel}
+                </Typography>
+              )}
             </Box>
           )}
 

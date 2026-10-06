@@ -34,6 +34,10 @@ export interface ReminderRow {
   logCreatedAt: string | null;
   logErrorMessage: string | null;
   messageBody: string | null;
+  /** Plantilla ya armada, antes de que exista log. */
+  previewBody: string | null;
+  /** Horas de equipo, solo vista interna. Null con una sola auxiliar. */
+  teamDurationLabel: string | null;
   conversationStableKey: string | null;
   address: string | null;
   professionalName: string | null;
@@ -309,6 +313,8 @@ export function historyItemToReminderRow(item: HistoryBatchItem): ReminderRow {
     logCreatedAt: item.logCreatedAt,
     logErrorMessage: item.logErrorMessage,
     messageBody: item.messageBody,
+    previewBody: null,
+    teamDurationLabel: null,
     conversationStableKey: item.conversationStableKey,
     address: item.address,
     professionalName: item.professionalName,

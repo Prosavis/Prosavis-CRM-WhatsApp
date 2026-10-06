@@ -30,13 +30,12 @@ import {
   resolveRecipient,
 } from '../_shared/whatsappIdentity.ts';
 import {
-  buildProfessionalReminderAddress,
-  buildReminderPaymentText,
-  buildReminderPaymentWarning,
-  sanitizeWhatsAppTemplateParam,
-} from '../_shared/whatsappTemplateText.ts';
-
-const DEFAULT_TIMEZONE = 'America/Bogota';
+  clientReminderParameterTexts,
+  clientReminderPreview,
+  professionalReminderParameterTexts,
+  professionalReminderPreview,
+  type ReminderTemplateInput,
+} from '../_shared/reminderTemplateText.ts';
 
 // ──────────────────────────────────────────────
 // Tipos
@@ -48,6 +47,9 @@ interface AppointmentData {
   scheduledDate: string; // ISO string
   address: string;
   durationMinutes: number;
+  /** Opcional. Si es > 1, {{5}} dice «8 horas (2 auxiliares)» y no la suma. */
+  teamSize?: number;
+  teamDurationMinutes?: number;
   totalAmount: number;
   paymentStatus: string;
   paidAmount?: number;
@@ -69,42 +71,19 @@ interface ReminderPayload {
 // Helpers
 // ──────────────────────────────────────────────
 
-function formatDate(isoString: string): string {
-  return new Date(isoString).toLocaleDateString('es-CO', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-    timeZone: DEFAULT_TIMEZONE,
-  });
-}
-
-function formatTime(isoString: string): string {
-  return new Date(isoString).toLocaleTimeString('es-CO', {
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZone: DEFAULT_TIMEZONE,
-  });
-}
-
-function formatSchedule(isoString: string): string {
-  return `${formatDate(isoString)} — ${formatTime(isoString)}`;
-}
-
-function formatDuration(minutes: number): string {
-  if (minutes < 60) return `${minutes} minutos`;
-  const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  if (mins === 0) return `${hours} ${hours === 1 ? 'hora' : 'horas'}`;
-  return `${hours} ${hours === 1 ? 'hora' : 'horas'} ${mins} minutos`;
-}
-
-function reminderPaymentInput(appointmentData: AppointmentData) {
+function reminderTemplateInput(appointmentData: AppointmentData): ReminderTemplateInput {
   return {
+    clientName: appointmentData.clientName,
+    professionalName: appointmentData.professionalName,
+    scheduledDate: appointmentData.scheduledDate,
+    address: appointmentData.address,
+    durationMinutes: appointmentData.durationMinutes,
+    teamSize: appointmentData.teamSize,
     totalAmount: appointmentData.totalAmount,
     paymentStatus: appointmentData.paymentStatus,
     paidAmount: appointmentData.paidAmount,
     pendingAmount: appointmentData.pendingAmount,
+    mapsLink: appointmentData.mapsLink,
   };
 }
 
@@ -139,35 +118,14 @@ async function ensureConversationExists(
   }
 }
 
-/**
- * Construye el display body para el log, extrayendo los texts de los componentes.
- */
 function buildDisplayBody(
-  templateName: string,
   recipientType: 'client' | 'professional',
   appointmentData: AppointmentData,
-  mapsLink?: string,
 ): string {
-  if (recipientType === 'client') {
-    return (
-      `🧹 Recordatorio de servicio — ${appointmentData.clientName}\n` +
-      `Tu profesional: ${appointmentData.professionalName}\n` +
-      `Fecha: ${formatSchedule(appointmentData.scheduledDate)}\n` +
-      `Dirección: ${appointmentData.address || '—'}\n` +
-      `Duración: ${formatDuration(appointmentData.durationMinutes)}\n` +
-      `Valor: ${buildReminderPaymentText(reminderPaymentInput(appointmentData))}`
-    );
-  }
-  // Professional
-  const mapsText = mapsLink ? `\n📍 Maps: ${mapsLink}` : '';
-  return (
-    `🧹 Recordatorio de servicio mañana\n` +
-    `Cliente: ${appointmentData.clientName}\n` +
-    `Dirección: ${appointmentData.address || '—'}\n` +
-    `Horario: ${formatSchedule(appointmentData.scheduledDate)}\n` +
-    `Duración: ${formatDuration(appointmentData.durationMinutes)}` +
-    mapsText
-  );
+  const input = reminderTemplateInput(appointmentData);
+  return recipientType === 'client'
+    ? clientReminderPreview(input)
+    : professionalReminderPreview(input);
 }
 
 // ──────────────────────────────────────────────
@@ -230,76 +188,19 @@ Deno.serve(async (req) => {
     const TEMPLATE_LANGUAGE = 'es_CO';
 
     const templateName = recipientType === 'client' ? TEMPLATE_CLIENT : TEMPLATE_PROFESSIONAL;
-    const mapsLink = appointmentData.mapsLink || '';
-
-    let components: Array<Record<string, unknown>>;
-
-    if (recipientType === 'client') {
-      // recordatorio_cita_24h:
-      // {{1}} clientName
-      // {{2}} professionalName
-      // {{3}} fecha completa (formato local)
-      // {{4}} dirección
-      // {{5}} duración
-      // {{6}} valor + estado de pago
-      // {{7}} advertencia de pago
-      components = [
-        {
-          type: 'body',
-          parameters: [
-            { type: 'text', text: sanitizeWhatsAppTemplateParam(appointmentData.clientName) },
-            {
-              type: 'text',
-              text: sanitizeWhatsAppTemplateParam(appointmentData.professionalName || 'Profesional'),
-            },
-            { type: 'text', text: sanitizeWhatsAppTemplateParam(formatSchedule(appointmentData.scheduledDate)) },
-            { type: 'text', text: sanitizeWhatsAppTemplateParam(appointmentData.address) },
-            {
-              type: 'text',
-              text: sanitizeWhatsAppTemplateParam(formatDuration(appointmentData.durationMinutes)),
-            },
-            {
-              type: 'text',
-              text: sanitizeWhatsAppTemplateParam(
-                buildReminderPaymentText(reminderPaymentInput(appointmentData)),
-              ),
-            },
-            {
-              type: 'text',
-              text: sanitizeWhatsAppTemplateParam(
-                buildReminderPaymentWarning(reminderPaymentInput(appointmentData)),
-              ),
-            },
-          ],
-        },
-      ];
-    } else {
-      // recordatorio_profesional_24h:
-      // {{1}} clientName
-      // {{2}} dirección
-      // {{3}} horario (fecha + hora)
-      // {{4}} duración
-      const scheduleText = `${formatDate(appointmentData.scheduledDate)} — ${formatTime(appointmentData.scheduledDate)}`;
-      const addressText = buildProfessionalReminderAddress(appointmentData.address, mapsLink);
-
-      components = [
-        {
-          type: 'body',
-          parameters: [
-            { type: 'text', text: sanitizeWhatsAppTemplateParam(appointmentData.clientName) },
-            { type: 'text', text: addressText },
-            { type: 'text', text: sanitizeWhatsAppTemplateParam(scheduleText) },
-            {
-              type: 'text',
-              text: sanitizeWhatsAppTemplateParam(formatDuration(appointmentData.durationMinutes)),
-            },
-          ],
-        },
-      ];
-    }
+    const templateInput = reminderTemplateInput(appointmentData);
+    const parameterTexts = recipientType === 'client'
+      ? clientReminderParameterTexts(templateInput)
+      : professionalReminderParameterTexts(templateInput);
+    const components: Array<Record<string, unknown>> = [
+      {
+        type: 'body',
+        parameters: parameterTexts.map((text) => ({ type: 'text', text })),
+      },
+    ];
 
     // ── 5. Enviar vía Meta ──
-    const displayBody = buildDisplayBody(templateName, recipientType, appointmentData, mapsLink);
+    const displayBody = buildDisplayBody(recipientType, appointmentData);
     const graph = getGraphCredentials();
     assertBotOnlyAutomation(graph.phoneNumberId);
 
