@@ -226,9 +226,10 @@ as $$
     )
     and not exists (
       select 1
-      from public.crm_appointments a
+      from public.bookings a
       where a.client_phone is not null
-        and a.scheduled_date > now() - interval '180 days'
+        and a.source_deleted_at is null
+        and a.scheduled_start > now() - interval '180 days'
         and a.status not ilike '%cancel%'
         and right(regexp_replace(a.client_phone, '[^0-9]', '', 'g'), 10) in (
           l.phone_key,
