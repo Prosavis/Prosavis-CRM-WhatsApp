@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(9);
+select plan(11);
 
 select has_function(
   'public',
@@ -21,7 +21,7 @@ select has_function(
 select has_view('public', 'outreach_call_funnel_daily', 'funnel view exists');
 
 insert into public.outreach_leads (
-  id, name, landline_e164, municipio, call_status, wa_status, email_status
+  id, name, call_e164, municipio, call_status, wa_status, email_status
 ) values
   (
     'c1000000-0000-4000-8000-000000000001',
@@ -46,6 +46,24 @@ insert into public.outreach_leads (
     'Fijo Bogota',
     '+576013334455',
     null,
+    'pendiente',
+    'pending',
+    'pending'
+  ),
+  (
+    'c1000000-0000-4000-8000-000000000004',
+    'Celular Pereira',
+    '+573101112233',
+    'Pereira',
+    'pendiente',
+    'pending',
+    'pending'
+  ),
+  (
+    'c1000000-0000-4000-8000-000000000005',
+    'Celular Medellin',
+    '+573104445566',
+    'Medellin',
     'pendiente',
     'pending',
     'pending'
@@ -106,6 +124,26 @@ select is(
   ),
   0,
   'a Bogota landline stays out of the queue'
+);
+
+select is(
+  (
+    select count(*)::integer
+    from public.list_outreach_call_eligible(20)
+    where id = 'c1000000-0000-4000-8000-000000000004'
+  ),
+  1,
+  'a Pereira mobile enters the queue'
+);
+
+select is(
+  (
+    select count(*)::integer
+    from public.list_outreach_call_eligible(20)
+    where id = 'c1000000-0000-4000-8000-000000000005'
+  ),
+  0,
+  'a Medellin mobile stays out of the queue'
 );
 
 select * from finish();
