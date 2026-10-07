@@ -24,6 +24,14 @@ import {
   runFirestoreQuery,
 } from './firebaseAdminRest.ts';
 import { persistBatchSnapshot } from './reminderBatchSnapshot.ts';
+import {
+  clientReminderPreview,
+  formatTeamDurationLabel,
+  memberDurationMinutes,
+  memberOffsetMinutes,
+  professionalReminderPreview,
+  teamClockFromRecord,
+} from './reminderTemplateText.ts';
 
 // deno-lint-ignore no-explicit-any
 type SupabaseClient = any;
@@ -72,6 +80,10 @@ export interface ReminderRow {
   logCreatedAt: string | null;
   logErrorMessage: string | null;
   messageBody: string | null;
+  /** Plantilla ya armada, antes de que exista log. Null si falta la fecha. */
+  previewBody: string | null;
+  /** Horas de equipo, solo vista interna. Null con una sola auxiliar. */
+  teamDurationLabel: string | null;
   conversationStableKey: string | null;
   address: string | null;
   professionalName: string | null;
@@ -725,6 +737,18 @@ async function buildReminderRow(
     ? clientName
     : (memberOverride ? memberDisplayName : professionalNamesDisplay);
 
+  const clock = teamClockFromRecord(data);
+  const preview = buildPreviewBody({
+    data,
+    recipientType,
+    clientName,
+    professionalName: professionalNamesDisplay,
+    scheduledDate,
+    address: getAppointmentAddress(data),
+    memberId: memberOverride?.id ?? null,
+    clock,
+  });
+
   return {
     appointmentId,
     recipientType,
@@ -744,6 +768,8 @@ async function buildReminderRow(
     logCreatedAt: log?.created_at ?? null,
     logErrorMessage: log?.error_message ?? null,
     messageBody: log?.message_body ?? null,
+    previewBody: preview,
+    teamDurationLabel: formatTeamDurationLabel(clock),
     conversationStableKey: log?.conversation_stable_key ?? null,
     address: getAppointmentAddress(data),
     professionalName: professionalNamesDisplay,
@@ -974,16 +1000,78 @@ function serviceDateFromAppointment(data: Record<string, unknown>): string {
   return new Date(scheduled).toLocaleDateString('en-CA', { timeZone: TIMEZONE });
 }
 
+function paymentNumbers(data: Record<string, unknown>) {
+  const pending = Number(data.pendingAmount);
+  return {
+    totalAmount: Number(data.totalAmount ?? data.price ?? 0) || 0,
+    paymentStatus: String(data.paymentStatus ?? 'PAGO_PENDIENTE'),
+    paidAmount: Number(data.paidAmount ?? 0) || 0,
+    pendingAmount: Number.isFinite(pending) ? Math.max(0, Math.round(pending)) : undefined,
+  };
+}
+
+function shiftIso(iso: string, offsetMinutes: number): string {
+  const base = new Date(iso).getTime();
+  if (!Number.isFinite(base) || offsetMinutes === 0) return iso;
+  return new Date(base + offsetMinutes * 60_000).toISOString();
+}
+
+function buildPreviewBody(params: {
+  data: Record<string, unknown>;
+  recipientType: RecipientType;
+  clientName: string;
+  professionalName: string;
+  scheduledDate: string | null;
+  address: string | null;
+  memberId: string | null;
+  clock: ReturnType<typeof teamClockFromRecord>;
+}): string | null {
+  if (!params.scheduledDate) return null;
+  const memberId = params.recipientType === 'professional' ? params.memberId : null;
+  const start = memberId
+    ? shiftIso(params.scheduledDate, memberOffsetMinutes(params.data, memberId))
+    : params.scheduledDate;
+  const durationMinutes = memberId
+    ? memberDurationMinutes(params.data, memberId)
+    : params.clock.wallClockMinutes;
+  const input = {
+    clientName: params.clientName,
+    professionalName: params.professionalName,
+    scheduledDate: start,
+    address: params.address ?? '',
+    durationMinutes,
+    teamSize: params.recipientType === 'client' ? params.clock.teamSize : 1,
+    mapsLink: typeof params.data.mapsLink === 'string' ? params.data.mapsLink : undefined,
+    ...paymentNumbers(params.data),
+  };
+  return params.recipientType === 'client'
+    ? clientReminderPreview(input)
+    : professionalReminderPreview(input);
+}
+
 function buildRetryAppointmentPayload(
   appointmentId: string,
   data: Record<string, unknown>,
+  recipientType: RecipientType,
+  memberId: string | null,
 ) {
+  const clock = teamClockFromRecord(data);
+  const scheduled = String(data.scheduledDate ?? '');
+  const professional = recipientType === 'professional';
+  const durationMinutes = professional && memberId
+    ? memberDurationMinutes(data, memberId)
+    : clock.wallClockMinutes;
+  const scheduledDate = professional && memberId
+    ? shiftIso(scheduled, memberOffsetMinutes(data, memberId))
+    : scheduled;
   return {
     clientName: String(data.clientName ?? 'Cliente'),
     professionalName: buildProfessionalNamesDisplay(data),
-    scheduledDate: String(data.scheduledDate ?? ''),
+    scheduledDate,
     address: getAppointmentAddressFromData(data),
-    durationMinutes: Number(data.duration ?? 0) || 0,
+    durationMinutes,
+    teamSize: clock.teamSize,
+    teamDurationMinutes: clock.teamDurationMinutes,
     totalAmount: Number(data.totalAmount ?? data.price ?? 0) || 0,
     paymentStatus: String(data.paymentStatus ?? 'PAGO_PENDIENTE'),
     paidAmount: Number(data.paidAmount ?? 0) || 0,
@@ -1065,7 +1153,12 @@ export async function handleRetry(
     return jsonResponse({ error: 'REMINDER_API_KEY no configurada.' }, 503);
   }
 
-  const appointmentData = buildRetryAppointmentPayload(trimmedId, data);
+  const appointmentData = buildRetryAppointmentPayload(
+    trimmedId,
+    data,
+    recipientType,
+    effectiveMemberId,
+  );
   const attemptFields = recipientType === 'client'
     ? {
         lastAttemptAt: 'recordatorio24hLastAttemptAt',
