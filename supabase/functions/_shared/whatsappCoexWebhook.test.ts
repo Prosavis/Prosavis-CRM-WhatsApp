@@ -300,7 +300,7 @@ Deno.test('image echo stores media_id without throwing', async () => {
   assertEquals(db.tables.whatsapp_message_log[0].message_body, 'foto del local');
 });
 
-Deno.test('ctwa_clid is stored from an ad referral and not overwritten', async () => {
+Deno.test('ctwa_clid is stored from an ad referral and the latest click wins', async () => {
   assertEquals(
     ctwaReferralFromMessage({
       referral: { source_type: 'ad', source_id: '111', ctwa_clid: 'clid-1' },
@@ -343,10 +343,15 @@ Deno.test('ctwa_clid is stored from an ad referral and not overwritten', async (
     },
   });
   assertEquals(second, 'inserted');
-  assertEquals(db.tables.whatsapp_conversations[0].ctwa_clid, 'clid-1');
+  assertEquals(db.tables.whatsapp_conversations[0].ctwa_clid, 'clid-2');
+  assertEquals(db.tables.whatsapp_conversations[0].ctwa_source_id, '222');
+  assertEquals(
+    (db.tables.whatsapp_conversations[0].ctwa_clicks as MemoryRow[]).map((click) => click.ctwa_clid),
+    ['clid-1'],
+  );
 });
 
-Deno.test('bot thread stores the first ad click and a retry does not overwrite it', async () => {
+Deno.test('bot thread keeps the click on a retry and moves the old one to history on a new ad', async () => {
   assertEquals(
     ctwaReferralFromMessage({ referral: { ctwa_clid: 'clid-bot' } }),
     { ctwaClid: 'clid-bot', sourceId: '' },
@@ -370,14 +375,27 @@ Deno.test('bot thread stores the first ad click and a retry does not overwrite i
   });
   assertEquals(db.tables.whatsapp_conversations[0].ctwa_clid, 'clid-bot');
   assertEquals(db.tables.whatsapp_conversations[0].ctwa_source_id, 'simple-2');
+  const firstCapturedAt = db.tables.whatsapp_conversations[0].ctwa_captured_at;
+
+  await captureCtwaClick({ supabase: db as never, message, stableKey, direction: 'inbound' });
+  assertEquals(db.tables.whatsapp_conversations[0].ctwa_clid, 'clid-bot');
+  assertEquals(db.tables.whatsapp_conversations[0].ctwa_captured_at, firstCapturedAt);
+  assertEquals(db.tables.whatsapp_conversations[0].ctwa_clicks, undefined);
 
   await captureCtwaClick({
     supabase: db as never,
-    message: { referral: { source_type: 'ad', source_id: 'otro', ctwa_clid: 'clid-nuevo' } },
+    message: { referral: { source_type: 'ad', source_id: 'home-office-b', ctwa_clid: 'clid-nuevo' } },
     stableKey,
     direction: 'inbound',
   });
-  assertEquals(db.tables.whatsapp_conversations[0].ctwa_clid, 'clid-bot');
+  assertEquals(db.tables.whatsapp_conversations[0].ctwa_clid, 'clid-nuevo');
+  assertEquals(db.tables.whatsapp_conversations[0].ctwa_source_id, 'home-office-b');
+  assertEquals(db.tables.whatsapp_conversations[0].ctwa_clicks, [
+    { ctwa_clid: 'clid-bot', ctwa_source_id: 'simple-2', ctwa_captured_at: firstCapturedAt },
+  ]);
+
+  await captureCtwaClick({ supabase: db as never, message, stableKey, direction: 'inbound' });
+  assertEquals(db.tables.whatsapp_conversations[0].ctwa_clid, 'clid-nuevo');
 });
 
 Deno.test('echo without to does not throw', async () => {

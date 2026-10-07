@@ -106,22 +106,39 @@ export async function captureCtwaClick(params: {
   try {
     const { data, error } = await params.supabase
       .from('whatsapp_conversations')
-      .select('ctwa_clid')
+      .select('ctwa_clid, ctwa_source_id, ctwa_captured_at, ctwa_clicks')
       .eq('stable_key', params.stableKey)
       .maybeSingle();
     if (error) {
       console.error('ctwa_clid read skipped', error.message);
       return;
     }
-    if (getString((data as { ctwa_clid?: unknown } | null)?.ctwa_clid)) return;
-    const { error: updateError } = await params.supabase
+    const current = asRecord(data);
+    const currentClid = getString(current.ctwa_clid);
+    if (currentClid === referral.ctwaClid) return;
+    const history = asArray(current.ctwa_clicks);
+    if (history.some((click) => getString(asRecord(click).ctwa_clid) === referral.ctwaClid)) return;
+    const update: JsonRecord = {
+      ctwa_clid: referral.ctwaClid,
+      ctwa_source_id: referral.sourceId || null,
+      ctwa_captured_at: new Date().toISOString(),
+    };
+    if (currentClid) {
+      update.ctwa_clicks = [
+        ...history,
+        {
+          ctwa_clid: currentClid,
+          ctwa_source_id: getString(current.ctwa_source_id) || null,
+          ctwa_captured_at: getString(current.ctwa_captured_at) || null,
+        },
+      ];
+    }
+    let write = params.supabase
       .from('whatsapp_conversations')
-      .update({
-        ctwa_clid: referral.ctwaClid,
-        ctwa_source_id: referral.sourceId || null,
-        ctwa_captured_at: new Date().toISOString(),
-      })
+      .update(update)
       .eq('stable_key', params.stableKey);
+    if (currentClid) write = write.eq('ctwa_clid', currentClid);
+    const { error: updateError } = await write;
     if (updateError) console.error('ctwa_clid write skipped', updateError.message);
   } catch (err) {
     console.error('ctwa_clid persist skipped', err);
