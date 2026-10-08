@@ -34,6 +34,13 @@ describe('directoryDisplayTags', () => {
     })).toEqual([]);
   });
 
+  it('shows Equipo Prosavis as one label next to other tags', () => {
+    expect(directoryDisplayTags({
+      tags: ['Equipo Prosavis', 'Auxiliares', 'equipo prosavis'],
+      classification: 'Equipo Prosavis, Auxiliares',
+    })).toEqual(['Equipo Prosavis', 'Auxiliares']);
+  });
+
   it('falls back to a single legacy classification when there are no tags', () => {
     expect(directoryDisplayTags({
       tags: [],
@@ -46,11 +53,16 @@ describe('directoryTagColor', () => {
   const catalog = catalogColorByTagName([
     { name: 'Auxiliares', color: '#c62828' },
     { name: 'TEST', color: '#1565c0' },
+    { name: 'Equipo Prosavis', color: '#002446' },
   ]);
 
   it('resolves catalog color by name ignoring case', () => {
     expect(directoryTagColor('Auxiliares', catalog)).toBe('#c62828');
     expect(directoryTagColor('auxiliares', catalog)).toBe('#c62828');
+  });
+
+  it('resolves a multi-word tag color', () => {
+    expect(directoryTagColor(' equipo prosavis ', catalog)).toBe('#002446');
   });
 
   it('returns undefined for a label that is not in the catalog', () => {

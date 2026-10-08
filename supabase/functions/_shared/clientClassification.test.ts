@@ -5,6 +5,8 @@ import {
   hasPararTag,
   hasProblematicaTag,
   hasRiskTag,
+  isInternalContact,
+  isTestContact,
   qualityLayer,
 } from './clientClassification.ts';
 
@@ -61,6 +63,22 @@ Deno.test('qualityLayer falls back to standard on first COMPLETED', () => {
 Deno.test('hasProblematicaTag matches with or without accent', () => {
   assertEquals(hasProblematicaTag({ tags: ['Cliente Problematica'] }), true);
   assertEquals(hasProblematicaTag({ classification: 'Cliente Problemática' }), true);
+});
+
+Deno.test('Equipo Prosavis and TEST are internal contacts', () => {
+  assertEquals(isInternalContact({ tags: ['Equipo Prosavis'] }), true);
+  assertEquals(isInternalContact({ tags: ['  equipo prosavis '] }), true);
+  assertEquals(isInternalContact({ tags: ['Auxiliares, Equipo Prosavis'] }), true);
+  assertEquals(isInternalContact({ classification: 'Agendado, Equipo Prosavis' }), true);
+  assertEquals(isInternalContact({ tags: ['TEST'] }), true);
+  assertEquals(isInternalContact({ tags: ['Equipo', 'Prosavis'] }), false);
+  assertEquals(isInternalContact({ tags: ['Agendado'] }), false);
+});
+
+Deno.test('isTestContact keeps working and includes Equipo Prosavis', () => {
+  assertEquals(isTestContact({ tags: ['TEST'] }), true);
+  assertEquals(isTestContact({ tags: ['Equipo Prosavis'] }), true);
+  assertEquals(isTestContact({ tags: [] }), false);
 });
 
 Deno.test('Parar is not Decline or risk', () => {

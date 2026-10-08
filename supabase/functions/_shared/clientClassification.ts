@@ -3,13 +3,15 @@
  * Alineado con Prosavis-UserConsole/src/utils/clientClassification.ts
  */
 
+import { INTERNAL_CONTACT_TAG_TOKENS } from './internalContactTags.ts';
+
 const EMPRESAS_TOKENS = new Set(['empresas', 'empresa', 'company']);
 const RECURRING_CLIENT_KEYWORDS = ['cliente recurrente', 'recurrente'];
 const AGENDADO_KEYWORDS = ['agendado', 'agendada'];
 /** Tags que marcan lista negra: Decline, 🚫, Bloqueado. */
 const BLACKLIST_TOKENS = new Set(['decline', '🚫', 'bloqueado']);
-/** Tag TEST = admins/ingenieros; excluir de métricas. */
-const TEST_TOKENS = new Set(['test']);
+/** TEST (pruebas) y Equipo Prosavis (equipo); excluir de métricas. */
+const INTERNAL_CONTACT_TOKENS = new Set<string>(INTERNAL_CONTACT_TAG_TOKENS);
 /** Tag Favoritos = acceso rápido preferido en métricas. */
 const FAVORITOS_TOKENS = new Set(['favoritos', 'favorito']);
 /** Decline como tag de venta/pago (distinto de Parar). */
@@ -100,10 +102,13 @@ export function hasBlacklistTag(client: ClassifiableClient): boolean {
   return hasExactToken(client, BLACKLIST_TOKENS);
 }
 
-/** Contacto de prueba (admins/devs); excluir de métricas. */
-export function isTestContact(client: ClassifiableClient): boolean {
-  return hasExactToken(client, TEST_TOKENS);
+/** Contacto interno (TEST o Equipo Prosavis); excluir de métricas y envíos. */
+export function isInternalContact(client: ClassifiableClient): boolean {
+  return hasExactToken(client, INTERNAL_CONTACT_TOKENS);
 }
+
+/** Nombre histórico de isInternalContact; incluye Equipo Prosavis. */
+export const isTestContact = isInternalContact;
 
 /** Tag Favoritos / Favorito en tags o classification. */
 export function hasFavoritosTag(client: ClassifiableClient): boolean {

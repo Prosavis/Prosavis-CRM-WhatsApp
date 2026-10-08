@@ -7,8 +7,8 @@ import { directoryPhoneKey, isReactivationPhoneValid } from './directoryPhone.ts
 import {
   hasBlacklistTag,
   isCompanyClient,
+  isInternalContact,
   isRecurringClient,
-  isTestContact,
   type ClassifiableClient,
 } from './clientClassification.ts';
 import { shouldSkipReactivationByTags } from './reactivationTagPolicy.ts';
@@ -383,7 +383,7 @@ export function isEligibleForReactivation(
   if (client.isBlacklisted || client.optOut) return false;
   if (!isReactivationPhoneValid(client.phone)) return false;
   if (excludeCompanies && client.isCompany) return false;
-  if (isTestContact({ classification: client.classification, tags: client.tags })) {
+  if (isInternalContact({ classification: client.classification, tags: client.tags })) {
     return false;
   }
   // Auxiliares / Job / Marian / Decline / ciudades fuera de Pereira-Dosquebradas-Santa Rosa-Cartago, etc.

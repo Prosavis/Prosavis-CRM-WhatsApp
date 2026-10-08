@@ -4,7 +4,7 @@
  * No enviar si:
  * - Lista negra / Decline / bloqueados
  * - Equipo / Auxiliares / Trabajo-CV
- * - TEST / Empresas / problemáticos / no priorizar
+ * - TEST / Equipo Prosavis / Empresas / problemáticos / no priorizar
  * - Tag de ciudad/región fuera de cobertura operativa
  *
  * Cobertura operativa (ciudad): Pereira, Dosquebradas, Santa Rosa, Cartago.
@@ -12,6 +12,12 @@
  * Con tag de ciudad permitida → se permite.
  * Con tag de ciudad NO permitida → se excluye.
  */
+
+import {
+  EQUIPO_PROSAVIS_TAG_TOKEN,
+  INTERNAL_CONTACT_TAG_TOKENS,
+  TEST_TAG_TOKEN,
+} from './internalContactTags.ts';
 
 export const REACTIVATION_ALLOWED_CITY_TAGS = [
   'pereira',
@@ -58,8 +64,8 @@ export const REACTIVATION_HARD_EXCLUDE_TAGS = [
   'trabajo',
   'trabajo / cv',
   'trabajo/cv',
-  // Pruebas / B2B / calidad
-  'test',
+  // Pruebas y equipo (TEST, Equipo Prosavis) / B2B / calidad
+  ...INTERNAL_CONTACT_TAG_TOKENS,
   'empresas',
   'empresa',
   'company',
@@ -123,6 +129,7 @@ function isCoverageGeographyTag(token: string): boolean {
 export type ReactivationTagSkipReason =
   | 'tag_blacklist'
   | 'tag_team'
+  | 'tag_equipo'
   | 'tag_test'
   | 'tag_company'
   | 'tag_quality'
@@ -155,7 +162,8 @@ export function getReactivationTagSkipReason(options: {
     ) {
       return 'tag_team';
     }
-    if (token === 'test') return 'tag_test';
+    if (token === EQUIPO_PROSAVIS_TAG_TOKEN) return 'tag_equipo';
+    if (token === TEST_TAG_TOKEN) return 'tag_test';
     if (token === 'empresas' || token === 'empresa' || token === 'company') {
       return 'tag_company';
     }

@@ -12,7 +12,7 @@ import {
   hasProblematicaTag,
   isCompanyClient,
   isRecurringClient,
-  isTestContact,
+  isInternalContact,
   qualityLayer,
   type QualityLayer,
 } from './clientClassification.ts';
@@ -243,13 +243,14 @@ export function buildQualityMetrics(params: {
   }
 
   const usedBucketKeys = new Set<string>();
+  const internalBucketKeys = new Set<string>();
   const clients: QualityClientRow[] = [];
 
   for (const entry of params.directory) {
     const keys = directoryKeys(entry, params.phoneKey);
-    if (isTestContact({ classification: entry.classification, tags: entry.tags })) {
+    if (isInternalContact({ classification: entry.classification, tags: entry.tags })) {
       for (const key of keys) {
-        if (buckets.has(key)) usedBucketKeys.add(key);
+        if (buckets.has(key)) internalBucketKeys.add(key);
       }
       continue;
     }
@@ -291,7 +292,9 @@ export function buildQualityMetrics(params: {
 
   let orphanIndex = 0;
   for (const [key, bucket] of buckets) {
-    if (usedBucketKeys.has(key) || bucket.completedCount < 1) continue;
+    if (usedBucketKeys.has(key) || internalBucketKeys.has(key) || bucket.completedCount < 1) {
+      continue;
+    }
     orphanIndex += 1;
     const classifiable = { tags: [] as string[] };
     clients.push({
@@ -428,7 +431,7 @@ export function buildQualityMetricsFromNucleus(
     const classifiable = { classification: row.classification, tags };
     const completedCount = Number(row.completed_count) || 0;
     if (completedCount < 1) continue;
-    if (isTestContact(classifiable)) continue;
+    if (isInternalContact(classifiable)) continue;
     clients.push({
       id: row.directory_id,
       name: row.name,

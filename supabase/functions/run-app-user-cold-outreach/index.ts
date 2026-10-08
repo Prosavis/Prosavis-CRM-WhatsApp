@@ -353,7 +353,7 @@ Deno.serve(async (req) => {
           'active_sequence = REACTIVACION',
           'opt_out',
           'whatsapp_blocklist',
-          'tags Auxiliares/test/Decline/Bloqueado',
+          'tags Auxiliares/test/Equipo Prosavis/Decline/Bloqueado',
           'reactivations_enabled = false',
           'outbound WA últimos 7 días',
           'teléfono no móvil CO',
