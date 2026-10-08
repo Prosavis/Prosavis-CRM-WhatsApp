@@ -36,7 +36,7 @@ describe('geminiGenerateJson HTTP transport', () => {
 
     await geminiGenerateJson({
       apiKey: 'test-api-key',
-      model: 'gemini-3.6-flash',
+      model: 'gemini-3.8-flash',
       prompt: 'Resume',
       responseJsonSchema: strictSchema,
     });
@@ -48,6 +48,10 @@ describe('geminiGenerateJson HTTP transport', () => {
     };
     expect(body.generationConfig.responseJsonSchema).toEqual(strictSchema);
     expect(body.generationConfig).not.toHaveProperty('responseSchema');
+    expect(body.generationConfig).not.toHaveProperty('temperature');
+    expect(body.generationConfig).not.toHaveProperty('topP');
+    expect(body.generationConfig).not.toHaveProperty('topK');
+    expect(body.generationConfig).not.toHaveProperty('thinkingBudget');
   });
 
   it('sends system instructions separately from the user prompt', async () => {
@@ -63,7 +67,7 @@ describe('geminiGenerateJson HTTP transport', () => {
 
     await geminiGenerateJson({
       apiKey: 'test-api-key',
-      model: 'gemini-3.6-flash',
+      model: 'gemini-3.8-flash',
       systemInstruction: 'REGLAS DEL SISTEMA',
       prompt: 'HISTORIAL Y CONTEXTO GROUNDED',
     });
@@ -104,7 +108,7 @@ describe('geminiGenerateJson HTTP transport', () => {
 
     await geminiGenerateJson({
       apiKey: 'test-api-key',
-      model: 'gemini-3.6-flash',
+      model: 'gemini-3.8-flash',
       prompt: 'Legacy',
       responseSchema: legacySchema,
     });
@@ -119,7 +123,7 @@ describe('geminiGenerateJson HTTP transport', () => {
 });
 
 describe('geminiAnalyzeImage HTTP transport', () => {
-  it('asks for 8192 output tokens and minimal thinking, and returns finishReason', async () => {
+  it('asks for 8192 output tokens and low thinking, and returns finishReason', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       candidates: [{
         content: {
@@ -150,7 +154,9 @@ describe('geminiAnalyzeImage HTTP transport', () => {
     expect(body.generationConfig.maxOutputTokens).toBe(IMAGE_ANALYSIS_MAX_OUTPUT_TOKENS);
     expect(body.generationConfig.maxOutputTokens).toBe(8192);
     expect(body.generationConfig.thinkingConfig).toEqual({
-      thinkingLevel: IMAGE_ANALYSIS_THINKING_LEVEL,
+      thinkingLevel: 'low',
     });
+    expect(IMAGE_ANALYSIS_THINKING_LEVEL).toBe('low');
+    expect(body.generationConfig).not.toHaveProperty('temperature');
   });
 });

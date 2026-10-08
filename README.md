@@ -92,9 +92,9 @@ Referencia local en `.env.example` (solo para `supabase functions serve`).
 | `WHATSAPP_WEBHOOK_MODE` | `shadow` = solo audita; `active` = crea conversaciones/mensajes |
 | `META_GRAPH_API_VERSION` | Versión Graph API (ej. `v21.0`) |
 | `GEMINI_API_KEY` | IA en inbox: sugerencias, booking JSON, transcripción audio |
-| `GEMINI_MODEL_REPLY` | Modelo reply (default `gemini-3.6-flash`) |
-| `GEMINI_MODEL_JSON` | Modelo JSON booking (default `gemini-3.6-flash`) |
-| `GEMINI_MODEL_TRANSCRIBE` | Modelo STT (default `gemini-3.6-flash`) |
+| `GEMINI_MODEL_REPLY` | Modelo reply (default `gemini-3.8-flash`) |
+| `GEMINI_MODEL_JSON` | Modelo JSON booking (default `gemini-3.8-flash`) |
+| `GEMINI_MODEL_TRANSCRIBE` | Modelo STT (default `gemini-3.8-flash`) |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | Lectura Firestore (citas para IA, métricas, reminders) |
 | `EMAIL_UNSUBSCRIBE_SECRET` | HMAC del one-click de baja del lote `comercial@` |
 | `EMAIL_UNSUBSCRIBE_URL` | Opcional. Default: `https://djzwjaegxbhlefanmmee.supabase.co/functions/v1/email-unsubscribe` |

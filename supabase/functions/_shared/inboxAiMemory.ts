@@ -64,7 +64,6 @@ export interface InboxAiMemoryGenerationParams {
   apiKey: string;
   model: string;
   prompt: string;
-  temperature: number;
   maxOutputTokens: number;
   responseJsonSchema: Record<string, unknown>;
   logScope: string;
@@ -340,7 +339,6 @@ export async function loadOrRefreshInboxAiMemory(params: {
       apiKey,
       model,
       prompt: buildInboxAiMemoryPrompt(previous, params.transcript, params.canonicalName),
-      temperature: 0,
       maxOutputTokens: 2_048,
       responseJsonSchema: INBOX_AI_MEMORY_RESPONSE_SCHEMA,
       logScope: 'inbox-ai-memory',

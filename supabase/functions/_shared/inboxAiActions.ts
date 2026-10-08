@@ -477,7 +477,6 @@ export async function generateInboxAiSuggestion(params: {
     systemInstruction:
       `${params.systemInstruction}\n\n${ACTION_GENERATION_INSTRUCTIONS}`,
     prompt: params.contextPrompt,
-    temperature: 0.4,
     responseJsonSchema: INBOX_AI_SUGGESTION_JSON_SCHEMA,
     logScope: 'suggest-whatsapp-agent-reply',
   });

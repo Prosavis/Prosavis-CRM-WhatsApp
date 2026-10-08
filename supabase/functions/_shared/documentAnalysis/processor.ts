@@ -56,7 +56,6 @@ async function extractFromText(transcript: string): Promise<ResumeExtractResult>
     systemInstruction: LABOR_EXTRACT_SYSTEM,
     prompt: `${LABOR_EXTRACT_PROMPT}\n\nTexto:\n${transcript.slice(0, 20000)}`,
     responseJsonSchema: RESUME_EXTRACT_JSON_SCHEMA,
-    temperature: 0,
     maxOutputTokens: 8192,
     logScope: 'document-analysis-text',
   });

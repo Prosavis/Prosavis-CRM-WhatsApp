@@ -1,10 +1,10 @@
 /**
  * Cliente compartido para Google Gemini API.
  * Único proveedor de IA para el CRM WhatsApp.
- * Usa gemini-3.6-flash como modelo por defecto.
+ * Usa gemini-3.8-flash como modelo por defecto.
  *
  * Documentación:
- *   https://ai.google.dev/gemini-api/docs/models/gemini-3.6-flash
+ *   https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash
  *   https://ai.google.dev/gemini-api/docs/structured-output
  */
 
@@ -16,18 +16,52 @@ import {
 } from './transcriptContinuation.ts';
 
 export const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
-export const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
 export const GEMINI_TIMEOUT_MS = 75000;
 export const MAX_INLINE_AUDIO_BYTES = 180 * 1024; // 180 KB — inline; mayor usa asset
 export const IMAGE_ANALYSIS_MAX_OUTPUT_TOKENS = 8192;
-export const IMAGE_ANALYSIS_THINKING_LEVEL = 'minimal';
+export const IMAGE_ANALYSIS_THINKING_LEVEL = 'low';
 
 export type GeminiThinkingLevel = 'minimal' | 'low' | 'medium' | 'high';
 
-export interface GeminiThinkingConfig {
+/** 3.7 y 3.8 rechazan "minimal". */
+const MODELS_WITHOUT_MINIMAL = /^gemini-3\.(7|8)(?:-|$)/;
+
+export function resolveThinkingLevel(
+  model: string,
+  requested?: GeminiThinkingLevel,
+): GeminiThinkingLevel | undefined {
+  if (!requested) return undefined;
+  if (requested === 'minimal' && MODELS_WITHOUT_MINIMAL.test(model)) {
+    return 'low';
+  }
+  return requested;
+}
+
+export interface GeminiGenerationConfigInput {
+  maxOutputTokens?: number;
+  responseMimeType?: string;
+  responseSchema?: Record<string, unknown>;
+  responseJsonSchema?: Record<string, unknown>;
   thinkingLevel?: GeminiThinkingLevel;
-  thinkingBudget?: number;
-  includeThoughts?: boolean;
+}
+
+/**
+ * Único constructor de generationConfig del CRM.
+ * No envía temperature, topP, topK ni thinkingBudget.
+ */
+export function buildGeminiGenerationConfig(
+  model: string,
+  input: GeminiGenerationConfigInput = {},
+): Record<string, unknown> {
+  const config: Record<string, unknown> = {};
+  if (input.maxOutputTokens != null) config.maxOutputTokens = input.maxOutputTokens;
+  if (input.responseMimeType) config.responseMimeType = input.responseMimeType;
+  if (input.responseSchema) config.responseSchema = input.responseSchema;
+  if (input.responseJsonSchema) config.responseJsonSchema = input.responseJsonSchema;
+  const thinkingLevel = resolveThinkingLevel(model, input.thinkingLevel);
+  if (thinkingLevel) config.thinkingConfig = { thinkingLevel };
+  return config;
 }
 
 function readRuntimeEnv(name: string): string | undefined {
@@ -103,15 +137,12 @@ interface GeminiGenerateContentRequest {
   contents: GeminiContent[];
   systemInstruction?: GeminiContent;
   generationConfig?: {
-    temperature?: number;
     maxOutputTokens?: number;
-    topP?: number;
-    topK?: number;
     stopSequences?: string[];
     responseMimeType?: string;
     responseSchema?: Record<string, unknown>;
     responseJsonSchema?: Record<string, unknown>;
-    thinkingConfig?: GeminiThinkingConfig;
+    thinkingConfig?: { thinkingLevel: GeminiThinkingLevel };
   };
 }
 
@@ -132,43 +163,29 @@ async function geminiRequest(params: {
   model: string;
   contents: GeminiContent[];
   systemInstruction?: string;
-  temperature?: number;
   maxOutputTokens?: number;
   responseMimeType?: string;
   responseSchema?: Record<string, unknown>;
   responseJsonSchema?: Record<string, unknown>;
-  thinkingConfig?: GeminiThinkingConfig;
+  thinkingLevel?: GeminiThinkingLevel;
 }): Promise<GeminiGenerateContentResponse> {
   const url = `${GEMINI_BASE_URL}/models/${params.model}:generateContent`;
 
   const body: GeminiGenerateContentRequest = {
     contents: params.contents,
-    generationConfig: {
-      temperature: params.temperature ?? 0.4,
+    generationConfig: buildGeminiGenerationConfig(params.model, {
       maxOutputTokens: params.maxOutputTokens ?? 2048,
-    },
+      responseMimeType: params.responseMimeType,
+      responseSchema: params.responseSchema,
+      responseJsonSchema: params.responseJsonSchema,
+      thinkingLevel: params.thinkingLevel,
+    }),
   };
 
   if (params.systemInstruction) {
     body.systemInstruction = {
       parts: [{ text: params.systemInstruction }],
     };
-  }
-
-  if (params.responseMimeType) {
-    body.generationConfig!.responseMimeType = params.responseMimeType;
-  }
-
-  if (params.responseSchema) {
-    body.generationConfig!.responseSchema = params.responseSchema;
-  }
-
-  if (params.responseJsonSchema) {
-    body.generationConfig!.responseJsonSchema = params.responseJsonSchema;
-  }
-
-  if (params.thinkingConfig) {
-    body.generationConfig!.thinkingConfig = params.thinkingConfig;
   }
 
   const response = await fetch(url, {
@@ -243,15 +260,15 @@ function stripCodeFences(text: string): string {
 
 /**
  * Genera texto usando Gemini.
- * Acepta systemInstruction opcional, temperature y maxOutputTokens.
+ * Acepta systemInstruction opcional y maxOutputTokens.
  */
 export async function geminiGenerateText(params: {
   apiKey: string;
   model?: string;
   systemInstruction?: string;
   userText: string;
-  temperature?: number;
   maxOutputTokens?: number;
+  thinkingLevel?: GeminiThinkingLevel;
 }): Promise<string> {
   const model = params.model ??
     resolveGeminiModel('GEMINI_MODEL_REPLY', DEFAULT_GEMINI_MODEL);
@@ -265,8 +282,8 @@ export async function geminiGenerateText(params: {
     model,
     contents,
     systemInstruction: params.systemInstruction,
-    temperature: params.temperature,
     maxOutputTokens: params.maxOutputTokens,
+    thinkingLevel: params.thinkingLevel,
   });
 
   return extractTextFromResponse(data);
@@ -302,10 +319,10 @@ export async function geminiGenerateJson<T>(params: {
   model?: string;
   systemInstruction?: string;
   prompt: string;
-  temperature?: number;
   maxOutputTokens?: number;
   responseSchema?: Record<string, unknown>;
   responseJsonSchema?: Record<string, unknown>;
+  thinkingLevel?: GeminiThinkingLevel;
   logScope?: string;
   logResponsePreview?: boolean;
 }): Promise<T> {
@@ -319,10 +336,10 @@ export async function geminiGenerateJsonWithMeta<T>(params: {
   model?: string;
   systemInstruction?: string;
   prompt: string;
-  temperature?: number;
   maxOutputTokens?: number;
   responseSchema?: Record<string, unknown>;
   responseJsonSchema?: Record<string, unknown>;
+  thinkingLevel?: GeminiThinkingLevel;
   logScope?: string;
   logResponsePreview?: boolean;
 }): Promise<GeminiJsonResult<T>> {
@@ -344,7 +361,7 @@ export async function geminiGenerateJsonWithMeta<T>(params: {
     model,
     contents: [{ role: 'user', parts: [{ text: params.prompt }] }],
     systemInstruction: params.systemInstruction,
-    temperature: params.temperature ?? 0,
+    thinkingLevel: params.thinkingLevel,
     maxOutputTokens: params.maxOutputTokens ?? 8192,
     responseMimeType: 'application/json',
     responseSchema: params.responseSchema,
@@ -439,7 +456,7 @@ function audioMimeType(mimeType: string): string {
 /**
  * Transcribe audio usando Gemini (multimodal).
  * Descarga el audio de WhatsApp y lo envía a Gemini como inline_data.
- * Gemini 3.5 Flash soporta entrada de audio nativa.
+ * Gemini 3.8 Flash soporta entrada de audio nativa.
  */
 export async function geminiTranscribeAudio(params: {
   apiKey: string;
@@ -469,7 +486,6 @@ export async function geminiTranscribeAudio(params: {
         { text: instruction },
       ],
     }],
-    temperature: 0,
     maxOutputTokens: params.maxOutputTokens ?? STT_MAX_OUTPUT_TOKENS,
   });
 
@@ -519,7 +535,7 @@ function imageMimeType(mimeType: string): string {
 /**
  * Describe una foto inbound de WhatsApp para el operador / packer de inbox.
  * No inventa precios ni disponibilidad.
- * thinkingLevel minimal: maxOutputTokens incluye tokens de razonamiento.
+ * thinkingLevel low: 3.8 no admite minimal. maxOutputTokens incluye el razonamiento.
  */
 export async function geminiAnalyzeImage(params: {
   apiKey: string;
@@ -550,9 +566,8 @@ export async function geminiAnalyzeImage(params: {
         { text: instruction },
       ],
     }],
-    temperature: 0,
     maxOutputTokens: IMAGE_ANALYSIS_MAX_OUTPUT_TOKENS,
-    thinkingConfig: { thinkingLevel: IMAGE_ANALYSIS_THINKING_LEVEL },
+    thinkingLevel: IMAGE_ANALYSIS_THINKING_LEVEL,
   });
 
   return extractTextResultFromResponse(data);
@@ -648,7 +663,6 @@ export async function geminiGenerateJsonFromFile<T>(params: {
     model,
     contents: [{ role: 'user', parts }],
     systemInstruction: params.systemInstruction,
-    temperature: 0,
     maxOutputTokens: params.maxOutputTokens ?? 8192,
     responseMimeType: 'application/json',
     responseJsonSchema: params.responseJsonSchema,
