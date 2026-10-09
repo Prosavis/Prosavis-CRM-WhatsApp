@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Skills obligatorias (CRM WhatsApp)
 
-**Skills:** `../.agents/skills/<nombre>/SKILL.md` (suite compartida).
+**Skills:** `.agents/skills/<nombre>/SKILL.md` (bundle de este repo; Cloud Agents lo ven). En el escritorio, con `GitHub/` abierto, la suite completa sigue en `../.agents/skills/`.
 
 Complementa `agent-vercel-supabase-waba.mdc`.
 
