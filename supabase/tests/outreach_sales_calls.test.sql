@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(11);
+select plan(15);
 
 select has_function(
   'public',
@@ -64,6 +64,42 @@ insert into public.outreach_leads (
     'Celular Medellin',
     '+573104445566',
     'Medellin',
+    'pendiente',
+    'pending',
+    'pending'
+  ),
+  (
+    'c1000000-0000-4000-8000-000000000006',
+    'Fijo Santa Rosa',
+    '+576064446666',
+    'Santa Rosa de Cabal',
+    'pendiente',
+    'pending',
+    'pending'
+  ),
+  (
+    'c1000000-0000-4000-8000-000000000007',
+    'Fijo Cartago',
+    '+576023337777',
+    'Cartago',
+    'pendiente',
+    'pending',
+    'pending'
+  ),
+  (
+    'c1000000-0000-4000-8000-000000000008',
+    'Fijo Cali',
+    '+576023338888',
+    'Cali',
+    'pendiente',
+    'pending',
+    'pending'
+  ),
+  (
+    'c1000000-0000-4000-8000-000000000009',
+    'Grupo Coomeva',
+    '+576063339999',
+    'Pereira',
     'pendiente',
     'pending',
     'pending'
@@ -132,8 +168,18 @@ select is(
     from public.list_outreach_call_eligible(20)
     where id = 'c1000000-0000-4000-8000-000000000004'
   ),
+  0,
+  'a Pereira mobile stays out of the phase 1 queue'
+);
+
+select is(
+  (
+    select count(*)::integer
+    from public.list_outreach_call_eligible(20)
+    where id = 'c1000000-0000-4000-8000-000000000006'
+  ),
   1,
-  'a Pereira mobile enters the queue'
+  'a Santa Rosa landline enters the queue'
 );
 
 select is(
@@ -144,6 +190,36 @@ select is(
   ),
   0,
   'a Medellin mobile stays out of the queue'
+);
+
+select is(
+  (
+    select count(*)::integer
+    from public.list_outreach_call_eligible(20)
+    where id = 'c1000000-0000-4000-8000-000000000007'
+  ),
+  1,
+  'a Cartago landline enters the queue'
+);
+
+select is(
+  (
+    select count(*)::integer
+    from public.list_outreach_call_eligible(20)
+    where id = 'c1000000-0000-4000-8000-000000000008'
+  ),
+  0,
+  'a 602 number outside Cartago stays out of the queue'
+);
+
+select is(
+  (
+    select count(*)::integer
+    from public.list_outreach_call_eligible(20)
+    where id = 'c1000000-0000-4000-8000-000000000009'
+  ),
+  0,
+  'Grupo Coomeva stays out of the queue'
 );
 
 select * from finish();
