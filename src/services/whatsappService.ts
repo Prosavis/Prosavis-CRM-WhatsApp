@@ -1,4 +1,8 @@
-import type { RealtimeChannel } from '@supabase/supabase-js';
+import {
+  REALTIME_CHANNEL_STATES,
+  REALTIME_SUBSCRIBE_STATES,
+  type RealtimeChannel,
+} from '@supabase/supabase-js';
 import { supabase } from '@/config/supabase';
 import {
   INBOX_CONVERSATION_SELECT,
@@ -2111,14 +2115,89 @@ export interface WhatsAppAdminPresence {
 }
 
 type PresenceSession = {
-  channel: RealtimeChannel;
+  channel: RealtimeChannel | null;
   phoneNumberId: string;
   uid: string;
   lastPayload: WhatsAppPresenceTrackPayload | null;
   subscribed: Promise<void>;
+  joined: boolean;
 };
 
 let presenceSession: PresenceSession | null = null;
+let presenceFlush: Promise<void> = Promise.resolve();
+let presenceFlushSession: PresenceSession | null = null;
+let presenceTrackWarned = false;
+
+function presenceChannelName(phoneNumberId: string): string {
+  return `whatsapp-admin-presence:${phoneNumberId}`;
+}
+
+function findPresenceChannel(phoneNumberId: string): RealtimeChannel | undefined {
+  const topic = `realtime:${presenceChannelName(phoneNumberId)}`;
+  return supabase.getChannels().find((channel) => channel.topic === topic);
+}
+
+function warnPresenceTrackOnce(scope: string, detail: unknown): void {
+  if (presenceTrackWarned) return;
+  presenceTrackWarned = true;
+  console.warn(`[${scope}] track failed:`, detail);
+}
+
+function presenceChannelIsJoined(session: PresenceSession): session is PresenceSession & {
+  channel: RealtimeChannel;
+} {
+  return session.joined && session.channel?.state === REALTIME_CHANNEL_STATES.joined;
+}
+
+async function releasePresenceChannel(channel: RealtimeChannel | null | undefined): Promise<void> {
+  if (!channel) return;
+  if (channel.state === REALTIME_CHANNEL_STATES.joined) {
+    await channel.untrack().catch(() => undefined);
+  }
+  await supabase.removeChannel(channel).catch(() => undefined);
+}
+
+function schedulePresenceFlush(session: PresenceSession): void {
+  if (presenceFlushSession === session) return;
+  presenceFlushSession = session;
+  presenceFlush = presenceFlush
+    .catch(() => undefined)
+    .then(() => runPresenceFlush(session));
+}
+
+async function runPresenceFlush(session: PresenceSession): Promise<void> {
+  if (presenceFlushSession === session) presenceFlushSession = null;
+  if (presenceSession !== session) return;
+
+  const payloadAtStart = session.lastPayload;
+  if (!presenceChannelIsJoined(session)) {
+    if (payloadAtStart) warnPresenceTrackOnce('setMyWhatsAppPresence', 'channel not joined');
+    return;
+  }
+
+  const { channel } = session;
+  try {
+    const status = payloadAtStart ? await channel.track(payloadAtStart) : await channel.untrack();
+    if (presenceSession !== session) return;
+    if (session.lastPayload !== payloadAtStart) {
+      schedulePresenceFlush(session);
+      return;
+    }
+    if (status !== 'ok') {
+      warnPresenceTrackOnce(
+        payloadAtStart ? 'setMyWhatsAppPresence' : 'clearMyWhatsAppPresence',
+        status,
+      );
+      return;
+    }
+    presenceTrackWarned = false;
+  } catch (err) {
+    warnPresenceTrackOnce(
+      payloadAtStart ? 'setMyWhatsAppPresence' : 'clearMyWhatsAppPresence',
+      err,
+    );
+  }
+}
 
 function emitPresenceState(
   channel: RealtimeChannel,
@@ -2133,9 +2212,10 @@ async function awaitPresenceSession(uid: string): Promise<PresenceSession | null
   try {
     await session.subscribed;
   } catch {
-    return null;
+    // El canal no llegó a unirse. El caller mira `joined` y no hace push.
   }
-  return presenceSession?.uid === uid ? presenceSession : null;
+  if (presenceSession !== session || session.uid !== uid) return null;
+  return session;
 }
 
 /**
@@ -2148,13 +2228,9 @@ export function subscribeToWhatsAppAdminPresence(
   onNext: (entries: WhatsAppAdminPresence[]) => void,
   onError?: (error: Error) => void,
 ): Unsubscribe {
-  if (presenceSession) {
-    const prev = presenceSession;
-    presenceSession = null;
-    void prev.channel.untrack().catch(() => undefined);
-    void supabase.removeChannel(prev.channel);
-  }
-
+  const topic = presenceChannelName(phoneNumberId);
+  let cancelled = false;
+  let settled = false;
   let resolveSubscribed!: () => void;
   let rejectSubscribed!: (error: Error) => void;
   const subscribed = new Promise<void>((resolve, reject) => {
@@ -2164,71 +2240,106 @@ export function subscribeToWhatsAppAdminPresence(
   // Evita unhandled rejection si nadie await-ea al fallar el subscribe.
   void subscribed.catch(() => undefined);
 
-  const channel = supabase.channel(`whatsapp-admin-presence:${phoneNumberId}`, {
-    config: { presence: { key: uid } },
-  });
+  const prev = presenceSession;
+  if (prev) prev.joined = false;
 
   const session: PresenceSession = {
-    channel,
+    channel: null,
     phoneNumberId,
     uid,
     lastPayload: null,
     subscribed,
+    joined: false,
   };
   presenceSession = session;
-
-  const publish = () => {
-    try {
-      emitPresenceState(channel, onNext);
-    } catch (error) {
-      onError?.(error instanceof Error ? error : new Error(String(error)));
-    }
-  };
-
-  channel
-    .on('presence', { event: 'sync' }, publish)
-    .on('presence', { event: 'join' }, publish)
-    .on('presence', { event: 'leave' }, publish)
-    .subscribe((status, err) => {
-      if (status === 'SUBSCRIBED') {
-        resolveSubscribed();
-        publish();
-        return;
-      }
-      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-        const error = err instanceof Error ? err : new Error(`Presence channel ${status}`);
-        rejectSubscribed(error);
-        onError?.(error);
-      }
-    });
 
   const onVisibility = () => {
     if (typeof document === 'undefined') return;
     if (document.visibilityState !== 'visible') return;
-    const current = presenceSession;
-    if (!current || current.channel !== channel || !current.lastPayload) return;
-    const refreshed: WhatsAppPresenceTrackPayload = {
-      ...current.lastPayload,
+    if (presenceSession !== session || !session.lastPayload) return;
+    session.lastPayload = {
+      ...session.lastPayload,
       updatedAt: new Date().toISOString(),
     };
-    current.lastPayload = refreshed;
-    void current.channel.track(refreshed).catch((trackErr: unknown) => {
-      onError?.(trackErr instanceof Error ? trackErr : new Error(String(trackErr)));
-    });
+    schedulePresenceFlush(session);
   };
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', onVisibility);
   }
 
+  void (async () => {
+    if (prev?.channel) await releasePresenceChannel(prev.channel);
+    const stale = findPresenceChannel(phoneNumberId);
+    if (stale && stale !== prev?.channel) await releasePresenceChannel(stale);
+    if (cancelled || presenceSession !== session) return;
+
+    const channel = supabase.channel(topic, {
+      config: { presence: { key: uid, enabled: true } },
+    });
+    if (cancelled || presenceSession !== session) {
+      await releasePresenceChannel(channel);
+      return;
+    }
+    session.channel = channel;
+
+    const publish = () => {
+      try {
+        emitPresenceState(channel, onNext);
+      } catch (error) {
+        onError?.(error instanceof Error ? error : new Error(String(error)));
+      }
+    };
+
+    const markDown = (status: string, err: Error | undefined, notify: boolean) => {
+      session.joined = false;
+      const error = err ?? new Error(`Presence channel ${status}`);
+      if (!settled) {
+        settled = true;
+        rejectSubscribed(error);
+      }
+      if (notify) onError?.(error);
+    };
+
+    channel
+      .on('presence', { event: 'sync' }, publish)
+      .on('presence', { event: 'join' }, publish)
+      .on('presence', { event: 'leave' }, publish)
+      .subscribe((status, err) => {
+        if (cancelled || presenceSession !== session) return;
+        switch (status) {
+          case REALTIME_SUBSCRIBE_STATES.SUBSCRIBED:
+            session.joined = true;
+            if (!settled) {
+              settled = true;
+              resolveSubscribed();
+            }
+            publish();
+            if (session.lastPayload) schedulePresenceFlush(session);
+            break;
+          case REALTIME_SUBSCRIBE_STATES.CLOSED:
+            markDown(status, err, false);
+            break;
+          case REALTIME_SUBSCRIBE_STATES.CHANNEL_ERROR:
+          case REALTIME_SUBSCRIBE_STATES.TIMED_OUT:
+            markDown(status, err, true);
+            break;
+          default: {
+            const unexpected: never = status;
+            void unexpected;
+          }
+        }
+      });
+  })();
+
   return () => {
+    cancelled = true;
+    session.joined = false;
     if (typeof document !== 'undefined') {
       document.removeEventListener('visibilitychange', onVisibility);
     }
-    if (presenceSession?.channel === channel) {
-      presenceSession = null;
-    }
-    void channel.untrack().catch(() => undefined);
-    void supabase.removeChannel(channel);
+    if (presenceSession === session) presenceSession = null;
+    if (presenceFlushSession === session) presenceFlushSession = null;
+    void releasePresenceChannel(session.channel);
   };
 }
 
@@ -2255,7 +2366,7 @@ export async function setMyWhatsAppPresence(
   }
 
   const activity = partial.activity === 'typing' ? 'typing' : 'viewing';
-  const payload: WhatsAppPresenceTrackPayload = {
+  session.lastPayload = {
     uid,
     displayName: (partial.displayName ?? 'Administrador').trim() || 'Administrador',
     conversationId,
@@ -2263,29 +2374,16 @@ export async function setMyWhatsAppPresence(
     phoneNumberId,
     updatedAt: new Date().toISOString(),
   };
-  session.lastPayload = payload;
-  try {
-    const status = await session.channel.track(payload);
-    if (status !== 'ok') {
-      console.warn('[setMyWhatsAppPresence] track failed:', status);
-    }
-  } catch (err) {
-    console.warn('[setMyWhatsAppPresence] track failed:', err);
-  }
+  schedulePresenceFlush(session);
+  await presenceFlush;
 }
 
 export async function clearMyWhatsAppPresence(uid: string): Promise<void> {
   const session = await awaitPresenceSession(uid);
   if (!session) return;
   session.lastPayload = null;
-  try {
-    const status = await session.channel.untrack();
-    if (status !== 'ok') {
-      console.warn('[clearMyWhatsAppPresence] untrack failed:', status);
-    }
-  } catch (err) {
-    console.warn('[clearMyWhatsAppPresence] untrack failed:', err);
-  }
+  schedulePresenceFlush(session);
+  await presenceFlush;
 }
 
 export async function getWhatsAppMediaSignedUrl(params: {
