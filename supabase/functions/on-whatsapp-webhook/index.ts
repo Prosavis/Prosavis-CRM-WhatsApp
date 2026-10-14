@@ -470,6 +470,7 @@ function isStopKeyword(text: string | null | undefined): boolean {
     .toLowerCase();
   return (
     normalized === 'parar' ||
+    normalized === 'salir' ||
     normalized === 'stop' ||
     normalized === 'cancelar' ||
     normalized === 'baja' ||
