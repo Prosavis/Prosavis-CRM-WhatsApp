@@ -14,7 +14,7 @@ import {
   subscribeInboxMessageInserts,
   subscribeInboxMessages,
 } from '@/utils/inboxRealtimeSync';
-import { ctwaAdPreviewFromPayload, type CtwaAdPreview } from '@/utils/ctwaAdPreview';
+import { ctwaAdPreviewFromPayload, menuButtonsFromPayload, type CtwaAdPreview } from '@/utils/ctwaAdPreview';
 import { getCachedMediaUrl, mediaUrlCacheKey, setCachedMediaUrl } from '@/utils/mediaUrlCache';
 import type { Database } from '@/types/database';
 import type { WhatsAppDeliveryCostMonth } from '@/types/whatsappDeliveryCost';
@@ -250,6 +250,7 @@ function mapMessageRow(row: MessageRow): WhatsAppMessage {
     revokedReason: row.revoked_reason as WhatsAppMessage['revokedReason'],
     createdAt: new Date(row.created_at),
     adReferral: ctwaAdPreviewFromPayload(row.raw_payload) ?? undefined,
+    menuButtons: menuButtonsFromPayload(row.raw_payload),
   };
 }
 
@@ -332,6 +333,8 @@ export interface WhatsAppMessage {
   replyToWaMessageId?: string;
   /** Clic de anuncio guardado en `raw_payload.referral` de este mensaje. */
   adReferral?: CtwaAdPreview;
+  /** Botones del menú de anuncio, tal como los vio el cliente. */
+  menuButtons?: { id: string; title: string }[];
   filename?: string;
   batchId?: string;
   batchIndex?: number;

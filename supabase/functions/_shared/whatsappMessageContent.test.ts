@@ -31,6 +31,17 @@ Deno.test('Cloud API revoke keeps original id when Meta sends it', () => {
   });
 });
 
+Deno.test('an ad-menu button keeps the title the person tapped', () => {
+  const content = getMessageContent({
+    type: 'interactive',
+    interactive: {
+      type: 'button_reply',
+      button_reply: { id: 'ctwa_domestica', title: 'Doméstica' },
+    },
+  });
+  assertEquals(content.messageBody, 'Doméstica');
+});
+
 Deno.test('poll unsupported gets a human label, not [unsupported]', () => {
   const message = {
     type: 'unsupported',

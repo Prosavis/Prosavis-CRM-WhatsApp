@@ -43,6 +43,7 @@ import {
   postFrancyAssistantNotice,
 } from '../_shared/francyAssistantGate.ts';
 import { pricingPatchForStatus } from '../_shared/whatsappStatusPricing.ts';
+import { runCtwaAdMenu } from '../_shared/ctwaAdMenu.ts';
 
 const encoder = new TextEncoder();
 type JsonRecord = Record<string, unknown>;
@@ -302,6 +303,13 @@ async function processInboundMessage(params: {
       stableKey,
       direction: 'inbound',
     });
+    await runCtwaAdMenu({
+      supabase: params.supabase,
+      message: params.message,
+      stableKey,
+      phoneNumberId,
+      to: customerKey,
+    });
     return 'duplicate';
   }
 
@@ -457,6 +465,14 @@ async function processInboundMessage(params: {
       createdAt,
     });
   }
+
+  await runCtwaAdMenu({
+    supabase: params.supabase,
+    message: params.message,
+    stableKey,
+    phoneNumberId,
+    to: customerKey,
+  });
 
   return 'inserted';
 }

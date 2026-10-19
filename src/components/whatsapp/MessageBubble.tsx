@@ -1042,6 +1042,27 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
             </Typography>
           )}
 
+          {message.menuButtons && message.menuButtons.length > 0 && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mt: 1 }}>
+              {message.menuButtons.map((button) => (
+                <Box
+                  key={button.id}
+                  sx={{
+                    borderTop: '1px solid',
+                    borderColor: 'divider',
+                    pt: 0.75,
+                    textAlign: 'center',
+                    color: '#0b8468',
+                    fontSize: '0.875rem',
+                    fontWeight: 600,
+                  }}
+                >
+                  {button.title}
+                </Box>
+              ))}
+            </Box>
+          )}
+
           {missingCoexBody && !hasMedia && !hasLocation && !hasContacts && (
             <Typography
               variant="caption"

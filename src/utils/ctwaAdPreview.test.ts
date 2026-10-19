@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ctwaAdName, ctwaAdPreviewFromPayload } from './ctwaAdPreview';
+import { ctwaAdName, ctwaAdPreviewFromPayload, menuButtonsFromPayload } from './ctwaAdPreview';
 
 describe('ctwaAdPreview', () => {
   it('names the four live WhatsApp ads', () => {
@@ -36,6 +36,21 @@ describe('ctwaAdPreview', () => {
     expect(preview?.name).toBeUndefined();
     expect(preview?.headline).toBe('Otro');
     expect(preview?.imageUrl).toBe('https://cdn.example/x.jpg');
+  });
+
+  it('reads the buttons that were sent with the menu', () => {
+    expect(menuButtonsFromPayload({
+      menu_buttons: [
+        { id: 'ctwa_domestica', title: 'Doméstica' },
+        { id: 'ctwa_empresarial', title: 'Empresarial' },
+        { id: 'ctwa_empleo', title: 'Empleo' },
+      ],
+    })).toEqual([
+      { id: 'ctwa_domestica', title: 'Doméstica' },
+      { id: 'ctwa_empresarial', title: 'Empresarial' },
+      { id: 'ctwa_empleo', title: 'Empleo' },
+    ]);
+    expect(menuButtonsFromPayload({ messages: [] })).toEqual([]);
   });
 
   it('ignores a message that is not an ad click', () => {

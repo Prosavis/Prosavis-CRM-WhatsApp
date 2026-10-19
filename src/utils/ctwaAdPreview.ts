@@ -45,3 +45,22 @@ export function ctwaAdPreviewFromPayload(payload: unknown): CtwaAdPreview | null
     imageUrl: asText(referral.image_url),
   };
 }
+
+export interface MenuButton {
+  id: string;
+  title: string;
+}
+
+/** Botones que se mandaron con el menú, guardados en `raw_payload.menu_buttons`. */
+export function menuButtonsFromPayload(payload: unknown): MenuButton[] {
+  const record = asRecord(payload);
+  const raw = record?.menu_buttons;
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((item) => {
+    const button = asRecord(item);
+    const id = asText(button?.id);
+    const title = asText(button?.title);
+    if (!id || !title) return [];
+    return [{ id, title }];
+  });
+}

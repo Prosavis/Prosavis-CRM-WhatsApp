@@ -381,6 +381,7 @@ export async function sendToMeta(params: {
   reactionToWaMessageId?: string;
   reactionEmoji?: string;
   requirePhone?: boolean;
+  interactiveButtons?: { id: string; title: string }[];
 }): Promise<MetaSendResult> {
   const recipient = resolveRecipient(params.to);
   const recipientPayload = buildRecipientPayload(recipient, {
@@ -428,6 +429,23 @@ export async function sendToMeta(params: {
       ...recipientPayload,
       type: params.mediaType,
       [params.mediaType]: mediaPayload,
+    };
+  } else if (params.interactiveButtons?.length) {
+    requestBody = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      ...recipientPayload,
+      type: 'interactive',
+      interactive: {
+        type: 'button',
+        body: { text: params.messageBody ?? '' },
+        action: {
+          buttons: params.interactiveButtons.map((button) => ({
+            type: 'reply',
+            reply: { id: button.id, title: button.title },
+          })),
+        },
+      },
     };
   } else {
     requestBody = {

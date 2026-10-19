@@ -163,6 +163,13 @@ export function getMessageContent(message: JsonRecord): WhatsAppMessageContent {
     };
   }
 
+  if (type === 'interactive') {
+    const interactive = asRecord(message.interactive);
+    const button = asRecord(interactive.button_reply);
+    const title = getString(button.title) || getString(button.id);
+    return emptyNonMediaContent(title || '[interactive]');
+  }
+
   if (type === 'reaction') {
     const reaction = asRecord(message.reaction);
     const emoji = getString(reaction.emoji);
