@@ -32,4 +32,14 @@ describe('mapConversationRow last_inbound_at', () => {
     });
     expect(mapped.lastInboundAt).toBeUndefined();
   });
+
+  it('maps the ad id of the click', () => {
+    const mapped = mapConversationRow({
+      stable_key: 'lid:CO.1',
+      unread_count: 0,
+      tag_ids: [],
+      ctwa_source_id: '120250397331720691',
+    });
+    expect(mapped.ctwaSourceId).toBe('120250397331720691');
+  });
 });

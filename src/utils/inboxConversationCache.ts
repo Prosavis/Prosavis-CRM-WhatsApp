@@ -32,6 +32,7 @@ export const INBOX_CONVERSATION_SELECT = [
   'is_pinned',
   'pinned_at',
   'crm_force_unread',
+  'ctwa_source_id',
 ].join(',');
 
 export type InboxRealtimeEventType = 'INSERT' | 'UPDATE' | 'DELETE';

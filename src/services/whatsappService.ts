@@ -14,6 +14,7 @@ import {
   subscribeInboxMessageInserts,
   subscribeInboxMessages,
 } from '@/utils/inboxRealtimeSync';
+import { ctwaAdPreviewFromPayload, type CtwaAdPreview } from '@/utils/ctwaAdPreview';
 import { getCachedMediaUrl, mediaUrlCacheKey, setCachedMediaUrl } from '@/utils/mediaUrlCache';
 import type { Database } from '@/types/database';
 import type { WhatsAppDeliveryCostMonth } from '@/types/whatsappDeliveryCost';
@@ -177,6 +178,7 @@ export function mapConversationRow(
     isPinned: asBoolean(record.is_pinned),
     pinnedAt: toDate(asOptionalString(record.pinned_at)),
     crmForceUnread: asBoolean(record.crm_force_unread),
+    ctwaSourceId: asOptionalString(record.ctwa_source_id),
   };
 }
 
@@ -247,6 +249,7 @@ function mapMessageRow(row: MessageRow): WhatsAppMessage {
     revokedAt: toDate(row.revoked_at),
     revokedReason: row.revoked_reason as WhatsAppMessage['revokedReason'],
     createdAt: new Date(row.created_at),
+    adReferral: ctwaAdPreviewFromPayload(row.raw_payload) ?? undefined,
   };
 }
 
@@ -282,6 +285,8 @@ export interface WhatsAppConversation {
   isPinned?: boolean;
   pinnedAt?: Date;
   crmForceUnread?: boolean;
+  /** Id del anuncio de Meta (`ctwa_source_id`) si el chat llegó por un clic. */
+  ctwaSourceId?: string;
 }
 
 export interface WhatsAppLocation {
@@ -325,6 +330,8 @@ export interface WhatsAppMessage {
   reactionRemoved?: boolean;
   clientRequestId?: string;
   replyToWaMessageId?: string;
+  /** Clic de anuncio guardado en `raw_payload.referral` de este mensaje. */
+  adReferral?: CtwaAdPreview;
   filename?: string;
   batchId?: string;
   batchIndex?: number;

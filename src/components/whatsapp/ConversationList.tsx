@@ -88,6 +88,7 @@ import { useLongPress } from '@/hooks/useLongPress';
 import { usePhoneLayout } from '@/hooks/usePhoneLayout';
 import { coloredChipSx } from '@/utils/coloredChipStyles';
 import { formatRelativeColombiaTime } from '@/utils/colombiaTime';
+import { ctwaAdName } from '@/utils/ctwaAdPreview';
 import { conversationPreviewText } from '@/utils/whatsappCoexStub';
 import {
   clampInboxListWidth,
@@ -219,6 +220,7 @@ const ConversationRow: React.FC<ConversationRowProps> = React.memo(({
   onContextMenu,
 }) => {
   const theme = useTheme();
+  const adName = ctwaAdName(conv.ctwaSourceId);
   const longPress = useLongPress({ onLongPress: onEnterSelection });
   const inboxLine = resolveWhatsAppLine(conv.phoneNumberId);
 
@@ -325,8 +327,15 @@ const ConversationRow: React.FC<ConversationRowProps> = React.memo(({
                 <PushPinIcon sx={{ fontSize: 14, color: 'text.secondary', ml: 0.5, flexShrink: 0, transform: 'rotate(45deg)' }} />
               )}
             </Box>
-            {(directoryTags.length > 0 || convTags.length > 0) && (
+            {(directoryTags.length > 0 || convTags.length > 0 || adName) && (
               <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5, flexWrap: 'wrap' }}>
+                {adName && (
+                  <Chip
+                    label={adName}
+                    size="small"
+                    sx={coloredChipSx(theme, '#6b46c1', 'filled', { height: 18, fontSize: '0.65rem' })}
+                  />
+                )}
                 {directoryTags.slice(0, 3).map((tag) => (
                   <Chip
                     key={`dir-${tag}`}

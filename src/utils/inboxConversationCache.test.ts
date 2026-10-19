@@ -247,6 +247,7 @@ describe('inboxConversationCache', () => {
     expect(INBOX_CONVERSATION_SELECT.includes('*')).toBe(false);
     expect(INBOX_CONVERSATION_SELECT).toContain('stable_key');
     expect(INBOX_CONVERSATION_SELECT).toContain('last_inbound_at');
+    expect(INBOX_CONVERSATION_SELECT).toContain('ctwa_source_id');
     expect(INBOX_CONVERSATION_SELECT).not.toContain('metadata');
   });
 

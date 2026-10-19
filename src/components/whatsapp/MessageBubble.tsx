@@ -72,6 +72,7 @@ import {
   type AdminSenderProfile,
   type OutboundSentVia,
 } from '@/utils/outboundSenderLabel';
+import type { CtwaAdPreview } from '@/utils/ctwaAdPreview';
 
 export interface MessageReaction {
   actorKey: string;
@@ -104,6 +105,47 @@ const MESSAGE_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
   minute: '2-digit',
   timeZone: COLOMBIA_TIME_ZONE,
 };
+
+function AdReferralQuote({ preview }: { preview: CtwaAdPreview }) {
+  const [imageOk, setImageOk] = useState(Boolean(preview.imageUrl));
+  const title = preview.name || preview.headline || 'Anuncio';
+  return (
+    <Box
+      sx={{
+        display: 'flex',
+        gap: 1,
+        borderLeft: '3px solid #7c5cbf',
+        bgcolor: 'rgba(124, 92, 191, 0.08)',
+        borderRadius: 1,
+        px: 1,
+        py: 0.5,
+        mb: 0.5,
+        minWidth: 0,
+      }}
+    >
+      {preview.imageUrl && imageOk && (
+        <Box
+          component="img"
+          src={preview.imageUrl}
+          alt=""
+          referrerPolicy="no-referrer"
+          onError={() => setImageOk(false)}
+          sx={{ width: 54, height: 72, objectFit: 'cover', borderRadius: 1, flexShrink: 0 }}
+        />
+      )}
+      <Box sx={{ minWidth: 0 }}>
+        <Typography variant="caption" fontWeight={700} color="#6b46c1" display="block" noWrap>
+          {title}
+        </Typography>
+        {preview.headline && preview.headline !== title && (
+          <Typography variant="caption" display="block" noWrap color="text.secondary">
+            {preview.headline}
+          </Typography>
+        )}
+      </Box>
+    </Box>
+  );
+}
 
 function resolveMediaErrorDisplay(params: {
   code?: string;
@@ -919,6 +961,8 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
               />
             </Box>
           )}
+
+          {message.adReferral && <AdReferralQuote preview={message.adReferral} />}
 
           {message.replyToWaMessageId && (() => {
             const quoted = allMessages.find((m) => m.waMessageId === message.replyToWaMessageId);
