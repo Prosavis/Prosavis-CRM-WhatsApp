@@ -10,6 +10,7 @@ export type AdminSenderProfile = { email?: string | null };
 /** Emails canónicos del panel. No usar display_name de Google. */
 export const CRM_SENDER_LABEL_BY_EMAIL: Readonly<Record<string, string>> = {
   'oliverafrancy@gmail.com': 'Francy',
+  'francyoliverab@gmail.com': 'Francy',
   'johislaflaca07@gmail.com': 'Johanna',
   'support@prosavis.com': 'Soporte',
   'admin@prosavis.com': 'Admin Marian',

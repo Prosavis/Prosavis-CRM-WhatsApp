@@ -23,6 +23,7 @@ const adminById = new Map([
 describe('CRM_SENDER_LABEL_BY_EMAIL', () => {
   it('maps the four CRM accounts without using Nicolás as a chip', () => {
     expect(CRM_SENDER_LABEL_BY_EMAIL['oliverafrancy@gmail.com']).toBe('Francy');
+    expect(CRM_SENDER_LABEL_BY_EMAIL['francyoliverab@gmail.com']).toBe('Francy');
     expect(CRM_SENDER_LABEL_BY_EMAIL['johislaflaca07@gmail.com']).toBe('Johanna');
     expect(CRM_SENDER_LABEL_BY_EMAIL['support@prosavis.com']).toBe('Soporte');
     expect(CRM_SENDER_LABEL_BY_EMAIL['admin@prosavis.com']).toBe('Admin Marian');
