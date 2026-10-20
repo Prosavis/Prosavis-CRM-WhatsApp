@@ -40,6 +40,7 @@ import CodeIcon from '@mui/icons-material/Code';
 import EmojiEmotionsIcon from '@mui/icons-material/EmojiEmotions';
 import StickyNote2Icon from '@mui/icons-material/StickyNote2';
 import {
+  getWhatsAppMediaSignedUrl,
   resolveOutboundMediaSpec,
   type WhatsAppSticker,
   type WhatsAppStickerFolder,
@@ -61,6 +62,11 @@ import {
 } from '@/utils/messageComposerDraftStore';
 import { WhatsAppLexicalEditor, type WhatsAppLexicalEditorHandle } from './lexical/WhatsAppLexicalEditor';
 import { usePhoneLayout } from '@/hooks/usePhoneLayout';
+import {
+  DOMESTIC_PDF_FILENAME,
+  DOMESTIC_PDF_STORAGE_PATH,
+  snippetAttachesDomesticPdf,
+} from '@/constants/domesticPdf';
 
 type SupportedMediaType = Extract<
   WhatsAppOutboundMediaType,
@@ -362,10 +368,39 @@ const MessageInput: React.FC<MessageInputProps> = ({
     setSnippetHighlight(0);
   }, [filteredSnippets.length]);
 
+  const attachDomesticPdf = useCallback(async () => {
+    try {
+      const signedUrl = await getWhatsAppMediaSignedUrl({
+        storagePath: DOMESTIC_PDF_STORAGE_PATH,
+        bucketId: 'whatsapp-media',
+      });
+      const response = await fetch(signedUrl);
+      if (!response.ok) throw new Error('No se pudo leer el PDF');
+      const blob = await response.blob();
+      const file = new File([blob], DOMESTIC_PDF_FILENAME, { type: 'application/pdf' });
+      setPendingFiles((prev) => {
+        if (prev.some((item) => item.file.name === DOMESTIC_PDF_FILENAME)) return prev;
+        return [...prev, {
+          id: `att_${DOMESTIC_PDF_FILENAME}`,
+          file,
+          mediaType: 'document',
+          label: 'Documento',
+          status: 'queued',
+        }];
+      });
+    } catch (error) {
+      console.error('domestic pdf attach skipped', error);
+      crmToast.error('No se pudo adjuntar el PDF de doméstica');
+    }
+  }, []);
+
   const applySnippet = useCallback((snippet: WhatsAppSnippet) => {
     lexicalEditorRef.current?.setWhatsAppText(snippet.body);
     lexicalEditorRef.current?.focus();
-  }, []);
+    if (snippetAttachesDomesticPdf(snippet.shortcut)) {
+      void attachDomesticPdf();
+    }
+  }, [attachDomesticPdf]);
 
   const insertAtSelection = useCallback((value: string) => {
     lexicalEditorRef.current?.insertAtSelection(value);
