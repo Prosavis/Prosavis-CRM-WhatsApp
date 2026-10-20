@@ -30,6 +30,7 @@ import {
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import SearchIcon from '@mui/icons-material/Search';
+import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import LocalOfferIcon from '@mui/icons-material/LocalOffer';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import PushPinIcon from '@mui/icons-material/PushPin';
@@ -68,6 +69,7 @@ import { inboxLineForeground, inboxLineMuiColor } from '@/utils/inboxLineVisual'
 import { resolveWhatsAppLine } from '@/utils/whatsappLines';
 import { resolveContactDisplayName, shouldSyncContactNameFromDirectory } from '@/utils/contactDisplayName';
 import { catalogColorByTagName, directoryDisplayTags, directoryTagColor } from '@/utils/directoryDisplayTags';
+import { isScrolledAwayFromTop } from '@/utils/inboxScrollAnchor';
 import { patchWhatsAppConversationAdmin } from '@/services/whatsappService';
 import {
   conversationMatchesInboxCategory,
@@ -668,6 +670,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
     && filtered.every((c) => selectedIds.has(c.id));
 
   const listParentRef = useRef<HTMLDivElement | null>(null);
+  const [showJumpToRecent, setShowJumpToRecent] = useState(false);
   const conversationVirtualizer = useVirtualizer({
     count: filtered.length,
     getScrollElement: () => listParentRef.current,
@@ -1275,10 +1278,15 @@ const ConversationList: React.FC<ConversationListProps> = ({
         </DialogActions>
       </Dialog>
 
+      <Box sx={{ flex: 1, minHeight: 0, position: 'relative' }}>
       <Box
         ref={listParentRef}
         data-testid="inbox-conversation-list"
         tabIndex={0}
+        onScroll={(event) => {
+          const away = isScrolledAwayFromTop(event.currentTarget.scrollTop);
+          setShowJumpToRecent((current) => (current === away ? current : away));
+        }}
         onKeyDown={(event) => {
           if (event.key === 'ArrowDown' || event.key === 'j') {
             event.preventDefault();
@@ -1291,7 +1299,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
             if (current) onSelect(current);
           }
         }}
-        sx={{ flex: 1, overflow: 'auto', py: 0, outline: 'none' }}
+        sx={{ height: '100%', overflow: 'auto', py: 0, outline: 'none' }}
       >
         {loading && filtered.length === 0 && (
           <Box sx={{ px: 2, py: 1 }}>
@@ -1416,6 +1424,42 @@ const ConversationList: React.FC<ConversationListProps> = ({
             })}
           </Box>
         )}
+      </Box>
+      {showJumpToRecent && (
+        <Button
+          fullWidth
+          aria-label="Volver a los chats más recientes"
+          data-testid="inbox-jump-to-recent"
+          startIcon={<KeyboardArrowUpIcon />}
+          onClick={() => {
+            conversationVirtualizer.scrollToOffset(0);
+            const node = listParentRef.current;
+            if (node) node.scrollTop = 0;
+            setShowJumpToRecent(false);
+          }}
+          sx={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 2,
+            minHeight: 44,
+            borderRadius: 0,
+            justifyContent: 'flex-start',
+            px: 2,
+            textTransform: 'none',
+            fontWeight: 600,
+            bgcolor: 'background.paper',
+            borderBottom: 1,
+            borderColor: 'divider',
+            color: 'text.primary',
+            boxShadow: 1,
+            '&:hover': { bgcolor: 'action.hover' },
+          }}
+        >
+          Chats más recientes
+        </Button>
+      )}
       </Box>
       </Box>
       {!compactList && (

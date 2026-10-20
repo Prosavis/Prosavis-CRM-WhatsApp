@@ -49,6 +49,7 @@ import MarkChatUnreadIcon from '@mui/icons-material/MarkChatUnread';
 import ReplyIcon from '@mui/icons-material/Reply';
 import ForwardIcon from '@mui/icons-material/Forward';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import { crmToast } from '@/utils/crmToast';
 import {
   hasMoreMessages,
@@ -57,6 +58,7 @@ import {
   prependOlderMessages,
 } from '@/utils/inboxMessageCache';
 import { INBOX_PERF_MARKS, markInboxPerf } from '@/utils/inboxPerfMarks';
+import { isScrolledAwayFromBottom } from '@/utils/inboxScrollAnchor';
 import {
   markConversationPreviewFailed,
   patchConversationPreview,
@@ -287,6 +289,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [loadingOlder, setLoadingOlder] = useState(false);
   const sendAbortRef = useRef<AbortController | null>(null);
   const pinToBottomRef = useRef(true);
+  const programmaticScrollRef = useRef(false);
+  const userScrollIntentRef = useRef(false);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [suggestionDraft, setSuggestionDraft] = useState('');
   const [suggestionLoading, setSuggestionLoading] = useState(false);
   const [suggestionHint, setSuggestionHint] = useState<string | null>(null);
@@ -427,6 +432,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     setOlderMessages([]);
     setOptimisticMessages([]);
     setHasOlder(false);
+    pinToBottomRef.current = true;
+    userScrollIntentRef.current = false;
+    setShowJumpToLatest(false);
     setSelectionMode(false);
     setSelectedIds(new Set());
 
@@ -570,13 +578,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       sendAbortRef.current?.abort();
     };
   }, [conversation.id]);
-
-  useEffect(() => {
-    if (!pinToBottomRef.current) return;
-    const node = scrollContainerRef.current;
-    if (!node) return;
-    node.scrollTop = node.scrollHeight;
-  }, [messages]);
 
   // === Presencia: track/untrack en canal Realtime (sin heartbeat SQL) ===
   const currentActivityRef = useRef<'viewing' | 'typing'>('viewing');
@@ -732,6 +733,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     if (!oldest || loadingOlder) return;
     setLoadingOlder(true);
     pinToBottomRef.current = false;
+    setShowJumpToLatest(true);
     try {
       const older = await fetchConversationMessages(stableKey, {
         limit: 200,
@@ -1488,6 +1490,30 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     overscan: 12,
     getItemKey: (index) => visibleMessages[index]?.id ?? index,
   });
+  const messageVirtualizerRef = useRef(messageVirtualizer);
+  messageVirtualizerRef.current = messageVirtualizer;
+  const messageListSize = messageVirtualizer.getTotalSize();
+  useEffect(() => {
+    if (!pinToBottomRef.current || visibleMessages.length === 0) return;
+    userScrollIntentRef.current = false;
+    programmaticScrollRef.current = true;
+    messageVirtualizerRef.current.scrollToIndex(visibleMessages.length - 1, { align: 'end' });
+    let innerFrame = 0;
+    const outerFrame = requestAnimationFrame(() => {
+      const node = scrollContainerRef.current;
+      if (node) node.scrollTop = node.scrollHeight;
+      innerFrame = requestAnimationFrame(() => {
+        programmaticScrollRef.current = false;
+        const settled = scrollContainerRef.current;
+        if (!settled || !pinToBottomRef.current) return;
+        setShowJumpToLatest(isScrolledAwayFromBottom(settled));
+      });
+    });
+    return () => {
+      cancelAnimationFrame(outerFrame);
+      if (innerFrame) cancelAnimationFrame(innerFrame);
+    };
+  }, [conversation.id, messageListSize, visibleMessages.length]);
   const { metaByPhoneKey: directoryMetaByPhoneKey, ready: directoryMetaReady } =
     useDirectoryContactMeta([conversation]);
   const directoryTags = directoryMetaReady
@@ -1734,15 +1760,28 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       )}
 
       {/* Messages */}
+      <Box sx={{ flex: 1, minHeight: 0, position: 'relative' }}>
       <Box
         ref={scrollContainerRef}
         data-testid={!loading ? 'inbox-chat-ready' : undefined}
+        onWheel={() => {
+          userScrollIntentRef.current = true;
+        }}
+        onTouchMove={() => {
+          userScrollIntentRef.current = true;
+        }}
+        onPointerDown={() => {
+          userScrollIntentRef.current = true;
+        }}
         onScroll={(event) => {
-          const node = event.currentTarget;
-          pinToBottomRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
+          if (programmaticScrollRef.current || !userScrollIntentRef.current) return;
+          userScrollIntentRef.current = false;
+          const away = isScrolledAwayFromBottom(event.currentTarget);
+          pinToBottomRef.current = !away;
+          setShowJumpToLatest(away);
         }}
         sx={{
-          flex: 1,
+          height: '100%',
           overflow: 'auto',
           bgcolor: (t) => (t.palette.mode === 'dark' ? 'background.default' : '#efeae2'),
           backgroundImage: (t) =>
@@ -1837,6 +1876,44 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           </Box>
         )}
         <div ref={messagesEndRef} />
+      </Box>
+      {showJumpToLatest && (
+        <Tooltip title="Ir al último mensaje">
+          <IconButton
+            aria-label="Ir al mensaje más reciente"
+            data-testid="inbox-jump-to-latest"
+            onClick={() => {
+              pinToBottomRef.current = true;
+              userScrollIntentRef.current = false;
+              setShowJumpToLatest(false);
+              const count = visibleMessages.length;
+              if (count === 0) return;
+              programmaticScrollRef.current = true;
+              messageVirtualizer.scrollToIndex(count - 1, { align: 'end' });
+              requestAnimationFrame(() => {
+                const node = scrollContainerRef.current;
+                if (node) node.scrollTop = node.scrollHeight;
+                requestAnimationFrame(() => {
+                  programmaticScrollRef.current = false;
+                });
+              });
+            }}
+            sx={{
+              position: 'absolute',
+              right: 16,
+              bottom: 16,
+              width: 44,
+              height: 44,
+              bgcolor: 'background.paper',
+              boxShadow: 2,
+              zIndex: 2,
+              '&:hover': { bgcolor: 'background.paper' },
+            }}
+          >
+            <KeyboardArrowDownIcon />
+          </IconButton>
+        </Tooltip>
+      )}
       </Box>
 
       {/* Input */}
