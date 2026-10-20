@@ -1,5 +1,7 @@
 const TEMPLATE_DISPLAY_NAMES: Record<string, string> = {
   cobro_servicios: 'Cobro de servicios',
+  seguimiento_servicio_persona: 'Seguimiento de servicio (persona)',
+  seguimiento_servicio_empresa: 'Seguimiento de servicio (empresa)',
   seguimiento_suave: 'Seguimiento suave',
   seguimiento_incentivo: 'Seguimiento con incentivo',
   seguimiento_final: 'Seguimiento final',

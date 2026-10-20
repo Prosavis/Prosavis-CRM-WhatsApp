@@ -47,6 +47,8 @@ export const WHATSAPP_TEMPLATE_SECTIONS: WhatsAppTemplateSectionMeta[] = [
 
 const TEMPLATE_SECTION_BY_NAME: Record<string, WhatsAppTemplatePanelSection> = {
   cobro_servicios: 'utility',
+  seguimiento_servicio_persona: 'utility',
+  seguimiento_servicio_empresa: 'utility',
 
   seguimiento_suave: 'reactivation',
   seguimiento_incentivo: 'reactivation',
