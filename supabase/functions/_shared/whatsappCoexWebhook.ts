@@ -65,6 +65,21 @@ export function shouldUpgradeCoexStub(
   return !existing || isCommercialOrphanStatusStub(existing);
 }
 
+const OUTBOUND_PREVIEW_STATUSES = new Set(['sent', 'delivered', 'read', 'played', 'failed']);
+
+export function outboundEchoPreviewStatus(existingStatus?: string | null): string {
+  const status = (existingStatus ?? '').trim().toLowerCase();
+  return OUTBOUND_PREVIEW_STATUSES.has(status) ? status : 'sent';
+}
+
+function outboundEchoReadPatch(existingStatus?: string | null): Record<string, unknown> {
+  return {
+    unread_count: 0,
+    crm_force_unread: false,
+    last_message_outbound_status: outboundEchoPreviewStatus(existingStatus),
+  };
+}
+
 function asRecord(value: unknown): JsonRecord {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as JsonRecord)
@@ -319,7 +334,7 @@ export async function persistCoexMessage(params: {
 
   const { data: existing, error: existingError } = await params.supabase
     .from('whatsapp_message_log')
-    .select('id, message_body, conversation_stable_key')
+    .select('id, message_body, conversation_stable_key, status')
     .eq('wa_message_id', waMessageId)
     .maybeSingle();
   if (existingError) throw existingError;
@@ -330,6 +345,12 @@ export async function persistCoexMessage(params: {
   const body = content.messageBody;
 
   if (existing) {
+    const conversationKey = String(existing.conversation_stable_key || stableKey);
+    if (direction === 'outbound') {
+      await params.supabase.from('whatsapp_conversations').update(
+        outboundEchoReadPatch(getString(existing.status) || null),
+      ).eq('stable_key', conversationKey);
+    }
     if (!shouldUpgradeCoexStub(existing.message_body as string | null, body)) {
       return 'duplicate';
     }
@@ -345,7 +366,6 @@ export async function persistCoexMessage(params: {
       .eq('id', existing.id);
     if (upgradeError) throw upgradeError;
 
-    const conversationKey = String(existing.conversation_stable_key || stableKey);
     const { data: existingConv } = await params.supabase
       .from('whatsapp_conversations')
       .select('last_message_text, last_inbound_at')
@@ -359,6 +379,7 @@ export async function persistCoexMessage(params: {
         last_message_text: body,
         last_message_at: createdAt,
         last_message_direction: direction,
+        ...(direction === 'outbound' ? outboundEchoReadPatch(getString(existing.status) || null) : {}),
         ...(direction === 'inbound'
           ? {
               last_inbound_at: nextLastInboundAt(existingConv?.last_inbound_at, createdAt),
@@ -403,6 +424,7 @@ export async function persistCoexMessage(params: {
         }
       : {}),
     phone_number_id: params.phoneNumberId,
+    ...(direction === 'outbound' ? outboundEchoReadPatch(null) : {}),
   };
   if (params.incrementUnread === true && direction === 'inbound') {
     conversationPatch.unread_count = Number(existingConv?.unread_count ?? 0) + 1;
@@ -500,14 +522,6 @@ export async function persistCommercialOrphanStatus(params: {
       contact_phone: recipientId,
       state: 'active',
       phone_number_id: phoneNumberId,
-      ...(shouldPreview
-        ? {
-          last_message_text: COMMERCIAL_ORPHAN_STATUS_STUB,
-          last_message_at: createdAt,
-          last_message_direction: 'outbound',
-          last_message_outbound_status: deliveryStatus,
-        }
-        : {}),
     },
     { onConflict: 'stable_key' },
   );
@@ -540,6 +554,16 @@ export async function persistCommercialOrphanStatus(params: {
     return existing ?? null;
   }
   if (insertError) throw insertError;
+
+  if (shouldPreview) {
+    await params.supabase.from('whatsapp_conversations').update({
+      last_message_text: COMMERCIAL_ORPHAN_STATUS_STUB,
+      last_message_at: createdAt,
+      last_message_direction: 'outbound',
+      last_message_outbound_status: deliveryStatus,
+    }).eq('stable_key', stableKey);
+  }
+
   return inserted;
 }
 

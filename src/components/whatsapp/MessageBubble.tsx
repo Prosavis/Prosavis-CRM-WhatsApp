@@ -67,6 +67,7 @@ import {
   isDeletedOrUnsupportedPreview,
   quotedMessagePreview,
 } from '@/utils/whatsappCoexStub';
+import { outboundTickKind } from '@/utils/outboundTickKind';
 import {
   resolveOutboundSenderLabel,
   type AdminSenderProfile,
@@ -283,7 +284,8 @@ const getPhoneKey = (phone: { phone?: string; type?: string }) =>
   [phone.phone, phone.type].filter(Boolean).join('|') || 'telefono-sin-datos';
 
 function StatusIcon({ status }: { status: string }) {
-  switch (status) {
+  const kind = outboundTickKind(status);
+  switch (kind) {
     case 'read':
       return <DoneAllIcon sx={{ fontSize: 16, color: '#53bdeb' }} />;
     case 'delivered':
@@ -292,8 +294,12 @@ function StatusIcon({ status }: { status: string }) {
       return <DoneIcon sx={{ fontSize: 16, color: '#8696a0' }} />;
     case 'failed':
       return <ErrorOutlineIcon sx={{ fontSize: 16, color: '#ea0038' }} />;
-    default:
+    case 'pending':
       return <AccessTimeIcon sx={{ fontSize: 16, color: '#8696a0' }} />;
+    default: {
+      const exhaustive: never = kind;
+      return exhaustive;
+    }
   }
 }
 

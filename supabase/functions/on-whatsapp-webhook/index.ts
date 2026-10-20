@@ -17,6 +17,7 @@ import {
 import { directoryPhoneKey } from '../_shared/directoryPhone.ts';
 import { REACTIVATION_SEQUENCE } from '../_shared/reactivationCadence.ts';
 import { applyColdFailureTag, removeColdFailureTags } from '../_shared/coldAppUserOutreach.ts';
+import { isOutboundDeliverySuccess } from '../_shared/whatsappDeliveryStatus.ts';
 import { conversationStableKey, envString } from '../_shared/whatsappLines.ts';
 import {
   captureCtwaClick,
@@ -591,7 +592,7 @@ async function processStatus(params: {
   }
 
   const isFailure = status === 'failed';
-  const isSuccessStatus = status === 'sent' || status === 'delivered' || status === 'read';
+  const isSuccessStatus = isOutboundDeliverySuccess(status);
   const errorMessage = isFailure ? getStatusErrorMessage(params.status) : null;
   const phone = String(existingMessage.recipient_phone ?? '').trim();
 

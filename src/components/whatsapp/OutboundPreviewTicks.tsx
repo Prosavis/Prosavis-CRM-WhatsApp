@@ -3,15 +3,16 @@ import DoneIcon from '@mui/icons-material/Done';
 import DoneAllIcon from '@mui/icons-material/DoneAll';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import { outboundTickKind } from '@/utils/outboundTickKind';
 
-export type OutboundPreviewStatus = 'sent' | 'delivered' | 'read' | 'failed' | string | undefined;
+export type OutboundPreviewStatus = 'sent' | 'delivered' | 'read' | 'played' | 'failed' | string | undefined;
 
 /** Misma paleta que `MessageBubble` (`StatusIcon`) para paridad visual lista ↔ hilo. */
 const OutboundPreviewTicks: React.FC<{ status?: OutboundPreviewStatus }> = ({ status }) => {
-  const s = (status || 'sent').toLowerCase();
+  const kind = outboundTickKind(status, { emptyAs: 'sent' });
   const tickSx = { fontSize: 15, lineHeight: 1 };
 
-  switch (s) {
+  switch (kind) {
     case 'read':
       return <DoneAllIcon sx={{ ...tickSx, color: '#53bdeb' }} titleAccess="Leído" />;
     case 'delivered':
@@ -20,8 +21,12 @@ const OutboundPreviewTicks: React.FC<{ status?: OutboundPreviewStatus }> = ({ st
       return <ErrorOutlineIcon sx={{ ...tickSx, color: '#ea0038' }} titleAccess="No entregado" />;
     case 'sent':
       return <DoneIcon sx={{ ...tickSx, color: '#8696a0' }} titleAccess="Enviado" />;
-    default:
+    case 'pending':
       return <AccessTimeIcon sx={{ ...tickSx, color: '#8696a0' }} titleAccess="Estado desconocido" />;
+    default: {
+      const exhaustive: never = kind;
+      return exhaustive;
+    }
   }
 };
 

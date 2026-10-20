@@ -10,6 +10,7 @@ import {
   ctwaReferralFromMessage,
   parseCoexCustomerPhone,
   persistCoexMessage,
+  persistCommercialOrphanStatus,
   shouldIgnoreBotCoexField,
   shouldPersistCommercialOrphanStatus,
   shouldSkipMissingCommercialStatus,
@@ -414,4 +415,156 @@ Deno.test('echo without to does not throw', async () => {
   });
   assertEquals(status, 'skipped');
   assertEquals(db.tables.whatsapp_message_log.length, 0);
+});
+
+Deno.test('outbound echo marks the commercial chat read', async () => {
+  const stableKey = conversationStableKey('573146283332', COMMERCIAL_PHONE_NUMBER_ID);
+  const db = createMemorySupabase({
+    conversations: [{
+      stable_key: stableKey,
+      unread_count: 4,
+      crm_force_unread: true,
+    }],
+  });
+
+  const status = await persistCoexMessage({
+    supabase: db as never,
+    phoneNumberId: COMMERCIAL_PHONE_NUMBER_ID,
+    defaultDirection: 'outbound',
+    message: {
+      id: 'wamid.echo.read',
+      from: '573112121108',
+      to: '573146283332',
+      timestamp: '1756300100',
+      type: 'text',
+      text: { body: 'ya le contesté desde el teléfono' },
+    },
+  });
+
+  assertEquals(status, 'inserted');
+  assertEquals(db.tables.whatsapp_conversations[0].unread_count, 0);
+  assertEquals(db.tables.whatsapp_conversations[0].crm_force_unread, false);
+  assertEquals(db.tables.whatsapp_conversations[0].last_message_outbound_status, 'sent');
+});
+
+Deno.test('inbound echo does not clear an existing unread badge', async () => {
+  const stableKey = conversationStableKey('573146283332', COMMERCIAL_PHONE_NUMBER_ID);
+  const db = createMemorySupabase({
+    conversations: [{
+      stable_key: stableKey,
+      unread_count: 2,
+      crm_force_unread: false,
+    }],
+  });
+
+  const status = await persistCoexMessage({
+    supabase: db as never,
+    phoneNumberId: COMMERCIAL_PHONE_NUMBER_ID,
+    defaultDirection: 'inbound',
+    message: {
+      id: 'wamid.echo.in',
+      from: '573146283332',
+      timestamp: '1756300101',
+      type: 'text',
+      text: { body: 'mensaje del cliente' },
+    },
+  });
+
+  assertEquals(status, 'inserted');
+  assertEquals(db.tables.whatsapp_conversations[0].unread_count, 2);
+});
+
+Deno.test('duplicate outbound echo keeps played and still clears unread', async () => {
+  const stableKey = conversationStableKey('573146283332', COMMERCIAL_PHONE_NUMBER_ID);
+  const db = createMemorySupabase({
+    messages: [{
+      id: 'audio-played',
+      wa_message_id: 'wamid.echo.played',
+      message_body: 'nota de voz',
+      status: 'played',
+      conversation_stable_key: stableKey,
+    }],
+    conversations: [{
+      stable_key: stableKey,
+      unread_count: 3,
+      crm_force_unread: true,
+      last_message_text: 'nota de voz',
+    }],
+  });
+
+  const status = await persistCoexMessage({
+    supabase: db as never,
+    phoneNumberId: COMMERCIAL_PHONE_NUMBER_ID,
+    defaultDirection: 'outbound',
+    message: {
+      id: 'wamid.echo.played',
+      from: '573112121108',
+      to: '573146283332',
+      timestamp: '1756300102',
+      type: 'text',
+      text: { body: 'otra cosa' },
+    },
+  });
+
+  assertEquals(status, 'duplicate');
+  assertEquals(db.tables.whatsapp_message_log[0].message_body, 'nota de voz');
+  assertEquals(db.tables.whatsapp_conversations[0].unread_count, 0);
+  assertEquals(db.tables.whatsapp_conversations[0].crm_force_unread, false);
+  assertEquals(db.tables.whatsapp_conversations[0].last_message_outbound_status, 'played');
+});
+
+Deno.test('orphan status does not replace a real preview when the message already exists', async () => {
+  const stableKey = conversationStableKey('573146283332', COMMERCIAL_PHONE_NUMBER_ID);
+  const createdAt = new Date('2026-10-19T18:48:00.000Z');
+  const db = createMemorySupabase({
+    messages: [{
+      id: 'audio-1',
+      wa_message_id: 'wamid.audio',
+      message_body: '[audio]',
+      conversation_stable_key: stableKey,
+      recipient_phone: '573146283332',
+      raw_payload: {},
+    }],
+    conversations: [{
+      stable_key: stableKey,
+      last_message_text: '[audio]',
+      last_message_at: createdAt.toISOString(),
+    }],
+  });
+
+  const row = await persistCommercialOrphanStatus({
+    supabase: db as never,
+    phoneNumberId: COMMERCIAL_PHONE_NUMBER_ID,
+    status: {
+      id: 'wamid.audio',
+      status: 'delivered',
+      timestamp: String(Math.floor(createdAt.getTime() / 1000)),
+      recipient_id: '573146283332',
+    },
+  });
+
+  assertEquals(row?.id, 'audio-1');
+  assertEquals(db.tables.whatsapp_conversations[0].last_message_text, '[audio]');
+  assertEquals(db.tables.whatsapp_message_log.length, 1);
+});
+
+Deno.test('a new orphan status still stores the stub preview', async () => {
+  const db = createMemorySupabase();
+  const row = await persistCommercialOrphanStatus({
+    supabase: db as never,
+    phoneNumberId: COMMERCIAL_PHONE_NUMBER_ID,
+    status: {
+      id: 'wamid.orphan.new',
+      status: 'sent',
+      timestamp: '1756300200',
+      recipient_id: '573146283332',
+    },
+  });
+
+  assertEquals(typeof row?.id, 'string');
+  assertEquals(
+    db.tables.whatsapp_conversations[0].last_message_text,
+    COMMERCIAL_ORPHAN_STATUS_STUB,
+  );
+  assertEquals(db.tables.whatsapp_message_log[0].message_body, COMMERCIAL_ORPHAN_STATUS_STUB);
 });
