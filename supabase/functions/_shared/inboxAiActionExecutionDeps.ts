@@ -178,6 +178,7 @@ export function createInboxAiActionExecutionDeps(params: {
         templateComponents: components,
         messageBody: displayMessageBody,
         requirePhone: true,
+        supabase,
       });
       const stableKey = outboundConversationKey(phone, graph.phoneNumberId);
       const recipient = resolveRecipient(phone);

@@ -68,6 +68,7 @@ Deno.serve(async (req) => {
       templateLanguage,
       templateComponents: components,
       messageBody: displayMessageBody,
+      supabase,
     });
 
     const stableKey = outboundConversationKey(recipientKey, graph.phoneNumberId);

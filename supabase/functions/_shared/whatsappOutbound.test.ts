@@ -51,6 +51,33 @@ Deno.test('Meta text request targets an LID through recipient without a fake pho
   }
 });
 
+Deno.test('cobro template without the CRM log does not call Meta', async () => {
+  const originalFetch = globalThis.fetch;
+  let called = false;
+  globalThis.fetch = () => {
+    called = true;
+    return Promise.resolve(new Response('{}', { status: 200 }));
+  };
+  try {
+    await sendToMeta({
+      to: '573001234567',
+      phoneNumberId: '1035566289641219',
+      accessToken: 'test-token',
+      templateName: 'cobro_transferencia',
+      cobroNow: new Date('2026-10-16T10:00:00-05:00'),
+    });
+    throw new Error('debía rechazar');
+  } catch (error) {
+    assertEquals(
+      error instanceof Error ? error.message : String(error),
+      'Cobro bloqueado: falta el registro del CRM para validar la frecuencia.',
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assertEquals(called, false);
+});
+
 Deno.test('outbound LID logs BSUID without pretending it is a phone number', () => {
   assertEquals(
     outboundRecipientLogIdentity('lid:CO.1068129212242368'),

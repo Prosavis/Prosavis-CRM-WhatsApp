@@ -1,4 +1,5 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { isCobroTemplateName, rejectCobroTemplate } from './cobroLey2300.ts';
 import { resolveOutboundContactName } from './contactDisplayName.ts';
 import {
   buildRecipientPayload,
@@ -382,7 +383,12 @@ export async function sendToMeta(params: {
   reactionEmoji?: string;
   requirePhone?: boolean;
   interactiveButtons?: { id: string; title: string }[];
+  supabase?: SupabaseClient;
+  cobroNow?: Date;
 }): Promise<MetaSendResult> {
+  if (isCobroTemplateName(params.templateName ?? '')) {
+    await rejectCobroTemplate(params.supabase, params.to, params.cobroNow ?? new Date());
+  }
   const recipient = resolveRecipient(params.to);
   const recipientPayload = buildRecipientPayload(recipient, {
     requirePhone: params.requirePhone,

@@ -126,6 +126,7 @@ async function processRecipient(
       templateComponents: payload.templateComponents,
       messageBody: displayMessageBody,
       requirePhone: true,
+      supabase,
     });
 
     const stableKey = getStableKeyFromRecipient(phone);
