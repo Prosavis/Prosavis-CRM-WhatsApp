@@ -1,5 +1,6 @@
 import { assertEquals } from 'jsr:@std/assert';
 import {
+  attachesDomesticPdf,
   ctwaMenuChoiceFromMessage,
   decideCtwaAdMenu,
   messageHasAdReferral,
@@ -20,6 +21,13 @@ function menu(at: string): CtwaOutboundRow {
 function route(at: string): CtwaOutboundRow {
   return { sentVia: 'system', senderType: 'system', campaignType: 'CTWA_ROUTE', createdAt: at };
 }
+
+Deno.test('only the domestic branch attaches the pdf', () => {
+  assertEquals(attachesDomesticPdf('hogar'), true);
+  assertEquals(attachesDomesticPdf('empresas'), false);
+  assertEquals(attachesDomesticPdf('empleo'), false);
+  assertEquals(attachesDomesticPdf('inicio'), false);
+});
 
 Deno.test('a new ad click on 312 gets the inicio menu', () => {
   assertEquals(decideCtwaAdMenu({

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { stampCtwaLead, type CtwaRouteAction } from './ctwaLeadProfile.ts';
 import { BOT_PHONE_NUMBER_ID } from './whatsappLines.ts';
 import {
   getGraphCredentials,
@@ -9,10 +10,13 @@ import {
   persistOutboundLog,
   rejectIfSessionWindowClosed,
   sendToMeta,
+  uploadMediaBinaryToMeta,
 } from './whatsappOutbound.ts';
 
 export const CTWA_MENU_CAMPAIGN = 'CTWA_MENU';
 export const CTWA_ROUTE_CAMPAIGN = 'CTWA_ROUTE';
+export const DOMESTIC_PDF_STORAGE_PATH = 'brand/limpieza-domestica.pdf';
+export const DOMESTIC_PDF_FILENAME = 'Prosavis_Limpieza_Domestica.pdf';
 
 export const CTWA_MENU_BUTTONS = [
   { id: 'ctwa_domestica', title: 'Doméstica' },
@@ -29,14 +33,13 @@ const SNIPPET_BY_ACTION = {
   empleo: '/trabajo',
 } as const;
 
-const TAG_BY_CHOICE = {
-  empresas: 'Empresas',
-  empleo: 'Job',
-} as const;
-
 export type CtwaMenuChoice = 'domestica' | 'empresarial' | 'empleo';
 
 export type CtwaMenuAction = 'inicio' | 'hogar' | 'empresas' | 'empleo' | 'none';
+
+export function attachesDomesticPdf(action: CtwaMenuAction): boolean {
+  return action === 'hogar';
+}
 
 export interface CtwaOutboundRow {
   sentVia: string | null;
@@ -142,30 +145,20 @@ async function loadSnippet(supabase: SupabaseClient, shortcut: string): Promise<
   return body ? body.slice(0, 1024) : null;
 }
 
-async function addTag(supabase: SupabaseClient, stableKey: string, tagName: string): Promise<void> {
-  const { data: tagRow, error: tagError } = await supabase
-    .from('whatsapp_chat_tags')
-    .select('id')
-    .eq('name', tagName)
-    .eq('archived', false)
-    .maybeSingle();
-  if (tagError) throw new Error(tagError.message);
-  const tagId = asText(tagRow?.id);
-  if (!tagId) return;
-
-  const { data: conv, error: convError } = await supabase
-    .from('whatsapp_conversations')
-    .select('tag_ids')
-    .eq('stable_key', stableKey)
-    .maybeSingle();
-  if (convError) throw new Error(convError.message);
-  const ids = Array.isArray(conv?.tag_ids) ? conv.tag_ids.map(String) : [];
-  if (ids.includes(tagId)) return;
-  const { error } = await supabase
-    .from('whatsapp_conversations')
-    .update({ tag_ids: [...ids, tagId] })
-    .eq('stable_key', stableKey);
-  if (error) throw new Error(error.message);
+function routeAction(action: CtwaMenuAction): CtwaRouteAction | null {
+  switch (action) {
+    case 'hogar':
+    case 'empresas':
+    case 'empleo':
+      return action;
+    case 'inicio':
+    case 'none':
+      return null;
+    default: {
+      const unreachable: never = action;
+      return unreachable;
+    }
+  }
 }
 
 async function sendSystemOutbound(params: {
@@ -218,6 +211,86 @@ async function sendSystemOutbound(params: {
       last_message_outbound_status: metaResult.status,
     })
     .eq('stable_key', stableKey);
+}
+
+async function sendDomesticPdf(params: {
+  supabase: SupabaseClient;
+  to: string;
+  phoneNumberId: string | null;
+  text: string;
+}): Promise<boolean> {
+  try {
+    const phoneNumberId = params.phoneNumberId ?? undefined;
+    const stableKey = outboundConversationKey(params.to, phoneNumberId);
+    const sessionBlock = await rejectIfSessionWindowClosed(params.supabase, stableKey);
+    if (sessionBlock) return false;
+    if (await isRecipientBlocked(params.supabase, params.to)) return false;
+
+    const { data: blob, error } = await params.supabase.storage
+      .from('whatsapp-media')
+      .download(DOMESTIC_PDF_STORAGE_PATH);
+    if (error || !blob) throw error ?? new Error('pdf missing');
+
+    const graph = getGraphCredentials(phoneNumberId);
+    const mediaId = await uploadMediaBinaryToMeta({
+      phoneNumberId: graph.phoneNumberId,
+      accessToken: graph.accessToken,
+      file: blob,
+      mimeType: 'application/pdf',
+      filename: DOMESTIC_PDF_FILENAME,
+    });
+    const metaResult = await sendToMeta({
+      to: outboundCustomerPhone(params.to),
+      phoneNumberId: graph.phoneNumberId,
+      accessToken: graph.accessToken,
+      mediaId,
+      mediaType: 'document',
+      caption: params.text,
+      filename: DOMESTIC_PDF_FILENAME,
+    });
+    if (metaResult.status !== 'sent') {
+      console.error('ctwa domestic pdf skipped', metaResult.errorMessage);
+      return false;
+    }
+
+    const identity = outboundRecipientLogIdentity(params.to);
+    const persisted = await persistOutboundLog(params.supabase, {
+      conversation_stable_key: stableKey,
+      recipient_phone: identity.recipientPhone,
+      recipient_bsuid: identity.recipientBsuid,
+      direction: 'outbound',
+      sender_type: 'system',
+      message_body: params.text,
+      media_type: 'document',
+      caption: params.text,
+      filename: DOMESTIC_PDF_FILENAME,
+      storage_path: DOMESTIC_PDF_STORAGE_PATH,
+      mime_type: 'application/pdf',
+      size_bytes: blob.size,
+      media_id: mediaId,
+      status: metaResult.status,
+      wa_message_id: metaResult.waMessageId,
+      campaign_type: CTWA_ROUTE_CAMPAIGN,
+      phone_number_id: graph.phoneNumberId,
+      error_message: metaResult.errorMessage ?? null,
+      raw_payload: { meta: metaResult.payload },
+    }, null, 'system');
+
+    const createdAt = persisted.createdAt ?? new Date().toISOString();
+    await params.supabase
+      .from('whatsapp_conversations')
+      .update({
+        last_message_text: params.text,
+        last_message_at: createdAt,
+        last_message_direction: 'outbound',
+        last_message_outbound_status: metaResult.status,
+      })
+      .eq('stable_key', stableKey);
+    return true;
+  } catch (error) {
+    console.error('ctwa domestic pdf skipped', error);
+    return false;
+  }
 }
 
 async function loadOutboundsSinceClick(
@@ -282,7 +355,12 @@ export async function runCtwaAdMenu(params: {
         text: EMPRESAS_HOLD_TEXT,
         campaignType: CTWA_ROUTE_CAMPAIGN,
       });
-      await addTag(params.supabase, params.stableKey, TAG_BY_CHOICE.empresas);
+      await stampCtwaLead({
+        supabase: params.supabase,
+        stableKey: params.stableKey,
+        to: params.to,
+        action: 'empresas',
+      });
       return;
     }
 
@@ -290,16 +368,32 @@ export async function runCtwaAdMenu(params: {
     const text = await loadSnippet(params.supabase, shortcut);
     if (!text) return;
 
-    await sendSystemOutbound({
-      supabase: params.supabase,
-      to: params.to,
-      phoneNumberId: params.phoneNumberId,
-      text,
-      ...(action === 'inicio' ? { buttons: [...CTWA_MENU_BUTTONS] } : {}),
-      campaignType: action === 'inicio' ? CTWA_MENU_CAMPAIGN : CTWA_ROUTE_CAMPAIGN,
-    });
-    if (action === 'empleo') {
-      await addTag(params.supabase, params.stableKey, TAG_BY_CHOICE.empleo);
+    const sentPdf = attachesDomesticPdf(action)
+      ? await sendDomesticPdf({
+        supabase: params.supabase,
+        to: params.to,
+        phoneNumberId: params.phoneNumberId,
+        text,
+      })
+      : false;
+    if (!sentPdf) {
+      await sendSystemOutbound({
+        supabase: params.supabase,
+        to: params.to,
+        phoneNumberId: params.phoneNumberId,
+        text,
+        ...(action === 'inicio' ? { buttons: [...CTWA_MENU_BUTTONS] } : {}),
+        campaignType: action === 'inicio' ? CTWA_MENU_CAMPAIGN : CTWA_ROUTE_CAMPAIGN,
+      });
+    }
+    const route = routeAction(action);
+    if (route) {
+      await stampCtwaLead({
+        supabase: params.supabase,
+        stableKey: params.stableKey,
+        to: params.to,
+        action: route,
+      });
     }
   } catch (error) {
     console.error('ctwa ad menu skipped', error);
