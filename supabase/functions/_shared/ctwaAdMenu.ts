@@ -24,12 +24,10 @@ export const CTWA_MENU_BUTTONS = [
   { id: 'ctwa_empleo', title: 'Empleo' },
 ] as const;
 
-export const EMPRESAS_HOLD_TEXT =
-  'En unos minutos te contactamos para una atención más personalizada.';
-
 const SNIPPET_BY_ACTION = {
   inicio: '/inicio',
   hogar: '/hogar',
+  empresas: '/empresas',
   empleo: '/trabajo',
 } as const;
 
@@ -346,23 +344,6 @@ export async function runCtwaAdMenu(params: {
       outboundsSinceClick: outbounds,
     });
     if (action === 'none') return;
-
-    if (action === 'empresas') {
-      await sendSystemOutbound({
-        supabase: params.supabase,
-        to: params.to,
-        phoneNumberId: params.phoneNumberId,
-        text: EMPRESAS_HOLD_TEXT,
-        campaignType: CTWA_ROUTE_CAMPAIGN,
-      });
-      await stampCtwaLead({
-        supabase: params.supabase,
-        stableKey: params.stableKey,
-        to: params.to,
-        action: 'empresas',
-      });
-      return;
-    }
 
     const shortcut = SNIPPET_BY_ACTION[action];
     const text = await loadSnippet(params.supabase, shortcut);
