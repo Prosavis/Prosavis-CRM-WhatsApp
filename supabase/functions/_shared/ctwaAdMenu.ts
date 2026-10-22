@@ -1,5 +1,6 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { stampCtwaLead, type CtwaRouteAction } from './ctwaLeadProfile.ts';
+import { scheduleVoiceNudgeAfterSend } from './ctwaVoiceNudge.ts';
 import { BOT_PHONE_NUMBER_ID } from './whatsappLines.ts';
 import {
   getGraphCredentials,
@@ -159,6 +160,16 @@ function routeAction(action: CtwaMenuAction): CtwaRouteAction | null {
   }
 }
 
+interface SystemSendResult {
+  ok: boolean;
+  waMessageId: string | null;
+  createdAt: string | null;
+}
+
+function failedSend(): SystemSendResult {
+  return { ok: false, waMessageId: null, createdAt: null };
+}
+
 async function sendSystemOutbound(params: {
   supabase: SupabaseClient;
   to: string;
@@ -166,11 +177,11 @@ async function sendSystemOutbound(params: {
   text: string;
   buttons?: { id: string; title: string }[];
   campaignType: string;
-}): Promise<void> {
+}): Promise<SystemSendResult> {
   const stableKey = outboundConversationKey(params.to, params.phoneNumberId);
   const sessionBlock = await rejectIfSessionWindowClosed(params.supabase, stableKey);
-  if (sessionBlock) return;
-  if (await isRecipientBlocked(params.supabase, params.to)) return;
+  if (sessionBlock) return failedSend();
+  if (await isRecipientBlocked(params.supabase, params.to)) return failedSend();
 
   const graph = getGraphCredentials(params.phoneNumberId);
   const metaResult = await sendToMeta({
@@ -209,6 +220,8 @@ async function sendSystemOutbound(params: {
       last_message_outbound_status: metaResult.status,
     })
     .eq('stable_key', stableKey);
+  if (metaResult.status !== 'sent' || !metaResult.waMessageId) return failedSend();
+  return { ok: true, waMessageId: metaResult.waMessageId, createdAt };
 }
 
 async function sendDomesticPdf(params: {
@@ -216,13 +229,13 @@ async function sendDomesticPdf(params: {
   to: string;
   phoneNumberId: string | null;
   text: string;
-}): Promise<boolean> {
+}): Promise<SystemSendResult> {
   try {
     const phoneNumberId = params.phoneNumberId ?? undefined;
     const stableKey = outboundConversationKey(params.to, phoneNumberId);
     const sessionBlock = await rejectIfSessionWindowClosed(params.supabase, stableKey);
-    if (sessionBlock) return false;
-    if (await isRecipientBlocked(params.supabase, params.to)) return false;
+    if (sessionBlock) return failedSend();
+    if (await isRecipientBlocked(params.supabase, params.to)) return failedSend();
 
     const { data: blob, error } = await params.supabase.storage
       .from('whatsapp-media')
@@ -246,9 +259,9 @@ async function sendDomesticPdf(params: {
       caption: params.text,
       filename: DOMESTIC_PDF_FILENAME,
     });
-    if (metaResult.status !== 'sent') {
+    if (metaResult.status !== 'sent' || !metaResult.waMessageId) {
       console.error('ctwa domestic pdf skipped', metaResult.errorMessage);
-      return false;
+      return failedSend();
     }
 
     const identity = outboundRecipientLogIdentity(params.to);
@@ -284,10 +297,10 @@ async function sendDomesticPdf(params: {
         last_message_outbound_status: metaResult.status,
       })
       .eq('stable_key', stableKey);
-    return true;
+    return { ok: true, waMessageId: metaResult.waMessageId, createdAt };
   } catch (error) {
     console.error('ctwa domestic pdf skipped', error);
-    return false;
+    return failedSend();
   }
 }
 
@@ -356,9 +369,10 @@ export async function runCtwaAdMenu(params: {
         phoneNumberId: params.phoneNumberId,
         text,
       })
-      : false;
-    if (!sentPdf) {
-      await sendSystemOutbound({
+      : failedSend();
+    const sent = sentPdf.ok
+      ? sentPdf
+      : await sendSystemOutbound({
         supabase: params.supabase,
         to: params.to,
         phoneNumberId: params.phoneNumberId,
@@ -366,6 +380,20 @@ export async function runCtwaAdMenu(params: {
         ...(action === 'inicio' ? { buttons: [...CTWA_MENU_BUTTONS] } : {}),
         campaignType: action === 'inicio' ? CTWA_MENU_CAMPAIGN : CTWA_ROUTE_CAMPAIGN,
       });
+    if (sent.ok && sent.waMessageId && sent.createdAt) {
+      try {
+        await scheduleVoiceNudgeAfterSend({
+          supabase: params.supabase,
+          stableKey: params.stableKey,
+          to: params.to,
+          phoneNumberId: params.phoneNumberId,
+          action,
+          anchorWaMessageId: sent.waMessageId,
+          anchorAt: sent.createdAt,
+        });
+      } catch (error) {
+        console.error('ctwa voice nudge enqueue skipped', error);
+      }
     }
     const route = routeAction(action);
     if (route) {

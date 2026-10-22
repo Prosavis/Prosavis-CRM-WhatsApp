@@ -31,6 +31,7 @@ export function buildOutboundMediaPayload(params: {
   mediaUrl?: string;
   caption?: string;
   filename?: string;
+  voice?: boolean;
 }): Record<string, unknown> {
   const mediaId = params.mediaId?.trim();
   const mediaUrl = params.mediaUrl?.trim();
@@ -52,6 +53,9 @@ export function buildOutboundMediaPayload(params: {
   }
   if (params.mediaType === 'document' && params.filename) {
     mediaPayload.filename = params.filename;
+  }
+  if (params.mediaType === 'audio' && params.voice) {
+    mediaPayload.voice = true;
   }
   return mediaPayload;
 }

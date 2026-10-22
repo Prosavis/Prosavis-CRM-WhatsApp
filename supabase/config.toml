@@ -302,3 +302,6 @@ verify_jwt = false
 
 [functions.document-analysis-worker]
 verify_jwt = false
+
+[functions.ctwa-voice-nudge]
+verify_jwt = false

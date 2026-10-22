@@ -33,6 +33,17 @@ Deno.test('buildOutboundMediaPayload falls back to link when no mediaId', () => 
   });
 });
 
+Deno.test('an audio voice note asks Meta for the WhatsApp voice bubble', () => {
+  assertEquals(buildOutboundMediaPayload({
+    mediaType: 'audio',
+    mediaId: 'meta-audio-1',
+    voice: true,
+  }), {
+    id: 'meta-audio-1',
+    voice: true,
+  });
+});
+
 Deno.test('buildOutboundMediaPayload rejects empty media references', () => {
   assertThrows(
     () => buildOutboundMediaPayload({ mediaType: 'audio' }),

@@ -375,6 +375,7 @@ export async function sendToMeta(params: {
   mediaType?: MediaType;
   caption?: string;
   filename?: string;
+  voiceNote?: boolean;
   replyToWaMessageId?: string;
   templateName?: string;
   templateLanguage?: string;
@@ -428,6 +429,7 @@ export async function sendToMeta(params: {
       mediaUrl: params.mediaUrl,
       caption: params.caption,
       filename: params.filename,
+      voice: params.voiceNote === true,
     });
     requestBody = {
       messaging_product: 'whatsapp',

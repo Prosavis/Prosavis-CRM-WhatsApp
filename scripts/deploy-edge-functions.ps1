@@ -21,6 +21,7 @@ $AllFunctions = @(
   'block-whatsapp-user-admin',
   'bulk-whatsapp-send',
   'create-whatsapp-snippet',
+  'ctwa-voice-nudge',
   'create-whatsapp-sticker',
   'create-whatsapp-template-preset',
   'delete-whatsapp-conversation-admin',

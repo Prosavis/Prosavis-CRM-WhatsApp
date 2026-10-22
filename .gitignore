@@ -38,6 +38,9 @@ scripts/.edge-deploy/
 scripts/.edge-deploy-payloads/
 scripts/deploy-manifest.json
 scripts/mcp-runner/
+# Tomas de ElevenLabs de las notas CTWA. El OGG que se envía vive en Storage.
+audio/ctwa-voice-nudges/
+
 # Listas de audiencia con PII (teléfonos / nombres) — solo local
 scripts/output/
 .cursor/edge-mcp-deploy-results/
