@@ -179,6 +179,14 @@ export function mapConversationRow(
     pinnedAt: toDate(asOptionalString(record.pinned_at)),
     crmForceUnread: asBoolean(record.crm_force_unread),
     ctwaSourceId: asOptionalString(record.ctwa_source_id),
+    reviewIntentMark:
+      record.review_intent_mark === 'apto' ||
+      record.review_intent_mark === 'queja' ||
+      record.review_intent_mark === 'no_pedir'
+        ? record.review_intent_mark
+        : undefined,
+    reviewIntentLabel: asOptionalString(record.review_intent_label),
+    intakeIntentLabel: asOptionalString(record.intake_intent_label),
   };
 }
 
@@ -288,6 +296,9 @@ export interface WhatsAppConversation {
   crmForceUnread?: boolean;
   /** Id del anuncio de Meta (`ctwa_source_id`) si el chat llegó por un clic. */
   ctwaSourceId?: string;
+  reviewIntentMark?: 'apto' | 'queja' | 'no_pedir';
+  reviewIntentLabel?: string;
+  intakeIntentLabel?: string;
 }
 
 export interface WhatsAppLocation {

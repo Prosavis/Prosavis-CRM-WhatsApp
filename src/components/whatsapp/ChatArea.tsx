@@ -68,6 +68,7 @@ import {
 import MessageBubble, { type MessageReaction } from './MessageBubble';
 import { useMetaTemplates } from './templates/useMetaTemplates';
 import { templateActionButtonsByName } from '@/utils/whatsappTemplateHelpers';
+import { reviewIntentMarkText } from '../../../supabase/functions/_shared/reviewIntent';
 import type { AdminSenderProfile } from '@/utils/outboundSenderLabel';
 import ForwardMessageDialog from './ForwardMessageDialog';
 import MessageInput, {
@@ -1603,6 +1604,35 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 <Typography variant="caption" color="text.secondary" noWrap>
                   {conversation.contactPhone || conversation.phone || ''}
                 </Typography>
+                {conversation.intakeIntentLabel && (
+                  <Chip
+                    label={`intención: ${conversation.intakeIntentLabel}`}
+                    size="small"
+                    sx={{ height: 18, fontSize: '0.65rem' }}
+                  />
+                )}
+                {conversation.reviewIntentMark && (
+                  <Tooltip
+                    title={
+                      conversation.reviewIntentLabel
+                        ? `Juicio en sombra: ${conversation.reviewIntentLabel}. No se envía nada.`
+                        : 'Juicio en sombra. No se envía nada.'
+                    }
+                  >
+                    <Chip
+                      label={reviewIntentMarkText(conversation.reviewIntentMark)}
+                      size="small"
+                      color={
+                        conversation.reviewIntentMark === 'apto'
+                          ? 'success'
+                          : conversation.reviewIntentMark === 'queja'
+                            ? 'error'
+                            : 'default'
+                      }
+                      sx={{ height: 18, fontSize: '0.65rem' }}
+                    />
+                  </Tooltip>
+                )}
                 {directoryTags.map((tag) => (
                   <Chip
                     key={`dir-${tag}`}
