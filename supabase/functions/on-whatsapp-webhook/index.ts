@@ -45,6 +45,7 @@ import {
 } from '../_shared/francyAssistantGate.ts';
 import { pricingPatchForStatus } from '../_shared/whatsappStatusPricing.ts';
 import { runCtwaAdMenu } from '../_shared/ctwaAdMenu.ts';
+import { runReviewIntentShadow } from '../_shared/reviewIntentRun.ts';
 
 const encoder = new TextEncoder();
 type JsonRecord = Record<string, unknown>;
@@ -465,6 +466,16 @@ async function processInboundMessage(params: {
       messageBody: content.messageBody,
       createdAt,
     });
+    if (!content.reactionTo && !content.reactionRemoved) {
+      scheduleBackgroundWork(
+        runReviewIntentShadow({
+          supabase: params.supabase,
+          stableKey,
+          phone: customerKey,
+        }),
+        'review-intent',
+      );
+    }
   }
 
   await runCtwaAdMenu({
