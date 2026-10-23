@@ -1,4 +1,18 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { geminiGenerateJson, getGeminiApiKey } from './geminiClient.ts';
+import {
+  adCueFromMessage,
+  adDisplayLabel,
+  confirmIntakeModel,
+  intakeIntentFromText,
+  intakeProfileSentence,
+  intakeRouteFromIntent,
+  intakeTextHasComplaint,
+  resolveMessageIntent,
+  type AdCue,
+  type IntakeModelJudgment,
+  type IntakeRoute,
+} from './intakeIntent.ts';
 import { stampCtwaLead, type CtwaRouteAction } from './ctwaLeadProfile.ts';
 import { scheduleVoiceNudgeAfterSend } from './ctwaVoiceNudge.ts';
 import { BOT_PHONE_NUMBER_ID } from './whatsappLines.ts';
@@ -59,16 +73,17 @@ function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function choiceFromPlainText(body: string): CtwaMenuChoice | null {
-  const text = body
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-    .toLowerCase();
-  if (text === '1' || text === 'domestica') return 'domestica';
-  if (text === '2' || text === 'empresarial') return 'empresarial';
-  if (text === '3' || text === 'empleo') return 'empleo';
+function choiceFromIntent(intent: IntakeRoute | null): CtwaMenuChoice | null {
+  if (intent === 'hogar') return 'domestica';
+  if (intent === 'empresas') return 'empresarial';
+  if (intent === 'empleo') return 'empleo';
   return null;
+}
+
+function choiceFromPlainText(body: string): CtwaMenuChoice | null {
+  const intent = intakeIntentFromText(body);
+  if (intent === 'no_se_entiende' || intent == null) return null;
+  return choiceFromIntent(intent);
 }
 
 export function ctwaMenuChoiceFromMessage(message: JsonRecord): CtwaMenuChoice | null {
@@ -82,7 +97,10 @@ export function ctwaMenuChoiceFromMessage(message: JsonRecord): CtwaMenuChoice |
   const fromTitle = title ? choiceFromPlainText(title) : null;
   if (fromTitle) return fromTitle;
   const text = asRecord(message.text);
-  return choiceFromPlainText(asText(text.body));
+  const body = asText(text.body);
+  const ad = adCueFromMessage(message);
+  const read = resolveMessageIntent(body, ad ? `${ad.headline}\n${ad.body}` : null);
+  return choiceFromIntent(intakeRouteFromIntent(read));
 }
 
 export function messageHasAdReferral(message: JsonRecord): boolean {
@@ -92,7 +110,7 @@ export function messageHasAdReferral(message: JsonRecord): boolean {
   return Boolean(asText(referral.ctwa_clid) || asText(referral.source_id));
 }
 
-function humanTookOverAfterMenu(rows: readonly CtwaOutboundRow[]): boolean {
+export function humanTookOverAfterMenu(rows: readonly CtwaOutboundRow[]): boolean {
   const menuAt = rows
     .filter((row) => row.campaignType === CTWA_MENU_CAMPAIGN)
     .map((row) => row.createdAt || '')
@@ -121,7 +139,8 @@ export function decideCtwaAdMenu(input: {
   const menuSent = rows.some((row) => row.campaignType === CTWA_MENU_CAMPAIGN);
 
   if (input.choice) {
-    if (!menuSent || alreadyRouted || humanTookOverAfterMenu(rows)) return 'none';
+    if (alreadyRouted || humanTookOverAfterMenu(rows)) return 'none';
+    if (!menuSent && !input.hasAdReferral) return 'none';
     if (input.choice === 'domestica') return 'hogar';
     if (input.choice === 'empresarial') return 'empresas';
     return 'empleo';
@@ -325,6 +344,105 @@ async function loadOutboundsSinceClick(
   }));
 }
 
+function choiceFromStoredAd(body: string, adCopy: string): CtwaMenuChoice | null {
+  if (!adCopy) return null;
+  return choiceFromIntent(intakeRouteFromIntent(resolveMessageIntent(body, adCopy)));
+}
+
+function leadSentence(action: IntakeRoute, body: string, ad: AdCue | null): string {
+  return intakeProfileSentence({
+    route: action,
+    phrase: body,
+    adLabel: adDisplayLabel(ad),
+  });
+}
+
+async function loadStoredAdCue(supabase: SupabaseClient, stableKey: string): Promise<AdCue | null> {
+  const { data, error } = await supabase
+    .from('whatsapp_message_log')
+    .select('raw_payload')
+    .eq('conversation_stable_key', stableKey)
+    .eq('direction', 'inbound')
+    .order('created_at', { ascending: true })
+    .limit(12);
+  if (error || !Array.isArray(data)) return null;
+  for (const row of data) {
+    const cue = adCueFromMessage(row?.raw_payload as Record<string, unknown> | null);
+    if (cue) return cue;
+  }
+  return null;
+}
+
+function parseIntakeModel(raw: unknown): IntakeModelJudgment | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const record = raw as Record<string, unknown>;
+  return {
+    intent: asText(record.intent),
+    evidence: asText(record.evidence),
+    hasComplaint: record.hasComplaint === true,
+  };
+}
+
+async function geminiIntakeRoute(text: string, adCopy: string): Promise<CtwaMenuAction | null> {
+  const apiKey = getGeminiApiKey();
+  if (!apiKey || !text.trim()) return null;
+  try {
+    const raw = await geminiGenerateJson<unknown>({
+      apiKey,
+      maxOutputTokens: 400,
+      thinkingLevel: 'low',
+      logScope: 'intake-intent',
+      responseJsonSchema: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['intent', 'evidence', 'hasComplaint'],
+        properties: {
+          intent: { type: 'string', enum: ['hogar', 'empresas', 'empleo', 'no_se_entiende'] },
+          evidence: { type: 'string' },
+          hasComplaint: { type: 'boolean' },
+        },
+      },
+      systemInstruction:
+        'Clasificas el primer interés de un chat de WhatsApp de Prosavis. intent es hogar, empresas, empleo o no_se_entiende. evidence es una cita textual exacta del mensaje o del titular del anuncio. hasComplaint es true si hay queja. No inventes la cita.',
+      prompt: adCopy.trim()
+        ? `Anuncio:\n${adCopy.trim()}\n\nMensaje:\n${text}`
+        : text,
+    });
+    return confirmIntakeModel(text, parseIntakeModel(raw), adCopy);
+  } catch (error) {
+    console.error('intake gemini skipped', error);
+    return null;
+  }
+}
+
+async function intakeDirectoryBlocks(supabase: SupabaseClient, to: string): Promise<boolean> {
+  const digits = to.replace(/\D/g, '');
+  if (!digits) return false;
+  const { data, error } = await supabase
+    .from('crm_directory')
+    .select('opt_out, tags, classification')
+    .or(`phone.eq.${digits},phone.eq.+${digits}`)
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return false;
+  if (data.opt_out === true) return true;
+  const tags = Array.isArray(data.tags) ? data.tags.map((tag) => String(tag).toLowerCase()) : [];
+  const classification = asText(data.classification).toLowerCase();
+  return tags.some((tag) => tag.includes('problematica')) || classification.includes('problematica');
+}
+
+async function noteIntakeIntent(
+  supabase: SupabaseClient,
+  stableKey: string,
+  action: IntakeRoute,
+): Promise<void> {
+  const { error } = await supabase
+    .from('whatsapp_conversations')
+    .update({ intake_intent_label: action })
+    .eq('stable_key', stableKey);
+  if (error) console.error('intake intent mark skipped', error.message);
+}
+
 /** Responde el clic de anuncio en el 312. No lanza: un fallo de envío no tumba el webhook. */
 export async function runCtwaAdMenu(params: {
   supabase: SupabaseClient;
@@ -343,20 +461,58 @@ export async function runCtwaAdMenu(params: {
       .maybeSingle();
     if (convError) throw new Error(convError.message);
 
-    const choice = ctwaMenuChoiceFromMessage(params.message);
+    const body = asText(asRecord(params.message.text).body);
+    const ad = adCueFromMessage(params.message) ?? await loadStoredAdCue(params.supabase, params.stableKey);
+    const adCopy = ad ? `${ad.headline}\n${ad.body}`.trim() : '';
+    const choice = ctwaMenuChoiceFromMessage(params.message) ?? choiceFromStoredAd(body, adCopy);
     const outbounds = await loadOutboundsSinceClick(
       params.supabase,
       params.stableKey,
       asText(conv?.ctwa_captured_at) || null,
     );
-    const action = decideCtwaAdMenu({
+    const automatedOff = conv?.automated_inbound_disabled === true;
+    const hasAdReferral = messageHasAdReferral(params.message);
+    let action = decideCtwaAdMenu({
       phoneNumberId: params.phoneNumberId,
-      automatedInboundDisabled: conv?.automated_inbound_disabled === true,
-      hasAdReferral: messageHasAdReferral(params.message),
+      automatedInboundDisabled: automatedOff,
+      hasAdReferral,
       choice,
       outboundsSinceClick: outbounds,
     });
-    if (action === 'none') return;
+    const menuSent = outbounds.some((row) => row.campaignType === CTWA_MENU_CAMPAIGN);
+    const alreadyRouted = outbounds.some((row) => row.campaignType === CTWA_ROUTE_CAMPAIGN);
+    const humanTookOver = humanTookOverAfterMenu(outbounds);
+    if (choice && humanTookOver) {
+      await stampCtwaLead({
+        supabase: params.supabase,
+        stableKey: params.stableKey,
+        to: params.to,
+        action: choice === 'domestica' ? 'hogar' : choice === 'empresarial' ? 'empresas' : 'empleo',
+        env: {},
+        profileSentence: leadSentence(
+          choice === 'domestica' ? 'hogar' : choice === 'empresarial' ? 'empresas' : 'empleo',
+          body,
+          ad,
+        ),
+      });
+      await noteIntakeIntent(params.supabase, params.stableKey, choice === 'domestica' ? 'hogar' : choice === 'empresarial' ? 'empresas' : 'empleo');
+      return;
+    }
+    if (
+      action === 'none'
+      && !automatedOff
+      && !choice
+      && menuSent
+      && !alreadyRouted
+      && !humanTookOver
+      && intakeIntentFromText(body) === 'no_se_entiende'
+      && !intakeTextHasComplaint(body)
+    ) {
+      const recovered = await geminiIntakeRoute(body, adCopy);
+      if (recovered) action = recovered;
+    }
+    if (action === 'none' || intakeTextHasComplaint(body)) return;
+    if (await intakeDirectoryBlocks(params.supabase, params.to)) return;
 
     const shortcut = SNIPPET_BY_ACTION[action];
     const text = await loadSnippet(params.supabase, shortcut);
@@ -402,7 +558,9 @@ export async function runCtwaAdMenu(params: {
         stableKey: params.stableKey,
         to: params.to,
         action: route,
+        profileSentence: leadSentence(route, body, ad),
       });
+      await noteIntakeIntent(params.supabase, params.stableKey, route);
     }
   } catch (error) {
     console.error('ctwa ad menu skipped', error);

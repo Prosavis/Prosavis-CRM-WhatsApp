@@ -11,9 +11,10 @@ export const CTWA_ROUTE_TAG: Record<CtwaRouteAction, string> = {
   empleo: 'Job',
 };
 
-const VIGENTE_BY_ACTION: Record<Exclude<CtwaRouteAction, 'empleo'>, string> = {
+const VIGENTE_BY_ACTION: Record<CtwaRouteAction, string> = {
   hogar: 'Anuncio 312, doméstica. Aún no da dirección ni fecha.',
   empresas: 'Anuncio 312, empresarial. Aún no da tipo de espacio.',
+  empleo: 'Anuncio 312, empleo.',
 };
 
 const BRANCH_LABEL: Record<CtwaRouteAction, string> = {
@@ -94,14 +95,31 @@ function diaryBody(existing: string): { structured: boolean; diary: string; lega
 }
 
 /** Misma forma que mergeContextSheet: vigente arriba, diario abajo, sin borrar lo anterior. */
+export function vigenteIsEmpty(existing: string | null | undefined): boolean {
+  const trimmed = String(existing ?? '').trim();
+  if (!trimmed) return true;
+  const match = trimmed.match(/^\[Vigente [^\]]*\]\s*([\s\S]*?)(?:\n---|\n## Diario|$)/);
+  if (!match) return false;
+  return !match[1].trim();
+}
+
+export function appendProfileDiary(existing: string, line: string, now?: Date): string {
+  const stamp = bogotaStamp(now ?? new Date());
+  const block = `### ${stamp} · bot 312\n${line.trim()}`;
+  const trimmed = existing.trim();
+  if (!trimmed.includes('## Diario')) return `${trimmed}\n\n## Diario\n${block}\n`;
+  return `${trimmed}\n\n${block}\n`;
+}
+
 export function appendRouteContextSheet(input: {
   existing: string | null | undefined;
-  action: Exclude<CtwaRouteAction, 'empleo'>;
+  action: CtwaRouteAction;
   now?: Date;
+  vigente?: string;
 }): string {
   const now = input.now ?? new Date();
   const stamp = bogotaStamp(now);
-  const vigente = VIGENTE_BY_ACTION[input.action];
+  const vigente = input.vigente?.trim() || VIGENTE_BY_ACTION[input.action];
   const block = `### ${stamp} · bot 312\n${vigente}`;
   const { structured, diary, legado } = diaryBody(String(input.existing ?? ''));
   const parts: string[] = [];
@@ -190,6 +208,35 @@ async function addChatTag(
   return 'added';
 }
 
+async function ensureIntakeMemory(
+  supabase: SupabaseClient,
+  stableKey: string,
+  action: CtwaRouteAction,
+  now: Date,
+  summary?: string,
+): Promise<void> {
+  const { data, error } = await supabase
+    .from('whatsapp_conversation_ai_memory')
+    .select('stable_key, summary')
+    .eq('stable_key', stableKey)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (data) return;
+  const { error: insertError } = await supabase
+    .from('whatsapp_conversation_ai_memory')
+    .upsert({
+      stable_key: stableKey,
+      summary: summary?.trim() || `Primera intención: ${BRANCH_LABEL[action]}.`,
+      preferences: [],
+      objections: [],
+      agreements: [],
+      message_count: 1,
+      model: 'reglas',
+      updated_at: now.toISOString(),
+    }, { onConflict: 'stable_key' });
+  if (insertError) throw new Error(insertError.message);
+}
+
 function defer(task: Promise<unknown>): void {
   const runtime = (globalThis as {
     EdgeRuntime?: { waitUntil?: (promise: Promise<unknown>) => void };
@@ -210,6 +257,7 @@ export async function stampCtwaLead(params: {
   now?: Date;
   env?: Record<string, string | undefined>;
   fetchImpl?: typeof fetch;
+  profileSentence?: string;
 }): Promise<void> {
   try {
     const now = params.now ?? new Date();
@@ -283,17 +331,31 @@ export async function stampCtwaLead(params: {
       .eq('stable_key', params.stableKey);
     if (noteError) throw new Error(noteError.message);
 
-    if (params.action !== 'empleo' && directoryId) {
+    const sentence = params.profileSentence?.trim() || '';
+    if (directoryId && sentence && !vigenteIsEmpty(existing?.internal_notes)) {
+      const sheet = appendProfileDiary(String(existing?.internal_notes ?? ''), sentence, now);
+      const { error: sheetError } = await params.supabase
+        .from('crm_directory')
+        .update({ internal_notes: sheet })
+        .eq('id', directoryId);
+      if (sheetError) throw new Error(sheetError.message);
+    } else if (directoryId && vigenteIsEmpty(existing?.internal_notes)) {
       const sheet = appendRouteContextSheet({
         existing: existing?.internal_notes,
         action: params.action,
         now,
+        vigente: sentence || undefined,
       });
       const { error: sheetError } = await params.supabase
         .from('crm_directory')
         .update({ internal_notes: sheet })
         .eq('id', directoryId);
       if (sheetError) throw new Error(sheetError.message);
+    }
+    try {
+      await ensureIntakeMemory(params.supabase, params.stableKey, params.action, now, sentence);
+    } catch (error) {
+      console.error('intake memory skipped', error);
     }
 
     const webhook = ctwaLeadWebhookEnv(params.env ?? {

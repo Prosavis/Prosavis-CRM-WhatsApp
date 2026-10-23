@@ -83,6 +83,40 @@ Deno.test('free text after the menu is left for a person', () => {
   }), 'none');
 });
 
+Deno.test('a clear first ad phrase skips the menu', () => {
+  assertEquals(decideCtwaAdMenu({
+    phoneNumberId: BOT,
+    automatedInboundDisabled: false,
+    hasAdReferral: true,
+    choice: 'domestica',
+    outboundsSinceClick: [],
+  }), 'hogar');
+  assertEquals(decideCtwaAdMenu({
+    phoneNumberId: BOT,
+    automatedInboundDisabled: false,
+    hasAdReferral: true,
+    choice: 'empleo',
+    outboundsSinceClick: [],
+  }), 'empleo');
+});
+
+Deno.test('Buscoenpleo after the menu routes to empleo until a person replies', () => {
+  assertEquals(decideCtwaAdMenu({
+    phoneNumberId: BOT,
+    automatedInboundDisabled: false,
+    hasAdReferral: false,
+    choice: 'empleo',
+    outboundsSinceClick: [menu('2026-10-19T17:00:00Z')],
+  }), 'empleo');
+  assertEquals(decideCtwaAdMenu({
+    phoneNumberId: BOT,
+    automatedInboundDisabled: false,
+    hasAdReferral: false,
+    choice: 'empleo',
+    outboundsSinceClick: [menu('2026-10-19T17:00:00Z'), human('2026-10-19T17:05:00Z')],
+  }), 'none');
+});
+
 Deno.test('the three buttons route once, and a later human reply stops the branch', () => {
   const base = {
     phoneNumberId: BOT,
@@ -114,7 +148,19 @@ Deno.test('button id and ad referral are read from the webhook message', () => {
   assertEquals(ctwaMenuChoiceFromMessage({ type: 'text', text: { body: 'Doméstica' } }), 'domestica');
   assertEquals(ctwaMenuChoiceFromMessage({ type: 'text', text: { body: '2' } }), 'empresarial');
   assertEquals(ctwaMenuChoiceFromMessage({ type: 'text', text: { body: 'empleo' } }), 'empleo');
-  assertEquals(ctwaMenuChoiceFromMessage({ type: 'text', text: { body: 'busco empleo' } }), null);
+  assertEquals(ctwaMenuChoiceFromMessage({ type: 'text', text: { body: 'busco empleo' } }), 'empleo');
+  assertEquals(ctwaMenuChoiceFromMessage({ type: 'text', text: { body: 'Buscoenpleo' } }), 'empleo');
+  assertEquals(ctwaMenuChoiceFromMessage({ type: 'text', text: { body: 'quiero agendar una limpieza' } }), 'domestica');
+  assertEquals(ctwaMenuChoiceFromMessage({
+    type: 'text',
+    text: { body: 'Hola' },
+    referral: { source_type: 'ad', source_id: '1', headline: 'Vacantes de trabajo' },
+  }), 'empleo');
+  assertEquals(ctwaMenuChoiceFromMessage({
+    type: 'text',
+    text: { body: 'Buscoenpleo' },
+    referral: { source_type: 'ad', source_id: '1', headline: 'Limpieza del hogar' },
+  }), 'empleo');
   assertEquals(ctwaMenuChoiceFromMessage({ type: 'text', text: { body: 'quiero la 1' } }), null);
   assertEquals(messageHasAdReferral({
     referral: { source_type: 'ad', source_id: '120250397331720691', ctwa_clid: 'abc' },
