@@ -74,6 +74,8 @@ import {
   type OutboundSentVia,
 } from '@/utils/outboundSenderLabel';
 import type { CtwaAdPreview } from '@/utils/ctwaAdPreview';
+import type { WhatsAppTemplateActionButton } from '@/utils/whatsappTemplateHelpers';
+import TemplateActionButtons from './templates/TemplateActionButtons';
 
 export interface MessageReaction {
   actorKey: string;
@@ -96,6 +98,7 @@ interface MessageBubbleProps {
   reacting?: boolean;
   onReact?: (msg: WhatsAppMessage, emoji: string) => void;
   adminById?: ReadonlyMap<string, AdminSenderProfile>;
+  templateButtons?: WhatsAppTemplateActionButton[];
 }
 
 const MEDIA_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -839,6 +842,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
   reacting,
   onReact,
   adminById,
+  templateButtons,
 }) => {
   const theme = useTheme();
   const isOutbound = message.direction === 'outbound';
@@ -1067,6 +1071,10 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </Box>
               ))}
             </Box>
+          )}
+
+          {templateButtons && templateButtons.length > 0 && (
+            <TemplateActionButtons buttons={templateButtons} />
           )}
 
           {missingCoexBody && !hasMedia && !hasLocation && !hasContacts && (

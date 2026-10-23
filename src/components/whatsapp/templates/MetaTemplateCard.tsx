@@ -2,7 +2,8 @@ import React from 'react';
 import { Box, Typography } from '@mui/material';
 import type { WhatsAppTemplateSummary } from '@/services/whatsappService';
 import WhatsAppTemplateCategoryChip from '@/components/whatsapp/WhatsAppTemplateCategoryChip';
-import { previewTextForList } from '@/utils/whatsappTemplateHelpers';
+import { previewTextForList, templateActionButtons } from '@/utils/whatsappTemplateHelpers';
+import TemplateActionButtons from './TemplateActionButtons';
 import { getTemplateDisplayName } from './templateDisplayNames';
 
 const BUBBLE_PREVIEW_SX = {
@@ -82,6 +83,7 @@ const MetaTemplateCard: React.FC<MetaTemplateCardProps> = ({
           >
             {previewTextForList(template)}
           </Typography>
+          <TemplateActionButtons buttons={templateActionButtons(template.components)} />
         </Box>
       </Box>
     </Box>

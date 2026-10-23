@@ -66,6 +66,8 @@ import {
   type ConversationPreviewMessage,
 } from '@/utils/inboxConversationCache';
 import MessageBubble, { type MessageReaction } from './MessageBubble';
+import { useMetaTemplates } from './templates/useMetaTemplates';
+import { templateActionButtonsByName } from '@/utils/whatsappTemplateHelpers';
 import type { AdminSenderProfile } from '@/utils/outboundSenderLabel';
 import ForwardMessageDialog from './ForwardMessageDialog';
 import MessageInput, {
@@ -273,6 +275,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 }) => {
   const theme = useTheme();
   const queryClient = useQueryClient();
+  const { templates: metaTemplates } = useMetaTemplates(wabaId);
+  const templateButtonsByName = useMemo(
+    () => templateActionButtonsByName(metaTemplates),
+    [metaTemplates],
+  );
   const isMobile = usePhoneLayout();
   const messageSubscriptionIdRef = useRef(0);
   const [messageHistory, dispatchMessageHistory] = useReducer(
@@ -1869,6 +1876,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                     reacting={msg.waMessageId ? Boolean(pendingReactions[msg.waMessageId]) : false}
                     onReact={handleReact}
                     adminById={adminById}
+                    templateButtons={
+                      msg.templateName ? templateButtonsByName.get(msg.templateName) : undefined
+                    }
                   />
                 </Box>
               );
