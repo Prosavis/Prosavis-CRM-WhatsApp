@@ -4,6 +4,7 @@ import {
   confirmIntakeModel,
   intakeIntentFromText,
   intakeProfileSentence,
+  isGenericIntake,
   resolveMessageIntent,
 } from '../../supabase/functions/_shared/intakeIntent'
 
@@ -26,6 +27,13 @@ describe('intakeIntentFromText', () => {
 
   it('una queja no elige flujo', () => {
     expect(intakeIntentFromText('quiero agendar una limpieza, fue una queja')).toBe('no_se_entiende')
+  })
+
+  it('hola quiero más información es un saludo genérico', () => {
+    expect(isGenericIntake('¡Hola! Quiero más información')).toBe(true)
+    expect(resolveMessageIntent('¡Hola! Quiero más información', 'Vacantes para trabajo en casa')).toBe('empleo')
+    expect(resolveMessageIntent('¡Hola! Quiero más información', '')).toBeNull()
+    expect(isGenericIntake('quiero agendar una limpieza')).toBe(false)
   })
 
   it('un hola sigue al anuncio y una frase clara lo contradice', () => {

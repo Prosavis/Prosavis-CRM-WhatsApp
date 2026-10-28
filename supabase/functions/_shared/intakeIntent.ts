@@ -103,10 +103,37 @@ export interface AdCue {
   body: string
 }
 
+const GENERIC_TOKENS = new Set([
+  'hola',
+  'buenos',
+  'buen',
+  'buenas',
+  'dias',
+  'tardes',
+  'noches',
+  'hey',
+  'hi',
+  'hello',
+  'info',
+  'informacion',
+  'quiero',
+  'mas',
+  'una',
+  'un',
+])
+
 export function isGenericIntake(body: string): boolean {
   const spaced = normalizeIntakeSpaced(body)
   if (!spaced) return true
-  return GENERIC.some((phrase) => spaced === phrase)
+  if (GENERIC.some((phrase) => spaced === phrase)) return true
+  const tokens = spaced.split(' ')
+  return tokens.length > 0 && tokens.every((token) => GENERIC_TOKENS.has(token))
+}
+
+/** El texto lista las tres opciones, aunque lo haya pegado una persona desde el CRM. */
+export function outboundLooksLikeOptionMenu(body: string | null | undefined): boolean {
+  const spaced = normalizeIntakeSpaced(body ?? '')
+  return spaced.includes('domestica') && spaced.includes('empresarial') && spaced.includes('empleo')
 }
 
 export function adIntentFromCopy(copy: string): IntakeRoute | null {

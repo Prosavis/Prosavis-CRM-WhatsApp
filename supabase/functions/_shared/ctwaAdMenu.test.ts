@@ -100,6 +100,45 @@ Deno.test('a clear first ad phrase skips the menu', () => {
   }), 'empleo');
 });
 
+const PASTED_MENU = 'Hola. 1 Servicio de limpieza doméstica. 2 Servicio de limpieza empresarial. 3 Busco empleo';
+
+function pastedMenu(at: string): CtwaOutboundRow {
+  return {
+    sentVia: 'crm',
+    senderType: 'agent',
+    campaignType: 'OTHER',
+    createdAt: at,
+    messageBody: PASTED_MENU,
+  };
+}
+
+Deno.test('a CRM paste of the three options unlocks 1, 2 or 3', () => {
+  assertEquals(decideCtwaAdMenu({
+    phoneNumberId: BOT,
+    automatedInboundDisabled: false,
+    hasAdReferral: false,
+    choice: 'empleo',
+    outboundsSinceClick: [pastedMenu('2026-10-23T20:05:19Z')],
+  }), 'empleo');
+  assertEquals(decideCtwaAdMenu({
+    phoneNumberId: BOT,
+    automatedInboundDisabled: false,
+    hasAdReferral: false,
+    choice: 'domestica',
+    outboundsSinceClick: [pastedMenu('2026-10-23T20:05:19Z')],
+  }), 'hogar');
+  assertEquals(decideCtwaAdMenu({
+    phoneNumberId: BOT,
+    automatedInboundDisabled: false,
+    hasAdReferral: false,
+    choice: 'empleo',
+    outboundsSinceClick: [
+      pastedMenu('2026-10-23T20:05:19Z'),
+      human('2026-10-23T20:06:00Z'),
+    ],
+  }), 'none');
+});
+
 Deno.test('Buscoenpleo after the menu routes to empleo until a person replies', () => {
   assertEquals(decideCtwaAdMenu({
     phoneNumberId: BOT,

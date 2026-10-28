@@ -8,6 +8,7 @@ import {
   intakeProfileSentence,
   intakeRouteFromIntent,
   intakeTextHasComplaint,
+  outboundLooksLikeOptionMenu,
   resolveMessageIntent,
   type AdCue,
   type IntakeModelJudgment,
@@ -59,6 +60,7 @@ export interface CtwaOutboundRow {
   senderType: string | null;
   campaignType: string | null;
   createdAt: string | null;
+  messageBody?: string | null;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -110,15 +112,20 @@ export function messageHasAdReferral(message: JsonRecord): boolean {
   return Boolean(asText(referral.ctwa_clid) || asText(referral.source_id));
 }
 
+function isOptionMenu(row: CtwaOutboundRow): boolean {
+  return row.campaignType === CTWA_MENU_CAMPAIGN || outboundLooksLikeOptionMenu(row.messageBody);
+}
+
 export function humanTookOverAfterMenu(rows: readonly CtwaOutboundRow[]): boolean {
   const menuAt = rows
-    .filter((row) => row.campaignType === CTWA_MENU_CAMPAIGN)
+    .filter(isOptionMenu)
     .map((row) => row.createdAt || '')
     .sort()
     .at(-1);
   if (!menuAt) return false;
   return rows.some((row) =>
     (row.sentVia === 'crm' || row.senderType === 'agent')
+    && !isOptionMenu(row)
     && (row.createdAt || '') > menuAt
   );
 }
@@ -136,7 +143,7 @@ export function decideCtwaAdMenu(input: {
 
   const rows = input.outboundsSinceClick;
   const alreadyRouted = rows.some((row) => row.campaignType === CTWA_ROUTE_CAMPAIGN);
-  const menuSent = rows.some((row) => row.campaignType === CTWA_MENU_CAMPAIGN);
+  const menuSent = rows.some(isOptionMenu);
 
   if (input.choice) {
     if (alreadyRouted || humanTookOverAfterMenu(rows)) return 'none';
@@ -330,7 +337,7 @@ async function loadOutboundsSinceClick(
 ): Promise<CtwaOutboundRow[]> {
   let query = supabase
     .from('whatsapp_message_log')
-    .select('sent_via, sender_type, campaign_type, created_at')
+    .select('sent_via, sender_type, campaign_type, created_at, message_body')
     .eq('conversation_stable_key', stableKey)
     .eq('direction', 'outbound');
   if (clickAt) query = query.gte('created_at', clickAt);
@@ -341,6 +348,7 @@ async function loadOutboundsSinceClick(
     senderType: asText(row.sender_type) || null,
     campaignType: asText(row.campaign_type) || null,
     createdAt: asText(row.created_at) || null,
+    messageBody: asText(row.message_body) || null,
   }));
 }
 
@@ -479,7 +487,7 @@ export async function runCtwaAdMenu(params: {
       choice,
       outboundsSinceClick: outbounds,
     });
-    const menuSent = outbounds.some((row) => row.campaignType === CTWA_MENU_CAMPAIGN);
+    const menuSent = outbounds.some(isOptionMenu);
     const alreadyRouted = outbounds.some((row) => row.campaignType === CTWA_ROUTE_CAMPAIGN);
     const humanTookOver = humanTookOverAfterMenu(outbounds);
     if (choice && humanTookOver) {
