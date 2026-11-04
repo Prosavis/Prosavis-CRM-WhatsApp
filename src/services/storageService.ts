@@ -64,22 +64,27 @@ export async function uploadWhatsAppStorageFile(
   storagePath: string,
   file: File,
 ): Promise<UploadResult> {
-  // Paths de outbound ya son únicos (UUID/timestamp); upsert + versionado de Storage
-  // puede fallar en overwrite. Refrescamos sesión por si el JWT del Storage expiró.
-  await supabase.auth.refreshSession().catch(() => undefined);
-
+  // No refreshSession() aquí: el auto-refresh de auth-js ya lo hace y la llamada manual
+  // choca con el Navigator LockManager ("lock was released because another request stole it").
   const { data, error } = await supabase.storage.from(bucket).upload(storagePath, file, {
-    upsert: false,
+    upsert: true,
     contentType: file.type || undefined,
     cacheControl: '3600',
   });
-  if (error) throw new Error(formatStorageUploadError(error));
 
+  // ponytail: 504/red tras 60 s = Storage pudo escribir el objeto igual (visto 2026-11-04).
+  // Verificamos existencia antes de declarar fallo; el path es único por envío.
+  if (error) {
+    const { data: alreadyStored } = await supabase.storage.from(bucket).exists(storagePath);
+    if (!alreadyStored) throw new Error(formatStorageUploadError(error));
+  }
+
+  const storedPath = data?.path ?? storagePath;
   let publicUrl = '';
   try {
     const { data: signed } = await supabase.storage
       .from(bucket)
-      .createSignedUrl(data.path, 7200);
+      .createSignedUrl(storedPath, 7200);
     if (signed?.signedUrl) publicUrl = signed.signedUrl;
   } catch {
     // El signed URL client-side puede fallar si el token expiró.
@@ -87,7 +92,7 @@ export async function uploadWhatsAppStorageFile(
   }
 
   return {
-    storagePath: data.path,
+    storagePath: storedPath,
     publicUrl,
   };
 }
