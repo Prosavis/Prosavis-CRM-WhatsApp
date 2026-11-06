@@ -71,6 +71,13 @@ export interface MetaSendResult {
   errorMessage?: string;
 }
 
+export interface OutboundLocation {
+  latitude: number;
+  longitude: number;
+  name?: string;
+  address?: string;
+}
+
 export interface SendMediaOutboundParams {
   to: string;
   mediaType: MediaType;
@@ -279,7 +286,7 @@ export async function uploadMediaBinaryToMeta(params: {
   return id;
 }
 
-async function resolveOutboundMediaForMeta(
+export async function resolveOutboundMediaForMeta(
   supabase: SupabaseClient,
   params: {
     mediaType: MediaType;
@@ -384,6 +391,9 @@ export async function sendToMeta(params: {
   reactionEmoji?: string;
   requirePhone?: boolean;
   interactiveButtons?: { id: string; title: string }[];
+  location?: OutboundLocation;
+  /** Botón nativo «Enviar ubicación»; el cuerpo sale de `messageBody`. Requiere ventana de 24 h. */
+  locationRequest?: boolean;
   supabase?: SupabaseClient;
   cobroNow?: Date;
 }): Promise<MetaSendResult> {
@@ -455,6 +465,31 @@ export async function sendToMeta(params: {
         },
       },
     };
+  } else if (params.location) {
+    requestBody = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      ...recipientPayload,
+      type: 'location',
+      location: {
+        latitude: params.location.latitude,
+        longitude: params.location.longitude,
+        ...(params.location.name ? { name: params.location.name } : {}),
+        ...(params.location.address ? { address: params.location.address } : {}),
+      },
+    };
+  } else if (params.locationRequest) {
+    requestBody = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      ...recipientPayload,
+      type: 'interactive',
+      interactive: {
+        type: 'location_request_message',
+        body: { text: params.messageBody ?? '' },
+        action: { name: 'send_location' },
+      },
+    };
   } else {
     requestBody = {
       messaging_product: 'whatsapp',
@@ -498,7 +533,9 @@ export async function sendToMeta(params: {
       ? params.caption || `[${params.mediaType}]`
       : params.reactionEmoji !== undefined
         ? params.reactionEmoji
-        : (params.messageBody ?? '');
+        : params.location
+          ? (params.messageBody ?? (params.location.name || '[ubicación]'))
+          : (params.messageBody ?? '');
 
   return {
     status: response.ok && waMessageId ? 'sent' : 'failed',
@@ -516,6 +553,8 @@ export async function sendToMeta(params: {
     },
   };
 }
+
+export type SendToMetaParams = Parameters<typeof sendToMeta>[0];
 
 export function buildTemplateDisplayBody(
   templateName: string,

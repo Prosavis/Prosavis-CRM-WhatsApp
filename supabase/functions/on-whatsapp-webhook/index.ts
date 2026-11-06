@@ -46,6 +46,7 @@ import {
 import { pricingPatchForStatus } from '../_shared/whatsappStatusPricing.ts';
 import { runCtwaAdMenu } from '../_shared/ctwaAdMenu.ts';
 import { runReviewIntentShadow } from '../_shared/reviewIntentRun.ts';
+import { buildRutaInboundEvent, forwardRutaInbound } from '../_shared/rutaInbound.ts';
 
 const encoder = new TextEncoder();
 type JsonRecord = Record<string, unknown>;
@@ -278,7 +279,7 @@ async function processInboundMessage(params: {
   message: JsonRecord;
   value: JsonRecord;
   contacts: unknown[];
-}): Promise<'inserted' | 'duplicate' | 'skipped' | 'updated'> {
+}): Promise<'inserted' | 'ruta_handled' | 'duplicate' | 'skipped' | 'updated'> {
   const identity = resolveInboundCustomer(params.message, params.contacts);
   const waMessageId = getString(params.message.id);
   if (!identity || !waMessageId) {
@@ -476,6 +477,17 @@ async function processInboundMessage(params: {
         'review-intent',
       );
     }
+  }
+
+  const rutaEvent = buildRutaInboundEvent({ message: params.message, phoneNumberId, receivedAt: createdAt });
+  if (
+    rutaEvent &&
+    await forwardRutaInbound(rutaEvent, {
+      url: envString('RUTA_INBOUND_URL'),
+      apiKey: envString('RUTA_INBOUND_API_KEY'),
+    })
+  ) {
+    return 'ruta_handled';
   }
 
   await runCtwaAdMenu({
@@ -731,6 +743,7 @@ async function processPayload(
           });
 
           if (processed === 'duplicate' || processed === 'skipped') result.skippedDuplicates += 1;
+          else if (processed === 'ruta_handled') result.inboundMessages += 1;
           else if (processed === 'inserted') {
             result.inboundMessages += 1;
             const raw = asRecord(rawMessage);

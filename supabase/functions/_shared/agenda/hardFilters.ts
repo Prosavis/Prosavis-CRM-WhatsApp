@@ -61,6 +61,9 @@ export function windowsContainingDuration(
     .sort((a, b) => a.startMinute - b.startMinute || a.endMinute - b.endMinute);
 }
 
+// TODO(afinidad): cuando se encienda V5, una auxiliar en `no_enviar` para el
+// cliente (tabla `crm_client_cleaner_affinity`) es filtro duro, y `favorita`
+// alimenta el peso de afinidad del ranking. Hoy no se lee aquí.
 export function applyHardFilters(
   cleaner: CleanerAgendaSnapshot,
   request: AgendaRequest,

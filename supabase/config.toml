@@ -305,3 +305,6 @@ verify_jwt = false
 
 [functions.ctwa-voice-nudge]
 verify_jwt = false
+
+[functions.ruta-notify]
+verify_jwt = false

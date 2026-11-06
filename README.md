@@ -100,6 +100,19 @@ Referencia local en `.env.example` (solo para `supabase functions serve`).
 | `EMAIL_UNSUBSCRIBE_SECRET` | HMAC del one-click de baja del lote `comercial@` |
 | `EMAIL_UNSUBSCRIBE_URL` | Opcional. Default: `https://djzwjaegxbhlefanmmee.supabase.co/functions/v1/email-unsubscribe` |
 
+#### Ruta Prosavis (línea 312)
+
+Contrato: [ruta-prosavis.md](../prosavis-firebase/docs/context/ruta-prosavis.md). Todo sale y entra por la 312; la 311 (Coex) nunca se automatiza.
+
+| Secret | Uso |
+| --- | --- |
+| `RUTA_NOTIFY_API_KEY` | Firebase llama a la Edge `ruta-notify` con `x-api-key`. Sin el secret la Edge responde 500. |
+| `RUTA_INBOUND_URL` | Destino del reenvío desde `on-whatsapp-webhook` (`https://prosavis.com/api/r/_inbound`). |
+| `RUTA_INBOUND_API_KEY` | `x-api-key` del reenvío. Mismo valor que espera `rutaApi` en Functions. |
+
+- `ruta-notify` (`POST`, `verify_jwt = false`): `kind` = `template` (`ruta_hoy`, `ruta_manana`, `ruta_sin_senal`, `pedir_ubicacion_cliente`, `alerta_llegada`; es_CO), `location`, `image` (solo https) o `location_request`. Responde `{ ok: true, messageId }` o `{ ok: false, error }`. Cada envío queda en el inbox de la 312 como `system`. Ubicación, imagen y pedido de ubicación son mensajes de servicio: con la ventana de 24 h cerrada responde 409.
+- `on-whatsapp-webhook` reenvía a `RUTA_INBOUND_URL` los toques a `Ver cómo llegar`, `Mandar mi ubicación` y `Enviar ubicación` y las ubicaciones que llegan a la 312 (2,5 s de timeout). El mensaje se guarda en el inbox igual que siempre. Si Firebase responde `{ handled: true }`, no corren el menú CTWA ni el aviso al asistente de Francy. Sin secrets, con error o con timeout, sigue el comportamiento de siempre.
+
 Detalle del packer de contexto: [CRM_INBOX_AI_CONTEXTO.md](../prosavis-firebase/docs/whatsapp/CRM_INBOX_AI_CONTEXTO.md).
 
 Configuración rápida con archivo local (ver `.env.secrets.local.example`):

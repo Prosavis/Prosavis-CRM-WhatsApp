@@ -66,6 +66,7 @@ $AllFunctions = @(
   'reactivation-automations-monitor',
   'reminder-automations-monitor',
   'reorder-whatsapp-stickers',
+  'ruta-notify',
   'run-app-user-cold-outreach',
   'run-empresas-outreach',
   'run-whatsapp-reactivations',
