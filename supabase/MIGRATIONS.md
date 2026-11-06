@@ -2,10 +2,10 @@
 
 ### Afinidad cliente ↔ auxiliar (06/11/2026)
 
-- `20261106192500_crm_client_cleaner_affinity.sql`: tabla `crm_client_cleaner_affinity` (`directory_id` → `crm_directory.id` con cascada, `member_id`, `entry` jsonb), índice por `member_id`, RLS sin políticas y sin grants para `anon`/`authenticated`.
+- `20261106214357_crm_client_cleaner_affinity.sql`: tabla `crm_client_cleaner_affinity` (`directory_id` → `crm_directory.id` con cascada, `member_id`, `entry` jsonb), índice por `member_id`, RLS sin políticas y sin grants para `anon`/`authenticated`.
 - Tabla aparte, no columna: `select('*')` de `crm_directory` (CRM React y Functions) no la ve.
 - RPCs `security definer` solo para `service_role`: `crm_directory_set_cleaner_affinity` (null borra; conserva `overrides` si la entrada no los trae), `crm_directory_append_cleaner_affinity_override` (tope 10, más reciente primero; null si no hay entrada), `crm_directory_rekey_cleaner_affinity` (gana el `setAt` más reciente) y `crm_directory_get_cleaner_affinity`.
-- Pendiente de aplicar en remoto (sin `db push`; MCP o CLI cuando Nicolás lo pida). GitHub Actions sigue apagado.
+- Aplicada en `djzwjaegxbhlefanmmee` el 06/11/2026 por MCP, versión remota `20261106214357`. El archivo local usa ese mismo timestamp para no desalinear `db push`. `anon` y `authenticated` no tienen `SELECT`. RLS activo, cero políticas. GitHub Actions sigue apagado.
 - pgTAP: `supabase/tests/crm_client_cleaner_affinity.test.sql`.
 
 ### Solicitudes de empleo (16/09/2026)
