@@ -124,6 +124,40 @@ Deno.test('validation: location coordinates, https image links and location_requ
   assertEquals(parseError({ kind: 'location_request', to }), 'text es obligatorio.');
 });
 
+Deno.test('payload: sin inicio uses the approved utility copy and no url button', () => {
+  const aux = parsedOrThrow({
+    kind: 'template',
+    to: '573001234567',
+    templateName: 'aux_sin_inicio_15',
+    bodyParams: ['Ana', '8:00 a. m.'],
+  });
+  const plan = buildRutaNotifyPayload(aux);
+  assertEquals(
+    plan.displayBody,
+    'Hola Ana, su servicio de hoy era a las 8:00 a. m. y en la app aún no aparece que haya salido ni iniciado. Márquelo apenas pueda. Si tiene un inconveniente, avísenos por aquí.',
+  );
+  assertEquals(plan.requiresSessionWindow, false);
+  assertEquals(
+    parseError({
+      kind: 'template',
+      to: '573001234567',
+      templateName: 'alerta_sin_inicio',
+      bodyParams: ['Ana', '8:00 a. m.', 'Luz'],
+      urlSuffix: 'x',
+    }),
+    'alerta_sin_inicio no tiene botón URL; quite urlSuffix.',
+  );
+  assertEquals(
+    parseError({
+      kind: 'template',
+      to: '573001234567',
+      templateName: 'aux_sin_inicio_30',
+      bodyParams: ['Ana'],
+    }),
+    'aux_sin_inicio_30 lleva 2 parámetro(s) en bodyParams.',
+  );
+});
+
 Deno.test('payload: ruta_hoy sends body params plus the EMPEZAR url suffix, inbox shows the body only', async () => {
   const request = parsedOrThrow({
     kind: 'template',

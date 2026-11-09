@@ -13,7 +13,11 @@ interface RutaTemplateSpec {
   urlSuffix: boolean;
 }
 
-/** Cuerpos tal como se enviaron a Meta el 06-nov-2026. Si cambian en Meta, cambian aquí. */
+/**
+ * Cuerpos de Ruta enviados a Meta el 06-nov-2026.
+ * aux_sin_inicio_15, aux_sin_inicio_30 y alerta_sin_inicio siguen el copy aprobado;
+ * se crean en Meta cuando Nicolás lo confirme. Si cambian en Meta, cambian aquí.
+ */
 export const RUTA_TEMPLATES = {
   ruta_hoy: {
     body: 'Hola {{1}}, hoy a las {{2}} tiene servicio. Cuando salga de su casa, toque EMPEZAR.',
@@ -39,6 +43,21 @@ export const RUTA_TEMPLATES = {
     body: 'Alerta de llegada: {{1}} · {{2}}. Servicio de las {{3}}. Abra Llegadas de hoy.',
     bodyParams: 3,
     urlSuffix: true,
+  },
+  aux_sin_inicio_15: {
+    body: 'Hola {{1}}, su servicio de hoy era a las {{2}} y en la app aún no aparece que haya salido ni iniciado. Márquelo apenas pueda. Si tiene un inconveniente, avísenos por aquí.',
+    bodyParams: 2,
+    urlSuffix: false,
+  },
+  aux_sin_inicio_30: {
+    body: 'Hola {{1}}, ya pasaron 30 minutos de su servicio de las {{2}} y no ha marcado salida ni inicio. Es importante: márquelo ahora o comuníquese con la oficina.',
+    bodyParams: 2,
+    urlSuffix: false,
+  },
+  alerta_sin_inicio: {
+    body: 'Alerta: {{1}} no ha marcado salida ni inicio del servicio de las {{2}} con {{3}}. Llámela.',
+    bodyParams: 3,
+    urlSuffix: false,
   },
 } as const satisfies Record<string, RutaTemplateSpec>;
 
