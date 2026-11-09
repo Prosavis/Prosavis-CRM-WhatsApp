@@ -523,7 +523,16 @@ const MediaContent: React.FC<{
     message.mediaType === 'image' && message.direction === 'inbound' ? (
       <Box sx={{ mt: 0.75 }}>
         {imageAnalysis ? (
-          <Box sx={{ p: 1, borderRadius: 1, bgcolor: 'rgba(37, 211, 102, 0.08)' }}>
+          <Box
+            sx={{
+              p: 1,
+              borderRadius: 1,
+              bgcolor: 'rgba(37, 211, 102, 0.08)',
+              minWidth: 0,
+              maxWidth: '100%',
+              overflowWrap: 'anywhere',
+            }}
+          >
             <Typography variant="caption" fontWeight={600} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
               <ImageIcon sx={{ fontSize: 14 }} />
               Análisis de imagen
@@ -630,7 +639,7 @@ const MediaContent: React.FC<{
   if (message.mediaType === 'image') {
     if (effectiveUrl) {
       return (
-        <Box sx={{ mb: 0.5, maxWidth: 300 }}>
+        <Box sx={{ mb: 0.5, maxWidth: 300, minWidth: 0 }}>
           <Box sx={{ borderRadius: 1, overflow: 'hidden', position: 'relative', '&:hover .img-actions': { opacity: 1 } }}>
             <img
               src={effectiveUrl}
@@ -653,7 +662,7 @@ const MediaContent: React.FC<{
       );
     }
     return (
-      <Box sx={{ mb: 0.5, maxWidth: 300 }}>
+      <Box sx={{ mb: 0.5, maxWidth: 300, minWidth: 0 }}>
         <MediaErrorPlaceholder
           icon={<ImageIcon sx={{ color: '#667781' }} />}
           label="Imagen — toca para ver"
@@ -931,6 +940,8 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
           sx={{
             maxWidth: '65%',
             minWidth: 80,
+            overflowWrap: 'anywhere',
+            wordBreak: 'break-word',
             bgcolor: isOutbound
               ? theme.palette.mode === 'dark'
                 ? alpha('#86ffb0', 0.22)
@@ -1046,7 +1057,15 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
             <Typography
               variant="body2"
               component="div"
-              sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'text.primary', lineHeight: 1.4 }}
+              sx={{
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                overflowWrap: 'anywhere',
+                minWidth: 0,
+                maxWidth: '100%',
+                color: 'text.primary',
+                lineHeight: 1.4,
+              }}
             >
               <WhatsAppFormattedText text={displayText} />
             </Typography>
@@ -1098,7 +1117,15 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
           {!showTextBody && !missingCoexBody && !deletedOrUnsupported && !hasMedia && !hasLocation && !hasContacts && body && (
             <Typography
               variant="body2"
-              sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'text.primary', lineHeight: 1.4 }}
+              sx={{
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                overflowWrap: 'anywhere',
+                minWidth: 0,
+                maxWidth: '100%',
+                color: 'text.primary',
+                lineHeight: 1.4,
+              }}
             >
               {body}
             </Typography>
