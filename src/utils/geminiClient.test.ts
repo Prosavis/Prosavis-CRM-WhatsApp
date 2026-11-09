@@ -3,6 +3,7 @@ import {
   IMAGE_ANALYSIS_MAX_OUTPUT_TOKENS,
   IMAGE_ANALYSIS_THINKING_LEVEL,
   geminiAnalyzeImage,
+  geminiAnalyzePdf,
   geminiGenerateJson,
 } from '../../supabase/functions/_shared/geminiClient';
 
@@ -158,5 +159,27 @@ describe('geminiAnalyzeImage HTTP transport', () => {
     });
     expect(IMAGE_ANALYSIS_THINKING_LEVEL).toBe('low');
     expect(body.generationConfig).not.toHaveProperty('temperature');
+  });
+
+  it('sends a PDF as application/pdf with the same operator note', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      candidates: [{
+        content: { parts: [{ text: 'Monto $88.000.' }] },
+        finishReason: 'STOP',
+      }],
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await geminiAnalyzePdf({
+      apiKey: 'test-api-key',
+      buffer: new Uint8Array([1, 2, 3]),
+    });
+
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const body = JSON.parse(String(request.body)) as {
+      contents: Array<{ parts: Array<{ inlineData?: { mimeType?: string }; text?: string }> }>;
+    };
+    expect(body.contents[0]?.parts[0]?.inlineData?.mimeType).toBe('application/pdf');
+    expect(body.contents[0]?.parts[1]?.text).toContain('monto, banco, referencia, fecha');
   });
 });

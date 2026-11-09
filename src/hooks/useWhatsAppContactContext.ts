@@ -42,7 +42,7 @@ function userFromDirectoryEntry(entry: DirectoryEntry): ContactPanelUser {
   const meta = entry.metadata ?? {};
   const dName = entry.displayName ?? entry.fullName ?? undefined;
   return {
-    id: String(entry.appUserId ?? entry.phone ?? entry.id),
+    id: (entry.appUserId ?? '').trim(),
     name: dName,
     displayName: dName,
     email: entry.email,

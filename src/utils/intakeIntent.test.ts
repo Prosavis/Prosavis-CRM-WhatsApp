@@ -6,6 +6,7 @@ import {
   intakeProfileSentence,
   isGenericIntake,
   resolveMessageIntent,
+  shouldStampIntakeAfterHumanTakeover,
 } from '../../supabase/functions/_shared/intakeIntent'
 
 describe('intakeIntentFromText', () => {
@@ -13,6 +14,36 @@ describe('intakeIntentFromText', () => {
     expect(intakeIntentFromText('Buscoenpleo')).toBe('empleo')
     expect(intakeIntentFromText('busco empleo')).toBe('empleo')
     expect(intakeIntentFromText('tengo hoja de vida')).toBe('empleo')
+    expect(intakeIntentFromText('te envío mi hoja de vida')).toBe('empleo')
+  })
+
+  it('pedir la hoja de vida de otra persona no es empleo', () => {
+    expect(intakeIntentFromText('Tu me envías hoja de vida de la persona')).toBe('no_se_entiende')
+    expect(intakeIntentFromText('envíame la hoja de vida de la auxiliar')).toBe('no_se_entiende')
+    expect(intakeIntentFromText('mándame la hoja de vida de quien va')).toBe('no_se_entiende')
+  })
+
+  it('una toma humana no pisa un servicio con empleo salvo postulación explícita', () => {
+    expect(shouldStampIntakeAfterHumanTakeover({
+      body: 'Tu me envías hoja de vida de la persona',
+      next: 'empleo',
+      current: 'hogar',
+    })).toBe(false)
+    expect(shouldStampIntakeAfterHumanTakeover({
+      body: 'necesito el trabajo el sábado',
+      next: 'empleo',
+      current: 'hogar',
+    })).toBe(false)
+    expect(shouldStampIntakeAfterHumanTakeover({
+      body: 'busco empleo',
+      next: 'empleo',
+      current: 'hogar',
+    })).toBe(true)
+    expect(shouldStampIntakeAfterHumanTakeover({
+      body: 'te envío mi hoja de vida',
+      next: 'empleo',
+      current: 'empresas',
+    })).toBe(true)
   })
 
   it('quiero agendar una limpieza es hogar', () => {

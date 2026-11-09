@@ -7,6 +7,7 @@ import React, {
   useState,
 } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { IntakeIntentMenu } from '@/components/whatsapp/IntakeIntentMenu';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   Box,
@@ -112,6 +113,12 @@ import {
   type WhatsAppSticker,
   type WhatsAppStickerFolder,
 } from '@/services/whatsappService';
+import {
+  clearEmpleoIntent,
+  invalidateDirectoryMeta,
+  patchIntakeLabel,
+} from '@/services/intakeIntentService';
+import { isJobTag } from '@/utils/intakeIntentControl';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import EditIcon from '@mui/icons-material/Edit';
 import BookingAssistantDrawer from './BookingAssistantDrawer';
@@ -1258,6 +1265,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     setTagSaving(true);
     try {
       await assignWhatsAppTags(conversation.id, newTags);
+      const changed = tags.find((tag) => tag.id === tagId);
+      if (isAssigned && changed && isJobTag(changed.name)) {
+        const cleared = await clearEmpleoIntent(conversation.id);
+        if (cleared) patchIntakeLabel(queryClient, conversation.id, null);
+      }
+      invalidateDirectoryMeta(queryClient);
       onTagsChanged?.();
     } catch (err) {
       console.error('Error assigning tags:', err);
@@ -1265,7 +1278,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     } finally {
       setTagSaving(false);
     }
-  }, [conversation.id, conversation.tagIds, onTagsChanged]);
+  }, [conversation.id, conversation.tagIds, onTagsChanged, queryClient, tags]);
 
   const handleDeleteConversationConfirmed = useCallback(async () => {
     if (deleteConversationPhrase.trim() !== DELETE_WHATSAPP_CONVERSATION_CONFIRM_PHRASE) {
@@ -1604,13 +1617,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 <Typography variant="caption" color="text.secondary" noWrap>
                   {conversation.contactPhone || conversation.phone || ''}
                 </Typography>
-                {conversation.intakeIntentLabel && (
-                  <Chip
-                    label={`intención: ${conversation.intakeIntentLabel}`}
-                    size="small"
-                    sx={{ height: 18, fontSize: '0.65rem' }}
-                  />
-                )}
+                <IntakeIntentMenu
+                  stableKey={conversation.id}
+                  label={conversation.intakeIntentLabel}
+                  onError={(message) => setSnack({ open: true, message, severity: 'error' })}
+                />
                 {conversation.reviewIntentMark && (
                   <Tooltip
                     title={
@@ -1995,7 +2006,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 }
                 label={
                   <Typography variant="caption">
-                    Analizar imágenes en IA
+                    Analizar imágenes y PDF en IA
                   </Typography>
                 }
                 sx={{ m: 0 }}

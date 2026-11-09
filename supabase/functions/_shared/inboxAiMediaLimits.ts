@@ -1,5 +1,6 @@
 export const MAX_STT_AUDIO_BYTES = 16 * 1024 * 1024;
 export const MAX_IMAGE_ANALYSIS_BYTES = 5 * 1024 * 1024;
+export const MAX_PDF_ANALYSIS_BYTES = 10 * 1024 * 1024;
 export const MAX_IMAGES_PER_ANALYSIS_REQUEST = 8;
 export const MAX_IMAGE_ANALYSES_PER_CONVERSATION_24H = 20;
 export const IMAGE_ANALYSIS_PREFIX = '[Imagen]:';
@@ -56,6 +57,56 @@ export function isAnalyzableInboundImage(row: {
   const mime = String(row.mime_type ?? '').trim().toLowerCase();
   if (mime && !mime.startsWith('image/')) return { ok: false, reason: 'bad_mime' };
   return { ok: true };
+}
+
+export function isInboundPdfDocument(row: {
+  media_type?: unknown;
+  mime_type?: unknown;
+  filename?: unknown;
+}): boolean {
+  const mediaType = String(row.media_type ?? '').trim().toLowerCase();
+  if (mediaType !== 'document') return false;
+  const mime = String(row.mime_type ?? '').split(';')[0].trim().toLowerCase();
+  if (mime === 'application/pdf') return true;
+  const filename = String(row.filename ?? '').trim().toLowerCase();
+  return filename.endsWith('.pdf');
+}
+
+export function isAnalyzableInboundPdf(row: {
+  direction?: unknown;
+  media_type?: unknown;
+  storage_path?: unknown;
+  size_bytes?: unknown;
+  mime_type?: unknown;
+  filename?: unknown;
+}): { ok: true } | { ok: false; reason: string } {
+  if (row.direction !== 'inbound') return { ok: false, reason: 'not_inbound' };
+  if (!isInboundPdfDocument(row)) return { ok: false, reason: 'not_pdf' };
+  if (!String(row.storage_path ?? '').trim()) return { ok: false, reason: 'no_storage_path' };
+  const size = Number(row.size_bytes ?? 0);
+  if (Number.isFinite(size) && size > MAX_PDF_ANALYSIS_BYTES) {
+    return { ok: false, reason: 'too_large' };
+  }
+  return { ok: true };
+}
+
+export function classifyAnalyzableInboundMedia(row: {
+  direction?: unknown;
+  media_type?: unknown;
+  storage_path?: unknown;
+  size_bytes?: unknown;
+  mime_type?: unknown;
+  filename?: unknown;
+}): { ok: true; kind: 'image' | 'pdf' } | { ok: false; reason: string } {
+  const mediaType = String(row.media_type ?? '').trim().toLowerCase();
+  if (mediaType === 'document') {
+    const pdf = isAnalyzableInboundPdf(row);
+    if (pdf.ok) return { ok: true, kind: 'pdf' };
+    return pdf;
+  }
+  const image = isAnalyzableInboundImage(row);
+  if (image.ok) return { ok: true, kind: 'image' };
+  return image;
 }
 
 export function countsTowardVisionQuota(

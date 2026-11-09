@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   Box,
   Chip,
@@ -12,6 +13,11 @@ import {
 import LocalOfferOutlinedIcon from '@mui/icons-material/LocalOfferOutlined';
 import type { DirectoryEntry } from '@/types/lead';
 import { directoryService } from '@/services/directoryService';
+import {
+  clearEmpleoIntentIfJobRemoved,
+  invalidateDirectoryMeta,
+  patchIntakeLabel,
+} from '@/services/intakeIntentService';
 import { listWhatsAppTags, listWhatsAppTagFolders } from '@/services/whatsappService';
 import type { WhatsAppTag, WhatsAppTagFolder } from '@/types/whatsapp';
 import { getClassificationLabel, tagNamesToIds } from '@/utils/classificationLabels';
@@ -53,6 +59,7 @@ export const DirectoryClassificationTagPicker: React.FC<
   label = 'Clasificación (tags)',
 }) => {
   const theme = useTheme();
+  const queryClient = useQueryClient();
   const [catalog, setCatalog] = useState<WhatsAppTag[]>([]);
   const [folders, setFolders] = useState<WhatsAppTagFolder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -99,8 +106,19 @@ export const DirectoryClassificationTagPicker: React.FC<
     async (tagIds: string[]) => {
       setSaving(true);
       try {
+        const previousTags = entry.tags ?? [];
         const updated = await directoryService.setClassificationTags(entry.id, tagIds);
         onSaved?.(updated);
+        invalidateDirectoryMeta(queryClient);
+        const full = await directoryService.getEntryById(entry.id);
+        const cleared = await clearEmpleoIntentIfJobRemoved({
+          stableKey: full?.whatsAppConversationId,
+          previousTags,
+          nextTags: updated.tags ?? [],
+        });
+        if (cleared && full?.whatsAppConversationId) {
+          patchIntakeLabel(queryClient, full.whatsAppConversationId, null);
+        }
       } catch (err) {
         onError?.(err instanceof Error ? err.message : 'No se pudo guardar la clasificación');
         throw err;
@@ -108,7 +126,7 @@ export const DirectoryClassificationTagPicker: React.FC<
         setSaving(false);
       }
     },
-    [entry.id, onError, onSaved]
+    [entry.id, entry.tags, onError, onSaved, queryClient]
   );
 
   const handleToggle = useCallback(

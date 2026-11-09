@@ -35,13 +35,41 @@ export function intakeTextHasComplaint(text: string): boolean {
   return COMPLAINT.some((phrase) => spaced.includes(phrase))
 }
 
+/** La persona ofrece su propia hoja de vida. Pedir la de otra no cuenta. */
+export function offersOwnResume(spaced: string): boolean {
+  return spaced.includes('tengo hoja de vida') || spaced.includes('mi hoja de vida')
+}
+
+/** Pide la hoja de vida de quien va a prestar el servicio. */
+export function requestsOthersResume(text: string): boolean {
+  const spaced = normalizeIntakeSpaced(text)
+  if (!spaced.includes('hoja de vida') || offersOwnResume(spaced)) return false
+  return spaced.includes('me envias')
+    || spaced.includes('enviame')
+    || spaced.includes('mandame')
+    || spaced.includes('me mandas')
+    || spaced.includes('de la persona')
+    || spaced.includes('de la auxiliar')
+    || spaced.includes('de quien va')
+}
+
+/** Postulación explícita. «Trabajo» o «hoja de vida» ajenos no bastan para pisar un servicio. */
+export function explicitJobApplication(text: string): boolean {
+  const spaced = normalizeIntakeSpaced(text)
+  const compact = normalizeIntakeCompact(text)
+  return compact.includes('buscoempleo')
+    || compact.includes('buscoenpleo')
+    || hasWord(spaced, 'vacante')
+    || offersOwnResume(spaced)
+}
+
 function matches(spaced: string, compact: string): { empleo: boolean; hogar: boolean; empresas: boolean } {
   const empleo = compact.includes('buscoempleo')
     || compact.includes('buscoenpleo')
     || compact.includes('empleo')
     || hasWord(spaced, 'trabajo')
     || hasWord(spaced, 'vacante')
-    || spaced.includes('hoja de vida')
+    || offersOwnResume(spaced)
   const hogar = spaced.includes('agendar una limpieza')
     || spaced.includes('quiero agendar')
     || hasWord(spaced, 'domestica')
@@ -67,6 +95,23 @@ export function intakeIntentFromText(body: string): IntakeRead | null {
   if (hit.empleo) return 'empleo'
   if (hit.hogar) return 'hogar'
   return 'empresas'
+}
+
+/** Tras una respuesta humana, no se pisa un servicio con empleo salvo postulación explícita. */
+export function shouldStampIntakeAfterHumanTakeover(input: {
+  body: string
+  next: IntakeRoute
+  current: IntakeRoute | null
+}): boolean {
+  if (requestsOthersResume(input.body)) return false
+  if (
+    input.next === 'empleo'
+    && (input.current === 'hogar' || input.current === 'empresas')
+    && !explicitJobApplication(input.body)
+  ) {
+    return false
+  }
+  return true
 }
 
 export function intakeRouteFromIntent(intent: IntakeRead | null): IntakeRoute | null {

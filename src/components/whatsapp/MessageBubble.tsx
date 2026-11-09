@@ -27,6 +27,7 @@ import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import ImageIcon from '@mui/icons-material/Image';
 import VideocamIcon from '@mui/icons-material/Videocam';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import SmartphoneIcon from '@mui/icons-material/Smartphone';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -58,7 +59,9 @@ import {
 } from '@/services/whatsappService';
 import ClientDateText from '@/components/common/ClientDateText';
 import { AnalysisMarkdown } from '@/components/whatsapp/AnalysisMarkdown';
+import { MediaInsightPanel } from '@/components/whatsapp/MediaInsightPanel';
 import { looksIncompleteImageAnalysis } from '../../../supabase/functions/_shared/imageAnalysisCache';
+import { isInboundPdfDocument } from '../../../supabase/functions/_shared/inboxAiMediaLimits';
 import { WhatsAppFormattedText } from '@/utils/whatsappTextFormatting';
 import { crmToast } from '@/utils/crmToast';
 import { COLOMBIA_TIME_ZONE } from '@/utils/colombiaTime';
@@ -472,34 +475,33 @@ const MediaContent: React.FC<{
   }, [message.id]);
 
   const autoTranscribing = message.voiceTranscriptionStatus === 'pending' && !transcript;
+  const inboundPdf = message.direction === 'inbound' && isInboundPdfDocument({
+    media_type: message.mediaType,
+    mime_type: message.mimeType,
+    filename: message.filename,
+  });
+  const inboundImage = message.mediaType === 'image' && message.direction === 'inbound';
 
   const transcriptionControls =
     message.mediaType === 'audio' && Boolean(message.mediaId || message.storagePath) ? (
       <Box sx={{ mt: 0.75 }}>
         {transcript ? (
-          <Box sx={{ p: 1, borderRadius: 1, bgcolor: 'rgba(37, 211, 102, 0.08)' }}>
-            <Typography variant="caption" fontWeight={600} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              <SubtitlesIcon sx={{ fontSize: 14 }} />
-              Transcripción
-            </Typography>
-            {message.voiceTranscriptionStatus === 'partial' && (
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                Incompleta — se puede volver a transcribir para cerrarla.
-              </Typography>
-            )}
-            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', mt: 0.25 }}>
+          <MediaInsightPanel
+            title="Transcripción"
+            icon={<SubtitlesIcon sx={{ fontSize: 14 }} />}
+            preview={transcript}
+            note={message.voiceTranscriptionStatus === 'partial'
+              ? 'Incompleta — se puede volver a transcribir para cerrarla.'
+              : undefined}
+            retryLabel="Volver a transcribir"
+            busyLabel="Transcribiendo…"
+            busy={transcribing}
+            onRetry={() => void handleTranscribe(true)}
+          >
+            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
               {transcript}
             </Typography>
-            <Button
-              size="small"
-              variant="text"
-              disabled={transcribing}
-              onClick={() => void handleTranscribe(true)}
-              sx={{ mt: 0.5, px: 0 }}
-            >
-              {transcribing ? 'Transcribiendo…' : 'Volver a transcribir'}
-            </Button>
-          </Box>
+          </MediaInsightPanel>
         ) : (
           <Button
             size="small"
@@ -519,58 +521,51 @@ const MediaContent: React.FC<{
       </Box>
     ) : null;
 
-  const imageAnalysisControls =
-    message.mediaType === 'image' && message.direction === 'inbound' ? (
-      <Box sx={{ mt: 0.75 }}>
-        {imageAnalysis ? (
-          <Box
-            sx={{
-              p: 1,
-              borderRadius: 1,
-              bgcolor: 'rgba(37, 211, 102, 0.08)',
-              minWidth: 0,
-              maxWidth: '100%',
-              overflowWrap: 'anywhere',
-            }}
-          >
-            <Typography variant="caption" fontWeight={600} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              <ImageIcon sx={{ fontSize: 14 }} />
-              Análisis de imagen
-            </Typography>
-            {(imageAnalysisStatus === 'partial' || looksIncompleteImageAnalysis(imageAnalysis)) && (
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                Incompleto — se puede volver a analizar.
-              </Typography>
-            )}
-            <AnalysisMarkdown text={imageAnalysis} />
-            <Button
-              size="small"
-              variant="text"
-              disabled={analyzingImage}
-              onClick={() => void handleAnalyzeImage(true)}
-              sx={{ mt: 0.5, px: 0 }}
-            >
-              {analyzingImage ? 'Analizando…' : 'Volver a analizar'}
-            </Button>
-          </Box>
-        ) : (
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={analyzingImage ? <CircularProgress size={14} /> : <ImageIcon />}
-            disabled={analyzingImage || !message.storagePath}
-            onClick={() => void handleAnalyzeImage(false)}
-          >
-            {analyzingImage ? 'Analizando…' : 'Analizar imagen'}
-          </Button>
-        )}
-        {imageAnalysisError && (
-          <Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.5 }}>
-            {imageAnalysisError}
-          </Typography>
-        )}
-      </Box>
-    ) : null;
+  const imageAnalysisControls = (inboundImage || inboundPdf) ? (
+    <Box sx={{ mt: 0.75 }}>
+      {imageAnalysis ? (
+        <MediaInsightPanel
+          title={inboundPdf ? 'Análisis de PDF' : 'Análisis de imagen'}
+          icon={inboundPdf
+            ? <PictureAsPdfIcon sx={{ fontSize: 14 }} />
+            : <ImageIcon sx={{ fontSize: 14 }} />}
+          preview={imageAnalysis}
+          note={(imageAnalysisStatus === 'partial' || looksIncompleteImageAnalysis(imageAnalysis))
+            ? 'Incompleto — se puede volver a analizar.'
+            : undefined}
+          retryLabel="Volver a analizar"
+          busyLabel="Analizando…"
+          busy={analyzingImage}
+          onRetry={() => void handleAnalyzeImage(true)}
+        >
+          <AnalysisMarkdown text={imageAnalysis} />
+        </MediaInsightPanel>
+      ) : (
+        <Button
+          size="small"
+          variant="outlined"
+          startIcon={analyzingImage
+            ? <CircularProgress size={14} />
+            : inboundPdf
+              ? <PictureAsPdfIcon />
+              : <ImageIcon />}
+          disabled={analyzingImage || !message.storagePath}
+          onClick={() => void handleAnalyzeImage(false)}
+        >
+          {analyzingImage
+            ? 'Analizando…'
+            : inboundPdf
+              ? 'Analizar PDF'
+              : 'Analizar imagen'}
+        </Button>
+      )}
+      {imageAnalysisError && (
+        <Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.5 }}>
+          {imageAnalysisError}
+        </Typography>
+      )}
+    </Box>
+  ) : null;
 
   if (message.mediaType === 'sticker') {
     if (effectiveUrl) {
@@ -746,18 +741,21 @@ const MediaContent: React.FC<{
 
   if (message.mediaType === 'document') {
     return (
-      <Box sx={{ mb: 0.5, p: 1.5, bgcolor: 'rgba(0,0,0,0.04)', borderRadius: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-        <InsertDriveFileIcon sx={{ color: '#667781' }} />
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography variant="body2" noWrap>{message.filename || 'Documento'}</Typography>
+      <Box sx={{ mb: 0.5, minWidth: 0, maxWidth: '100%' }}>
+        <Box sx={{ p: 1.5, bgcolor: 'rgba(0,0,0,0.04)', borderRadius: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <InsertDriveFileIcon sx={{ color: '#667781' }} />
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography variant="body2" noWrap>{message.filename || 'Documento'}</Typography>
+          </Box>
+          {effectiveUrl ? (
+            <IconButton size="small" onClick={handleDownload}><DownloadIcon fontSize="small" /></IconButton>
+          ) : message.mediaId ? (
+            <IconButton size="small" onClick={resolveMedia} disabled={loading}>
+              {loading ? <CircularProgress size={16} /> : <DownloadIcon fontSize="small" />}
+            </IconButton>
+          ) : null}
         </Box>
-        {effectiveUrl ? (
-          <IconButton size="small" onClick={handleDownload}><DownloadIcon fontSize="small" /></IconButton>
-        ) : message.mediaId ? (
-          <IconButton size="small" onClick={resolveMedia} disabled={loading}>
-            {loading ? <CircularProgress size={16} /> : <DownloadIcon fontSize="small" />}
-          </IconButton>
-        ) : null}
+        {imageAnalysisControls}
       </Box>
     );
   }

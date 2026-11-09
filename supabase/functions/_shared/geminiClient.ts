@@ -532,12 +532,18 @@ function imageMimeType(mimeType: string): string {
   return 'image/jpeg';
 }
 
+const OPERATOR_MEDIA_NOTE =
+  'Nota operativa en español de Colombia para un operador de limpieza. ' +
+  'Sin preámbulo ni frases tipo "Aquí tienes el desglose". ' +
+  'Incluye: qué se ve, texto visible (OCR) y datos útiles para cotizar, cobrar o agendar ' +
+  '(dirección, metros, suciedad, tipo de inmueble, monto, banco, referencia, fecha). ' +
+  'No inventes precios ni disponibilidad. Si no se entiende, dilo sin especular.';
+
 /**
- * Describe una foto inbound de WhatsApp para el operador / packer de inbox.
- * No inventa precios ni disponibilidad.
+ * Describe una foto o un PDF inbound para el operador / packer de inbox.
  * thinkingLevel low: 3.8 no admite minimal. maxOutputTokens incluye el razonamiento.
  */
-export async function geminiAnalyzeImage(params: {
+async function geminiAnalyzeOperatorMedia(params: {
   apiKey: string;
   buffer: Uint8Array;
   mimeType: string;
@@ -546,24 +552,14 @@ export async function geminiAnalyzeImage(params: {
   const model = params.model ??
     resolveGeminiModel('GEMINI_MODEL_IMAGE_ANALYSIS', DEFAULT_GEMINI_MODEL);
 
-  const mime = imageMimeType(params.mimeType);
-  const imageB64 = bytesToBase64(params.buffer);
-
-  const instruction =
-    'Nota operativa en español de Colombia para un operador de limpieza. ' +
-    'Sin preámbulo ni frases tipo "Aquí tienes el desglose". ' +
-    'Incluye: qué se ve, texto visible (OCR) y datos útiles para cotizar, cobrar o agendar ' +
-    '(dirección, metros, suciedad, tipo de inmueble, monto, banco, referencia). ' +
-    'No inventes precios ni disponibilidad. Si no se entiende, dilo sin especular.';
-
   const data = await geminiRequest({
     apiKey: params.apiKey,
     model,
     contents: [{
       role: 'user',
       parts: [
-        { inlineData: { mimeType: mime, data: imageB64 } },
-        { text: instruction },
+        { inlineData: { mimeType: params.mimeType, data: bytesToBase64(params.buffer) } },
+        { text: OPERATOR_MEDIA_NOTE },
       ],
     }],
     maxOutputTokens: IMAGE_ANALYSIS_MAX_OUTPUT_TOKENS,
@@ -571,6 +567,29 @@ export async function geminiAnalyzeImage(params: {
   });
 
   return extractTextResultFromResponse(data);
+}
+
+export async function geminiAnalyzeImage(params: {
+  apiKey: string;
+  buffer: Uint8Array;
+  mimeType: string;
+  model?: string;
+}): Promise<{ text: string; finishReason?: string }> {
+  return geminiAnalyzeOperatorMedia({
+    ...params,
+    mimeType: imageMimeType(params.mimeType),
+  });
+}
+
+export async function geminiAnalyzePdf(params: {
+  apiKey: string;
+  buffer: Uint8Array;
+  model?: string;
+}): Promise<{ text: string; finishReason?: string }> {
+  return geminiAnalyzeOperatorMedia({
+    ...params,
+    mimeType: 'application/pdf',
+  });
 }
 
 export const DOCUMENT_ANALYSIS_MAX_INLINE_BYTES = 18 * 1024 * 1024;

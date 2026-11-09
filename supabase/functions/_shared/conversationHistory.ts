@@ -28,6 +28,7 @@ export const DEFAULT_HISTORY_LIMIT = 150;
 export const DEFAULT_TRANSCRIPT_CHAR_BUDGET = 60_000;
 export const AUDIO_TRANSCRIPT_PREFIX = '[Audio transcrito]:';
 export const IMAGE_ANALYSIS_PREFIX = '[Imagen]:';
+export const PDF_ANALYSIS_PREFIX = '[PDF]:';
 
 function asTrimmedText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -86,6 +87,15 @@ export function resolveConversationTurnText(
 
   if (imageAnalysis && mediaType === 'image') {
     const labeled = `${IMAGE_ANALYSIS_PREFIX} ${imageAnalysis}`;
+    const captionOrBody = caption || (body && !isMediaPlaceholder(body, mediaType) ? body : '');
+    if (captionOrBody && captionOrBody !== imageAnalysis) {
+      return `${captionOrBody}\n${labeled}`;
+    }
+    return labeled;
+  }
+
+  if (imageAnalysis && mediaType === 'document') {
+    const labeled = `${PDF_ANALYSIS_PREFIX} ${imageAnalysis}`;
     const captionOrBody = caption || (body && !isMediaPlaceholder(body, mediaType) ? body : '');
     if (captionOrBody && captionOrBody !== imageAnalysis) {
       return `${captionOrBody}\n${labeled}`;

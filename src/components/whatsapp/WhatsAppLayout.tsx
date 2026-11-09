@@ -725,6 +725,24 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     };
   }, [selectedConversation]);
 
+  const handleConversationClaimed = useCallback((stableKey: string) => {
+    const match = conversations.find((item) => item.id === stableKey);
+    if (match) {
+      setSelectedConversation(match);
+      return;
+    }
+    const phone = customerPhoneFromStableKey(stableKey);
+    setSelectedConversation((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        id: stableKey,
+        phone,
+        contactPhone: phone,
+      };
+    });
+  }, [conversations]);
+
   const handleConversationSelect = useCallback(
     (conversation: WhatsAppConversation) => {
       // Cualquier clic manual invalida el deep-link pegado en la URL.
@@ -1113,6 +1131,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
           <WhatsAppContactSidePanel
             conversation={selectedConversation}
             contact={contactCtx}
+            onConversationClaimed={handleConversationClaimed}
           />
         )}
 
@@ -1169,6 +1188,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
               contact={contactCtx}
               mobile
               onClose={() => setRightPanel('none')}
+              onConversationClaimed={handleConversationClaimed}
             />
           ) : null}
         </Drawer>

@@ -10,11 +10,8 @@ import {
 import { nextLastInboundAt } from '../_shared/metaSessionWindow.ts';
 import { recomputeWhatsAppConversationPreview } from '../_shared/recomputeConversationPreview.ts';
 import { UNARCHIVE_CONVERSATION_PATCH } from '../_shared/whatsappOutbound.ts';
-import {
-  remapDirectoryLidToPhone,
-  type DirectoryLidRemapClient,
-} from '../_shared/directoryLidRemap.ts';
 import { directoryPhoneKey } from '../_shared/directoryPhone.ts';
+import { claimLidConversationPhone } from '../_shared/whatsappLidClaim.ts';
 import { REACTIVATION_SEQUENCE } from '../_shared/reactivationCadence.ts';
 import { applyColdFailureTag, removeColdFailureTags } from '../_shared/coldAppUserOutreach.ts';
 import { isOutboundDeliverySuccess } from '../_shared/whatsappDeliveryStatus.ts';
@@ -29,7 +26,6 @@ import {
 } from '../_shared/whatsappCoexWebhook.ts';
 import {
   formatWebhookError,
-  lidCustomerKey,
   resolveInboundCustomer,
 } from '../_shared/whatsappInboundIdentity.ts';
 import {
@@ -158,122 +154,6 @@ function getContactName(contacts: unknown[], senderPhone: string): string | null
   return null;
 }
 
-async function remapLidConversationToPhone(params: {
-  supabase: ReturnType<typeof getServiceClient>;
-  userId: string;
-  phone: string;
-  phoneNumberId: string | null;
-}): Promise<void> {
-  const lidKey = conversationStableKey(lidCustomerKey(params.userId), params.phoneNumberId);
-  const phoneKey = conversationStableKey(params.phone, params.phoneNumberId);
-  if (!params.userId || !params.phone || lidKey === phoneKey) return;
-
-  await remapDirectoryLidToPhone({
-    supabase: params.supabase as DirectoryLidRemapClient,
-    lidKey,
-    phoneKey,
-    phone: params.phone,
-    phoneNumberId: params.phoneNumberId,
-  });
-
-  const { data: lidConv, error: lidReadError } = await params.supabase
-    .from('whatsapp_conversations')
-    .select(
-      'stable_key, unread_count, contact_name, contact_name_locked, whatsapp_profile_name, contact_photo_url, last_message_text, last_message_at, last_message_direction, last_message_outbound_status, last_intent, assigned_to, is_archived, is_pinned, state, tag_ids, metadata, phone_number_id',
-    )
-    .eq('stable_key', lidKey)
-    .maybeSingle();
-  if (lidReadError) throw lidReadError;
-  if (!lidConv) return;
-
-  const { data: phoneConv, error: phoneReadError } = await params.supabase
-    .from('whatsapp_conversations')
-    .select('unread_count, last_message_at, last_message_text, last_message_direction, metadata')
-    .eq('stable_key', phoneKey)
-    .maybeSingle();
-  if (phoneReadError) throw phoneReadError;
-
-  const lidMeta = asRecord(lidConv.metadata);
-  const nextMetadata = {
-    ...asRecord(phoneConv?.metadata),
-    ...lidMeta,
-    lidUserId: params.userId,
-    remappedFromLid: lidKey,
-  };
-
-  if (!phoneConv) {
-    const { error: insertError } = await params.supabase.from('whatsapp_conversations').insert({
-      stable_key: phoneKey,
-      phone: params.phone,
-      contact_phone: params.phone,
-      state: lidConv.state ?? 'active',
-      unread_count: lidConv.unread_count ?? 0,
-      contact_name: lidConv.contact_name,
-      contact_name_locked: lidConv.contact_name_locked,
-      whatsapp_profile_name: lidConv.whatsapp_profile_name,
-      contact_photo_url: lidConv.contact_photo_url,
-      last_message_text: lidConv.last_message_text,
-      last_message_at: lidConv.last_message_at,
-      last_message_direction: lidConv.last_message_direction,
-      last_message_outbound_status: lidConv.last_message_outbound_status,
-      last_intent: lidConv.last_intent,
-      assigned_to: lidConv.assigned_to,
-      is_archived: lidConv.is_archived,
-      is_pinned: lidConv.is_pinned,
-      tag_ids: lidConv.tag_ids,
-      metadata: nextMetadata,
-      phone_number_id: params.phoneNumberId ?? lidConv.phone_number_id,
-      ...UNARCHIVE_CONVERSATION_PATCH,
-    });
-    if (insertError) throw insertError;
-  } else {
-    const lidLast = lidConv.last_message_at
-      ? new Date(String(lidConv.last_message_at)).getTime()
-      : 0;
-    const phoneLast = phoneConv.last_message_at
-      ? new Date(String(phoneConv.last_message_at)).getTime()
-      : 0;
-    const mergeNewer = lidLast > phoneLast;
-    const { error: mergeError } = await params.supabase
-      .from('whatsapp_conversations')
-      .update({
-        phone: params.phone,
-        contact_phone: params.phone,
-        unread_count: Number(phoneConv.unread_count ?? 0) + Number(lidConv.unread_count ?? 0),
-        metadata: nextMetadata,
-        ...(mergeNewer
-          ? {
-            last_message_text: lidConv.last_message_text,
-            last_message_at: lidConv.last_message_at,
-            last_message_direction: lidConv.last_message_direction,
-          }
-          : {}),
-      })
-      .eq('stable_key', phoneKey);
-    if (mergeError) throw mergeError;
-  }
-
-  const { error: moveMessagesError } = await params.supabase
-    .from('whatsapp_message_log')
-    .update({
-      conversation_stable_key: phoneKey,
-      recipient_phone: params.phone,
-    })
-    .eq('conversation_stable_key', lidKey);
-  if (moveMessagesError) throw moveMessagesError;
-
-  await params.supabase
-    .from('whatsapp_media_assets')
-    .update({ conversation_stable_key: phoneKey })
-    .eq('conversation_stable_key', lidKey);
-
-  const { error: deleteLidError } = await params.supabase
-    .from('whatsapp_conversations')
-    .delete()
-    .eq('stable_key', lidKey);
-  if (deleteLidError) throw deleteLidError;
-}
-
 async function processInboundMessage(params: {
   supabase: ReturnType<typeof getServiceClient>;
   message: JsonRecord;
@@ -317,7 +197,7 @@ async function processInboundMessage(params: {
   }
 
   if (identity.kind === 'phone' && identity.userId) {
-    await remapLidConversationToPhone({
+    await claimLidConversationPhone({
       supabase: params.supabase,
       userId: identity.userId,
       phone: customerKey,

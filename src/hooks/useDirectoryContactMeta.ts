@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/config/supabase';
 import { inboxQueryKeys } from '@/hooks/inboxQueryKeys';
 import {
@@ -37,6 +37,7 @@ function buildLookupKeys(conversations: WhatsAppConversation[]): string[] {
 export function useDirectoryContactMeta(
   conversations: WhatsAppConversation[],
 ): DirectoryContactMetaResult {
+  const queryClient = useQueryClient();
   const lookupSignature = useMemo(() => {
     return buildLookupKeys(conversations).join('|');
   }, [conversations]);
@@ -56,6 +57,29 @@ export function useDirectoryContactMeta(
       });
     },
   });
+
+  useEffect(() => {
+    if (!lookupSignature) return;
+    let hash = 0;
+    for (let index = 0; index < lookupSignature.length; index += 1) {
+      hash = (hash * 31 + lookupSignature.charCodeAt(index)) >>> 0;
+    }
+    const channel = supabase
+      .channel(`crm-directory-meta-${hash.toString(16)}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'crm_directory' },
+        () => {
+          void queryClient.invalidateQueries({
+            queryKey: inboxQueryKeys.directoryMeta(lookupSignature),
+          });
+        },
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [lookupSignature, queryClient]);
 
   return {
     metaByPhoneKey: query.data ?? new Map<string, DirectoryContactMeta>(),

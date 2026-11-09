@@ -206,6 +206,61 @@ describe('getConversationHistoryWithMeta', () => {
     expect(result.turns[0]?.text).toBe('[image]');
   });
 
+  it('includes a cached PDF analysis when image analysis is enabled', async () => {
+    const query = {
+      select: () => query,
+      eq: () => query,
+      order: () => query,
+      limit: () => Promise.resolve({
+        data: [{
+          direction: 'inbound',
+          message_body: '[document]',
+          caption: 'Comparto comprobante de pago',
+          media_type: 'document',
+          media_analysis_text: 'Comprobante Bancolombia. Monto $88.000. Fecha 9 de noviembre de 2026.',
+          created_at: '2026-11-09T14:44:00.000Z',
+        }],
+        error: null,
+      }),
+    };
+    const result = await getConversationHistoryWithMeta(
+      { from: () => query },
+      '573207919909',
+      10,
+      { includeImageAnalysis: true },
+    );
+
+    expect(result.turns[0]?.text).toContain('[PDF]:');
+    expect(result.turns[0]?.text).toContain('$88.000');
+    expect(result.turns[0]?.text).toContain('Comparto comprobante de pago');
+  });
+
+  it('keeps the [document] placeholder when analysis is disabled', async () => {
+    const query = {
+      select: () => query,
+      eq: () => query,
+      order: () => query,
+      limit: () => Promise.resolve({
+        data: [{
+          direction: 'inbound',
+          message_body: '[document]',
+          media_type: 'document',
+          media_analysis_text: 'no debe entrar',
+          created_at: '2026-11-09T14:44:00.000Z',
+        }],
+        error: null,
+      }),
+    };
+    const result = await getConversationHistoryWithMeta(
+      { from: () => query },
+      '573207919909',
+      10,
+      { includeImageAnalysis: false },
+    );
+
+    expect(result.turns[0]?.text).toBe('[document]');
+  });
+
   it('keeps the [audio] placeholder when transcriptions are disabled', async () => {
     const query = {
       select: () => query,

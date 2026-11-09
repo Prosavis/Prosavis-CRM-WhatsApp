@@ -2,6 +2,16 @@ type JsonRecord = Record<string, unknown>;
 
 export const LID_CUSTOMER_PREFIX = 'lid:';
 
+const BSUID_IDENTITY_REGEX = /^[A-Z]{2}\.[A-Za-z0-9.]+$/;
+
+function isPrivateWhatsappIdentity(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (trimmed.toLowerCase().startsWith(LID_CUSTOMER_PREFIX)) return true;
+  if (BSUID_IDENTITY_REGEX.test(trimmed)) return true;
+  return trimmed.replace(/\D/g, '').length > 15;
+}
+
 export type InboundCustomerKind = 'phone' | 'lid';
 
 export interface InboundCustomer {
@@ -83,11 +93,12 @@ export function resolveInboundCustomer(
     if (contactUserId) userId = contactUserId;
   }
 
-  const phone = from || waId;
-  if (phone) {
+  const phoneCandidate = from || waId;
+  const privateIdentity = Boolean(phoneCandidate) && isPrivateWhatsappIdentity(phoneCandidate);
+  if (phoneCandidate && !privateIdentity) {
     return {
       kind: 'phone',
-      customerKey: phone,
+      customerKey: phoneCandidate,
       userId: userId || null,
       profileName: profileName || null,
       username: username || null,
@@ -98,6 +109,15 @@ export function resolveInboundCustomer(
       kind: 'lid',
       customerKey: lidCustomerKey(userId),
       userId,
+      profileName: profileName || username || null,
+      username: username || null,
+    };
+  }
+  if (privateIdentity && phoneCandidate) {
+    return {
+      kind: 'lid',
+      customerKey: lidCustomerKey(phoneCandidate),
+      userId: phoneCandidate,
       profileName: profileName || username || null,
       username: username || null,
     };

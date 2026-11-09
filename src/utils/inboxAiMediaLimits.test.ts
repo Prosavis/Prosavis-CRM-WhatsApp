@@ -3,10 +3,12 @@ import {
   MAX_IMAGE_ANALYSES_PER_CONVERSATION_24H,
   MAX_IMAGE_ANALYSIS_BYTES,
   MAX_IMAGES_PER_ANALYSIS_REQUEST,
+  MAX_PDF_ANALYSIS_BYTES,
   canTranscribePersistedAudio,
   countsTowardVisionQuota,
   inboundAudioNeedsAutoTranscription,
   isAnalyzableInboundImage,
+  isAnalyzableInboundPdf,
   isVoiceTranscriptionFeatureEnabled,
   pickImagesToAnalyze,
   remainingVisionQuota,
@@ -93,6 +95,47 @@ describe('isAnalyzableInboundImage', () => {
     expect(isAnalyzableInboundImage({
       ...base,
       size_bytes: MAX_IMAGE_ANALYSIS_BYTES + 1,
+    })).toEqual({
+      ok: false,
+      reason: 'too_large',
+    });
+  });
+});
+
+describe('isAnalyzableInboundPdf', () => {
+  const base = {
+    direction: 'inbound',
+    media_type: 'document',
+    storage_path: '57300/comprobante.pdf',
+    size_bytes: 80_000,
+    mime_type: 'application/pdf',
+    filename: 'Prosavis $88.000 9112026.pdf',
+  };
+
+  it('accepts a stored inbound PDF under 10 MB', () => {
+    expect(isAnalyzableInboundPdf(base)).toEqual({ ok: true });
+    expect(isAnalyzableInboundPdf({
+      ...base,
+      mime_type: 'application/octet-stream',
+    })).toEqual({ ok: true });
+  });
+
+  it('rejects photos, outbound files, missing storage, and oversized PDFs', () => {
+    expect(isAnalyzableInboundPdf({ ...base, media_type: 'image', mime_type: 'image/jpeg' })).toEqual({
+      ok: false,
+      reason: 'not_pdf',
+    });
+    expect(isAnalyzableInboundPdf({ ...base, direction: 'outbound' })).toEqual({
+      ok: false,
+      reason: 'not_inbound',
+    });
+    expect(isAnalyzableInboundPdf({ ...base, storage_path: '' })).toEqual({
+      ok: false,
+      reason: 'no_storage_path',
+    });
+    expect(isAnalyzableInboundPdf({
+      ...base,
+      size_bytes: MAX_PDF_ANALYSIS_BYTES + 1,
     })).toEqual({
       ok: false,
       reason: 'too_large',

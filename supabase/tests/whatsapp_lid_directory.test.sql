@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(7);
+select plan(8);
 
 select ok(
   public.is_whatsapp_lid_identity('lid:CO.2284278722318211'),
@@ -98,6 +98,38 @@ select is(
   ),
   'LID Bot',
   'bot LID conversation also lands in directory'
+);
+
+insert into public.whatsapp_conversations (
+  stable_key,
+  phone,
+  contact_phone,
+  contact_name,
+  phone_number_id,
+  last_message_text,
+  last_message_at,
+  state
+)
+values (
+  '1658447422621518',
+  '1658447422621518',
+  '1658447422621518',
+  'Hugo',
+  '1035566289641219',
+  'plantilla',
+  '2026-10-12T17:29:09Z',
+  'active'
+);
+
+select is(
+  (
+    select count(*)::integer
+    from public.crm_directory
+    where whatsapp_conversation_id = '1658447422621518'
+       or phone = '1658447422621518'
+  ),
+  0,
+  'a 16-digit WhatsApp id does not create a directory row'
 );
 
 select * from finish();

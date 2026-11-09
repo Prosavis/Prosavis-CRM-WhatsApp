@@ -3,6 +3,27 @@ import { analyzeInboundImageById, analyzeUncachedInboundImagesForConversation } 
 import { resolveInboxAiOrGrokClient } from '../_shared/inboxAiContextAuth.ts';
 import { formatError } from '../_shared/whatsappOutbound.ts';
 
+function analysisFailureMessage(reason: string | undefined): string {
+  switch (reason) {
+    case 'too_large':
+      return 'El archivo supera el tamaño máximo para analizarlo.';
+    case 'daily_cap':
+      return 'Se alcanzó el cupo de análisis de este chat (20 en 24 h).';
+    case 'no_storage_path':
+      return 'El archivo todavía no está en Storage.';
+    case 'not_pdf':
+      return 'Solo se analizan PDF.';
+    case 'not_image':
+      return 'Este mensaje no se puede analizar.';
+    case 'not_inbound':
+      return 'Solo se analizan archivos que envió el cliente.';
+    case 'bad_mime':
+      return 'Ese tipo de archivo no se puede analizar.';
+    default:
+      return reason || 'No se pudo analizar el archivo.';
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -21,10 +42,10 @@ Deno.serve(async (req) => {
     if (messageLogId) {
       const item = await analyzeInboundImageById(auth.supabase, messageLogId, { force });
       if (item.status === 'failed') {
-        return jsonResponse({ error: item.reason || 'No se pudo analizar la imagen.', ...item }, 500);
+        return jsonResponse({ error: analysisFailureMessage(item.reason), ...item }, 500);
       }
       if (item.status === 'skipped') {
-        return jsonResponse({ error: item.reason || 'Imagen no analizable.', ...item }, 400);
+        return jsonResponse({ error: analysisFailureMessage(item.reason), ...item }, 400);
       }
       return jsonResponse({
         success: true,

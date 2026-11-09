@@ -46,6 +46,34 @@ Deno.test('LID inbound without from uses from_user_id', () => {
   assertEquals(lidCustomerKey('CO.2284278722318211'), 'lid:CO.2284278722318211');
 });
 
+Deno.test('16-digit from with a BSUID is a private identity, not a phone', () => {
+  const identity = resolveInboundCustomer(
+    {
+      id: 'wamid.hugo',
+      from: '1658447422621518',
+      from_user_id: 'CO.1658447422621518',
+      text: { body: 'Hola' },
+    },
+    [{
+      wa_id: '1658447422621518',
+      user_id: 'CO.1658447422621518',
+      profile: { name: 'Hugo' },
+    }],
+  );
+  assertEquals(identity?.kind, 'lid');
+  assertEquals(identity?.customerKey, 'lid:CO.1658447422621518');
+  assertEquals(identity?.profileName, 'Hugo');
+});
+
+Deno.test('16-digit from without user id is stored as a private identity', () => {
+  const identity = resolveInboundCustomer(
+    { id: 'wamid.solo', from: '1658447422621518', text: { body: 'Hola' } },
+    [],
+  );
+  assertEquals(identity?.kind, 'lid');
+  assertEquals(identity?.customerKey, 'lid:1658447422621518');
+});
+
 Deno.test('inbound without from or user id is rejected', () => {
   assertEquals(resolveInboundCustomer({ id: 'wamid.x', text: { body: 'hola' } }, []), null);
 });

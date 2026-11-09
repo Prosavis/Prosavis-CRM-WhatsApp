@@ -27,6 +27,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import { Link } from 'react-router-dom';
 import type { WhatsAppConversation } from '@/services/whatsappService';
 import {
+  claimWhatsAppLidPhone,
   patchWhatsAppConversationAdmin,
   updateAppUserProfile,
 } from '@/services/whatsappService';
@@ -229,6 +230,7 @@ interface WhatsAppContactSidePanelProps {
   contact: WhatsAppContactContextValue;
   mobile?: boolean;
   onClose?: () => void;
+  onConversationClaimed?: (stableKey: string) => void;
 }
 
 const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
@@ -236,6 +238,7 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
   contact,
   mobile = false,
   onClose,
+  onConversationClaimed,
 }) => {
   const { user, directoryEntry, lead, refetch, loading } = contact;
   const entry: DirectoryEntry | null = directoryEntry ?? lead;
@@ -527,13 +530,33 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
         return;
       }
 
-      const metadata = { ...(entry?.metadata ?? {}) };
+      let saveConversationId = conversation.id;
+      let saveEntry = entry;
+      if (isWhatsappLidIdentity(conversation.id) && normalizedPhone) {
+        const claimed = await claimWhatsAppLidPhone({
+          conversationId: conversation.id,
+          phone: normalizedPhone,
+        });
+        saveConversationId = claimed.stableKey;
+        if (claimed.directoryId) {
+          const linked = await directoryService.getEntryById(claimed.directoryId);
+          if (!linked) {
+            throw new Error('La ficha unificada no apareció después de guardar el teléfono.');
+          }
+          saveEntry = linked;
+        }
+      }
+      const adoptingExistingDirectory = Boolean(
+        saveEntry && (!entry || entry.id !== saveEntry.id),
+      );
+
+      const metadata = { ...(saveEntry?.metadata ?? {}) };
       if (form.department.trim()) metadata.department = form.department.trim();
       else delete metadata.department;
       if (form.city.trim()) metadata.city = form.city.trim();
       else delete metadata.city;
 
-      const conversationLink = directoryConversationLink(conversation.id);
+      const conversationLink = directoryConversationLink(saveConversationId);
       const directoryPayload: Partial<DirectoryEntry> = {
         fullName,
         displayName: form.displayName.trim() || fullName,
@@ -571,39 +594,84 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
       const lastChargedAmount = parseNum(form.lastChargedAmount);
       if (lastChargedAmount !== undefined) directoryPayload.lastChargedAmount = lastChargedAmount;
 
-      let targetEntryId = entry?.id;
-      if (!entry) {
+      let targetEntryId = saveEntry?.id;
+      if (adoptingExistingDirectory && saveEntry) {
+        const partial: Partial<DirectoryEntry> = {
+          phone: normalizedPhone,
+          ...conversationLink,
+        };
+        if (fullName) partial.fullName = fullName;
+        const displayName = form.displayName.trim() || fullName;
+        if (displayName) partial.displayName = displayName;
+        if (form.email.trim()) partial.email = form.email.trim();
+        if (form.photoUrl.trim()) partial.photoUrl = form.photoUrl.trim();
+        if (form.address.trim()) partial.address = form.address.trim();
+        if (form.notes.trim()) partial.notes = form.notes.trim();
+        if (form.internalNotes.trim()) partial.internalNotes = form.internalNotes.trim();
+        if (form.preferredServiceAddressLine.trim()) {
+          partial.preferredServiceAddressLine = form.preferredServiceAddressLine.trim();
+        }
+        if (form.preferredServiceAddressRef.trim()) {
+          partial.preferredServiceAddressRef = form.preferredServiceAddressRef.trim();
+        }
+        if (form.department.trim() || form.city.trim()) {
+          const nextMeta = { ...(saveEntry.metadata ?? {}) };
+          if (form.department.trim()) nextMeta.department = form.department.trim();
+          if (form.city.trim()) nextMeta.city = form.city.trim();
+          partial.metadata = nextMeta;
+        }
+        await directoryService.updateEntry(saveEntry.id, partial);
+        targetEntryId = saveEntry.id;
+      } else if (!saveEntry) {
         const created = await directoryService.createEntry(directoryPayload);
         targetEntryId = created.id;
         await directoryService.updateEntry(created.id, conversationLink);
       } else if (normalizedPhone) {
         const existingByPhone = await directoryService.findByPhone(normalizedPhone);
-        const other = existingByPhone.find((row) => row.id !== entry.id);
+        const other = existingByPhone.find((row) => row.id !== saveEntry.id);
         if (other) {
-          await directoryService.mergeEntries(other.id, entry.id);
+          await directoryService.mergeEntries(other.id, saveEntry.id);
           targetEntryId = other.id;
           await directoryService.updateEntry(other.id, directoryPayload);
         } else {
-          await directoryService.updateEntry(entry.id, directoryPayload);
+          await directoryService.updateEntry(saveEntry.id, directoryPayload);
         }
       } else {
-        await directoryService.updateEntry(entry.id, directoryPayload);
+        await directoryService.updateEntry(saveEntry.id, directoryPayload);
       }
 
       const contactName = form.displayName.trim() || fullName;
-      await patchWhatsAppConversationAdmin({
-        conversationId: conversation.id,
-        patch: {
-          contactName: contactName.length >= 2 ? contactName : undefined,
-          contactPhotoUrl: form.photoUrl.trim() || null,
-          whatsappProfileName: form.whatsappProfileName.trim() || null,
-          adminNotes: form.adminNotes.trim() || null,
-          contactNameLocked: contactName.length >= 2 ? true : undefined,
-        },
-      });
+      const conversationPatch: {
+        contactName?: string;
+        contactPhotoUrl?: string | null;
+        whatsappProfileName?: string | null;
+        adminNotes?: string | null;
+        contactNameLocked?: boolean;
+      } = {};
+      if (contactName.length >= 2) {
+        conversationPatch.contactName = contactName;
+        conversationPatch.contactNameLocked = true;
+      }
+      if (adoptingExistingDirectory) {
+        if (form.photoUrl.trim()) conversationPatch.contactPhotoUrl = form.photoUrl.trim();
+        if (form.whatsappProfileName.trim()) {
+          conversationPatch.whatsappProfileName = form.whatsappProfileName.trim();
+        }
+        if (form.adminNotes.trim()) conversationPatch.adminNotes = form.adminNotes.trim();
+      } else {
+        conversationPatch.contactPhotoUrl = form.photoUrl.trim() || null;
+        conversationPatch.whatsappProfileName = form.whatsappProfileName.trim() || null;
+        conversationPatch.adminNotes = form.adminNotes.trim() || null;
+      }
+      if (Object.keys(conversationPatch).length > 0) {
+        await patchWhatsAppConversationAdmin({
+          conversationId: saveConversationId,
+          patch: conversationPatch,
+        });
+      }
 
-      const appUid = (form.appUserId.trim() || entry?.appUserId || '').trim();
-      const entryAppUid = (entry?.appUserId || '').trim();
+      const appUid = (form.appUserId.trim() || saveEntry?.appUserId || '').trim();
+      const entryAppUid = (saveEntry?.appUserId || '').trim();
       if (appUid && targetEntryId && (!entryAppUid || appUid === entryAppUid)) {
         try {
           await updateAppUserProfile({
@@ -630,15 +698,19 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
       setForm(savedForm);
       setSavedSnapshot(JSON.stringify(savedForm));
       setSaveSuccess(true);
-      await refetch();
+      if (saveConversationId !== conversation.id) {
+        onConversationClaimed?.(saveConversationId);
+      } else {
+        await refetch();
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Error al guardar la ficha');
     } finally {
       setSaving(false);
     }
-  }, [conversation, entry, form, refetch]);
+  }, [conversation, entry, form, onConversationClaimed, refetch]);
 
-  const hasLinkedAppUser = Boolean(user?.id || entry?.appUserId || form.appUserId.trim());
+  const hasLinkedAppUser = Boolean((entry?.appUserId ?? '').trim() || form.appUserId.trim());
   const isLidChat =
     isWhatsappLidIdentity(conversation.id) ||
     isWhatsappLidIdentity(conversation.phone) ||

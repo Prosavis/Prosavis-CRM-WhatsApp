@@ -1,15 +1,22 @@
 // deno-lint-ignore-file no-explicit-any
 import { DEFAULT_HISTORY_LIMIT } from './conversationHistory.ts';
-import { DEFAULT_GEMINI_MODEL, getGeminiApiKey, geminiAnalyzeImage, resolveGeminiModel } from './geminiClient.ts';
+import {
+  DEFAULT_GEMINI_MODEL,
+  getGeminiApiKey,
+  geminiAnalyzeImage,
+  geminiAnalyzePdf,
+  resolveGeminiModel,
+} from './geminiClient.ts';
 import {
   imageAnalysisStatusFromFinishReason,
   shouldReuseCachedImageAnalysis,
 } from './imageAnalysisCache.ts';
 import {
   MAX_IMAGE_ANALYSIS_BYTES,
+  MAX_PDF_ANALYSIS_BYTES,
   VISION_REUSE_MODEL_PREFIX,
+  classifyAnalyzableInboundMedia,
   countsTowardVisionQuota,
-  isAnalyzableInboundImage,
   pickImagesToAnalyze,
   remainingVisionQuota,
   visionSinceIso,
@@ -124,7 +131,7 @@ export async function analyzeInboundImageById(
   const { data: row, error } = await supabase
     .from('whatsapp_message_log')
     .select(
-      'id,direction,media_type,storage_path,size_bytes,mime_type,media_analysis_text,media_analysis_status,conversation_stable_key',
+      'id,direction,media_type,storage_path,size_bytes,mime_type,filename,media_analysis_text,media_analysis_status,conversation_stable_key',
     )
     .eq('id', messageLogId)
     .single();
@@ -132,7 +139,7 @@ export async function analyzeInboundImageById(
     return { messageLogId, status: 'failed', reason: formatUnknownError(error) };
   }
 
-  const analyzable = isAnalyzableInboundImage(row);
+  const analyzable = classifyAnalyzableInboundMedia(row);
   if (!analyzable.ok) {
     return { messageLogId, status: 'skipped', reason: analyzable.reason };
   }
@@ -176,7 +183,8 @@ export async function analyzeInboundImageById(
 
   try {
     const buffer = await downloadWhatsAppBucketBytes(supabase, String(row.storage_path));
-    if (buffer.byteLength > MAX_IMAGE_ANALYSIS_BYTES) {
+    const maxBytes = analyzable.kind === 'pdf' ? MAX_PDF_ANALYSIS_BYTES : MAX_IMAGE_ANALYSIS_BYTES;
+    if (buffer.byteLength > maxBytes) {
       await persistAnalysis(supabase, messageLogId, {
         media_analysis_status: 'failed',
         media_analysis_error: 'too_large',
@@ -186,12 +194,16 @@ export async function analyzeInboundImageById(
     }
 
     const model = resolveGeminiModel('GEMINI_MODEL_IMAGE_ANALYSIS', DEFAULT_GEMINI_MODEL);
-    const analysis = await withOneRetry(() => geminiAnalyzeImage({
-      apiKey,
-      buffer,
-      mimeType: String(row.mime_type || 'image/jpeg'),
-      model,
-    }));
+    const analysis = await withOneRetry(() => (
+      analyzable.kind === 'pdf'
+        ? geminiAnalyzePdf({ apiKey, buffer, model })
+        : geminiAnalyzeImage({
+          apiKey,
+          buffer,
+          mimeType: String(row.mime_type || 'image/jpeg'),
+          model,
+        })
+    ));
     const status = imageAnalysisStatusFromFinishReason(analysis.finishReason);
 
     await persistAnalysis(supabase, messageLogId, {
@@ -228,7 +240,7 @@ export async function analyzeUncachedInboundImagesForConversation(
   const { data, error } = await supabase
     .from('whatsapp_message_log')
     .select(
-      'id,direction,media_type,storage_path,size_bytes,mime_type,media_analysis_text,media_analysis_status,hidden_from_panel',
+      'id,direction,media_type,storage_path,size_bytes,mime_type,filename,media_analysis_text,media_analysis_status,hidden_from_panel',
     )
     .eq('conversation_stable_key', stableKey)
     .eq('hidden_from_panel', false)
@@ -248,7 +260,7 @@ export async function analyzeUncachedInboundImagesForConversation(
 
   for (const row of rows) {
     const id = String(row.id);
-    const analyzable = isAnalyzableInboundImage(row);
+    const analyzable = classifyAnalyzableInboundMedia(row);
     if (!analyzable.ok) {
       if (wanted.size) preSkipped.push({ messageLogId: id, status: 'skipped', reason: analyzable.reason });
       continue;

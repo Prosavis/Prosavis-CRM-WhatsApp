@@ -26,6 +26,7 @@ import {
   resolveWhatsAppLine,
 } from './whatsappLines.ts';
 import { queuePersistedAudioTranscription } from './whatsappMediaHydrate.ts';
+import { absorbDirectoryLidLinkedToPhone } from './whatsappLidClaim.ts';
 import { type OutboundSentVia } from './outboundSentVia.ts';
 import {
   SESSION_WINDOW_CLOSED_CODE,
@@ -583,6 +584,12 @@ export async function ensureConversation(
   phoneNumberId: string,
   contactName?: string | null,
 ) {
+  await absorbDirectoryLidLinkedToPhone({
+    supabase,
+    stableKey,
+    phoneNumberId,
+  });
+
   const { data: existing, error: readError } = await supabase
     .from('whatsapp_conversations')
     .select('contact_name, contact_name_locked')

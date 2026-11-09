@@ -91,6 +91,9 @@ verify_jwt = false
 [functions.patch-whatsapp-conversation]
 verify_jwt = false
 
+[functions.claim-whatsapp-lid-phone]
+verify_jwt = false
+
 [functions.on-whatsapp-webhook]
 verify_jwt = false
 

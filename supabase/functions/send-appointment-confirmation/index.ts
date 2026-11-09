@@ -4,6 +4,7 @@ import { assertBotOnlyAutomation } from '../_shared/whatsappLines.ts';
 import { verifyAppointmentOwnership, verifyFirebaseToken } from '../_shared/firebaseAuth.ts';
 import {
   assertMetaSendEnabled,
+  ensureConversation,
   formatError,
   getGraphCredentials,
   isRecipientBlocked,
@@ -130,6 +131,7 @@ Deno.serve(async (req) => {
     });
 
     const stableKey = getStableKeyFromRecipient(phone);
+    await ensureConversation(supabase, stableKey, phone, graph.phoneNumberId, clientName);
     const recipient = resolveRecipient(phone);
     const persisted = await persistOutboundLog(
       supabase,

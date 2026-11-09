@@ -595,6 +595,19 @@ export function subscribeToMessages(
   });
 }
 
+export async function claimWhatsAppLidPhone(params: {
+  conversationId: string;
+  phone: string;
+}): Promise<{ success: boolean; stableKey: string; directoryId: string | null }> {
+  return invokeFn<{ success: boolean; stableKey: string; directoryId: string | null }>(
+    'claim-whatsapp-lid-phone',
+    {
+      conversationId: params.conversationId,
+      phone: params.phone,
+    },
+  );
+}
+
 export async function patchWhatsAppConversationAdmin(params: {
   conversationId: string;
   patch: Partial<{

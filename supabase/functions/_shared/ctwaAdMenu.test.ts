@@ -4,6 +4,7 @@ import {
   ctwaMenuChoiceFromMessage,
   decideCtwaAdMenu,
   messageHasAdReferral,
+  shouldStampIntakeAfterHumanTakeover,
   type CtwaOutboundRow,
 } from './ctwaAdMenu.ts';
 
@@ -176,6 +177,38 @@ Deno.test('the three buttons route once, and a later human reply stops the branc
     choice: 'domestica',
     outboundsSinceClick: [menu('2026-10-19T17:00:00Z'), human('2026-10-19T17:02:00Z')],
   }), 'none');
+});
+
+Deno.test('a request for someone else resume does not restamp empleo over a service', () => {
+  assertEquals(ctwaMenuChoiceFromMessage({
+    type: 'text',
+    text: { body: 'Tu me envías hoja de vida de la persona' },
+  }), null);
+  assertEquals(shouldStampIntakeAfterHumanTakeover({
+    body: 'Tu me envías hoja de vida de la persona',
+    next: 'empleo',
+    current: 'hogar',
+  }), false);
+  assertEquals(shouldStampIntakeAfterHumanTakeover({
+    body: 'necesito el trabajo el sábado',
+    next: 'empleo',
+    current: 'hogar',
+  }), false);
+  assertEquals(shouldStampIntakeAfterHumanTakeover({
+    body: 'busco empleo',
+    next: 'empleo',
+    current: 'hogar',
+  }), true);
+  assertEquals(shouldStampIntakeAfterHumanTakeover({
+    body: 'te envío mi hoja de vida',
+    next: 'empleo',
+    current: 'empresas',
+  }), true);
+  assertEquals(shouldStampIntakeAfterHumanTakeover({
+    body: 'hay vacante',
+    next: 'empleo',
+    current: 'hogar',
+  }), true);
 });
 
 Deno.test('button id and ad referral are read from the webhook message', () => {

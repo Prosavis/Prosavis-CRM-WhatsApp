@@ -42,7 +42,7 @@ export async function remapDirectoryLidToPhone(params: {
   phoneKey: string;
   phone: string;
   phoneNumberId: string | null;
-}): Promise<void> {
+}): Promise<string | null> {
   const column = directoryConversationIdColumn(params.phoneNumberId);
   const { data: lidDir, error: lidError } = await params.supabase
     .from('crm_directory')
@@ -74,11 +74,11 @@ export async function remapDirectoryLidToPhone(params: {
       .update({ [column]: params.phoneKey, updated_at: new Date().toISOString() })
       .eq('id', phoneDir.id);
     if (linkError) throw linkError;
-    return;
+    return phoneDir.id;
   }
 
   const keepId = lidDir?.id ?? phoneDir?.id;
-  if (!keepId) return;
+  if (!keepId) return null;
 
   const { error: updateError } = await params.supabase
     .from('crm_directory')
@@ -89,4 +89,5 @@ export async function remapDirectoryLidToPhone(params: {
     })
     .eq('id', keepId);
   if (updateError) throw updateError;
+  return keepId;
 }

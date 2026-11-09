@@ -10,6 +10,7 @@ import {
   intakeTextHasComplaint,
   outboundLooksLikeOptionMenu,
   resolveMessageIntent,
+  shouldStampIntakeAfterHumanTakeover,
   type AdCue,
   type IntakeModelJudgment,
   type IntakeRoute,
@@ -73,6 +74,14 @@ function asRecord(value: unknown): JsonRecord {
 
 function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+export { shouldStampIntakeAfterHumanTakeover } from './intakeIntent.ts';
+
+function storedIntakeRoute(value: unknown): IntakeRoute | null {
+  const text = asText(value)
+  if (text === 'hogar' || text === 'empresas' || text === 'empleo') return text
+  return null
 }
 
 function choiceFromIntent(intent: IntakeRoute | null): CtwaMenuChoice | null {
@@ -464,7 +473,7 @@ export async function runCtwaAdMenu(params: {
 
     const { data: conv, error: convError } = await params.supabase
       .from('whatsapp_conversations')
-      .select('automated_inbound_disabled, ctwa_captured_at')
+      .select('automated_inbound_disabled, ctwa_captured_at, intake_intent_label')
       .eq('stable_key', params.stableKey)
       .maybeSingle();
     if (convError) throw new Error(convError.message);
@@ -491,19 +500,24 @@ export async function runCtwaAdMenu(params: {
     const alreadyRouted = outbounds.some((row) => row.campaignType === CTWA_ROUTE_CAMPAIGN);
     const humanTookOver = humanTookOverAfterMenu(outbounds);
     if (choice && humanTookOver) {
+      const route: IntakeRoute = choice === 'domestica'
+        ? 'hogar'
+        : choice === 'empresarial'
+          ? 'empresas'
+          : 'empleo';
+      const current = storedIntakeRoute(
+        (conv as { intake_intent_label?: unknown } | null)?.intake_intent_label,
+      );
+      if (!shouldStampIntakeAfterHumanTakeover({ body, next: route, current })) return;
       await stampCtwaLead({
         supabase: params.supabase,
         stableKey: params.stableKey,
         to: params.to,
-        action: choice === 'domestica' ? 'hogar' : choice === 'empresarial' ? 'empresas' : 'empleo',
+        action: route,
         env: {},
-        profileSentence: leadSentence(
-          choice === 'domestica' ? 'hogar' : choice === 'empresarial' ? 'empresas' : 'empleo',
-          body,
-          ad,
-        ),
+        profileSentence: leadSentence(route, body, ad),
       });
-      await noteIntakeIntent(params.supabase, params.stableKey, choice === 'domestica' ? 'hogar' : choice === 'empresarial' ? 'empresas' : 'empleo');
+      await noteIntakeIntent(params.supabase, params.stableKey, route);
       return;
     }
     if (
