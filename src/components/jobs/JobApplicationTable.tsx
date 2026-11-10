@@ -18,6 +18,11 @@ interface JobApplicationTableProps {
   onTransition: (id: string, change: JobStageChange) => Promise<void> | void;
 }
 
+function hasDirectoryTag(tags: string[] | null | undefined, name: string): boolean {
+  const needle = name.toLowerCase();
+  return (tags ?? []).some((tag) => tag.trim().toLowerCase() === needle);
+}
+
 function fitColor(rank: number | null | undefined): 'success' | 'info' | 'default' {
   if (rank === 2) return 'success';
   if (rank === 1) return 'info';
@@ -61,6 +66,10 @@ export const JobApplicationTable: React.FC<JobApplicationTableProps> = ({
               {row.candidate?.full_name ?? 'Sin nombre'}
               {row.needs_review ? (
                 <Chip size="small" label="Revisar" color="warning" sx={{ ml: 1 }} />
+              ) : null}
+              {hasDirectoryTag(row.directory?.tags, 'despedida')
+                || hasDirectoryTag(row.directory?.tags, 'auxiliares desactivadas') ? (
+                <Chip size="small" label="Despedida" sx={{ ml: 1 }} />
               ) : null}
               {row.needs_stage_review && row.legacy_stage ? (
                 <Chip

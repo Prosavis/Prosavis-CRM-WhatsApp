@@ -32,6 +32,7 @@ export interface JobApplicationListItem {
     display_name: string | null;
     phone: string | null;
     photo_url: string | null;
+    tags?: string[] | null;
   } | null;
 }
 

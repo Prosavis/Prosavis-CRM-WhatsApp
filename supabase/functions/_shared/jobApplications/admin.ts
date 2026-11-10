@@ -54,7 +54,7 @@ export async function listJobApplications(
         id, full_name, phone, email, document_number, location_text
       ),
       directory:crm_directory (
-        id, full_name, display_name, phone, photo_url
+        id, full_name, display_name, phone, photo_url, tags
       )
     `,
       { count: 'exact' },
