@@ -50,6 +50,8 @@ export function listJobApplications(params: {
   needsReview?: boolean;
   priorityOnly?: boolean;
   needsStageReview?: boolean;
+  contactedFrom?: string | null;
+  contactedTo?: string | null;
   stages?: string[] | null;
   limit?: number;
   offset?: number;

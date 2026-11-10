@@ -13,6 +13,13 @@ export class JobApplicationsError extends Error {
   }
 }
 
+function bogotaDayStart(value: unknown, nextDay = false): string | null {
+  const ymd = typeof value === 'string' ? value.trim() : '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return null;
+  const [year, month, day] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day + (nextDay ? 1 : 0), 5, 0, 0)).toISOString();
+}
+
 function actorOf(profile: { id: string; email?: string | null }) {
   return {
     kind: 'supabase',
@@ -35,6 +42,8 @@ export async function listJobApplications(
   const needsReview = params.needsReview === true || params.needsReview === 'true';
   const priorityOnly = params.priorityOnly === true || params.priorityOnly === 'true';
   const needsStageReview = params.needsStageReview === true || params.needsStageReview === 'true';
+  const contactedFrom = bogotaDayStart(params.contactedFrom);
+  const contactedTo = bogotaDayStart(params.contactedTo, true);
   const stages = Array.isArray(params.stages)
     ? params.stages.map((value) => String(value)).filter(Boolean)
     : [];
@@ -73,6 +82,8 @@ export async function listJobApplications(
   if (needsReview) query = query.eq('needs_review', true);
   if (priorityOnly) query = query.eq('fit_rank', 2);
   if (needsStageReview) query = query.eq('needs_stage_review', true);
+  if (contactedFrom) query = query.gte('created_at', contactedFrom);
+  if (contactedTo) query = query.lt('created_at', contactedTo);
 
   const { data, error, count } = await query;
   if (error) throw new JobApplicationsError(error.message, 'query', 500);

@@ -11,7 +11,6 @@ import {
 } from '@mui/material';
 import { JobApplicationDetailPanel } from '@/components/jobs/JobApplicationDetail';
 import { JobApplicationTable } from '@/components/jobs/JobApplicationTable';
-import { JobApplicationsKpis, type JobKpiKey } from '@/components/jobs/JobApplicationsKpis';
 import {
   useJobApplicationMutations,
   useJobApplicationsList,
@@ -19,8 +18,31 @@ import {
 } from '@/hooks/useJobApplicationsQueries';
 import { JOB_APPLICATION_STAGES, JOB_STAGE_LABELS, type JobApplicationStage } from '@/utils/jobApplicationsDomain';
 
-const INTERVIEW_STAGES = ['interview_pending', 'interview_scheduled'];
-const CLOSURE_STAGES = ['rejected', 'interview_declined', 'no_show', 'despedida'];
+interface JobListFilters {
+  priorityOnly: boolean;
+  needsStageReview: boolean;
+  needsReview: boolean;
+  includeMarian: boolean;
+  contactedFrom: string;
+  contactedTo: string;
+}
+
+const EMPTY_FILTERS: JobListFilters = {
+  priorityOnly: false,
+  needsStageReview: false,
+  needsReview: false,
+  includeMarian: false,
+  contactedFrom: '',
+  contactedTo: '',
+};
+
+function activeFilterCount(filters: JobListFilters): number {
+  return Number(filters.priorityOnly)
+    + Number(filters.needsStageReview)
+    + Number(filters.needsReview)
+    + Number(filters.includeMarian)
+    + Number(Boolean(filters.contactedFrom || filters.contactedTo));
+}
 
 const JobApplicationsPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -28,22 +50,23 @@ const JobApplicationsPage: React.FC = () => {
   const [stage, setStage] = useState<string>('inbound');
   const [stageGroup, setStageGroup] = useState<string[] | null>(null);
   const [search, setSearch] = useState('');
-  const [includeMarian, setIncludeMarian] = useState(false);
-  const [needsReview, setNeedsReview] = useState(false);
-  const [priorityOnly, setPriorityOnly] = useState(false);
-  const [needsStageReview, setNeedsStageReview] = useState(false);
+  const [filters, setFilters] = useState<JobListFilters>(EMPTY_FILTERS);
+  const [draft, setDraft] = useState<JobListFilters>(EMPTY_FILTERS);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [offset, setOffset] = useState(0);
   const limit = 50;
 
-  const metrics = useJobApplicationsMetrics(includeMarian);
+  const metrics = useJobApplicationsMetrics(filters.includeMarian);
   const list = useJobApplicationsList({
     stage: stageGroup ? null : stage || null,
     stages: stageGroup,
     search,
-    includeMarian,
-    needsReview,
-    priorityOnly,
-    needsStageReview,
+    includeMarian: filters.includeMarian,
+    needsReview: filters.needsReview,
+    priorityOnly: filters.priorityOnly,
+    needsStageReview: filters.needsStageReview,
+    contactedFrom: filters.contactedFrom || null,
+    contactedTo: filters.contactedTo || null,
     limit,
     offset,
   });
@@ -68,64 +91,10 @@ const JobApplicationsPage: React.FC = () => {
     setOffset(0);
   };
 
-  const selectKpi = (key: JobKpiKey) => {
-    setOffset(0);
-    setNeedsReview(false);
-    setNeedsStageReview(false);
-    setPriorityOnly(false);
-    setStageGroup(null);
-    switch (key) {
-      case 'inbound':
-        setStage('inbound');
-        return;
-      case 'priority':
-        setStage('inbound');
-        setPriorityOnly(true);
-        return;
-      case 'interviewsOpen':
-        setStage('');
-        setStageGroup(INTERVIEW_STAGES);
-        return;
-      case 'hired':
-        setStage('hired');
-        return;
-      case 'closures':
-        setStage('');
-        setStageGroup(CLOSURE_STAGES);
-        return;
-      case 'marianSpecial':
-        setIncludeMarian(true);
-        setStage('inbound');
-        return;
-      default: {
-        const unreachable: never = key;
-        return unreachable;
-      }
-    }
-  };
-
   const stageSelected = (value: JobApplicationStage) =>
     stageGroup ? stageGroup.includes(value) : stage === value;
 
-  const selectedKpi: JobKpiKey | null = priorityOnly && stage === 'inbound'
-    ? 'priority'
-    : stage === 'hired'
-      ? 'hired'
-      : stage === 'inbound'
-        ? 'inbound'
-        : stageGroup === INTERVIEW_STAGES
-          ? 'interviewsOpen'
-          : stageGroup === CLOSURE_STAGES
-            ? 'closures'
-            : null;
-
-  const toggleFilter = (key: 'priorityOnly' | 'needsStageReview' | 'needsReview' | 'includeMarian') => {
-    setOffset(0);
-    if (key === 'priorityOnly') setPriorityOnly((value) => !value);
-    if (key === 'needsStageReview') setNeedsStageReview((value) => !value);
-    if (key === 'needsReview') setNeedsReview((value) => !value);
-    if (key === 'includeMarian') setIncludeMarian((value) => !value);
-  };
+  const appliedCount = activeFilterCount(filters);
 
   return (
     <Box data-testid="jobs-workspace" sx={{ px: { xs: 1.5, md: 2.5 }, py: { xs: 1.5, md: 2.5 } }}>
@@ -144,14 +113,6 @@ const JobApplicationsPage: React.FC = () => {
           Importar lote
         </Button>
       </Stack>
-
-      <JobApplicationsKpis
-        metrics={metrics.data}
-        loading={metrics.isPending}
-        error={metrics.error instanceof Error ? metrics.error.message : null}
-        selected={selectedKpi}
-        onSelect={selectKpi}
-      />
 
       <Stack
         direction="row"
@@ -195,7 +156,7 @@ const JobApplicationsPage: React.FC = () => {
         ))}
       </Stack>
 
-      <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" alignItems="center" sx={{ mb: 2 }}>
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
         <TextField
           size="small"
           placeholder="Buscar nombre o teléfono"
@@ -204,24 +165,96 @@ const JobApplicationsPage: React.FC = () => {
             setSearch(event.target.value);
             setOffset(0);
           }}
-          sx={{ minWidth: 220, flex: '1 1 220px' }}
+          sx={{ width: { xs: '100%', sm: 280 } }}
         />
-        {([
-          ['priorityOnly', 'Prioritarias', priorityOnly],
-          ['needsStageReview', 'Por clasificar', needsStageReview],
-          ['needsReview', 'Revisión', needsReview],
-          ['includeMarian', 'Marian', includeMarian],
-        ] as const).map(([key, label, on]) => (
-          <Chip
-            key={key}
-            label={label}
-            clickable
-            color={on ? 'primary' : 'default'}
-            variant={on ? 'filled' : 'outlined'}
-            onClick={() => toggleFilter(key)}
-          />
-        ))}
+        <Button
+          size="small"
+          variant={filtersOpen || appliedCount > 0 ? 'contained' : 'outlined'}
+          color={appliedCount > 0 ? 'primary' : 'inherit'}
+          onClick={() => {
+            if (filtersOpen) {
+              setFiltersOpen(false);
+              return;
+            }
+            setDraft(filters);
+            setFiltersOpen(true);
+          }}
+        >
+          Filtros{appliedCount > 0 ? ` · ${appliedCount}` : ''}
+        </Button>
       </Stack>
+      {filtersOpen ? (
+        <Box
+          sx={{
+            mb: 2,
+            p: 1.5,
+            border: '1px solid',
+            borderColor: 'divider',
+            borderRadius: 2,
+            bgcolor: 'background.paper',
+          }}
+        >
+          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+            {([
+              ['priorityOnly', 'Prioritarias'],
+              ['needsStageReview', 'Por clasificar'],
+              ['needsReview', 'Revisión'],
+              ['includeMarian', 'Marian'],
+            ] as const).map(([key, label]) => (
+              <Chip
+                key={key}
+                label={label}
+                clickable
+                color={draft[key] ? 'primary' : 'default'}
+                variant={draft[key] ? 'filled' : 'outlined'}
+                onClick={() => setDraft((current) => ({ ...current, [key]: !current[key] }))}
+              />
+            ))}
+          </Stack>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
+            <TextField
+              size="small"
+              type="date"
+              label="Contactó desde"
+              value={draft.contactedFrom}
+              onChange={(event) => setDraft((current) => ({ ...current, contactedFrom: event.target.value }))}
+              InputLabelProps={{ shrink: true }}
+            />
+            <TextField
+              size="small"
+              type="date"
+              label="Contactó hasta"
+              value={draft.contactedTo}
+              onChange={(event) => setDraft((current) => ({ ...current, contactedTo: event.target.value }))}
+              InputLabelProps={{ shrink: true }}
+            />
+            <Box sx={{ flex: 1 }} />
+            <Button
+              size="small"
+              color="inherit"
+              onClick={() => {
+                setDraft(EMPTY_FILTERS);
+                setFilters(EMPTY_FILTERS);
+                setOffset(0);
+                setFiltersOpen(false);
+              }}
+            >
+              Limpiar
+            </Button>
+            <Button
+              size="small"
+              variant="contained"
+              onClick={() => {
+                setFilters(draft);
+                setOffset(0);
+                setFiltersOpen(false);
+              }}
+            >
+              Aplicar
+            </Button>
+          </Stack>
+        </Box>
+      ) : null}
 
       <JobApplicationTable
         items={items}

@@ -80,8 +80,9 @@ describe('JobApplicationsPage', () => {
   it('renders KPIs, list tab and a row', () => {
     renderPage();
     expect(screen.getByTestId('jobs-workspace')).toBeInTheDocument();
-    expect(screen.getByTestId('jobs-kpi-inbound')).toHaveTextContent('8');
+    expect(screen.getByTestId('jobs-stage-inbound')).toHaveTextContent('8');
     expect(screen.getByTestId('jobs-pipeline')).toBeInTheDocument();
+    expect(screen.queryByTestId('jobs-kpi-priority')).not.toBeInTheDocument();
     expect(screen.queryByTestId('jobs-tab-analytics')).not.toBeInTheDocument();
     expect(screen.getByText('Ana Pérez')).toBeInTheDocument();
     expect(screen.getByText('Prioritaria')).toBeInTheDocument();

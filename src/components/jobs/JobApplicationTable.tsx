@@ -59,7 +59,7 @@ export const JobApplicationTable: React.FC<JobApplicationTableProps> = ({
           <TableCell sx={{ color: 'text.secondary', fontSize: 12 }}>Candidata</TableCell>
           <TableCell sx={{ color: 'text.secondary', fontSize: 12 }}>Marca</TableCell>
           <TableCell sx={{ color: 'text.secondary', fontSize: 12 }}>Estado</TableCell>
-          <TableCell sx={{ color: 'text.secondary', fontSize: 12 }}>Llegó</TableCell>
+          <TableCell sx={{ color: 'text.secondary', fontSize: 12 }}>Contactó</TableCell>
         </TableRow>
       </TableHead>
       <TableBody>
