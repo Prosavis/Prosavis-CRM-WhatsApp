@@ -11,6 +11,7 @@ export interface JobApplicationListItem {
   origin_label: string | null;
   created_by_label: string | null;
   created_at: string;
+  last_contact_at?: string | null;
   hired_at: string | null;
   interview_at?: string | null;
   needs_stage_review?: boolean;

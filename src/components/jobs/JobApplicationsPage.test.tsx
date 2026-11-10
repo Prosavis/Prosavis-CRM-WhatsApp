@@ -56,6 +56,7 @@ vi.mock('@/hooks/useJobApplicationsQueries', () => ({
   }),
   useJobApplicationMutations: () => ({
     backfill: { mutate: vi.fn(), isPending: false },
+    refreshPage: { mutate: vi.fn(), isPending: false },
     transition: { mutateAsync: vi.fn(), isPending: false },
     hire: { mutateAsync: vi.fn(), isPending: false },
     split: { mutateAsync: vi.fn() },

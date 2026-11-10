@@ -112,7 +112,7 @@ export const JobApplicationTable: React.FC<JobApplicationTableProps> = ({
               />
             </TableCell>
             <TableCell sx={{ whiteSpace: 'nowrap', color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>
-              {arrivedLabel(row.created_at)}
+              {arrivedLabel(row.last_contact_at || row.created_at)}
             </TableCell>
             <TableCell>
               <Button

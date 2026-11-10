@@ -191,6 +191,15 @@ const JobApplicationsPage: React.FC = () => {
         />
         <Button
           size="small"
+          variant="outlined"
+          color="inherit"
+          disabled={items.length === 0 || mutations.refreshPage.isPending}
+          onClick={() => mutations.refreshPage.mutate(items.map((row) => row.id))}
+        >
+          {mutations.refreshPage.isPending ? 'Actualizando…' : 'Actualizar página'}
+        </Button>
+        <Button
+          size="small"
           variant={filtersOpen || appliedCount > 0 ? 'contained' : 'outlined'}
           color={appliedCount > 0 ? 'primary' : 'inherit'}
           onClick={() => {

@@ -48,16 +48,13 @@ export async function listJobApplications(
   const stages = Array.isArray(params.stages)
     ? params.stages.map((value) => String(value)).filter(Boolean)
     : [];
-  const scheduledOnly = stages.length === 1
-    ? stages[0] === 'interview_scheduled'
-    : stage === 'interview_scheduled';
 
   let query = supabase
     .from('job_applications')
     .select(
       `
       id, cohort, stage, assigned_to, needs_review, review_reason, source_channel,
-      origin_label, created_by_label, created_at, hired_at, directory_id,
+      origin_label, created_by_label, created_at, last_contact_at, hired_at, directory_id,
       team_member_id, team_member_service_id, interview_at, needs_stage_review,
       legacy_stage, fit_rank,
       candidate:job_candidates (
@@ -73,8 +70,7 @@ export async function listJobApplications(
     .is('deleted_at', null)
     .range(offset, offset + limit - 1);
 
-  if (scheduledOnly) query = query.order('interview_at', { ascending: true, nullsFirst: false });
-  else query = query.order('created_at', { ascending: false });
+  query = query.order('last_contact_at', { ascending: false, nullsFirst: false });
 
   if (!includeMarian && !cohort) query = query.eq('cohort', 'job');
   if (cohort) query = query.eq('cohort', cohort);
@@ -173,7 +169,7 @@ export async function mutateApplication(
 ) {
   const actor = actorOf(profile);
   const id = String(body.id ?? body.applicationId ?? '');
-  if (!id && action !== 'backfill' && action !== 'metrics' && action !== 'listTeam') {
+  if (!id && action !== 'backfill' && action !== 'metrics' && action !== 'listTeam' && action !== 'refreshPage') {
     throw new JobApplicationsError('applicationId es requerido');
   }
 
@@ -236,6 +232,10 @@ export async function mutateApplication(
       return rpc(supabase, 'enqueue_whatsapp_media_for_application', {
         p_application_id: id,
       });
+    case 'refreshPage': {
+      const ids = Array.isArray(body.ids) ? body.ids.filter((value) => typeof value === 'string') : [];
+      return rpc(supabase, 'refresh_job_application_page', { p_ids: ids });
+    }
     case 'backfill':
       return rpc(supabase, 'backfill_job_applications', {
         p_dry_run: body.dryRun !== false,

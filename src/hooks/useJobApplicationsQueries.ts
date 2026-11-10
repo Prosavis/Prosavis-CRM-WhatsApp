@@ -9,6 +9,7 @@ import {
   hireJobApplication,
   listJobApplications,
   listJobTeamMembers,
+  refreshJobApplicationsPage,
   mergeJobApplications,
   splitJobApplication,
   transitionJobApplication,
@@ -111,5 +112,9 @@ export function useJobApplicationMutations() {
     mutationFn: backfillJobApplications,
     onSuccess: invalidate,
   });
-  return { transition, assign, split, merge, hire, remove, backfill };
+  const refreshPage = useMutation({
+    mutationFn: (ids: string[]) => refreshJobApplicationsPage(ids),
+    onSuccess: invalidate,
+  });
+  return { transition, assign, split, merge, hire, remove, backfill, refreshPage };
 }

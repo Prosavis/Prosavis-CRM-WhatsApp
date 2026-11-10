@@ -104,6 +104,10 @@ export function deleteJobApplication(id: string) {
   return invokeAdmin({ action: 'delete', id });
 }
 
+export function refreshJobApplicationsPage(ids: string[]) {
+  return invokeAdmin({ action: 'refreshPage', ids });
+}
+
 export function backfillJobApplications(params: {
   dryRun?: boolean;
   cohort?: string | null;
