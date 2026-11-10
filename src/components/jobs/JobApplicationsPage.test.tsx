@@ -12,9 +12,14 @@ vi.mock('@/hooks/useJobApplicationsQueries', () => ({
       job: 12,
       marianSpecial: 3,
       needsReview: 2,
+      needsStageReview: 1,
+      inbound: 8,
+      priority: 3,
+      interviewsOpen: 2,
       hired: 1,
+      closures: 4,
       rejectedOrWithdrawn: 4,
-      byStage: { new: 5, hired: 1 },
+      byStage: { inbound: 8, hired: 1 },
       bySourceChannel: { whatsapp: 10, backfill: 2 },
     },
     isPending: false,
@@ -25,7 +30,11 @@ vi.mock('@/hooks/useJobApplicationsQueries', () => ({
       items: [{
         id: 'app-1',
         cohort: 'job',
-        stage: 'new',
+        stage: 'inbound',
+        interview_at: null,
+        needs_stage_review: false,
+        legacy_stage: null,
+        fit_rank: 2,
         assigned_to: null,
         needs_review: false,
         review_reason: null,
@@ -71,10 +80,10 @@ describe('JobApplicationsPage', () => {
   it('renders KPIs, list tab and a row', () => {
     renderPage();
     expect(screen.getByTestId('jobs-workspace')).toBeInTheDocument();
-    expect(screen.getByTestId('jobs-kpi-total')).toHaveTextContent('12');
-    expect(screen.getByTestId('jobs-tab-analytics')).toBeInTheDocument();
-    expect(screen.getByTestId('jobs-tab-review')).toBeInTheDocument();
+    expect(screen.getByTestId('jobs-kpi-inbound')).toHaveTextContent('8');
+    expect(screen.getByTestId('jobs-pipeline')).toBeInTheDocument();
+    expect(screen.queryByTestId('jobs-tab-analytics')).not.toBeInTheDocument();
     expect(screen.getByText('Ana Pérez')).toBeInTheDocument();
-    expect(screen.getByText('••••5678')).toBeInTheDocument();
+    expect(screen.getByText('Prioritaria')).toBeInTheDocument();
   });
 });

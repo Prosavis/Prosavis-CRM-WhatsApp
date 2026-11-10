@@ -3,18 +3,21 @@ import { Box, ButtonBase, Stack, Typography } from '@mui/material';
 import type { JobApplicationsMetrics } from '@/types/jobApplications';
 
 const CARDS = [
-  { key: 'total', label: 'Solicitudes Job' },
-  { key: 'needsReview', label: 'Por revisar' },
+  { key: 'inbound', label: 'Ingreso' },
+  { key: 'priority', label: 'Prioritarias' },
+  { key: 'interviewsOpen', label: 'Entrevistas abiertas' },
   { key: 'hired', label: 'Contratadas' },
-  { key: 'rejectedOrWithdrawn', label: 'Descartadas / retiradas' },
+  { key: 'closures', label: 'Cierres' },
   { key: 'marianSpecial', label: 'Marian (fuera de KPI)' },
 ] as const;
+
+export type JobKpiKey = (typeof CARDS)[number]['key'];
 
 interface JobApplicationsKpisProps {
   metrics?: JobApplicationsMetrics;
   loading?: boolean;
   error?: string | null;
-  onSelect?: (key: (typeof CARDS)[number]['key']) => void;
+  onSelect?: (key: JobKpiKey) => void;
 }
 
 export const JobApplicationsKpis: React.FC<JobApplicationsKpisProps> = ({

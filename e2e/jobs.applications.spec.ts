@@ -12,13 +12,11 @@ async function openJobs(page: Page) {
 }
 
 test.describe('Solicitudes de empleo', () => {
-  test('shows the module after Directorio and the three workspace tabs', async ({ page }) => {
+  test('shows the selection pipeline', async ({ page }) => {
     await openJobs(page);
     await expect(page.getByRole('button', { name: 'Solicitudes de empleo' })).toBeVisible();
-    await expect(page.getByTestId('jobs-tab-list')).toBeVisible();
-    await expect(page.getByTestId('jobs-tab-analytics')).toBeVisible();
-    await expect(page.getByTestId('jobs-tab-review')).toBeVisible();
-    await page.getByTestId('jobs-tab-analytics').click();
-    await expect(page.getByTestId('jobs-analytics')).toBeVisible();
+    await expect(page.getByTestId('jobs-pipeline')).toBeVisible();
+    await expect(page.getByTestId('jobs-stage-inbound')).toBeVisible();
+    await expect(page.getByTestId('jobs-stage-hired')).toBeVisible();
   });
 });

@@ -21,6 +21,9 @@ export function useJobApplicationsList(params: {
   search?: string;
   includeMarian?: boolean;
   needsReview?: boolean;
+  priorityOnly?: boolean;
+  needsStageReview?: boolean;
+  stages?: string[] | null;
   limit: number;
   offset: number;
 }) {
@@ -65,8 +68,17 @@ export function useInvalidateJobApplications() {
 export function useJobApplicationMutations() {
   const invalidate = useInvalidateJobApplications();
   const transition = useMutation({
-    mutationFn: ({ id, stage, note }: { id: string; stage: string; note?: string }) =>
-      transitionJobApplication(id, stage, note),
+    mutationFn: ({
+      id,
+      stage,
+      note,
+      interviewAt,
+    }: {
+      id: string;
+      stage: string;
+      note?: string;
+      interviewAt?: string;
+    }) => transitionJobApplication(id, stage, note, interviewAt),
     onSuccess: invalidate,
   });
   const assign = useMutation({

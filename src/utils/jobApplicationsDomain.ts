@@ -1,26 +1,32 @@
 export const JOB_APPLICATION_STAGES = [
-  'new',
-  'pending_review',
-  'contacted',
-  'interviewed',
-  'trial',
-  'possible',
+  'inbound',
+  'interview_pending',
+  'interview_scheduled',
+  'interview_declined',
+  'no_show',
   'hired',
   'rejected',
-  'withdrawn',
 ] as const;
 
 export type JobApplicationStage = (typeof JOB_APPLICATION_STAGES)[number];
 
 export const JOB_STAGE_LABELS: Record<JobApplicationStage, string> = {
-  new: 'Nueva',
+  inbound: 'Ingreso',
+  interview_pending: 'Entrevista pendiente',
+  interview_scheduled: 'Entrevista programada',
+  interview_declined: 'Entrevista rechazada',
+  no_show: 'No asiste',
+  hired: 'Contratada',
+  rejected: 'Rechazada',
+};
+
+const LEGACY_JOB_STAGE_LABELS: Record<string, string> = {
+  new: 'Ingreso',
   pending_review: 'Por revisar',
   contacted: 'Contactada',
   interviewed: 'Entrevistada',
   trial: 'En prueba',
   possible: 'Posible',
-  hired: 'Contratada',
-  rejected: 'Descartada',
   withdrawn: 'Retirada',
 };
 
@@ -89,14 +95,107 @@ export function isJobApplicationStage(value: string): value is JobApplicationSta
   return (JOB_APPLICATION_STAGES as readonly string[]).includes(value);
 }
 
+const NOTE_STAGES = new Set<JobApplicationStage>(['interview_declined', 'no_show', 'rejected']);
+
 export function canTransitionJobStage(
   from: JobApplicationStage,
   to: JobApplicationStage,
   hasTeamMember: boolean,
+  extras?: { interviewAt?: string | null; note?: string | null },
 ): boolean {
-  if (from === to) return true;
+  if (from === to && to !== 'interview_scheduled') return true;
   if (to === 'hired' && !hasTeamMember) return false;
+  if (to === 'interview_scheduled' && !String(extras?.interviewAt ?? '').trim()) return false;
+  if (NOTE_STAGES.has(to) && !String(extras?.note ?? '').trim()) return false;
   return true;
+}
+
+export type JobStagePrompt = 'immediate' | 'date' | 'note' | 'hire';
+
+export function jobStagePrompt(stage: JobApplicationStage): JobStagePrompt {
+  switch (stage) {
+    case 'inbound':
+    case 'interview_pending':
+      return 'immediate';
+    case 'interview_scheduled':
+      return 'date';
+    case 'interview_declined':
+    case 'no_show':
+    case 'rejected':
+      return 'note';
+    case 'hired':
+      return 'hire';
+    default: {
+      const unreachable: never = stage;
+      return unreachable;
+    }
+  }
+}
+
+const CLEANING_TERM = /aseo|limpieza|oficios|empleada domestica|domestica|hogar/;
+const CLEANING_CONTEXT =
+  /\b(19\d{2}|20\d{2}|\d+\s*(anos|meses)|bogota|medellin|cali|barranquilla|hospital|empresa|conjunto|casa|oficina|apartamento)\b/;
+
+export interface CleaningFact {
+  key?: string | null;
+  value?: string | null;
+  evidence?: string | null;
+}
+
+function foldJobText(value: string): string {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+export function scoreCleaningExperience(
+  facts: CleaningFact[],
+): { score: number; evidence: string[] } {
+  const evidence: string[] = [];
+  let matches = 0;
+  let rich = false;
+  for (const fact of facts) {
+    const quote = String(fact.evidence ?? '').trim();
+    if (!quote) continue;
+    const text = foldJobText(`${fact.key ?? ''} ${fact.value ?? ''} ${quote}`);
+    if (!CLEANING_TERM.test(text)) continue;
+    matches += 1;
+    if (evidence.length < 3) evidence.push(quote);
+    if (CLEANING_CONTEXT.test(foldJobText(`${fact.value ?? ''} ${quote}`))) rich = true;
+  }
+  if (matches === 0) return { score: 0, evidence: [] };
+  return { score: matches >= 2 || rich ? 1 : 0.7, evidence };
+}
+
+export type JobFitMark = 'priority' | 'analyzed' | 'none';
+
+export function fitMarkFromCleaning(
+  score: number,
+  hasAnalysis: boolean,
+  evidenceCount: number,
+): JobFitMark {
+  if (!hasAnalysis) return 'none';
+  if (score >= 0.7 && evidenceCount > 0) return 'priority';
+  return 'analyzed';
+}
+
+export function fitRankFromMark(mark: JobFitMark): 0 | 1 | 2 {
+  switch (mark) {
+    case 'priority':
+      return 2;
+    case 'analyzed':
+      return 1;
+    case 'none':
+      return 0;
+    default: {
+      const unreachable: never = mark;
+      return unreachable;
+    }
+  }
+}
+
+export function fitMarkLabel(rank: number | null | undefined): string {
+  if (rank === 2) return 'Prioritaria';
+  if (rank === 1) return 'HV analizada';
+  return 'Sin HV';
 }
 
 export function digitsOnly(value: string | null | undefined): string {
@@ -198,7 +297,8 @@ export function maskDocumentNumber(value: string | null | undefined): string {
 }
 
 export function jobStageLabel(stage: string): string {
-  return isJobApplicationStage(stage) ? JOB_STAGE_LABELS[stage] : stage;
+  if (isJobApplicationStage(stage)) return JOB_STAGE_LABELS[stage];
+  return LEGACY_JOB_STAGE_LABELS[stage] ?? stage;
 }
 
 export function documentKindFromMime(

@@ -32,7 +32,15 @@ export async function listJobApplications(
   const cohort = typeof params.cohort === 'string' ? params.cohort : null;
   const assignedTo = typeof params.assignedTo === 'string' ? params.assignedTo : null;
   const search = typeof params.search === 'string' ? params.search.trim() : '';
-  const needsReview = params.needsReview === true;
+  const needsReview = params.needsReview === true || params.needsReview === 'true';
+  const priorityOnly = params.priorityOnly === true || params.priorityOnly === 'true';
+  const needsStageReview = params.needsStageReview === true || params.needsStageReview === 'true';
+  const stages = Array.isArray(params.stages)
+    ? params.stages.map((value) => String(value)).filter(Boolean)
+    : [];
+  const scheduledOnly = stages.length === 1
+    ? stages[0] === 'interview_scheduled'
+    : stage === 'interview_scheduled';
 
   let query = supabase
     .from('job_applications')
@@ -40,7 +48,8 @@ export async function listJobApplications(
       `
       id, cohort, stage, assigned_to, needs_review, review_reason, source_channel,
       origin_label, created_by_label, created_at, hired_at, directory_id,
-      team_member_id, team_member_service_id,
+      team_member_id, team_member_service_id, interview_at, needs_stage_review,
+      legacy_stage, fit_rank,
       candidate:job_candidates (
         id, full_name, phone, email, document_number, location_text
       ),
@@ -51,14 +60,19 @@ export async function listJobApplications(
       { count: 'exact' },
     )
     .is('deleted_at', null)
-    .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
+
+  if (scheduledOnly) query = query.order('interview_at', { ascending: true, nullsFirst: false });
+  else query = query.order('fit_rank', { ascending: false }).order('created_at', { ascending: false });
 
   if (!includeMarian && !cohort) query = query.eq('cohort', 'job');
   if (cohort) query = query.eq('cohort', cohort);
-  if (stage) query = query.eq('stage', stage);
+  if (stages.length > 0) query = query.in('stage', stages);
+  else if (stage) query = query.eq('stage', stage);
   if (assignedTo) query = query.eq('assigned_to', assignedTo);
   if (needsReview) query = query.eq('needs_review', true);
+  if (priorityOnly) query = query.eq('fit_rank', 2);
+  if (needsStageReview) query = query.eq('needs_stage_review', true);
 
   const { data, error, count } = await query;
   if (error) throw new JobApplicationsError(error.message, 'query', 500);
@@ -157,6 +171,7 @@ export async function mutateApplication(
         p_actor_id: actor.id,
         p_actor_label: actor.label,
         p_note: body.note ?? null,
+        p_interview_at: body.interviewAt ?? null,
       });
     case 'assign':
       return rpc(supabase, 'assign_job_application', {

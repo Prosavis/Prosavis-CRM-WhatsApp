@@ -10,6 +10,9 @@ import {
 import { downloadWhatsAppBucketBytes } from '../whatsappMediaStorage.ts';
 import {
   RESUME_ANALYSIS_SCHEMA_VERSION,
+  fitMarkFromCleaning,
+  fitRankFromMark,
+  scoreCleaningExperience,
   type ExtractedResumeSubject,
 } from '../jobApplications/domain.ts';
 import { planSubjectActions } from './applySubjects.ts';
@@ -206,7 +209,7 @@ export async function applyExtractedResult(
   const plan = planSubjectActions(extracted.subjects);
   const { data: application } = await supabase
     .from('job_applications')
-    .select('id, candidate_id, stage')
+    .select('id, candidate_id')
     .eq('id', applicationId)
     .maybeSingle();
   if (!application) return;
@@ -238,15 +241,22 @@ export async function applyExtractedResult(
     });
   }
 
+  const cleaning = scoreCleaningExperience(extracted.facts);
+  const fitRank = fitRankFromMark(
+    fitMarkFromCleaning(cleaning.score, true, cleaning.evidence.length),
+  );
+
+  await supabase
+    .from('job_applications')
+    .update({
+      fit_rank: fitRank,
+      ...(plan.needsReview
+        ? { needs_review: true, review_reason: plan.reviewReason }
+        : {}),
+    })
+    .eq('id', applicationId);
+
   if (plan.needsReview) {
-    await supabase
-      .from('job_applications')
-      .update({
-        needs_review: true,
-        review_reason: plan.reviewReason,
-        stage: application.stage === 'new' ? 'pending_review' : application.stage,
-      })
-      .eq('id', applicationId);
     await supabase.from('job_application_events').insert({
       application_id: applicationId,
       event_type: 'review_flagged',
@@ -269,6 +279,10 @@ export async function applyExtractedResult(
   for (const item of criteria) {
     const key = String((item as { key?: string }).key ?? '');
     if (!key) continue;
+    if (key === 'cleaning_experience') {
+      scores[key] = cleaning;
+      continue;
+    }
     const matches = extracted.facts.filter((fact) =>
       fact.key === key || fact.key.includes(key) || fact.value.toLowerCase().includes(key.replace('_', ' '))
     );

@@ -1,5 +1,10 @@
 # Migraciones Supabase — Prosavis CRM WhatsApp
 
+### Proceso de selección (10/11/2026)
+
+- `20261110121000_job_selection_process.sql`: etapas de ingreso y entrevista, `interview_at`, `needs_stage_review`, `legacy_stage`, `fit_rank`. Reclasifica lo ya guardado (sin inventar citas) y recalcula experiencia en limpieza desde hechos existentes. La transición nueva exige fecha o nota según la etapa.
+- Aplicada en `djzwjaegxbhlefanmmee` el 10/11/2026 por CLI (`db query` + `migration repair --status applied`). No fue `db push`: el historial local y remoto sigue desfasado en otras versiones.
+
 ### Afinidad cliente ↔ auxiliar (06/11/2026)
 
 - `20261106214357_crm_client_cleaner_affinity.sql`: tabla `crm_client_cleaner_affinity` (`directory_id` → `crm_directory.id` con cascada, `member_id`, `entry` jsonb), índice por `member_id`, RLS sin políticas y sin grants para `anon`/`authenticated`.

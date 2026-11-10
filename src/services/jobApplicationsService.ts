@@ -48,6 +48,9 @@ export function listJobApplications(params: {
   search?: string;
   includeMarian?: boolean;
   needsReview?: boolean;
+  priorityOnly?: boolean;
+  needsStageReview?: boolean;
+  stages?: string[] | null;
   limit?: number;
   offset?: number;
 }): Promise<JobApplicationsListResponse> {
@@ -62,8 +65,13 @@ export function getJobApplicationMetrics(includeMarian = false): Promise<JobAppl
   return invokeAdmin<JobApplicationsMetrics>({ action: 'metrics', includeMarian });
 }
 
-export function transitionJobApplication(id: string, stage: string, note?: string) {
-  return invokeAdmin({ action: 'transition', id, stage, note });
+export function transitionJobApplication(
+  id: string,
+  stage: string,
+  note?: string,
+  interviewAt?: string,
+) {
+  return invokeAdmin({ action: 'transition', id, stage, note, interviewAt });
 }
 
 export function assignJobApplication(id: string, assignedTo: string | null) {

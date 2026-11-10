@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(28);
+select plan(35);
 
 select has_table('public', 'document_assets', 'document assets exist');
 select has_table('public', 'document_analysis_jobs', 'analysis jobs exist');
@@ -68,6 +68,17 @@ select is(
 );
 
 select is(
+  (
+    select stage
+    from public.job_applications
+    where directory_id = '51000000-0000-4000-8000-000000000001'
+    limit 1
+  ),
+  'inbound',
+  'a new application starts as ingreso'
+);
+
+select is(
   jsonb_array_length(
     public.ingest_job_application_from_directory(
       '51000000-0000-4000-8000-000000000001',
@@ -107,15 +118,47 @@ select throws_ok(
   'hired without Equipo is rejected'
 );
 
+select throws_ok(
+  $$
+    select public.transition_job_application_stage(
+      (select id from public.job_applications where directory_id = '51000000-0000-4000-8000-000000000001' limit 1),
+      'interview_scheduled',
+      'system',
+      'tester',
+      'tester',
+      null,
+      null
+    )
+  $$,
+  'interview requires a date',
+  'scheduled without a date is rejected'
+);
+
+select throws_ok(
+  $$
+    select public.transition_job_application_stage(
+      (select id from public.job_applications where directory_id = '51000000-0000-4000-8000-000000000001' limit 1),
+      'rejected',
+      'system',
+      'tester',
+      'tester',
+      null,
+      null
+    )
+  $$,
+  'a note is required',
+  'rejection without a note is rejected'
+);
+
 select lives_ok(
   $$
     select public.transition_job_application_stage(
       (select id from public.job_applications where directory_id = '51000000-0000-4000-8000-000000000001' limit 1),
-      'contacted',
+      'interview_pending',
       'system',
       'tester',
       'tester',
-      'llamada'
+      null
     )
   $$,
   'valid stage transition writes'
@@ -320,6 +363,26 @@ select is(
   ),
   true,
   'job_applications has RLS enabled'
+);
+
+select is(
+  (
+    app_private.job_cleaning_fit(
+      '[{"key":"experiencia","value":"aseo","evidence":"aseo en casas"}]'::jsonb
+    ) ->> 'score'
+  )::numeric = 0.7,
+  true,
+  'one cleaning fact scores 0.7'
+);
+
+select is(
+  (
+    app_private.job_cleaning_fit(
+      '[{"key":"experiencia","value":"aseo de oficinas","evidence":"aseo de oficinas en Cali"}]'::jsonb
+    ) ->> 'score'
+  )::numeric = 1,
+  true,
+  'a place in the cleaning evidence scores 1'
 );
 
 select * from finish();

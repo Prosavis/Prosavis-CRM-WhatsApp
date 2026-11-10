@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   canTransitionJobStage,
+  fitMarkFromCleaning,
+  fitRankFromMark,
   matchJobIdentity,
   resolveJobCohortFromTag,
   resolveJobCohortsFromTags,
+  scoreCleaningExperience,
   shouldAutoCreateSubject,
 } from './jobApplicationsDomain';
 
@@ -35,9 +38,35 @@ describe('jobApplicationsDomain', () => {
     )).toEqual({ kind: 'review', reason: 'name_only' });
   });
 
-  it('blocks hired without a real team member', () => {
-    expect(canTransitionJobStage('interviewed', 'hired', false)).toBe(false);
-    expect(canTransitionJobStage('interviewed', 'hired', true)).toBe(true);
+  it('blocks hired without a real team member and requires a date or a note', () => {
+    expect(canTransitionJobStage('inbound', 'hired', false)).toBe(false);
+    expect(canTransitionJobStage('inbound', 'hired', true)).toBe(true);
+    expect(canTransitionJobStage('inbound', 'interview_scheduled', true)).toBe(false);
+    expect(canTransitionJobStage('inbound', 'interview_scheduled', true, {
+      interviewAt: '2026-11-12T15:00:00.000Z',
+    })).toBe(true);
+    expect(canTransitionJobStage('inbound', 'rejected', true)).toBe(false);
+    expect(canTransitionJobStage('inbound', 'rejected', true, { note: 'Sin experiencia' })).toBe(true);
+  });
+
+  it('marks a resume as priority only when cleaning experience is cited', () => {
+    const one = scoreCleaningExperience([
+      { key: 'experiencia', value: 'aseo', evidence: 'aseo en casas' },
+    ]);
+    expect(one.score).toBe(0.7);
+    expect(fitRankFromMark(fitMarkFromCleaning(one.score, true, one.evidence.length))).toBe(2);
+
+    const placed = scoreCleaningExperience([
+      { key: 'experiencia', value: 'aseo de oficinas', evidence: 'aseo de oficinas en Cali' },
+    ]);
+    expect(placed.score).toBe(1);
+
+    const empty = scoreCleaningExperience([
+      { key: 'experiencia', value: 'ventas', evidence: 'vendía en un local' },
+    ]);
+    expect(empty.score).toBe(0);
+    expect(fitMarkFromCleaning(empty.score, true, empty.evidence.length)).toBe('analyzed');
+    expect(fitMarkFromCleaning(0, false, 0)).toBe('none');
   });
 
   it('auto-creates only clear multi-word identities', () => {

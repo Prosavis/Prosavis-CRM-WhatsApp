@@ -1,8 +1,11 @@
 import { assertEquals } from 'jsr:@std/assert';
 import {
   canTransitionJobStage,
+  fitRankFromMark,
+  fitMarkFromCleaning,
   matchJobIdentity,
   resolveJobCohortFromTag,
+  scoreCleaningExperience,
   shouldAutoCreateSubject,
 } from './domain.ts';
 import { planSubjectActions } from '../documentAnalysis/applySubjects.ts';
@@ -27,7 +30,15 @@ Deno.test('dedupe stays conservative', () => {
 });
 
 Deno.test('hired requires a team member', () => {
-  assertEquals(canTransitionJobStage('trial', 'hired', false), false);
+  assertEquals(canTransitionJobStage('inbound', 'hired', false), false);
+});
+
+Deno.test('cleaning evidence sets the priority rank', () => {
+  const scored = scoreCleaningExperience([
+    { key: 'experiencia', value: 'aseo', evidence: 'aseo en casas' },
+  ]);
+  assertEquals(scored.score, 0.7);
+  assertEquals(fitRankFromMark(fitMarkFromCleaning(scored.score, true, scored.evidence.length)), 2);
 });
 
 Deno.test('split planner queues weak extra subjects for review', () => {

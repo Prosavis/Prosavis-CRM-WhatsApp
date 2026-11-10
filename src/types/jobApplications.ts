@@ -12,6 +12,10 @@ export interface JobApplicationListItem {
   created_by_label: string | null;
   created_at: string;
   hired_at: string | null;
+  interview_at?: string | null;
+  needs_stage_review?: boolean;
+  legacy_stage?: string | null;
+  fit_rank?: number | null;
   directory_id: string | null;
   team_member_id: string | null;
   candidate?: {
@@ -43,7 +47,12 @@ export interface JobApplicationsMetrics {
   job: number;
   marianSpecial: number;
   needsReview: number;
+  needsStageReview: number;
+  inbound: number;
+  priority: number;
+  interviewsOpen: number;
   hired: number;
+  closures: number;
   rejectedOrWithdrawn: number;
   byStage: Record<string, number>;
   bySourceChannel: Record<string, number>;

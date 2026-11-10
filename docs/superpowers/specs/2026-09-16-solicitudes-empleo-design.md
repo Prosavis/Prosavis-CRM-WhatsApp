@@ -36,21 +36,21 @@ El CRM tenía postulaciones mezcladas con clientes: tags `Job` / `Marian` en `cr
 
 ## 4. Embudo
 
-Etapas canónicas (código → UI):
+Dos capas. La etapa es el proceso. La marca Prioritaria no es una etapa: ordena y filtra Ingreso cuando la hoja de vida ya analizada cita experiencia en limpieza.
 
 | Código | UI |
 |---|---|
-| `new` | Nueva |
-| `pending_review` | Por revisar |
-| `contacted` | Contactada |
-| `interviewed` | Entrevistada |
-| `trial` | En prueba |
-| `possible` | Posible |
+| `inbound` | Ingreso |
+| `interview_pending` | Entrevista pendiente |
+| `interview_scheduled` | Entrevista programada |
+| `interview_declined` | Entrevista rechazada |
+| `no_show` | No asiste |
 | `hired` | Contratada |
-| `rejected` | Descartada |
-| `withdrawn` | Retirada |
+| `rejected` | Rechazada |
 
-`hired` exige vínculo a Equipo. La IA no contrata ni descarta.
+`interview_scheduled` exige fecha. `interview_declined`, `no_show` y `rejected` exigen una nota. `hired` exige vínculo a Equipo. La IA no contrata, no descarta y no cambia la etapa: si la identidad es dudosa solo enciende `needs_review`.
+
+Quien estaba en Contactada, Entrevistada, En prueba o Posible queda en Ingreso con `needs_stage_review` y la etapa anterior visible. `withdrawn` pasa a Rechazada, con la nota de reclasificación. No se inventan citas.
 
 ## 5. Servicio documental reusable
 
