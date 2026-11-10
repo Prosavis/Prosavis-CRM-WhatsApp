@@ -8,8 +8,10 @@ import {
   filterCommercialWebhookEvents,
   isReplayAllLinesRequest,
   isReplayUnprocessedRequest,
+  isReplayableWebhookEvent,
   payloadHasPhoneNumberId,
   replaySinceFromPayload,
+  stableKeysTouchedByPayload,
 } from './whatsappWebhookReplay.ts';
 
 const commercialPayload = {
@@ -57,4 +59,27 @@ Deno.test('replay keeps commercial events and drops bot LID leftovers', () => {
     { id: 'bot', payload: botPayload },
   ]);
   assertEquals(filtered.map((event) => event.id), ['commercial']);
+});
+
+Deno.test('replay only reprocesses messages and coexistence echoes', () => {
+  assertEquals(isReplayableWebhookEvent({ event_type: 'messages' }), true);
+  assertEquals(isReplayableWebhookEvent({ event_type: 'smb_message_echoes' }), true);
+  assertEquals(isReplayableWebhookEvent({ event_type: 'history' }), false);
+  assertEquals(isReplayableWebhookEvent({ event_type: 'smb_app_state_sync' }), false);
+  assertEquals(
+    stableKeysTouchedByPayload(commercialPayload),
+    [`573005653159__${COMMERCIAL_PHONE_NUMBER_ID}`],
+  );
+  assertEquals(stableKeysTouchedByPayload(botPayload), ['lid:CO.1']);
+  assertEquals(
+    stableKeysTouchedByPayload({
+      entry: [{
+        changes: [{
+          field: 'history',
+          value: { metadata: { phone_number_id: COMMERCIAL_PHONE_NUMBER_ID } },
+        }],
+      }],
+    }),
+    [],
+  );
 });

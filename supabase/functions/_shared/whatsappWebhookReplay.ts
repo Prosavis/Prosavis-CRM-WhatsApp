@@ -1,4 +1,6 @@
-import { COMMERCIAL_PHONE_NUMBER_ID } from './whatsappLines.ts';
+import { parseCoexCustomerPhone } from './whatsappCoexWebhook.ts';
+import { resolveInboundCustomer } from './whatsappInboundIdentity.ts';
+import { COMMERCIAL_PHONE_NUMBER_ID, conversationStableKey } from './whatsappLines.ts';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -43,6 +45,43 @@ export function payloadHasPhoneNumberId(
     }
   }
   return false;
+}
+
+export const REPLAYABLE_WEBHOOK_EVENT_TYPES = ['messages', 'smb_message_echoes'] as const;
+
+export function isReplayableWebhookEvent(event: { event_type?: string | null }): boolean {
+  const type = getString(event.event_type);
+  return (REPLAYABLE_WEBHOOK_EVENT_TYPES as readonly string[]).includes(type);
+}
+
+/** Hilos cuyo preview hay que recomputar después de un replay, para que un
+ * mensaje viejo no deje la lista en un texto anterior al último real. */
+export function stableKeysTouchedByPayload(payload: unknown): string[] {
+  const keys = new Set<string>();
+  for (const entry of asArray(asRecord(payload).entry)) {
+    for (const change of asArray(asRecord(entry).changes)) {
+      const changeRecord = asRecord(change);
+      const field = getString(changeRecord.field) || 'messages';
+      const value = asRecord(changeRecord.value);
+      const phoneNumberId = getString(asRecord(value.metadata).phone_number_id) || null;
+      if (field === 'messages') {
+        const contacts = asArray(value.contacts);
+        for (const rawMessage of asArray(value.messages)) {
+          const identity = resolveInboundCustomer(asRecord(rawMessage), contacts);
+          if (!identity) continue;
+          keys.add(conversationStableKey(identity.customerKey, phoneNumberId));
+        }
+      }
+      if (field === 'smb_message_echoes') {
+        for (const rawEcho of asArray(value.message_echoes)) {
+          const parsed = parseCoexCustomerPhone(asRecord(rawEcho), phoneNumberId ?? '');
+          if (!parsed) continue;
+          keys.add(conversationStableKey(parsed.customerPhone, phoneNumberId));
+        }
+      }
+    }
+  }
+  return [...keys];
 }
 
 export function filterCommercialWebhookEvents<T extends { payload: unknown }>(

@@ -3,7 +3,7 @@
  * Alineado con prosavis-firebase/functions/src/utils/phone.ts
  */
 
-import { isWhatsappLidIdentity } from './whatsappLines.ts';
+import { conversationStableKey, isWhatsappLidIdentity } from './whatsappLines.ts';
 
 export function normalizeDirectoryPhoneE164(
   phone: string | null | undefined
@@ -52,6 +52,26 @@ export function directoryPhoneFromWhatsAppIdentity(
   const raw = (contactPhone || phone || '').trim();
   if (!raw || isWhatsappLidIdentity(raw)) return null;
   return normalizeDirectoryPhoneE164(raw);
+}
+
+/**
+ * Identidad con la que se abre un hilo desde el CRM (nuevo contacto, directorio,
+ * reenvío). El teléfono queda en E.164 y la línea comercial usa
+ * `<e164>__<phone_number_id>`. Sin esto, un móvil de 10 dígitos en la 311
+ * choca con el índice (phone_key, phone_number_id) y el webhook no puede
+ * guardar los mensajes reales.
+ */
+export function leadConversationIdentity(
+  phone: string | null | undefined,
+  phoneNumberId: string | null | undefined,
+): { phoneDigits: string; stableKey: string } | null {
+  const e164 = normalizeDirectoryPhoneE164(phone);
+  if (!e164) return null;
+  const phoneDigits = e164.replace(/\D/g, '');
+  return {
+    phoneDigits,
+    stableKey: conversationStableKey(phoneDigits, phoneNumberId),
+  };
 }
 
 export function directoryPhoneKey(

@@ -22,6 +22,7 @@ import {
 } from '@/services/whatsappService';
 import { directoryService } from '@/services/directoryService';
 import { normalizeDirectoryPhoneE164 } from '@/utils/directoryPhone';
+import { directoryConversationLink } from '@/utils/directoryConversationMatch';
 import { coloredChipSx } from '@/utils/coloredChipStyles';
 import { usePhoneLayout } from '@/hooks/usePhoneLayout';
 
@@ -113,7 +114,7 @@ const NewContactDialog: React.FC<NewContactDialogProps> = ({
           source: 'WHATSAPP_INBOUND',
           status: 'active',
           classification: 'unknown',
-          whatsAppConversationId: result.conversationId,
+          ...directoryConversationLink(result.conversationId),
         });
         directoryId = created.id;
       } else if (displayName || result.conversationId) {
@@ -121,7 +122,7 @@ const NewContactDialog: React.FC<NewContactDialogProps> = ({
           ...(displayName
             ? { fullName: displayName, displayName }
             : {}),
-          whatsAppConversationId: result.conversationId,
+          ...directoryConversationLink(result.conversationId),
         });
       }
 

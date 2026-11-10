@@ -1,9 +1,6 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
+import { directoryPhoneKey, leadConversationIdentity } from '../_shared/directoryPhone.ts';
 import { requireCrmAdmin } from '../_shared/supabase.ts';
-
-function normalizePhone(phone: string): string {
-  return phone.replace(/\D/g, '');
-}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -11,27 +8,42 @@ Deno.serve(async (req) => {
   try {
     const { supabase } = await requireCrmAdmin(req);
     const body = await req.json();
-    const phone = normalizePhone(String(body.phone ?? ''));
     const name = body.name ? String(body.name) : null;
     const phoneNumberId = body.phoneNumberId
       ? String(body.phoneNumberId)
       : Deno.env.get('WHATSAPP_PHONE_NUMBER_ID') ?? null;
+    const identity = leadConversationIdentity(String(body.phone ?? ''), phoneNumberId);
 
-    if (!phone || phone.length < 10) {
+    if (!identity) {
       return jsonResponse({ error: 'Teléfono inválido.' }, 400);
     }
 
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await supabase
       .from('whatsapp_conversations')
       .select('stable_key, phone_number_id, contact_name')
-      .eq('stable_key', phone)
+      .eq('stable_key', identity.stableKey)
       .maybeSingle();
+    if (existingError) throw existingError;
 
     if (!existing) {
+      const phoneKey = directoryPhoneKey(identity.phoneDigits);
+      const { data: sameLine, error: sameLineError } = phoneKey && phoneNumberId
+        ? await supabase
+          .from('whatsapp_conversations')
+          .select('stable_key')
+          .eq('phone_key', phoneKey)
+          .eq('phone_number_id', phoneNumberId)
+          .maybeSingle()
+        : { data: null, error: null };
+      if (sameLineError) throw sameLineError;
+      if (sameLine?.stable_key) {
+        return jsonResponse({ success: true, conversationId: sameLine.stable_key });
+      }
+
       const { error } = await supabase.from('whatsapp_conversations').insert({
-        stable_key: phone,
-        phone,
-        contact_phone: phone,
+        stable_key: identity.stableKey,
+        phone: identity.phoneDigits,
+        contact_phone: identity.phoneDigits,
         contact_name: name,
         phone_number_id: phoneNumberId,
         state: 'active',
@@ -51,12 +63,12 @@ Deno.serve(async (req) => {
         const { error } = await supabase
           .from('whatsapp_conversations')
           .update(patch)
-          .eq('stable_key', phone);
+          .eq('stable_key', identity.stableKey);
         if (error) throw error;
       }
     }
 
-    return jsonResponse({ success: true, conversationId: phone });
+    return jsonResponse({ success: true, conversationId: identity.stableKey });
   } catch (error) {
     if (error instanceof Response) return error;
     return jsonResponse({ error: String(error) }, 500);

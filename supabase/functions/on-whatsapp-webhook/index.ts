@@ -30,9 +30,11 @@ import {
 } from '../_shared/whatsappInboundIdentity.ts';
 import {
   filterCommercialWebhookEvents,
+  isReplayableWebhookEvent,
   isReplayAllLinesRequest,
   isReplayUnprocessedRequest,
   replaySinceFromPayload,
+  stableKeysTouchedByPayload,
 } from '../_shared/whatsappWebhookReplay.ts';
 import { scheduleBackgroundWork } from '../_shared/edgeBackground.ts';
 import {
@@ -159,6 +161,7 @@ async function processInboundMessage(params: {
   message: JsonRecord;
   value: JsonRecord;
   contacts: unknown[];
+  replay?: boolean;
 }): Promise<'inserted' | 'ruta_handled' | 'duplicate' | 'skipped' | 'updated'> {
   const identity = resolveInboundCustomer(params.message, params.contacts);
   const waMessageId = getString(params.message.id);
@@ -186,13 +189,15 @@ async function processInboundMessage(params: {
       stableKey,
       direction: 'inbound',
     });
-    await runCtwaAdMenu({
-      supabase: params.supabase,
-      message: params.message,
-      stableKey,
-      phoneNumberId,
-      to: customerKey,
-    });
+    if (!params.replay) {
+      await runCtwaAdMenu({
+        supabase: params.supabase,
+        message: params.message,
+        stableKey,
+        phoneNumberId,
+        to: customerKey,
+      });
+    }
     return 'duplicate';
   }
 
@@ -347,7 +352,7 @@ async function processInboundMessage(params: {
       messageBody: content.messageBody,
       createdAt,
     });
-    if (!content.reactionTo && !content.reactionRemoved) {
+    if (!params.replay && !content.reactionTo && !content.reactionRemoved) {
       scheduleBackgroundWork(
         runReviewIntentShadow({
           supabase: params.supabase,
@@ -359,24 +364,26 @@ async function processInboundMessage(params: {
     }
   }
 
-  const rutaEvent = buildRutaInboundEvent({ message: params.message, phoneNumberId, receivedAt: createdAt });
-  if (
-    rutaEvent &&
-    await forwardRutaInbound(rutaEvent, {
-      url: envString('RUTA_INBOUND_URL'),
-      apiKey: envString('RUTA_INBOUND_API_KEY'),
-    })
-  ) {
-    return 'ruta_handled';
-  }
+  if (!params.replay) {
+    const rutaEvent = buildRutaInboundEvent({ message: params.message, phoneNumberId, receivedAt: createdAt });
+    if (
+      rutaEvent &&
+      await forwardRutaInbound(rutaEvent, {
+        url: envString('RUTA_INBOUND_URL'),
+        apiKey: envString('RUTA_INBOUND_API_KEY'),
+      })
+    ) {
+      return 'ruta_handled';
+    }
 
-  await runCtwaAdMenu({
-    supabase: params.supabase,
-    message: params.message,
-    stableKey,
-    phoneNumberId,
-    to: customerKey,
-  });
+    await runCtwaAdMenu({
+      supabase: params.supabase,
+      message: params.message,
+      stableKey,
+      phoneNumberId,
+      to: customerKey,
+    });
+  }
 
   return 'inserted';
 }
@@ -409,7 +416,7 @@ async function syncDirectoryOnInbound(params: {
     const digits = params.senderPhone.replace(/\D/g, '');
     let query = params.supabase
       .from('crm_directory')
-      .select('id,active_sequence,opt_out')
+      .select('id,active_sequence,opt_out,last_response_at')
       .limit(1);
 
     if (phoneKey) {
@@ -421,12 +428,18 @@ async function syncDirectoryOnInbound(params: {
     const { data: entry, error } = await query.maybeSingle();
     if (error || !entry) return;
 
-    const patch: Record<string, unknown> = {
-      last_response_at: params.createdAt,
-      last_response_text: params.messageBody?.slice(0, 500) ?? null,
-    };
+    const currentResponseAt = entry.last_response_at
+      ? new Date(String(entry.last_response_at)).getTime()
+      : 0;
+    const incomingAt = new Date(params.createdAt).getTime();
+    const isNewer = !currentResponseAt || incomingAt >= currentResponseAt;
+    const patch: Record<string, unknown> = {};
+    if (isNewer) {
+      patch.last_response_at = params.createdAt;
+      patch.last_response_text = params.messageBody?.slice(0, 500) ?? null;
+    }
 
-    if (isStopKeyword(params.messageBody)) {
+    if (isNewer && isStopKeyword(params.messageBody)) {
       patch.opt_out = true;
       patch.status = 'opt_out';
       if (entry.active_sequence === REACTIVATION_SEQUENCE) {
@@ -438,6 +451,7 @@ async function syncDirectoryOnInbound(params: {
       });
     }
 
+    if (Object.keys(patch).length === 0) return;
     await params.supabase.from('crm_directory').update(patch).eq('id', entry.id);
   } catch (err) {
     console.error('[on-whatsapp-webhook] syncDirectoryOnInbound failed', {
@@ -571,6 +585,7 @@ async function processStatus(params: {
 async function processPayload(
   supabase: ReturnType<typeof getServiceClient>,
   payload: JsonRecord,
+  options?: { replay?: boolean },
 ): Promise<ProcessingResult> {
   const result: ProcessingResult = {
     inboundMessages: 0,
@@ -620,6 +635,7 @@ async function processPayload(
             message: asRecord(rawMessage),
             value,
             contacts,
+            replay: options?.replay === true,
           });
 
           if (processed === 'duplicate' || processed === 'skipped') result.skippedDuplicates += 1;
@@ -628,6 +644,7 @@ async function processPayload(
             result.inboundMessages += 1;
             const raw = asRecord(rawMessage);
             const content = getMessageContent(raw);
+            if (options?.replay) continue;
             const notice = buildFrancyNotice({
               field: 'messages',
               from: getString(raw.from),
@@ -754,6 +771,8 @@ async function replayUnprocessedCommercialEvents(
   since: string;
   scanned: number;
   replayed: number;
+  previewsRecomputed: number;
+  previewErrors: string[];
   results: Array<{
     id: string;
     processed: boolean;
@@ -764,8 +783,9 @@ async function replayUnprocessedCommercialEvents(
 }> {
   const { data: events, error } = await supabase
     .from('whatsapp_webhook_events')
-    .select('id, payload, processed, error_message, received_at')
+    .select('id, event_type, payload, processed, error_message, received_at')
     .eq('processed', false)
+    .lt('replay_attempts', 3)
     .gte('received_at', since)
     .order('received_at', { ascending: true })
     .limit(500);
@@ -781,9 +801,32 @@ async function replayUnprocessedCommercialEvents(
     statuses: number;
     errors: string[];
   }> = [];
+  const touchedKeys = new Set<string>();
 
   for (const event of commercialEvents) {
-    const processingResult = await processPayload(supabase, asRecord(event.payload));
+    if (!isReplayableWebhookEvent(event)) {
+      const { error: skipError } = await supabase
+        .from('whatsapp_webhook_events')
+        .update({
+          processed: true,
+          error_message: 'replay omitido: no se vincula historial ni agenda Coex',
+        })
+        .eq('id', event.id);
+      if (skipError) throw skipError;
+      results.push({
+        id: event.id,
+        processed: true,
+        inboundMessages: 0,
+        statuses: 0,
+        errors: [],
+      });
+      continue;
+    }
+
+    const processingResult = await processPayload(supabase, asRecord(event.payload), { replay: true });
+    for (const stableKey of stableKeysTouchedByPayload(event.payload)) {
+      touchedKeys.add(stableKey);
+    }
     const processed = processingResult.errors.length === 0;
     const errorMessage = processed ? null : processingResult.errors.join(' | ');
     const { error: updateError } = await supabase
@@ -800,10 +843,21 @@ async function replayUnprocessedCommercialEvents(
     });
   }
 
+  const previewErrors: string[] = [];
+  for (const stableKey of touchedKeys) {
+    try {
+      await recomputeWhatsAppConversationPreview(supabase, stableKey);
+    } catch (previewError) {
+      previewErrors.push(`${stableKey}: ${formatWebhookError(previewError)}`);
+    }
+  }
+
   return {
     since,
     scanned: (events ?? []).length,
     replayed: results.length,
+    previewsRecomputed: touchedKeys.size - previewErrors.length,
+    previewErrors,
     results,
   };
 }
