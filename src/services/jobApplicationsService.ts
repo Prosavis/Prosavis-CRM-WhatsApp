@@ -52,6 +52,7 @@ export function listJobApplications(params: {
   needsStageReview?: boolean;
   contactedFrom?: string | null;
   contactedTo?: string | null;
+  cv?: 'sent' | 'missing' | null;
   stages?: string[] | null;
   limit?: number;
   offset?: number;

@@ -17,6 +17,8 @@ import {
   useJobApplicationsMetrics,
 } from '@/hooks/useJobApplicationsQueries';
 import { JOB_APPLICATION_STAGES, JOB_STAGE_LABELS, type JobApplicationStage } from '@/utils/jobApplicationsDomain';
+import { applyWhatsAppTab } from '@/utils/whatsappTabs';
+import type { JobApplicationListItem } from '@/types/jobApplications';
 
 interface JobListFilters {
   priorityOnly: boolean;
@@ -25,6 +27,7 @@ interface JobListFilters {
   includeMarian: boolean;
   contactedFrom: string;
   contactedTo: string;
+  cv: '' | 'sent' | 'missing';
 }
 
 const EMPTY_FILTERS: JobListFilters = {
@@ -34,6 +37,7 @@ const EMPTY_FILTERS: JobListFilters = {
   includeMarian: false,
   contactedFrom: '',
   contactedTo: '',
+  cv: '',
 };
 
 function activeFilterCount(filters: JobListFilters): number {
@@ -41,7 +45,8 @@ function activeFilterCount(filters: JobListFilters): number {
     + Number(filters.needsStageReview)
     + Number(filters.needsReview)
     + Number(filters.includeMarian)
-    + Number(Boolean(filters.contactedFrom || filters.contactedTo));
+    + Number(Boolean(filters.contactedFrom || filters.contactedTo))
+    + Number(Boolean(filters.cv));
 }
 
 const JobApplicationsPage: React.FC = () => {
@@ -67,6 +72,7 @@ const JobApplicationsPage: React.FC = () => {
     needsStageReview: filters.needsStageReview,
     contactedFrom: filters.contactedFrom || null,
     contactedTo: filters.contactedTo || null,
+    cv: filters.cv || null,
     limit,
     offset,
   });
@@ -75,6 +81,22 @@ const JobApplicationsPage: React.FC = () => {
   const items = list.data?.items ?? [];
   const total = list.data?.total ?? 0;
   const byStage = metrics.data?.byStage ?? {};
+
+  const openChat = (row: JobApplicationListItem) => {
+    const key = row.sources?.find((source) => source.conversation_stable_key)?.conversation_stable_key;
+    const digits = String(row.candidate?.phone ?? row.directory?.phone ?? '').replace(/\D/g, '');
+    if (!key && !digits) return;
+    setSearchParams((prev) => {
+      const next = applyWhatsAppTab(prev, 'inbox');
+      next.delete('applicationId');
+      if (key) next.set('conversation', key);
+      else {
+        next.set('focusPhone', digits);
+        next.set('conversation', digits);
+      }
+      return next;
+    });
+  };
 
   const openDetail = (id: string | null) => {
     setSearchParams((prev) => {
@@ -210,6 +232,19 @@ const JobApplicationsPage: React.FC = () => {
                 onClick={() => setDraft((current) => ({ ...current, [key]: !current[key] }))}
               />
             ))}
+            {([
+              ['sent', 'Con hoja de vida'],
+              ['missing', 'Sin hoja de vida'],
+            ] as const).map(([value, label]) => (
+              <Chip
+                key={value}
+                label={label}
+                clickable
+                color={draft.cv === value ? 'primary' : 'default'}
+                variant={draft.cv === value ? 'filled' : 'outlined'}
+                onClick={() => setDraft((current) => ({ ...current, cv: current.cv === value ? '' : value }))}
+              />
+            ))}
           </Stack>
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
             <TextField
@@ -259,6 +294,7 @@ const JobApplicationsPage: React.FC = () => {
       <JobApplicationTable
         items={items}
         onOpen={openDetail}
+        onChat={openChat}
         onTransition={async (id, change) => {
           await mutations.transition.mutateAsync({
             id,

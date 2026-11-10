@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   Box,
+  Button,
   Chip,
   Table,
   TableBody,
@@ -16,6 +17,7 @@ import { JobStageControl, type JobStageChange } from '@/components/jobs/JobStage
 interface JobApplicationTableProps {
   items: JobApplicationListItem[];
   onOpen: (id: string) => void;
+  onChat: (row: JobApplicationListItem) => void;
   onTransition: (id: string, change: JobStageChange) => Promise<void> | void;
 }
 
@@ -42,6 +44,7 @@ function fitColor(rank: number | null | undefined): 'success' | 'info' | 'defaul
 export const JobApplicationTable: React.FC<JobApplicationTableProps> = ({
   items,
   onOpen,
+  onChat,
   onTransition,
 }) => {
   if (items.length === 0) {
@@ -60,6 +63,7 @@ export const JobApplicationTable: React.FC<JobApplicationTableProps> = ({
           <TableCell sx={{ color: 'text.secondary', fontSize: 12 }}>Marca</TableCell>
           <TableCell sx={{ color: 'text.secondary', fontSize: 12 }}>Estado</TableCell>
           <TableCell sx={{ color: 'text.secondary', fontSize: 12 }}>Contactó</TableCell>
+          <TableCell sx={{ color: 'text.secondary', fontSize: 12 }} />
         </TableRow>
       </TableHead>
       <TableBody>
@@ -109,6 +113,19 @@ export const JobApplicationTable: React.FC<JobApplicationTableProps> = ({
             </TableCell>
             <TableCell sx={{ whiteSpace: 'nowrap', color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>
               {arrivedLabel(row.created_at)}
+            </TableCell>
+            <TableCell>
+              <Button
+                size="small"
+                variant="outlined"
+                disabled={!row.sources?.some((source) => source.conversation_stable_key) && !row.candidate?.phone && !row.directory?.phone}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onChat(row);
+                }}
+              >
+                Chat
+              </Button>
             </TableCell>
           </TableRow>
         ))}

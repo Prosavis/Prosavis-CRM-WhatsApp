@@ -44,6 +44,7 @@ export async function listJobApplications(
   const needsStageReview = params.needsStageReview === true || params.needsStageReview === 'true';
   const contactedFrom = bogotaDayStart(params.contactedFrom);
   const contactedTo = bogotaDayStart(params.contactedTo, true);
+  const cv = params.cv === 'sent' || params.cv === 'missing' ? params.cv : null;
   const stages = Array.isArray(params.stages)
     ? params.stages.map((value) => String(value)).filter(Boolean)
     : [];
@@ -64,7 +65,8 @@ export async function listJobApplications(
       ),
       directory:crm_directory (
         id, full_name, display_name, phone, photo_url, tags
-      )
+      ),
+      sources:job_application_sources (conversation_stable_key)
     `,
       { count: 'exact' },
     )
@@ -84,6 +86,8 @@ export async function listJobApplications(
   if (needsStageReview) query = query.eq('needs_stage_review', true);
   if (contactedFrom) query = query.gte('created_at', contactedFrom);
   if (contactedTo) query = query.lt('created_at', contactedTo);
+  if (cv === 'sent') query = query.gte('fit_rank', 1);
+  if (cv === 'missing') query = query.eq('fit_rank', 0);
 
   const { data, error, count } = await query;
   if (error) throw new JobApplicationsError(error.message, 'query', 500);

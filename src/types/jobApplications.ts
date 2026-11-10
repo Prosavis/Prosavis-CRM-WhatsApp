@@ -18,6 +18,7 @@ export interface JobApplicationListItem {
   fit_rank?: number | null;
   directory_id: string | null;
   team_member_id: string | null;
+  sources?: Array<{ conversation_stable_key?: string | null }> | null;
   candidate?: {
     id: string;
     full_name: string;
