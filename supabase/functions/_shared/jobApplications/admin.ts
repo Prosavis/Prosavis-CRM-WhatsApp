@@ -98,7 +98,7 @@ export async function getJobApplication(supabase: SupabaseClient, id: string) {
       `
       *,
       candidate:job_candidates (*),
-      directory:crm_directory (id, full_name, display_name, phone, email, photo_url, tags),
+      directory:crm_directory (id, full_name, display_name, phone, email, photo_url, tags, internal_notes),
       sources:job_application_sources (*),
       documents:job_application_documents (
         id, role, created_at, asset:document_assets (*)

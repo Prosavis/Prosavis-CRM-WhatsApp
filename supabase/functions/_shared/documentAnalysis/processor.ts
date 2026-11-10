@@ -272,7 +272,7 @@ export async function applyExtractedResult(
     .select('id, criteria')
     .eq('is_active', true)
     .maybeSingle();
-  if (!rubric) return;
+  if (rubric) {
 
   const scores: Record<string, { score: number; evidence: string[] }> = {};
   const criteria = Array.isArray(rubric.criteria) ? rubric.criteria : [];
@@ -307,5 +307,10 @@ export async function applyExtractedResult(
     actor_id: 'document-analysis-worker',
     actor_label: 'Análisis documental',
     payload: { summary: extracted.summary },
+  });
+  }
+
+  await supabase.rpc('append_job_context_from_application', {
+    p_application_id: applicationId,
   });
 }

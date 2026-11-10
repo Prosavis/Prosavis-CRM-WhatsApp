@@ -21,7 +21,7 @@ import {
 import { JOB_APPLICATION_STAGES, JOB_STAGE_LABELS, type JobApplicationStage } from '@/utils/jobApplicationsDomain';
 
 const INTERVIEW_STAGES = ['interview_pending', 'interview_scheduled'];
-const CLOSURE_STAGES = ['rejected', 'interview_declined', 'no_show'];
+const CLOSURE_STAGES = ['rejected', 'interview_declined', 'no_show', 'despedida'];
 
 const JobApplicationsPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();

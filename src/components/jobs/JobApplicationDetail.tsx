@@ -220,6 +220,11 @@ export const JobApplicationDetailPanel: React.FC<JobApplicationDetailProps> = ({
         </Button>
       ))}
 
+      <Typography variant="subtitle2" sx={{ mt: 2 }}>Cajón de contexto</Typography>
+      <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', mb: 2 }}>
+        {String((application.directory as { internal_notes?: string | null } | null)?.internal_notes || 'Aún no hay hoja de contexto.')}
+      </Typography>
+
       <Typography variant="subtitle2" sx={{ mt: 2 }}>Análisis</Typography>
       {summary ? <Typography variant="body2" sx={{ mb: 1 }}>{summary}</Typography> : (
         <Typography variant="body2" color="text.secondary">Aún no hay análisis.</Typography>

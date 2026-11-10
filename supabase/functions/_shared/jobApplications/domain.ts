@@ -6,6 +6,7 @@ export const JOB_APPLICATION_STAGES = [
   'no_show',
   'hired',
   'rejected',
+  'despedida',
 ] as const;
 
 export type JobApplicationStage = (typeof JOB_APPLICATION_STAGES)[number];
@@ -18,6 +19,7 @@ export const JOB_STAGE_LABELS: Record<JobApplicationStage, string> = {
   no_show: 'No asiste',
   hired: 'Contratada',
   rejected: 'Rechazada',
+  despedida: 'Despedida',
 };
 
 const LEGACY_JOB_STAGE_LABELS: Record<string, string> = {
@@ -95,7 +97,7 @@ export function isJobApplicationStage(value: string): value is JobApplicationSta
   return (JOB_APPLICATION_STAGES as readonly string[]).includes(value);
 }
 
-const NOTE_STAGES = new Set<JobApplicationStage>(['interview_declined', 'no_show', 'rejected']);
+const NOTE_STAGES = new Set<JobApplicationStage>(['interview_declined', 'no_show', 'rejected', 'despedida']);
 
 export function canTransitionJobStage(
   from: JobApplicationStage,
