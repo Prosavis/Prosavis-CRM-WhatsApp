@@ -59,7 +59,8 @@ export const JobStageControl: React.FC<JobStageControlProps> = ({
       <TextField
         select
         size="small"
-        label="Etapa"
+        hiddenLabel
+        aria-label="Etapa"
         value={isJobApplicationStage(value) ? value : ''}
         disabled={disabled || pending}
         onChange={(event) => {
@@ -68,8 +69,7 @@ export const JobStageControl: React.FC<JobStageControlProps> = ({
           setHint('');
           setError('');
           if (prompt === 'immediate') {
-            setDraft(null);
-            void submit({ stage: next });
+            setDraft(next);
             return;
           }
           if (prompt === 'hire') {
@@ -87,6 +87,16 @@ export const JobStageControl: React.FC<JobStageControlProps> = ({
           </MenuItem>
         ))}
       </TextField>
+      {draft && jobStagePrompt(draft) === 'immediate' ? (
+        <Button
+          size="small"
+          variant="contained"
+          disabled={pending}
+          onClick={() => void submit({ stage: draft })}
+        >
+          Mover
+        </Button>
+      ) : null}
       {draft === 'interview_scheduled' ? (
         <Stack direction="row" spacing={1} alignItems="center">
           <TextField

@@ -3,10 +3,9 @@ import { useSearchParams } from 'react-router-dom';
 import {
   Box,
   Button,
+  Chip,
   Drawer,
-  FormControlLabel,
   Stack,
-  Switch,
   TextField,
   Typography,
 } from '@mui/material';
@@ -108,12 +107,38 @@ const JobApplicationsPage: React.FC = () => {
   const stageSelected = (value: JobApplicationStage) =>
     stageGroup ? stageGroup.includes(value) : stage === value;
 
+  const selectedKpi: JobKpiKey | null = priorityOnly && stage === 'inbound'
+    ? 'priority'
+    : stage === 'hired'
+      ? 'hired'
+      : stage === 'inbound'
+        ? 'inbound'
+        : stageGroup === INTERVIEW_STAGES
+          ? 'interviewsOpen'
+          : stageGroup === CLOSURE_STAGES
+            ? 'closures'
+            : null;
+
+  const toggleFilter = (key: 'priorityOnly' | 'needsStageReview' | 'needsReview' | 'includeMarian') => {
+    setOffset(0);
+    if (key === 'priorityOnly') setPriorityOnly((value) => !value);
+    if (key === 'needsStageReview') setNeedsStageReview((value) => !value);
+    if (key === 'needsReview') setNeedsReview((value) => !value);
+    if (key === 'includeMarian') setIncludeMarian((value) => !value);
+  };
+
   return (
-    <Box data-testid="jobs-workspace" sx={{ px: { xs: 1.5, md: 2 }, py: { xs: 1.5, md: 2 } }}>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-        <Typography variant="h5" fontWeight={800}>Solicitudes de empleo</Typography>
+    <Box data-testid="jobs-workspace" sx={{ px: { xs: 1.5, md: 2.5 }, py: { xs: 1.5, md: 2.5 } }}>
+      <Stack direction="row" justifyContent="space-between" alignItems="flex-end" sx={{ mb: 2 }}>
+        <Box>
+          <Typography variant="h5" fontWeight={650} letterSpacing="-0.02em">Solicitudes de empleo</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Lo más reciente arriba.
+          </Typography>
+        </Box>
         <Button
           size="small"
+          color="inherit"
           onClick={() => mutations.backfill.mutate({ dryRun: false, limit: 80 })}
         >
           Importar lote
@@ -124,22 +149,31 @@ const JobApplicationsPage: React.FC = () => {
         metrics={metrics.data}
         loading={metrics.isPending}
         error={metrics.error instanceof Error ? metrics.error.message : null}
+        selected={selectedKpi}
         onSelect={selectKpi}
       />
 
       <Stack
         direction="row"
-        spacing={1}
-        useFlexGap
-        flexWrap="wrap"
+        spacing={0.75}
         data-testid="jobs-pipeline"
-        sx={{ mb: 2 }}
+        sx={{
+          mb: 1.5,
+          p: 0.75,
+          overflow: 'auto',
+          border: '1px solid',
+          borderColor: 'divider',
+          borderRadius: 2,
+          bgcolor: 'background.paper',
+        }}
       >
         <Button
           size="small"
-          variant={!stage && !stageGroup ? 'contained' : 'outlined'}
+          color="inherit"
+          variant={!stage && !stageGroup ? 'contained' : 'text'}
           onClick={() => selectStage('')}
           data-testid="jobs-stage-all"
+          sx={{ flex: '0 0 auto', borderRadius: 1.5, textTransform: 'none' }}
         >
           Todas {metrics.data?.total ?? 0}
         </Button>
@@ -147,73 +181,46 @@ const JobApplicationsPage: React.FC = () => {
           <Button
             key={value}
             size="small"
-            variant={stageSelected(value) ? 'contained' : 'outlined'}
+            color="inherit"
+            variant={stageSelected(value) ? 'contained' : 'text'}
             onClick={() => selectStage(value)}
             data-testid={`jobs-stage-${value}`}
+            sx={{ flex: '0 0 auto', borderRadius: 1.5, textTransform: 'none', whiteSpace: 'nowrap' }}
           >
-            {JOB_STAGE_LABELS[value]} {byStage[value] ?? 0}
+            {JOB_STAGE_LABELS[value]}
+            <Box component="span" sx={{ ml: 0.75, opacity: 0.7, fontVariantNumeric: 'tabular-nums' }}>
+              {byStage[value] ?? 0}
+            </Box>
           </Button>
         ))}
       </Stack>
 
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} useFlexGap flexWrap="wrap" sx={{ mb: 2 }}>
+      <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" alignItems="center" sx={{ mb: 2 }}>
         <TextField
           size="small"
-          label="Buscar"
+          placeholder="Buscar nombre o teléfono"
           value={search}
           onChange={(event) => {
             setSearch(event.target.value);
             setOffset(0);
           }}
+          sx={{ minWidth: 220, flex: '1 1 220px' }}
         />
-        <FormControlLabel
-          control={
-            <Switch
-              checked={priorityOnly}
-              onChange={(event) => {
-                setPriorityOnly(event.target.checked);
-                setOffset(0);
-              }}
-            />
-          }
-          label="Solo prioritarias"
-        />
-        <FormControlLabel
-          control={
-            <Switch
-              checked={needsStageReview}
-              onChange={(event) => {
-                setNeedsStageReview(event.target.checked);
-                setOffset(0);
-              }}
-            />
-          }
-          label="Por clasificar"
-        />
-        <FormControlLabel
-          control={
-            <Switch
-              checked={needsReview}
-              onChange={(event) => {
-                setNeedsReview(event.target.checked);
-                setOffset(0);
-              }}
-            />
-          }
-          label="Solo revisión"
-        />
-        <FormControlLabel
-          control={
-            <Switch
-              checked={includeMarian}
-              onChange={(event) => {
-                setIncludeMarian(event.target.checked);
-                setOffset(0);
-              }}
-            />
-          }
-          label="Incluir Marian"
-        />
+        {([
+          ['priorityOnly', 'Prioritarias', priorityOnly],
+          ['needsStageReview', 'Por clasificar', needsStageReview],
+          ['needsReview', 'Revisión', needsReview],
+          ['includeMarian', 'Marian', includeMarian],
+        ] as const).map(([key, label, on]) => (
+          <Chip
+            key={key}
+            label={label}
+            clickable
+            color={on ? 'primary' : 'default'}
+            variant={on ? 'filled' : 'outlined'}
+            onClick={() => toggleFilter(key)}
+          />
+        ))}
       </Stack>
 
       <JobApplicationTable

@@ -63,7 +63,7 @@ export async function listJobApplications(
     .range(offset, offset + limit - 1);
 
   if (scheduledOnly) query = query.order('interview_at', { ascending: true, nullsFirst: false });
-  else query = query.order('fit_rank', { ascending: false }).order('created_at', { ascending: false });
+  else query = query.order('created_at', { ascending: false });
 
   if (!includeMarian && !cohort) query = query.eq('cohort', 'job');
   if (cohort) query = query.eq('cohort', cohort);

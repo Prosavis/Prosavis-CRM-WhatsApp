@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  Box,
   Chip,
   Table,
   TableBody,
@@ -23,6 +24,15 @@ function hasDirectoryTag(tags: string[] | null | undefined, name: string): boole
   return (tags ?? []).some((tag) => tag.trim().toLowerCase() === needle);
 }
 
+function arrivedLabel(iso: string): string {
+  return new Date(iso).toLocaleString('es-CO', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 function fitColor(rank: number | null | undefined): 'success' | 'info' | 'default' {
   if (rank === 2) return 'success';
   if (rank === 1) return 'info';
@@ -43,14 +53,13 @@ export const JobApplicationTable: React.FC<JobApplicationTableProps> = ({
   }
 
   return (
-    <Table size="small" data-testid="jobs-table">
+    <Table size="medium" data-testid="jobs-table" sx={{ '& td, & th': { borderColor: 'divider' } }}>
       <TableHead>
         <TableRow>
-          <TableCell>Candidata</TableCell>
-          <TableCell>Marca</TableCell>
-          <TableCell>Estado</TableCell>
-          <TableCell>Teléfono</TableCell>
-          <TableCell>Cita</TableCell>
+          <TableCell sx={{ color: 'text.secondary', fontSize: 12 }}>Candidata</TableCell>
+          <TableCell sx={{ color: 'text.secondary', fontSize: 12 }}>Marca</TableCell>
+          <TableCell sx={{ color: 'text.secondary', fontSize: 12 }}>Estado</TableCell>
+          <TableCell sx={{ color: 'text.secondary', fontSize: 12 }}>Llegó</TableCell>
         </TableRow>
       </TableHead>
       <TableBody>
@@ -63,22 +72,25 @@ export const JobApplicationTable: React.FC<JobApplicationTableProps> = ({
             data-testid={`jobs-row-${row.id}`}
           >
             <TableCell>
-              {row.candidate?.full_name ?? 'Sin nombre'}
-              {row.needs_review ? (
-                <Chip size="small" label="Revisar" color="warning" sx={{ ml: 1 }} />
-              ) : null}
-              {hasDirectoryTag(row.directory?.tags, 'despedida')
-                || hasDirectoryTag(row.directory?.tags, 'auxiliares desactivadas') ? (
-                <Chip size="small" label="Despedida" sx={{ ml: 1 }} />
-              ) : null}
-              {row.needs_stage_review && row.legacy_stage ? (
-                <Chip
-                  size="small"
-                  variant="outlined"
-                  label={`Antes: ${jobStageLabel(row.legacy_stage)}`}
-                  sx={{ ml: 1 }}
-                />
-              ) : null}
+              <Typography variant="body2" fontWeight={600}>
+                {row.candidate?.full_name ?? 'Sin nombre'}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {row.candidate?.phone ?? 'Sin teléfono'}
+                {row.interview_at
+                  ? ` · Cita ${new Date(row.interview_at).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })}`
+                  : ''}
+              </Typography>
+              <Box sx={{ mt: 0.5, display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                {row.needs_review ? <Chip size="small" label="Revisar" color="warning" /> : null}
+                {hasDirectoryTag(row.directory?.tags, 'despedida')
+                  || hasDirectoryTag(row.directory?.tags, 'auxiliares desactivadas') ? (
+                  <Chip size="small" label="Despedida" variant="outlined" />
+                ) : null}
+                {row.needs_stage_review && row.legacy_stage ? (
+                  <Chip size="small" variant="outlined" label={`Antes: ${jobStageLabel(row.legacy_stage)}`} />
+                ) : null}
+              </Box>
             </TableCell>
             <TableCell>
               <Chip
@@ -88,21 +100,15 @@ export const JobApplicationTable: React.FC<JobApplicationTableProps> = ({
                 variant={row.fit_rank === 2 ? 'filled' : 'outlined'}
               />
             </TableCell>
-            <TableCell sx={{ minWidth: 220 }}>
+            <TableCell sx={{ minWidth: 200, width: 220 }}>
               <JobStageControl
                 value={row.stage}
                 onChange={(change) => onTransition(row.id, change)}
                 onHire={() => onOpen(row.id)}
               />
             </TableCell>
-            <TableCell>{row.candidate?.phone ?? '—'}</TableCell>
-            <TableCell>
-              {row.interview_at
-                ? new Date(row.interview_at).toLocaleString('es-CO', {
-                  dateStyle: 'short',
-                  timeStyle: 'short',
-                })
-                : '—'}
+            <TableCell sx={{ whiteSpace: 'nowrap', color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>
+              {arrivedLabel(row.created_at)}
             </TableCell>
           </TableRow>
         ))}
