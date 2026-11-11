@@ -5,13 +5,12 @@ import {
   Button,
   Chip,
   Divider,
-  MenuItem,
   Stack,
   TextField,
   Typography,
 } from '@mui/material';
-import { PROSAVIS_CLEANING_SERVICE_ID } from '@/constants/cleaningService';
 import { JobStageControl } from '@/components/jobs/JobStageControl';
+import { crmToast } from '@/utils/crmToast';
 import {
   useJobApplicationDetail,
   useJobApplicationMutations,
@@ -44,7 +43,6 @@ export const JobApplicationDetailPanel: React.FC<JobApplicationDetailProps> = ({
   const team = useJobTeamMembers();
   const mutations = useJobApplicationMutations();
   const [splitName, setSplitName] = useState('');
-  const [memberId, setMemberId] = useState('');
   const application = detail.data?.application;
   const candidate = (application?.candidate ?? null) as {
     full_name?: string;
@@ -143,7 +141,10 @@ export const JobApplicationDetailPanel: React.FC<JobApplicationDetailProps> = ({
 
       <JobStageControl
         value={String(application.stage)}
-        disabled={mutations.transition.isPending}
+        interviewAt={application.interview_at ? String(application.interview_at) : null}
+        hasTeamMember={Boolean(application.team_member_id)}
+        teamMembers={team.data?.members ?? []}
+        disabled={mutations.transition.isPending || mutations.hire.isPending}
         onChange={async (change) => {
           await mutations.transition.mutateAsync({
             id: applicationId,
@@ -151,37 +152,17 @@ export const JobApplicationDetailPanel: React.FC<JobApplicationDetailProps> = ({
             note: change.note,
             interviewAt: change.interviewAt,
           });
+          crmToast.success(`Quedó en ${jobStageLabel(change.stage)}`);
+        }}
+        onHire={async (member) => {
+          await mutations.hire.mutateAsync({
+            id: applicationId,
+            serviceId: member.serviceId,
+            memberId: member.memberId,
+          });
+          crmToast.success('Quedó en Contratada');
         }}
       />
-
-      <TextField
-        select
-        fullWidth
-        label="Vincular a Equipo (Contratada)"
-        value={memberId}
-        sx={{ mt: 2, mb: 1 }}
-        onChange={(event) => setMemberId(event.target.value)}
-      >
-        {(team.data?.members ?? []).map((member) => (
-          <MenuItem key={`${member.service_id}:${member.id}`} value={`${member.service_id}:${member.id}`}>
-            {member.name}
-          </MenuItem>
-        ))}
-      </TextField>
-      <Button
-        variant="contained"
-        disabled={!memberId || mutations.hire.isPending}
-        onClick={() => {
-          const [serviceId, id] = memberId.split(':');
-          void mutations.hire.mutateAsync({
-            id: applicationId,
-            serviceId: serviceId || PROSAVIS_CLEANING_SERVICE_ID,
-            memberId: id,
-          });
-        }}
-      >
-        Marcar contratada
-      </Button>
 
       <Divider sx={{ my: 2 }} />
       <Typography variant="subtitle2">Separar otra candidata</Typography>

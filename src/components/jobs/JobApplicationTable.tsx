@@ -10,15 +10,17 @@ import {
   TableRow,
   Typography,
 } from '@mui/material';
-import type { JobApplicationListItem } from '@/types/jobApplications';
+import type { JobApplicationListItem, JobTeamMember } from '@/types/jobApplications';
 import { fitMarkLabel, jobStageLabel } from '@/utils/jobApplicationsDomain';
-import { JobStageControl, type JobStageChange } from '@/components/jobs/JobStageControl';
+import { JobStageControl, type JobHireChoice, type JobStageChange } from '@/components/jobs/JobStageControl';
 
 interface JobApplicationTableProps {
   items: JobApplicationListItem[];
   onOpen: (id: string) => void;
   onChat: (row: JobApplicationListItem) => void;
   onTransition: (id: string, change: JobStageChange) => Promise<void> | void;
+  onHire: (id: string, member: JobHireChoice) => Promise<void> | void;
+  teamMembers: JobTeamMember[];
 }
 
 function hasDirectoryTag(tags: string[] | null | undefined, name: string): boolean {
@@ -46,6 +48,8 @@ export const JobApplicationTable: React.FC<JobApplicationTableProps> = ({
   onOpen,
   onChat,
   onTransition,
+  onHire,
+  teamMembers,
 }) => {
   if (items.length === 0) {
     return (
@@ -107,8 +111,11 @@ export const JobApplicationTable: React.FC<JobApplicationTableProps> = ({
             <TableCell sx={{ minWidth: 200, width: 220 }}>
               <JobStageControl
                 value={row.stage}
+                interviewAt={row.interview_at}
+                hasTeamMember={Boolean(row.team_member_id)}
+                teamMembers={teamMembers}
                 onChange={(change) => onTransition(row.id, change)}
-                onHire={() => onOpen(row.id)}
+                onHire={(member) => onHire(row.id, member)}
               />
             </TableCell>
             <TableCell sx={{ whiteSpace: 'nowrap', color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>

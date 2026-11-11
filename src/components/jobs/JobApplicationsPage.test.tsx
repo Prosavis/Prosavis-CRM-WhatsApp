@@ -5,6 +5,16 @@ import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import JobApplicationsPage from '@/pages/jobs/JobApplicationsPage';
 
+vi.mock('@/utils/crmToast', () => ({
+  crmToast: {
+    success: vi.fn(),
+    error: vi.fn(),
+    warning: vi.fn(),
+    info: vi.fn(),
+    show: vi.fn(),
+  },
+}));
+
 vi.mock('@/hooks/useJobApplicationsQueries', () => ({
   useJobApplicationsMetrics: () => ({
     data: {

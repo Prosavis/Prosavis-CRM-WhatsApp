@@ -15,8 +15,10 @@ import {
   useJobApplicationMutations,
   useJobApplicationsList,
   useJobApplicationsMetrics,
+  useJobTeamMembers,
 } from '@/hooks/useJobApplicationsQueries';
-import { JOB_APPLICATION_STAGES, JOB_STAGE_LABELS, type JobApplicationStage } from '@/utils/jobApplicationsDomain';
+import { JOB_APPLICATION_STAGES, JOB_STAGE_LABELS, jobStageLabel, type JobApplicationStage } from '@/utils/jobApplicationsDomain';
+import { crmToast } from '@/utils/crmToast';
 import { applyWhatsAppTab } from '@/utils/whatsappTabs';
 import type { JobApplicationListItem } from '@/types/jobApplications';
 
@@ -77,6 +79,7 @@ const JobApplicationsPage: React.FC = () => {
     offset,
   });
   const mutations = useJobApplicationMutations();
+  const team = useJobTeamMembers();
 
   const items = list.data?.items ?? [];
   const total = list.data?.total ?? 0;
@@ -117,6 +120,13 @@ const JobApplicationsPage: React.FC = () => {
     stageGroup ? stageGroup.includes(value) : stage === value;
 
   const appliedCount = activeFilterCount(filters);
+
+  const confirmStage = (nextStage: string) => {
+    crmToast.success(
+      `Quedó en ${jobStageLabel(nextStage)}`,
+      stage && stage !== nextStage ? { description: 'Ya no sale en esta lista.' } : undefined,
+    );
+  };
 
   return (
     <Box data-testid="jobs-workspace" sx={{ px: { xs: 1.5, md: 2.5 }, py: { xs: 1.5, md: 2.5 } }}>
@@ -304,6 +314,7 @@ const JobApplicationsPage: React.FC = () => {
         items={items}
         onOpen={openDetail}
         onChat={openChat}
+        teamMembers={team.data?.members ?? []}
         onTransition={async (id, change) => {
           await mutations.transition.mutateAsync({
             id,
@@ -311,6 +322,15 @@ const JobApplicationsPage: React.FC = () => {
             note: change.note,
             interviewAt: change.interviewAt,
           });
+          confirmStage(change.stage);
+        }}
+        onHire={async (id, member) => {
+          await mutations.hire.mutateAsync({
+            id,
+            serviceId: member.serviceId,
+            memberId: member.memberId,
+          });
+          confirmStage('hired');
         }}
       />
       <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
