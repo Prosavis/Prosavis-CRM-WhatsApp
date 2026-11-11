@@ -18,7 +18,7 @@ export function getStaticCleaningWompiUrl(amountCOP: number): string | null {
 }
 
 /**
- * Links Wompi con Kit profesional, indexados por precio BASE de la duración
+ * Links Wompi con Kit de limpieza Prosavis, indexados por precio BASE de la duración
  * (el total cobrado incluye +30k del kit). Espejo del backend.
  */
 export const CLEANING_KIT_WOMPI_LINKS_BY_BASE_COP: Record<number, string> = {

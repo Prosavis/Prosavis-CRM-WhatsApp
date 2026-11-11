@@ -68,7 +68,7 @@ export function formatPricingCatalogBlock(): string {
     '=== Catálogo oficial de precios (fuente de verdad) ===',
     'Duraciones agendables (únicas que puedes ofrecer en cotizaciones nuevas):',
     ...bookableLines,
-    `- Kit profesional → COP ${formatCOP(PROFESSIONAL_KIT_SURCHARGE_COP)} adicionales (opcional)`,
+    `- Kit de limpieza Prosavis → COP ${formatCOP(PROFESSIONAL_KIT_SURCHARGE_COP)} adicionales (opcional)`,
     'No ofrezcas 2 horas ni 3 horas en cotizaciones nuevas (tarifas legacy, no agendables).',
     'Elige la duración según el tamaño del inmueble (habitaciones/baños) usando las pistas de arriba.',
     'No inventes, estimes ni modifiques estos valores.',
