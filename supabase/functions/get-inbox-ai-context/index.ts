@@ -26,6 +26,7 @@ Deno.serve(async (req) => {
         includeVoiceTranscriptions: parsed.includeVoiceTranscriptions,
         includeImageAnalysis: parsed.includeImageAnalysis,
         includeCachedImageAnalysis: parsed.includeCachedImageAnalysis,
+        includeProviderNames: true,
       });
     } catch (err) {
       const msg = String((err as Error)?.message ?? err);

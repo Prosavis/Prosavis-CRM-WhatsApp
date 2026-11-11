@@ -1,8 +1,9 @@
 import { jsonResponse } from './cors.ts';
 import {
-  generateInboxAiSuggestion,
+  generateInboxAiSuggestionDetailed,
   type InboxAiActionGrounding,
 } from './inboxAiActions.ts';
+import type { GeminiJsonResult } from './geminiClient.ts';
 import type { ConversationHistoryMeta } from './conversationHistory.ts';
 import type {
   InboxAiAppointment,
@@ -10,14 +11,11 @@ import type {
 } from './inboxAiContextFormat.ts';
 import type { MetaSessionWindow } from './metaSessionWindow.ts';
 import {
-  DEFAULT_GEMINI_MODEL,
-  resolveGeminiModel,
-} from './geminiClient.ts';
-import {
   buildSuggestionLogContextMeta,
   insertWhatsAppAiSuggestionLog,
 } from './inboxAiSuggestionLog.ts';
 import { rewriteSuggestionGreetingName } from './inboxAiNameGrounding.ts';
+import type { StageTimer } from './suggestTiming.ts';
 
 /** Cliente Supabase tipado de forma laxa. */
 // deno-lint-ignore no-explicit-any
@@ -36,6 +34,7 @@ export interface SuggestionLogWriteParams {
   supabase: SupabaseClient;
   stableKey: string;
   createdBy: string | null;
+  extras?: Record<string, unknown>;
 }
 
 function suggestionResponseFields(context: InboxAiResponseContext) {
@@ -70,13 +69,17 @@ export async function createGeneratedInboxAiSuggestionResponse(params: {
   responseContext: InboxAiResponseContext;
   greetingFirstName?: string | null;
   suggestionLog?: SuggestionLogWriteParams | null;
+  onModel?: (meta: GeminiJsonResult<unknown>) => void;
+  stageTimer?: StageTimer;
 }): Promise<Response> {
-  const suggestionOutput = await generateInboxAiSuggestion({
+  const detailed = await generateInboxAiSuggestionDetailed({
     apiKey: params.apiKey,
     systemInstruction: params.systemInstruction,
     contextPrompt: params.contextPrompt,
     grounding: params.grounding,
   });
+  params.onModel?.(detailed.meta);
+  const suggestionOutput = detailed.output;
   suggestionOutput.suggestion = rewriteSuggestionGreetingName(
     suggestionOutput.suggestion,
     params.greetingFirstName,
@@ -87,7 +90,7 @@ export async function createGeneratedInboxAiSuggestionResponse(params: {
     wompiAmountCOP,
   } = params.grounding;
 
-  const model = resolveGeminiModel('GEMINI_MODEL_JSON', DEFAULT_GEMINI_MODEL);
+  const model = detailed.meta.model;
   let suggestionLogId: string | null = null;
 
   if (params.suggestionLog && suggestionOutput.suggestion) {
@@ -97,17 +100,29 @@ export async function createGeneratedInboxAiSuggestionResponse(params: {
       propertySummary: params.responseContext.propertySummary,
       sessionWindow: params.responseContext.sessionWindow,
       proposedActionTypes: suggestionOutput.proposedActions.map((a) => a.type),
+      extras: {
+        ...(params.suggestionLog.extras ?? {}),
+        geminiSuggestion: {
+          model: detailed.meta.model,
+          thinkingLevel: detailed.meta.thinkingLevel ?? null,
+          elapsedMs: detailed.meta.elapsedMs,
+          ...detailed.meta.usage,
+        },
+      },
     });
-    suggestionLogId = await insertWhatsAppAiSuggestionLog(
-      params.suggestionLog.supabase,
+    const insertLog = () => insertWhatsAppAiSuggestionLog(
+      params.suggestionLog!.supabase,
       {
-        stableKey: params.suggestionLog.stableKey,
+        stableKey: params.suggestionLog!.stableKey,
         suggestion: suggestionOutput.suggestion,
         model,
         contextMeta,
-        createdBy: params.suggestionLog.createdBy,
+        createdBy: params.suggestionLog!.createdBy,
       },
     );
+    suggestionLogId = params.stageTimer
+      ? await params.stageTimer.measure('log_insert', insertLog)
+      : await insertLog();
   }
 
   return jsonResponse({

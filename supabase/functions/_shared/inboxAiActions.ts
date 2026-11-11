@@ -1,5 +1,12 @@
 import type { NormalizedBookingContext } from './bookingContext.ts';
-import { geminiGenerateJson } from './geminiClient.ts';
+import {
+  geminiGenerateJsonWithMeta,
+  resolveGeminiModel,
+  resolveGeminiThinkingLevel,
+  DEFAULT_GEMINI_MODEL,
+  type GeminiJsonResult,
+  type GeminiThinkingLevel,
+} from './geminiClient.ts';
 import type { InboxAiAppointment } from './inboxAiContextFormat.ts';
 import { cleanInboxAiSuggestionText } from './inboxAiSuggestionText.ts';
 
@@ -456,6 +463,55 @@ export function normalizeInboxAiSuggestionOutput(
   };
 }
 
+export const INBOX_AI_COMBINED_JSON_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['booking', 'suggestion', 'proposedActions'],
+  properties: {
+    booking: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['stage', 'collectedData', 'missingData', 'availableSlots', 'wantsKit', 'clientInfo'],
+      properties: {
+        stage: { type: 'string' },
+        collectedData: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            date: { type: 'string' },
+            time: { type: 'string' },
+            duration: { type: 'integer' },
+            address: { type: 'string' },
+            addressSource: { type: 'string' },
+          },
+        },
+        missingData: { type: 'array', items: { type: 'string' } },
+        availableSlots: { type: 'array', items: { type: 'string' } },
+        paymentStatus: { type: 'string' },
+        paymentAmount: { type: 'number' },
+        wantsKit: { type: 'boolean' },
+        clientInfo: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            name: { type: 'string' },
+            phone: { type: 'string' },
+            email: { type: 'string' },
+            address: { type: 'string' },
+            city: { type: 'string' },
+            isReturningClient: { type: 'boolean' },
+            userId: { type: 'string' },
+          },
+        },
+      },
+    },
+    suggestion: { type: 'string' },
+    proposedActions: (
+      INBOX_AI_SUGGESTION_JSON_SCHEMA.properties as { proposedActions: unknown }
+    ).proposedActions,
+  },
+};
+
 const ACTION_GENERATION_INSTRUCTIONS = [
   'Devuelve una sugerencia de respuesta y hasta 5 acciones propuestas.',
   'Las acciones son solo propuestas y no se han ejecutado.',
@@ -466,19 +522,49 @@ const ACTION_GENERATION_INSTRUCTIONS = [
   'En suggestion usa saltos de línea reales para listas y párrafos, nunca la secuencia literal \\n.',
 ].join('\n');
 
+export interface InboxAiSuggestionCall {
+  output: InboxAiSuggestionOutput;
+  raw: unknown;
+  meta: GeminiJsonResult<unknown>;
+}
+
+export async function generateInboxAiSuggestionDetailed(params: {
+  apiKey: string;
+  systemInstruction: string;
+  contextPrompt: string;
+  grounding: InboxAiActionGrounding;
+  model?: string;
+  thinkingLevel?: GeminiThinkingLevel;
+  responseJsonSchema?: Record<string, unknown>;
+}): Promise<InboxAiSuggestionCall> {
+  const model = params.model ?? resolveGeminiModel('GEMINI_MODEL_JSON', DEFAULT_GEMINI_MODEL);
+  const thinkingLevel = params.thinkingLevel
+    ?? resolveGeminiThinkingLevel('GEMINI_THINKING_SUGGEST', 'low');
+  const meta = await geminiGenerateJsonWithMeta<unknown>({
+    apiKey: params.apiKey,
+    model,
+    thinkingLevel,
+    systemInstruction:
+      `${params.systemInstruction}\n\n${ACTION_GENERATION_INSTRUCTIONS}`,
+    prompt: params.contextPrompt,
+    responseJsonSchema: params.responseJsonSchema ?? INBOX_AI_SUGGESTION_JSON_SCHEMA,
+    logScope: 'suggest-whatsapp-agent-reply',
+  });
+  return {
+    output: normalizeInboxAiSuggestionOutput(meta.data, params.grounding),
+    raw: meta.data,
+    meta,
+  };
+}
+
 export async function generateInboxAiSuggestion(params: {
   apiKey: string;
   systemInstruction: string;
   contextPrompt: string;
   grounding: InboxAiActionGrounding;
+  model?: string;
+  thinkingLevel?: GeminiThinkingLevel;
 }): Promise<InboxAiSuggestionOutput> {
-  const raw = await geminiGenerateJson<unknown>({
-    apiKey: params.apiKey,
-    systemInstruction:
-      `${params.systemInstruction}\n\n${ACTION_GENERATION_INSTRUCTIONS}`,
-    prompt: params.contextPrompt,
-    responseJsonSchema: INBOX_AI_SUGGESTION_JSON_SCHEMA,
-    logScope: 'suggest-whatsapp-agent-reply',
-  });
-  return normalizeInboxAiSuggestionOutput(raw, params.grounding);
+  const detailed = await generateInboxAiSuggestionDetailed(params);
+  return detailed.output;
 }

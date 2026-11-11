@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  INBOX_AI_COMBINED_JSON_SCHEMA,
   INBOX_AI_SUGGESTION_JSON_SCHEMA,
   generateInboxAiSuggestion,
   normalizeInboxAiSuggestionOutput,
@@ -399,6 +400,7 @@ describe('generateInboxAiSuggestion', () => {
     };
 
     visitSchema(INBOX_AI_SUGGESTION_JSON_SCHEMA);
+    visitSchema(INBOX_AI_COMBINED_JSON_SCHEMA);
   });
 
   it('uses the strict responseJsonSchema on the real Gemini HTTP request', async () => {
@@ -437,6 +439,7 @@ describe('generateInboxAiSuggestion', () => {
       INBOX_AI_SUGGESTION_JSON_SCHEMA,
     );
     expect(body.generationConfig).not.toHaveProperty('responseSchema');
+    expect(body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: 'low' });
     expect(INBOX_AI_SUGGESTION_JSON_SCHEMA).toMatchObject({
       type: 'object',
       additionalProperties: false,

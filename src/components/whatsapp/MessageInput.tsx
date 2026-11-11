@@ -29,7 +29,7 @@ import AudiotrackIcon from '@mui/icons-material/Audiotrack';
 import VideocamIcon from '@mui/icons-material/Videocam';
 import DescriptionIcon from '@mui/icons-material/Description';
 import CloseIcon from '@mui/icons-material/Close';
-import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import SuggestionSparkleControl from './SuggestionSparkleControl';
 import MicIcon from '@mui/icons-material/Mic';
 import StopCircleIcon from '@mui/icons-material/StopCircle';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
@@ -101,7 +101,7 @@ interface MessageInputProps {
   /** Clave estable de la conversación (phone || id) para borradores por chat. */
   conversationKey: string;
   draftText?: string;
-  onRequestSuggestion?: (options?: { withContext?: boolean }) => void;
+  onRequestSuggestion?: (options?: { extraContext?: string }) => void;
   suggestionLoading?: boolean;
   suggestionHint?: string | null;
   onForceGenerate?: () => void;
@@ -217,7 +217,6 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const [dragActive, setDragActive] = useState(false);
   const [snippetHighlight, setSnippetHighlight] = useState(0);
   const [composerHeight, setComposerHeight] = useState(composerMinHeight);
-  const [aiAnchorEl, setAiAnchorEl] = useState<null | HTMLElement>(null);
   const [emojiAnchorEl, setEmojiAnchorEl] = useState<null | HTMLElement>(null);
   const [stickerAnchorEl, setStickerAnchorEl] = useState<null | HTMLElement>(null);
   const [stickerUploading, setStickerUploading] = useState(false);
@@ -994,61 +993,12 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
           <Box sx={{ alignItems: 'center', display: 'flex', gap: 0.25 }}>
             {onRequestSuggestion && (
-              <Tooltip title="Sugerir respuesta con IA">
-                <span>
-                  <IconButton
-                    size="small"
-                    disabled={composerDisabled || suggestionLoading}
-                    onClick={(event) => setAiAnchorEl(event.currentTarget)}
-                    sx={{
-                      color: suggestionLoading ? undefined : '#7c3aed',
-                      width: isMobile ? 44 : 34,
-                      height: isMobile ? 44 : 34,
-                    }}
-                  >
-                    {suggestionLoading ? <CircularProgress size={20} /> : <AutoAwesomeIcon />}
-                  </IconButton>
-                </span>
-              </Tooltip>
+              <SuggestionSparkleControl
+                disabled={composerDisabled}
+                loading={suggestionLoading}
+                onRequest={(extraContext) => onRequestSuggestion({ extraContext })}
+              />
             )}
-            <Menu
-              anchorEl={aiAnchorEl}
-              open={Boolean(aiAnchorEl)}
-              onClose={() => setAiAnchorEl(null)}
-              anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-              transformOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-            >
-              <MenuItem
-                onClick={() => {
-                  setAiAnchorEl(null);
-                  onRequestSuggestion?.();
-                }}
-              >
-                <ListItemIcon>
-                  <AutoAwesomeIcon fontSize="small" />
-                </ListItemIcon>
-                <ListItemText
-                  primary="Automático"
-                  secondary="Usa el contexto del chat"
-                  secondaryTypographyProps={{ variant: 'caption' }}
-                />
-              </MenuItem>
-              <MenuItem
-                onClick={() => {
-                  setAiAnchorEl(null);
-                  onRequestSuggestion?.({ withContext: true });
-                }}
-              >
-                <ListItemIcon>
-                  <AutoAwesomeIcon fontSize="small" sx={{ color: '#7c3aed' }} />
-                </ListItemIcon>
-                <ListItemText
-                  primary="Con contexto"
-                  secondary="Agrega una instrucción extra"
-                  secondaryTypographyProps={{ variant: 'caption' }}
-                />
-              </MenuItem>
-            </Menu>
             {onSendMedia && (
               <>
                 <IconButton

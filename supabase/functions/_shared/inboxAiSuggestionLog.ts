@@ -23,6 +23,7 @@ export interface SuggestionLogContextMeta {
   propertySummary: InboxAiPropertySummary | null;
   sessionWindow: MetaSessionWindow;
   proposedActionTypes: string[];
+  [key: string]: unknown;
 }
 
 export function levenshteinDistance(a: string, b: string): number {
@@ -67,6 +68,7 @@ export function buildSuggestionLogContextMeta(params: {
   propertySummary: InboxAiPropertySummary | null | undefined;
   sessionWindow: MetaSessionWindow;
   proposedActionTypes: string[];
+  extras?: Record<string, unknown>;
 }): SuggestionLogContextMeta {
   return {
     historyMeta: params.historyMeta,
@@ -74,7 +76,33 @@ export function buildSuggestionLogContextMeta(params: {
     propertySummary: params.propertySummary ?? null,
     sessionWindow: params.sessionWindow,
     proposedActionTypes: [...params.proposedActionTypes],
+    ...(params.extras ?? {}),
   };
+}
+
+export async function loadReusableBookingContext(
+  supabase: SupabaseClient,
+  stableKey: string,
+  anchorNewestAt: string | null,
+): Promise<Record<string, unknown> | null> {
+  if (!anchorNewestAt) return null;
+  try {
+    const { data, error } = await supabase
+      .from(SUGGESTION_LOG_TABLE)
+      .select('context_meta')
+      .eq('stable_key', stableKey)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error || !data?.context_meta || typeof data.context_meta !== 'object') return null;
+    const meta = data.context_meta as Record<string, unknown>;
+    const anchor = meta.anchorMessageAt ?? meta.anchorNewestAt;
+    if (anchor !== anchorNewestAt) return null;
+    const reuse = meta.bookingReuse;
+    return reuse && typeof reuse === 'object' ? reuse as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function insertWhatsAppAiSuggestionLog(

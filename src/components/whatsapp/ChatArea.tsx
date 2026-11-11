@@ -320,8 +320,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [usedAppointments, setUsedAppointments] = useState<InboxAiAppointment[]>([]);
   const [appointmentsLoadFailed, setAppointmentsLoadFailed] = useState(false);
   const [executingActionId, setExecutingActionId] = useState<string | null>(null);
-  const [aiContextDialogOpen, setAiContextDialogOpen] = useState(false);
-  const [aiExtraContext, setAiExtraContext] = useState('');
   const [bookingContext, setBookingContext] = useState<BookingContextData | null>(null);
   const [sessionWindow, setSessionWindow] = useState<MetaSessionWindow | null>(null);
   const [bookingDrawerOpen, setBookingDrawerOpen] = useState(false);
@@ -960,6 +958,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         includeVoiceTranscriptions,
         extraContext,
         includeImageAnalysis,
+        {
+          onDelta: (text) => setSuggestionDraft(text),
+        },
       );
       setSessionWindow(result.sessionWindow);
       setUsedHistoryMeta(result.historyMeta ?? null);
@@ -1042,22 +1043,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     }
   }, [includeImageAnalysis, includeVoiceTranscriptions, stableKey]);
 
-  const handleSuggestionRequestOption = useCallback((options?: { withContext?: boolean }) => {
-    if (options?.withContext) {
-      setAiExtraContext('');
-      setAiContextDialogOpen(true);
-      return;
-    }
-    void handleRequestSuggestion(false);
+  const handleSuggestionRequest = useCallback((options?: { extraContext?: string }) => {
+    void handleRequestSuggestion(false, options?.extraContext);
   }, [handleRequestSuggestion]);
-
-  const handleGenerateWithContext = useCallback(() => {
-    const context = aiExtraContext.trim();
-    if (!context) return;
-    setAiContextDialogOpen(false);
-    setAiExtraContext('');
-    void handleRequestSuggestion(false, context);
-  }, [aiExtraContext, handleRequestSuggestion]);
 
   const insertPaymentLinkInComposer = useCallback((url: string) => {
     setSuggestionDraft((prev) => {
@@ -1996,7 +1984,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 }
                 label={
                   <Typography variant="caption">
-                    Analizar imágenes y PDF en IA
+                    Usar análisis de imágenes y PDF ya guardados
                   </Typography>
                 }
                 sx={{ m: 0 }}
@@ -2105,7 +2093,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             onSendMedia={handleSendMedia}
             onSendMediaBatch={handleSendMediaBatch}
             draftText={suggestionDraft}
-            onRequestSuggestion={handleSuggestionRequestOption}
+            onRequestSuggestion={handleSuggestionRequest}
             suggestionLoading={suggestionLoading}
             suggestionHint={suggestionHint}
             onForceGenerate={() => void handleRequestSuggestion(true)}
@@ -2243,55 +2231,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           <Button onClick={() => setDeleteConfirmOpen(false)}>Cancelar</Button>
           <Button variant="contained" color="error" onClick={handleDeleteConfirmed} disabled={deleting}>
             {deleting ? <CircularProgress size={20} /> : 'Eliminar'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog
-        open={aiContextDialogOpen}
-        onClose={() => !suggestionLoading && setAiContextDialogOpen(false)}
-        maxWidth="sm"
-        fullWidth
-        fullScreen={isMobile}
-      >
-        <DialogTitle>Generar respuesta con contexto</DialogTitle>
-        <DialogContent>
-          <DialogContentText sx={{ mb: 2 }}>
-            Agrega instrucciones o intención extra para que la IA ajuste la respuesta al mensaje que quieres enviar.
-          </DialogContentText>
-          <TextField
-            autoFocus
-            fullWidth
-            multiline
-            minRows={4}
-            maxRows={8}
-            label="Contexto adicional"
-            placeholder="Ej. Recuérdale al cliente que tenemos disponibilidad mañana en la tarde y ofrece cerrar la reserva."
-            value={aiExtraContext}
-            disabled={suggestionLoading}
-            onChange={(event) => setAiExtraContext(event.target.value)}
-            onKeyDown={(event) => {
-              if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-                event.preventDefault();
-                handleGenerateWithContext();
-              }
-            }}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setAiContextDialogOpen(false)} disabled={suggestionLoading}>
-            Cancelar
-          </Button>
-          <Button
-            variant="contained"
-            onClick={handleGenerateWithContext}
-            disabled={suggestionLoading || !aiExtraContext.trim()}
-            sx={{
-              bgcolor: '#7c3aed',
-              '&:hover': { bgcolor: '#6d28d9' },
-            }}
-          >
-            {suggestionLoading ? <CircularProgress size={20} /> : 'Generar'}
           </Button>
         </DialogActions>
       </Dialog>

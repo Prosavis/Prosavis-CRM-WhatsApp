@@ -1,5 +1,6 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { scheduleBackgroundWork } from './edgeBackground.ts';
+import { analyzeInboundImageById } from './analyzeInboundImage.ts';
 import { inboundAudioNeedsAutoTranscription } from './inboxAiMediaLimits.ts';
 import {
   isVoiceTranscriptionEnabled,
@@ -77,6 +78,16 @@ export async function queuePersistedAudioTranscription(
   );
 }
 
+function shouldQueueInboundVision(
+  mediaType: string | null,
+  mimeType: string | null,
+): boolean {
+  const type = (mediaType ?? '').toLowerCase();
+  const mime = (mimeType ?? '').toLowerCase();
+  if (type === 'image') return true;
+  return type === 'document' && mime.includes('pdf');
+}
+
 export async function hydratePersistedMessageMedia(params: {
   supabase: SupabaseClient;
   messageLogId: string | null;
@@ -85,7 +96,8 @@ export async function hydratePersistedMessageMedia(params: {
   mediaType: string | null;
   mimeType: string | null;
 }): Promise<void> {
-  if (!params.mediaId || !params.messageLogId) return;
+  const messageLogId = params.messageLogId;
+  if (!params.mediaId || !messageLogId) return;
 
   const persisted = await persistInboundMedia({
     supabase: params.supabase,
@@ -104,17 +116,24 @@ export async function hydratePersistedMessageMedia(params: {
         mime_type: params.mimeType,
         size_bytes: persisted.fileSize,
       })
-      .eq('id', params.messageLogId);
+      .eq('id', messageLogId);
     if (mediaUpdateError) {
       console.error('[whatsapp-media] message media update failed', {
-        messageLogId: params.messageLogId,
+        messageLogId: messageLogId,
         mediaId: params.mediaId,
         error: mediaUpdateError,
       });
     }
 
+    if (!mediaUpdateError && shouldQueueInboundVision(params.mediaType, params.mimeType)) {
+      scheduleBackgroundWork(
+        analyzeInboundImageById(params.supabase, messageLogId),
+        'auto-image-analysis',
+      );
+    }
+
     await params.supabase.from('whatsapp_media_assets').insert({
-      message_log_id: params.messageLogId,
+      message_log_id: messageLogId,
       conversation_stable_key: params.stableKey,
       bucket_id: 'whatsapp-media',
       storage_path: persisted.storagePath,
@@ -128,12 +147,12 @@ export async function hydratePersistedMessageMedia(params: {
   if (
     inboundAudioNeedsAutoTranscription({
       mediaType: params.mediaType,
-      messageLogId: params.messageLogId,
+      messageLogId: messageLogId,
       mediaId: params.mediaId,
       storagePath: persisted.storagePath,
     }) &&
     isVoiceTranscriptionEnabled()
   ) {
-    await queuePersistedAudioTranscription(params.supabase, params.messageLogId);
+    await queuePersistedAudioTranscription(params.supabase, messageLogId);
   }
 }

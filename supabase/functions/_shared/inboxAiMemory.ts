@@ -5,7 +5,9 @@ import {
   getGeminiApiKey,
   resolveGeminiModel,
 } from './geminiClient.ts';
+import { scheduleBackgroundWork } from './edgeBackground.ts';
 import type { ConversationHistoryMeta } from './conversationHistory.ts';
+import type { StageTimer } from './suggestTiming.ts';
 import {
   memoryUsesForeignClientName,
   rewriteMemoryClientName,
@@ -253,7 +255,13 @@ export async function loadOrRefreshInboxAiMemory(params: {
   historyMeta: ConversationHistoryMeta;
   canonicalName?: string | null;
   dependencies?: Partial<InboxAiMemoryDependencies>;
+  refreshMode?: 'inline' | 'background';
+  stageTimer?: StageTimer;
 }): Promise<InboxAiMemory | null> {
+  const readStarted = Date.now();
+  const recordRead = () => {
+    params.stageTimer?.record('memory_read', Date.now() - readStarted);
+  };
   const dependencies = {
     ...defaultDependencies(),
     ...params.dependencies,
@@ -270,6 +278,7 @@ export async function loadOrRefreshInboxAiMemory(params: {
     previous = mapInboxAiMemoryRow(data);
   } catch (error) {
     warnMemory('memory-read-failed', error);
+    recordRead();
     return null;
   }
 
@@ -291,8 +300,12 @@ export async function loadOrRefreshInboxAiMemory(params: {
     }
   } catch (error) {
     warnMemory('message-count-failed', error);
+    recordRead();
+    params.stageTimer?.record('memory_refresh', 0, { skipped: true });
     return previous;
   }
+
+  recordRead();
 
   if (!shouldRefreshInboxAiMemory({
     hasMemory: previous != null,
@@ -309,8 +322,10 @@ export async function loadOrRefreshInboxAiMemory(params: {
         updatedAt: dependencies.now(),
       };
       await persistInboxAiMemory(params.supabase, sanitized);
+      params.stageTimer?.record('memory_refresh', 0, { skipped: true });
       return sanitized;
     }
+    params.stageTimer?.record('memory_refresh', 0, { skipped: true });
     return previous;
   }
 
@@ -322,10 +337,14 @@ export async function loadOrRefreshInboxAiMemory(params: {
       );
     } catch (error) {
       warnMemory('message-count-failed', error);
+      params.stageTimer?.record('memory_refresh', 0, { skipped: true });
       return previous;
     }
   }
 
+  const refreshStarted = Date.now();
+  const messageCount = totalVisibleMessageCount;
+  const runRefresh = async (): Promise<InboxAiMemory | null> => {
   const apiKey = dependencies.getApiKey();
   if (!apiKey) {
     warnMemory('gemini-refresh-failed');
@@ -355,7 +374,7 @@ export async function loadOrRefreshInboxAiMemory(params: {
     stableKey: params.stableKey,
     ...normalized,
     lastSummarizedMessageAt: params.historyMeta.newestAt ?? null,
-    messageCount: totalVisibleMessageCount,
+    messageCount,
     model,
     updatedAt,
   };
@@ -365,4 +384,21 @@ export async function loadOrRefreshInboxAiMemory(params: {
 
   const persisted = await persistInboxAiMemory(params.supabase, refreshed);
   return persisted ? refreshed : previous;
+  };
+
+  if (params.refreshMode === 'background') {
+    params.stageTimer?.record('memory_refresh', 0, { scheduled: true });
+    scheduleBackgroundWork(runRefresh(), 'inbox-ai-memory');
+    return previous;
+  }
+
+  try {
+    const refreshed = await runRefresh();
+    params.stageTimer?.record('memory_refresh', Date.now() - refreshStarted);
+    return refreshed;
+  } catch (error) {
+    params.stageTimer?.record('memory_refresh', Date.now() - refreshStarted, { failed: true });
+    warnMemory('gemini-refresh-failed', error);
+    return previous;
+  }
 }

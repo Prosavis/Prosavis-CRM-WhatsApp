@@ -2,12 +2,23 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   appendRealAvailabilityContext,
   getBogotaAvailabilityHorizon,
+  classifyAvailabilityFailure,
   loadRealAvailability,
   normalizeAvailabilitySlots,
   overwriteBookingAvailability,
   resolveOfficialDuration,
 } from '../../supabase/functions/_shared/availability';
 import { INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET } from '../../supabase/functions/_shared/inboxAiContextFormat';
+
+describe('classifyAvailabilityFailure', () => {
+  it('separates a secret mismatch from a timeout', () => {
+    expect(classifyAvailabilityFailure(new Error('Firebase CRM bridge request failed (401)'))).toBe('401');
+    const timeout = new Error('The operation was aborted');
+    timeout.name = 'TimeoutError';
+    expect(classifyAvailabilityFailure(timeout)).toBe('timeout');
+    expect(classifyAvailabilityFailure(new Error('Firebase CRM bridge is not configured'))).toBe('unconfigured');
+  });
+});
 
 describe('getBogotaAvailabilityHorizon', () => {
   it('uses Bogotá date keys and a seven-day inclusive horizon', () => {

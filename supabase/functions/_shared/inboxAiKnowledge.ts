@@ -7,6 +7,8 @@ import {
   normalizeDirectoryPhoneE164,
 } from './directoryPhone.ts';
 import type { InboxAiDirectory } from './inboxAiContextFormat.ts';
+import { directoryNotesSummaryEnabled } from './inboxAiSuggestConfig.ts';
+import { buildInternalNotesSummary } from './internalNotesSummary.ts';
 
 const COMMERCIAL_STABLE_KEY_SEP = '__';
 const LID_CUSTOMER_PREFIX = 'lid:';
@@ -105,7 +107,16 @@ function cityFromDirectoryRow(row: Record<string, unknown>): string | null {
   return asTrimmedString((metadata as Record<string, unknown>).city);
 }
 
+function directorySelect(): string {
+  if (!directoryNotesSummaryEnabled()) return DIRECTORY_SELECT;
+  return `${DIRECTORY_SELECT}, internal_notes_summary, internal_notes_summary_at`;
+}
+
 function clipDirectoryNotes(row: Record<string, unknown>): string | null {
+  const precomputed = asTrimmedString(row.internal_notes_summary);
+  if (precomputed) return clipEntry(precomputed, 1_200);
+  const extracted = buildInternalNotesSummary(asTrimmedString(row.internal_notes));
+  if (extracted) return clipEntry(extracted, 1_200);
   const notes = [
     asTrimmedString(row.notes),
     asTrimmedString(row.internal_notes),
@@ -212,7 +223,7 @@ export async function loadDirectoryByPhone(
 
   const { data: rows, error } = await supabase
     .from('crm_directory')
-    .select(DIRECTORY_SELECT)
+    .select(directorySelect())
     .in('phone', lookupPhones)
     .order('updated_at', { ascending: false })
     .limit(DIRECTORY_QUERY_LIMIT);
@@ -239,7 +250,7 @@ export async function loadDirectoryByConversation(
 
   const { data, error } = await supabase
     .from('crm_directory')
-    .select(DIRECTORY_SELECT)
+    .select(directorySelect())
     .eq(column, key)
     .limit(1)
     .maybeSingle();

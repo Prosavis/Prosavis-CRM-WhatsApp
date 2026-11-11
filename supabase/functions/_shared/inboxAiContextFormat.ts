@@ -303,7 +303,7 @@ export function isLiveServiceStatus(status: string | null | undefined): boolean 
   return normalized === 'IN_PROGRESS' || normalized === 'IN_ROUTE';
 }
 
-function formatAppointmentLine(a: InboxAiAppointment): string {
+function formatAppointmentLine(a: InboxAiAppointment, includeProviderName: boolean): string {
   const when = formatBogotaDateTime(a.scheduledDate);
   const place = displayAddress(a) ?? 'sin dirección';
   const parts = [
@@ -311,9 +311,11 @@ function formatAppointmentLine(a: InboxAiAppointment): string {
     a.status ?? '—',
     a.serviceName ?? 'servicio',
     `cliente: ${a.clientName ?? '—'}`,
-    `auxiliar: ${a.providerName ?? 'sin asignar'}`,
-    `dirección: ${place}`,
   ];
+  if (includeProviderName) {
+    parts.push(`auxiliar: ${a.providerName ?? 'sin asignar'}`);
+  }
+  parts.push(`dirección: ${place}`);
   if (a.duration != null) parts.push(`${a.duration}h`);
   if (a.paymentStatus) parts.push(`pago: ${a.paymentStatus}`);
   if (
@@ -458,7 +460,10 @@ export function formatInboxAiContextBlock(params: {
   canonicalName?: string | null;
   greetingFirstName?: string | null;
   appointmentsLoadFailed?: boolean;
+  includeProviderNames?: boolean;
+  promptLayout?: 'legacy' | 'compact';
 }): string {
+  const includeProviderNames = params.includeProviderNames === true;
   const nowIso = params.nowIso ?? new Date().toISOString();
   const now = new Date(nowIso).getTime();
   const conversationTags =
@@ -598,7 +603,9 @@ export function formatInboxAiContextBlock(params: {
     .sort((left, right) => right.scheduledDate.localeCompare(left.scheduledDate))
     .slice(0, PAST_APPTS);
   const appointmentLines = [
-    'Cada apoyo incluye fecha/hora (Colombia), estado, servicio, cliente, auxiliar, dirección y pago cuando existen.',
+    includeProviderNames
+      ? 'Cada apoyo incluye fecha/hora (Colombia), estado, servicio, cliente, auxiliar, dirección y pago cuando existen.'
+      : 'Cada apoyo incluye fecha/hora (Colombia), estado, servicio, cliente, dirección y pago cuando existen. No incluye el nombre de la auxiliar.',
   ];
   if (params.appointmentsLoadFailed) {
     appointmentLines.push(
@@ -610,18 +617,24 @@ export function formatInboxAiContextBlock(params: {
   );
   if (inProgress.length) {
     appointmentLines.push('Apoyo en curso ahora:');
-    appointmentLines.push(...inProgress.map(formatAppointmentLine));
+    appointmentLines.push(...inProgress.map((appointment) =>
+      formatAppointmentLine(appointment, includeProviderNames)
+    ));
   }
   if (!upcoming.length && !past.length && !params.appointmentsLoadFailed) {
     appointmentLines.push('Sin citas/apoyos encontrados para este contacto.');
   } else if (upcoming.length || past.length) {
     if (upcoming.length) {
       appointmentLines.push('Próximos:');
-      appointmentLines.push(...upcoming.map(formatAppointmentLine));
+      appointmentLines.push(...upcoming.map((appointment) =>
+        formatAppointmentLine(appointment, includeProviderNames)
+      ));
     }
     if (past.length) {
       appointmentLines.push('Pasados recientes:');
-      appointmentLines.push(...past.map(formatAppointmentLine));
+      appointmentLines.push(...past.map((appointment) =>
+        formatAppointmentLine(appointment, includeProviderNames)
+      ));
     }
   }
   sections.push(buildSection(
@@ -647,7 +660,31 @@ export function formatInboxAiContextBlock(params: {
   }
   sections.push(buildHistorySection(historyLines, params.transcript));
 
-  const block = sections.join('\n\n');
+  const compactOrder = [
+    '=== Catálogo oficial de precios (fuente de verdad) ===',
+    '=== Cobertura oficial de servicios (fuente de verdad) ===',
+    '=== Respuestas oficiales de la casa ===',
+    '=== Memoria del cliente ===',
+    '=== Perfil directorio ===',
+    '=== Contexto operativo de conversación ===',
+    '=== Clasificación CRM ===',
+    '=== Tags ===',
+    '=== Resumen de agendamientos / apoyos ===',
+    '=== Propiedades / ubicaciones de apoyos ===',
+    '=== Citas / apoyos (Firestore, fuente de verdad) ===',
+    '=== Historial WhatsApp ===',
+    '=== Canal / ventana WhatsApp ===',
+    '=== Momento actual ===',
+  ];
+  const orderedSections = params.promptLayout === 'compact'
+    ? [...sections].sort((left, right) => {
+      const leftHeading = left.split('\n')[0] ?? '';
+      const rightHeading = right.split('\n')[0] ?? '';
+      return compactOrder.indexOf(leftHeading) - compactOrder.indexOf(rightHeading);
+    })
+    : sections;
+
+  const block = orderedSections.join('\n\n');
   if (block.length > INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET) {
     throw new Error(
       `Inbox AI context exceeded ${INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET} characters.`,
@@ -864,7 +901,10 @@ export const INBOX_AI_SYSTEM_INSTRUCTION =
   'AUDIOS: si el historial trae "[Audio transcrito]:", ese texto ES el mensaje del cliente. ' +
   'Nunca digas que no pudiste escuchar el audio ni pidas que lo escriba de nuevo. ' +
   'Si pospone, cancela o dice que ya resolvió, respeta eso: no insistas en agendar hoy ni pegues link de pago. ' +
-  'Al hablar de apoyos, usa fecha/hora, dirección, cliente y auxiliar solo si aporta; no inventes auxiliares ni direcciones. ' +
+  'Al hablar de apoyos, usa fecha/hora, dirección y cliente solo si aporta. ' +
+  'No nombres a la auxiliar salvo que el cliente lo exija en este chat, y nunca prometas la misma auxiliar. ' +
+  'No inventes direcciones. ' +
+  'El kit opcional se llama «Kit de limpieza Prosavis», nunca «Kit profesional» ni «Pro Service». ' +
   'Usa precios únicamente desde el catálogo oficial incluido en el contexto. ' +
   'Para cotizaciones nuevas ofrece únicamente 4, 6 u 8 horas de ese catálogo; ' +
   'elige la duración según el tamaño del inmueble (p. ej. 2 habitaciones → 6 horas; 3+ y más de 100 m² → 8 horas). ' +

@@ -21,6 +21,24 @@ export interface AvailabilityLoadOptions {
   request?: (body: FirebaseAvailabilityRequest) => Promise<unknown>;
 }
 
+export type AvailabilityOutcome = 'ok' | '401' | 'timeout' | 'error' | 'unconfigured';
+
+export interface AvailabilityLoadResult {
+  slots: string[];
+  outcome: AvailabilityOutcome;
+}
+
+export function classifyAvailabilityFailure(error: unknown): AvailabilityOutcome {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes('(401)') || /unauthorized/i.test(message)) return '401';
+  if (/not configured/i.test(message)) return 'unconfigured';
+  const name = error instanceof Error ? error.name : '';
+  if (name === 'AbortError' || name === 'TimeoutError' || /aborted|timeout/i.test(message)) {
+    return 'timeout';
+  }
+  return 'error';
+}
+
 function bogotaDateKey(date: Date): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: BOGOTA_TIME_ZONE,
@@ -77,26 +95,57 @@ export function normalizeAvailabilitySlots(payload: unknown): string[] {
   return [...slots].sort((left, right) => left.localeCompare(right));
 }
 
+export async function loadRealAvailabilityDetailed(
+  duration: unknown,
+  options: AvailabilityLoadOptions = {},
+): Promise<AvailabilityLoadResult> {
+  const request = options.request ?? postFirebaseJson;
+  const horizon = getBogotaAvailabilityHorizon(options.now);
+  const officialDuration = resolveOfficialDuration(duration);
+  try {
+    const payload = await request({
+      ...horizon,
+      duration: officialDuration,
+    });
+    return { slots: normalizeAvailabilitySlots(payload), outcome: 'ok' };
+  } catch (error) {
+    const outcome = classifyAvailabilityFailure(error);
+    console.warn(JSON.stringify({
+      scope: 'booking-availability',
+      event: 'firebase-availability-degraded',
+      outcome,
+      duration: officialDuration,
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    return { slots: [], outcome };
+  }
+}
+
 export async function loadRealAvailability(
   duration: unknown,
   options: AvailabilityLoadOptions = {},
 ): Promise<string[]> {
-  const request = options.request ?? postFirebaseJson;
-  const horizon = getBogotaAvailabilityHorizon(options.now);
-  try {
-    const payload = await request({
-      ...horizon,
-      duration: resolveOfficialDuration(duration),
-    });
-    return normalizeAvailabilitySlots(payload);
-  } catch (error) {
-    console.warn(JSON.stringify({
-      scope: 'booking-availability',
-      event: 'firebase-availability-degraded',
-      error: error instanceof Error ? error.message : String(error),
-    }));
-    return [];
-  }
+  const result = await loadRealAvailabilityDetailed(duration, options);
+  return result.slots;
+}
+
+export async function loadPrefetchedAvailability(
+  durations: readonly number[],
+  options: AvailabilityLoadOptions = {},
+): Promise<Map<number, AvailabilityLoadResult>> {
+  const entries = await Promise.all(durations.map(async (duration) => {
+    const result = await loadRealAvailabilityDetailed(duration, options);
+    return [duration, result] as const;
+  }));
+  return new Map(entries);
+}
+
+export function pickPrefetchedAvailability(
+  prefetched: Map<number, AvailabilityLoadResult>,
+  duration: unknown,
+): AvailabilityLoadResult | null {
+  const official = resolveOfficialDuration(duration);
+  return prefetched.get(official) ?? null;
 }
 
 export function overwriteBookingAvailability<T extends object>(

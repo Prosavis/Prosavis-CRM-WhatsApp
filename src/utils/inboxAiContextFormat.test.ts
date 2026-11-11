@@ -169,7 +169,8 @@ describe('formatInboxAiContextBlock', () => {
     expect(block).toContain('Estado: open');
     expect(block).toContain('Requiere plantilla: no');
     expect(block).toContain('dirección: Calle 10 #20-30 (Apto 201)');
-    expect(block).toContain('auxiliar: Laura Gómez');
+    expect(block).not.toContain('auxiliar:');
+    expect(block).not.toContain('Laura Gómez');
     expect(block).toContain('pago: PAGO_ACEPTADO');
     expect(block).toContain('valor: COP 88.000');
     expect(block).toContain('método: WOMPI');
@@ -182,7 +183,7 @@ describe('formatInboxAiContextBlock', () => {
     expect(block).toContain('2 habitaciones');
     expect(block).not.toContain('120 minutos → COP 58.000');
     expect(block).not.toContain('180 minutos → COP 78.000');
-    expect(block).toContain('Kit profesional → COP 30.000 adicionales');
+    expect(block).toContain('Kit de limpieza Prosavis → COP 30.000 adicionales');
     expect(block).toContain('=== Cobertura oficial de servicios (fuente de verdad) ===');
     expect(block).toContain('Cra. 23 #85-13 Manzana 5 Casa 17, Pereira, Risaralda');
     expect(block).toContain('Pereira — cobertura directa');
@@ -247,7 +248,7 @@ describe('formatInboxAiContextBlock', () => {
     });
     expect(block).toContain('Apoyo en curso ahora:');
     expect(block).toContain('IN_PROGRESS');
-    expect(block).toContain('Diana Lucía Ramirez Vallejo');
+    expect(block).not.toContain('Diana Lucía Ramirez Vallejo');
 
     const failed = formatInboxAiContextBlock({
       phone: '573150004639',
@@ -489,6 +490,44 @@ describe('formatInboxAiContextBlock', () => {
   });
 });
 
+describe('formatInboxAiContextBlock layout', () => {
+  const shared = {
+    phone: '573001112233',
+    transcript: 'Cliente: Hola',
+    historyMeta: { loaded: 1, truncated: false },
+    memory: null,
+    directory: null,
+    appointments: [{
+      id: 'a',
+      scheduledDate: '2026-08-10T14:00:00.000Z',
+      providerName: 'Laura Gómez',
+    }],
+    sessionWindow: {
+      status: 'open' as const,
+      lastInboundAt: null,
+      expiresAt: null,
+      requiresTemplate: false,
+    },
+    nowIso: '2026-08-05T12:00:00.000Z',
+  };
+
+  it('puts static sections first in the compact layout and hides the cleaner', () => {
+    const compact = formatInboxAiContextBlock({ ...shared, promptLayout: 'compact' });
+    expect(compact.indexOf('=== Catálogo oficial de precios (fuente de verdad) ===')).toBeLessThan(
+      compact.indexOf('=== Historial WhatsApp ==='),
+    );
+    expect(compact.indexOf('=== Historial WhatsApp ===')).toBeLessThan(
+      compact.indexOf('=== Momento actual ==='),
+    );
+    expect(compact).not.toContain('Laura Gómez');
+  });
+
+  it('includes the cleaner name only when Grok asks for it', () => {
+    const named = formatInboxAiContextBlock({ ...shared, includeProviderNames: true });
+    expect(named).toContain('auxiliar: Laura Gómez');
+  });
+});
+
 describe('INBOX_AI_SYSTEM_INSTRUCTION', () => {
   it('requires early arrival when house will be empty', () => {
     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/SEGURIDAD Y ACCESO/);
@@ -535,6 +574,12 @@ describe('INBOX_AI_SYSTEM_INSTRUCTION', () => {
   it('treats audio transcriptions as the client message and forbids claiming it was inaudible', () => {
     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/\[Audio transcrito\]/);
     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/nunca digas que no pudiste escuchar/i);
+  });
+
+  it('forbids naming the cleaner and requires the Prosavis kit name', () => {
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/nunca prometas la misma auxiliar/i);
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/Kit de limpieza Prosavis/);
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).not.toMatch(/auxiliar solo si aporta/);
   });
 
   it('requires greeting with the canonical inbox name only', () => {

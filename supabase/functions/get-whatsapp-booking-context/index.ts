@@ -15,6 +15,8 @@ import {
   groundBookingClientInfo,
   groundBookingPayment,
 } from '../_shared/inboxAiContext.ts';
+import { loadReusableBookingContext } from '../_shared/inboxAiSuggestionLog.ts';
+import { latestVisibleMessageAnchor } from '../_shared/suggestionPrefetch.ts';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -27,6 +29,14 @@ Deno.serve(async (req) => {
     const includeImageAnalysis = body.includeImageAnalysis === true;
 
     if (!stableKey) return jsonResponse({ error: 'Se requiere stableKey.' }, 400);
+
+    const anchor = await latestVisibleMessageAnchor(supabase, stableKey);
+    const reused = await loadReusableBookingContext(
+      supabase,
+      stableKey,
+      anchor?.createdAt ?? null,
+    );
+    if (reused) return jsonResponse(reused);
 
     const apiKey = getGeminiApiKey();
     if (!apiKey) return jsonResponse({ error: 'GEMINI_API_KEY no configurada.' }, 412);

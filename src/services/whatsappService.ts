@@ -4,6 +4,7 @@ import {
   type RealtimeChannel,
 } from '@supabase/supabase-js';
 import { supabase } from '@/config/supabase';
+import { readSuggestionStream } from '@/utils/suggestionStreamClient';
 import {
   INBOX_CONVERSATION_SELECT,
   type ConversationPreviewMessage,
@@ -998,31 +999,37 @@ export interface SuggestReplyResult {
   suggestionLogId?: string | null;
 }
 
-export async function suggestWhatsAppAgentReply(
-  stableKey: string,
-  forceGenerate = false,
-  includeVoiceTranscriptions = false,
-  extraContext?: string,
-  includeImageAnalysis = true,
+function suggestionStreamingRequested(
+  options?: { onDelta?: (text: string) => void },
+): boolean {
+  return options?.onDelta != null
+    && import.meta.env.VITE_INBOX_AI_SUGGEST_STREAM === 'true';
+}
+
+async function invokeSuggestionStream(
+  body: Record<string, unknown>,
+  onDelta: (text: string) => void,
 ): Promise<SuggestReplyResult> {
-  const data = await invokeFn<SuggestReplyResult & {
-    hint?: string;
-    wompiCheckoutUrl?: string;
-    wompiPaymentReference?: string;
-    wompiAmountCOP?: number;
-    historyMeta?: ConversationHistoryMeta;
-    conversationTags?: string[];
-    propertySummary?: InboxAiPropertySummary | null;
-    appointments?: InboxAiAppointment[];
-    appointmentsLoadFailed?: boolean;
-    suggestionLogId?: string | null;
-  }>('suggest-whatsapp-agent-reply', {
-    stableKey,
-    forceGenerate,
-    includeVoiceTranscriptions,
-    includeImageAnalysis,
-    ...(extraContext?.trim() ? { extraContext: extraContext.trim() } : {}),
+  const { data: sessionData } = await supabase.auth.getSession();
+  const token = sessionData.session?.access_token;
+  if (!token) throw new Error('No hay sesión para la sugerencia');
+  const baseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+  if (!baseUrl || !anonKey) throw new Error('Falta la configuración de Supabase');
+  const response = await fetch(`${baseUrl}/functions/v1/suggest-whatsapp-agent-reply`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      apikey: anonKey,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ ...body, stream: true }),
   });
+  const payload = await readSuggestionStream(response, onDelta);
+  return mapSuggestReplyResult(payload as SuggestReplyResult);
+}
+
+function mapSuggestReplyResult(data: SuggestReplyResult): SuggestReplyResult {
   return {
     suggestion: data.suggestion ?? null,
     proposedActions: data.proposedActions ?? [],
@@ -1040,6 +1047,28 @@ export async function suggestWhatsAppAgentReply(
     appointmentsLoadFailed: data.appointmentsLoadFailed === true,
     suggestionLogId: data.suggestionLogId ?? null,
   };
+}
+
+export async function suggestWhatsAppAgentReply(
+  stableKey: string,
+  forceGenerate = false,
+  includeVoiceTranscriptions = false,
+  extraContext?: string,
+  includeImageAnalysis = true,
+  options?: { onDelta?: (text: string) => void },
+): Promise<SuggestReplyResult> {
+  const body = {
+    stableKey,
+    forceGenerate,
+    includeVoiceTranscriptions,
+    includeImageAnalysis,
+    ...(extraContext?.trim() ? { extraContext: extraContext.trim() } : {}),
+  };
+  if (suggestionStreamingRequested(options) && options?.onDelta) {
+    return invokeSuggestionStream(body, options.onDelta);
+  }
+  const data = await invokeFn<SuggestReplyResult>('suggest-whatsapp-agent-reply', body);
+  return mapSuggestReplyResult(data);
 }
 
 export async function closeWhatsAppAiSuggestionLog(params: {

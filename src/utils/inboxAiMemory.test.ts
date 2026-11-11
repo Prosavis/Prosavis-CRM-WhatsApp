@@ -455,6 +455,48 @@ describe('loadOrRefreshInboxAiMemory', () => {
     }));
   });
 
+  it('returns the stored memory and refreshes in the background', async () => {
+    const supabase = createMemorySupabaseDouble({
+      memory: priorMemoryRow,
+      totalVisible: 44,
+      newVisible: 20,
+    });
+    let release: (value: unknown) => void = () => undefined;
+    const generateJson = vi.fn().mockImplementation(() => new Promise((resolve) => {
+      release = resolve;
+    }));
+
+    const result = await loadOrRefreshInboxAiMemory({
+      supabase: supabase.client,
+      stableKey: priorMemory.stableKey,
+      transcript: 'Cliente: Prefiero la tarde',
+      historyMeta: {
+        loaded: 20,
+        truncated: false,
+        newestAt: '2026-08-05T12:00:00.000Z',
+      },
+      refreshMode: 'background',
+      dependencies: {
+        getApiKey: () => 'test-key',
+        resolveModel: () => 'memory-model',
+        generateJson,
+        now: () => '2026-08-05T12:01:00.000Z',
+      },
+    });
+
+    expect(result).toEqual(priorMemory);
+    expect(generateJson).toHaveBeenCalledTimes(1);
+    release({
+      summary: 'Resumen tardío',
+      preferences: [],
+      objections: [],
+      agreements: [],
+    });
+    await vi.waitFor(() => {
+      expect(supabase.upserts.length).toBeGreaterThan(0);
+    });
+  });
+
   it('fails open and warns when the refreshed memory upsert fails', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const supabase = createMemorySupabaseDouble({

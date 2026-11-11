@@ -12,6 +12,17 @@ export function unescapeInboxAiNewlines(value: string): string {
  * Limpia el texto de sugerencia para el composer de WhatsApp.
  * Preserva párrafos y listas; no aplasta saltos a un solo espacio.
  */
+export function appendAuthoritativePaymentLink(
+  suggestion: string,
+  url: string | null | undefined,
+): string {
+  const link = url?.trim() ?? '';
+  if (!link) return suggestion;
+  if (suggestion.includes(link)) return suggestion;
+  const trimmed = suggestion.trim();
+  return trimmed ? `${trimmed}\n\n${link}` : link;
+}
+
 export function cleanInboxAiSuggestionText(value: unknown): string {
   if (typeof value !== 'string') return '';
 

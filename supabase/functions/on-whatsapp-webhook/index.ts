@@ -37,6 +37,8 @@ import {
   stableKeysTouchedByPayload,
 } from '../_shared/whatsappWebhookReplay.ts';
 import { scheduleBackgroundWork } from '../_shared/edgeBackground.ts';
+import { suggestionPrefetchEnabled } from '../_shared/inboxAiSuggestConfig.ts';
+import { prefetchAssignedSuggestion } from '../_shared/suggestionPrefetchJob.ts';
 import {
   buildFrancyNotice,
   postFrancyAssistantNotice,
@@ -362,6 +364,21 @@ async function processInboundMessage(params: {
         'review-intent',
       );
     }
+  }
+
+  if (
+    !params.replay
+    && suggestionPrefetchEnabled()
+    && !content.reactionTo
+    && !content.reactionRemoved
+  ) {
+    scheduleBackgroundWork(
+      prefetchAssignedSuggestion({
+        supabase: params.supabase,
+        stableKey,
+      }),
+      'suggest-prefetch',
+    );
   }
 
   if (!params.replay) {

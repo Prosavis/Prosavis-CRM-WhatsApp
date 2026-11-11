@@ -63,6 +63,7 @@ import {
   buildMetaSessionWindow,
   type MetaSessionWindow,
 } from './metaSessionWindow.ts';
+import type { StageTimer } from './suggestTiming.ts';
 
 export {
   INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET,
@@ -203,6 +204,7 @@ export interface LoadAppointmentsResult {
   totalCount: number;
   /** True si todas las queries Firestore fallaron. */
   appointmentsLoadFailed: boolean;
+  queryCount: number;
 }
 
 /**
@@ -257,12 +259,10 @@ export async function loadAppointmentsForContact(params: {
     }
   };
 
-  for (const id of clientIds) {
-    await runSafe('clientId', id);
-  }
-  for (const variant of candidates) {
-    await runSafe('clientPhone', variant);
-  }
+  await Promise.all([
+    ...[...clientIds].map((id) => runSafe('clientId', id)),
+    ...[...candidates].map((variant) => runSafe('clientPhone', variant)),
+  ]);
 
   const all = [...byId.values()];
   all.sort((a, b) => b.scheduledDate.localeCompare(a.scheduledDate));
@@ -282,6 +282,7 @@ export async function loadAppointmentsForContact(params: {
     allAppointments: all,
     totalCount,
     appointmentsLoadFailed: attempts > 0 && successes === 0,
+    queryCount: attempts,
   };
 }
 
@@ -294,6 +295,10 @@ export async function buildInboxAiContext(
     includeCachedImageAnalysis?: boolean;
     historyLimit?: number;
     transcriptCharBudget?: number;
+    includeProviderNames?: boolean;
+    promptLayout?: 'legacy' | 'compact';
+    memoryRefresh?: 'inline' | 'background';
+    stageTimer?: StageTimer;
   },
 ): Promise<InboxAiContext> {
   const phone = normalizePhone(customerPhoneFromStableKey(stableKey));
@@ -301,41 +306,99 @@ export async function buildInboxAiContext(
   const charBudget = options?.transcriptCharBudget ?? DEFAULT_TRANSCRIPT_CHAR_BUDGET;
   const includeCachedImageAnalysis = options?.includeCachedImageAnalysis === true
     || options?.includeImageAnalysis === true;
-
-  if (options?.includeImageAnalysis === true) {
-    try {
-      await analyzeUncachedInboundImagesForConversation(supabase, stableKey, {
-        historyLimit,
-      });
-    } catch (error) {
-      console.error('[inbox-ai] image analysis batch failed', error);
-    }
-  }
-
-  const history = await getConversationHistoryWithMeta(supabase, stableKey, historyLimit, {
+  const timer = options?.stageTimer;
+  const historyOptions = {
     includeVoiceTranscriptions: options?.includeVoiceTranscriptions === true,
     includeImageAnalysis: options?.includeImageAnalysis === true,
     includeCachedImageAnalysis,
-  });
-  const siblingKey = siblingConversationStableKey(stableKey);
-  let siblingTurns: typeof history.turns = [];
-  if (siblingKey) {
+  };
+
+  if (options?.includeImageAnalysis === true) {
+    const imageWork = async () => {
+      try {
+        await analyzeUncachedInboundImagesForConversation(supabase, stableKey, {
+          historyLimit,
+        });
+      } catch (error) {
+        console.error('[inbox-ai] image analysis batch failed', error);
+      }
+    };
+    if (timer) await timer.measure('images', imageWork);
+    else await imageWork();
+  } else {
+    timer?.record('images', 0, { skipped: true });
+  }
+
+  const loadSibling = async () => {
+    const siblingKey = siblingConversationStableKey(stableKey);
+    if (!siblingKey) return [] as Awaited<ReturnType<typeof getConversationHistoryWithMeta>>['turns'];
     try {
       const sibling = await getConversationHistoryWithMeta(
         supabase,
         siblingKey,
         Math.min(historyLimit, 40),
-        {
-          includeVoiceTranscriptions: options?.includeVoiceTranscriptions === true,
-          includeImageAnalysis: options?.includeImageAnalysis === true,
-          includeCachedImageAnalysis,
-        },
+        historyOptions,
       );
-      siblingTurns = sibling.turns;
+      return sibling.turns;
     } catch {
-      siblingTurns = [];
+      return [] as Awaited<ReturnType<typeof getConversationHistoryWithMeta>>['turns'];
     }
-  }
+  };
+
+  const emptyConversation: InboxAiConversationContext = {
+    tags: [],
+    adminNotes: null,
+    assignedTo: null,
+    lastIntent: null,
+    automatedInboundDisabled: false,
+  };
+
+  const loadHistory = () => getConversationHistoryWithMeta(
+    supabase,
+    stableKey,
+    historyLimit,
+    historyOptions,
+  );
+  const loadConversation = async () => {
+    try {
+      return await loadConversationContext(supabase, stableKey);
+    } catch (err) {
+      console.warn(JSON.stringify({
+        scope: 'inbox-ai-context',
+        event: 'conversation-context-failed',
+        error: String((err as Error)?.message ?? err),
+      }));
+      return emptyConversation;
+    }
+  };
+  const loadDirectory = async () => {
+    try {
+      return await loadDirectoryForConversation(supabase, stableKey, phone);
+    } catch (err) {
+      console.warn(JSON.stringify({
+        scope: 'inbox-ai-context',
+        event: 'directory-lookup-failed',
+        error: String((err as Error)?.message ?? err),
+      }));
+      return null;
+    }
+  };
+
+  const [history, siblingTurns, conversationContextLoaded, directoryLoaded, officialAnswers] = timer
+    ? await Promise.all([
+      timer.measure('history', loadHistory),
+      timer.measure('sibling', loadSibling),
+      timer.measure('conversation', loadConversation),
+      timer.measure('directory', loadDirectory),
+      timer.measure('official_answers', () => loadOfficialAnswers(supabase)),
+    ])
+    : await Promise.all([
+      loadHistory(),
+      loadSibling(),
+      loadConversation(),
+      loadDirectory(),
+      loadOfficialAnswers(supabase),
+    ]);
   if (!history.turns.length && !siblingTurns.length) {
     throw new Error('No se encontró historial de conversación.');
   }
@@ -362,38 +425,9 @@ export async function buildInboxAiContext(
     : completeMerged;
   const sessionWindow = buildMetaSessionWindow(operatedMerged, nowIso);
 
-  let conversationContext: InboxAiConversationContext = {
-    tags: [],
-    adminNotes: null,
-    assignedTo: null,
-    lastIntent: null,
-    automatedInboundDisabled: false,
-  };
-  try {
-    conversationContext = await loadConversationContext(supabase, stableKey);
-  } catch (err) {
-    console.warn(
-      JSON.stringify({
-        scope: 'inbox-ai-context',
-        event: 'conversation-context-failed',
-        error: String((err as Error)?.message ?? err),
-      }),
-    );
-  }
+  const conversationContext = conversationContextLoaded;
+  let directory = directoryLoaded;
   const conversationTags = conversationContext.tags;
-
-  let directory: InboxAiDirectory | null = null;
-  try {
-    directory = await loadDirectoryForConversation(supabase, stableKey, phone);
-  } catch (err) {
-    console.warn(
-      JSON.stringify({
-        scope: 'inbox-ai-context',
-        event: 'directory-lookup-failed',
-        error: String((err as Error)?.message ?? err),
-      }),
-    );
-  }
 
   const canonicalName = resolveInboxAiCanonicalName({
     directoryName: directory?.fullName,
@@ -401,40 +435,55 @@ export async function buildInboxAiContext(
     whatsappProfileName: conversationContext.whatsappProfileName,
   });
   const greetingFirstName = resolveInboxAiGreetingFirstName(canonicalName);
-  const memory = await loadOrRefreshInboxAiMemory({
+
+  const loadMemory = () => loadOrRefreshInboxAiMemory({
     supabase,
     stableKey,
     transcript,
     historyMeta,
     canonicalName,
+    refreshMode: options?.memoryRefresh,
+    stageTimer: timer,
   });
-
-  const officialAnswers = await loadOfficialAnswers(supabase);
-
-  let appointments: InboxAiAppointment[] = [];
-  let allAppointments: InboxAiAppointment[] = [];
-  let appointmentCount = 0;
-  let appointmentsLoadFailed = false;
-  try {
-    const loaded = await loadAppointmentsForContact({
-      phone,
-      directoryId: directory?.id,
-      appUserId: directory?.appUserId,
-    });
-    appointments = loaded.appointments;
-    allAppointments = loaded.allAppointments;
-    appointmentCount = loaded.totalCount;
-    appointmentsLoadFailed = loaded.appointmentsLoadFailed === true;
-  } catch (err) {
-    appointmentsLoadFailed = true;
-    console.warn(
-      JSON.stringify({
+  const loadAppointments = async () => {
+    try {
+      return await loadAppointmentsForContact({
+        phone,
+        directoryId: directory?.id,
+        appUserId: directory?.appUserId,
+      });
+    } catch (err) {
+      console.warn(JSON.stringify({
         scope: 'inbox-ai-context',
         event: 'appointments-load-failed',
         error: String((err as Error)?.message ?? err),
-      }),
-    );
-  }
+      }));
+      return {
+        appointments: [] as InboxAiAppointment[],
+        allAppointments: [] as InboxAiAppointment[],
+        totalCount: 0,
+        appointmentsLoadFailed: true,
+        queryCount: 0,
+      };
+    }
+  };
+
+  const [memory, loadedAppointments] = timer
+    ? await Promise.all([
+      loadMemory(),
+      timer.measure('appointments', loadAppointments),
+    ])
+    : await Promise.all([loadMemory(), loadAppointments()]);
+  timer?.record(
+    'appointments',
+    timer.snapshot().stages.appointments ?? 0,
+    { queries: loadedAppointments.queryCount },
+  );
+
+  const appointments = loadedAppointments.appointments;
+  const allAppointments = loadedAppointments.allAppointments;
+  const appointmentCount = loadedAppointments.totalCount;
+  const appointmentsLoadFailed = loadedAppointments.appointmentsLoadFailed === true;
 
   if (directory && appointmentCount > 0) {
     directory = { ...directory, isReturningClient: true };
@@ -446,6 +495,7 @@ export async function buildInboxAiContext(
       directory?.preferredServiceAddress ?? directory?.address ?? null,
   });
 
+  const formatStarted = Date.now();
   const formattedBlock = formatInboxAiContextBlock({
     phone,
     transcript,
@@ -464,7 +514,10 @@ export async function buildInboxAiContext(
     canonicalName,
     greetingFirstName,
     appointmentsLoadFailed,
+    includeProviderNames: options?.includeProviderNames === true,
+    promptLayout: options?.promptLayout,
   });
+  timer?.record('format', Date.now() - formatStarted);
 
   return {
     phone,

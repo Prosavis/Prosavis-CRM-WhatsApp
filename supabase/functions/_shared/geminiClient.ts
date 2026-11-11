@@ -38,6 +38,36 @@ export function resolveThinkingLevel(
   return requested;
 }
 
+const THINKING_LEVELS = new Set<GeminiThinkingLevel>(['minimal', 'low', 'medium', 'high']);
+
+export interface GeminiUsageMetadata {
+  promptTokenCount: number | null;
+  candidatesTokenCount: number | null;
+  thoughtsTokenCount: number | null;
+  cachedContentTokenCount: number | null;
+}
+
+function usageCount(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+export function readGeminiUsageMetadata(source: {
+  usageMetadata?: {
+    promptTokenCount?: unknown;
+    candidatesTokenCount?: unknown;
+    thoughtsTokenCount?: unknown;
+    cachedContentTokenCount?: unknown;
+  };
+} | null | undefined): GeminiUsageMetadata {
+  const usage = source?.usageMetadata;
+  return {
+    promptTokenCount: usageCount(usage?.promptTokenCount),
+    candidatesTokenCount: usageCount(usage?.candidatesTokenCount),
+    thoughtsTokenCount: usageCount(usage?.thoughtsTokenCount),
+    cachedContentTokenCount: usageCount(usage?.cachedContentTokenCount),
+  };
+}
+
 export interface GeminiGenerationConfigInput {
   maxOutputTokens?: number;
   responseMimeType?: string;
@@ -79,6 +109,24 @@ export function getGeminiApiKey(): string | null {
 /** Resuelve el modelo desde env o usa el default. */
 export function resolveGeminiModel(envKey: string, fallback: string): string {
   return readRuntimeEnv(envKey)?.trim() || fallback;
+}
+
+/** Booking puede usar otro modelo. Vacío sigue a GEMINI_MODEL_JSON. */
+export function resolveBookingModel(): string {
+  const booking = readRuntimeEnv('GEMINI_MODEL_BOOKING')?.trim();
+  if (booking) return booking;
+  return resolveGeminiModel('GEMINI_MODEL_JSON', DEFAULT_GEMINI_MODEL);
+}
+
+export function resolveGeminiThinkingLevel(
+  envKey: string,
+  fallback: GeminiThinkingLevel,
+): GeminiThinkingLevel {
+  const raw = readRuntimeEnv(envKey)?.trim().toLowerCase();
+  if (raw && THINKING_LEVELS.has(raw as GeminiThinkingLevel)) {
+    return raw as GeminiThinkingLevel;
+  }
+  return fallback;
 }
 
 /**
@@ -154,6 +202,12 @@ interface GeminiGenerateContentResponse {
     finishReason?: string;
   }>;
   promptFeedback?: Record<string, unknown>;
+  usageMetadata?: {
+    promptTokenCount?: number;
+    candidatesTokenCount?: number;
+    thoughtsTokenCount?: number;
+    cachedContentTokenCount?: number;
+  };
 }
 
 // ─── Cliente HTTP ─────────────────────────────────────────────────────────
@@ -308,6 +362,10 @@ export function isGeminiMaxTokensError(error: unknown): boolean {
 export interface GeminiJsonResult<T> {
   data: T;
   finishReason?: string;
+  model: string;
+  thinkingLevel?: GeminiThinkingLevel;
+  elapsedMs: number;
+  usage: GeminiUsageMetadata;
 }
 
 /**
@@ -348,8 +406,10 @@ export async function geminiGenerateJsonWithMeta<T>(params: {
   const scope = params.logScope ?? 'gemini-json';
   const promptChars = params.prompt.length;
 
+  const thinkingLevel = resolveThinkingLevel(model, params.thinkingLevel);
   geminiLog(scope, 'request', {
     model,
+    thinkingLevel: thinkingLevel ?? null,
     promptChars,
     maxOutputTokens: params.maxOutputTokens ?? 8192,
     hasSchema: !!(params.responseSchema || params.responseJsonSchema),
@@ -370,6 +430,13 @@ export async function geminiGenerateJsonWithMeta<T>(params: {
 
   const finishReason = data.candidates?.[0]?.finishReason;
   const elapsedMs = Date.now() - started;
+  const usage = readGeminiUsageMetadata(data);
+  const meta = {
+    model,
+    thinkingLevel,
+    elapsedMs,
+    usage,
+  };
 
   let raw: string;
   try {
@@ -377,8 +444,10 @@ export async function geminiGenerateJsonWithMeta<T>(params: {
   } catch (e) {
     geminiLog(scope, 'extract_failed', {
       model,
+      thinkingLevel: thinkingLevel ?? null,
       finishReason,
       elapsedMs,
+      ...usage,
       error: e instanceof Error ? e.message : String(e),
     });
     throw e;
@@ -388,11 +457,13 @@ export async function geminiGenerateJsonWithMeta<T>(params: {
     const parsed = JSON.parse(raw) as T;
     geminiLog(scope, 'success', {
       model,
+      thinkingLevel: thinkingLevel ?? null,
       finishReason,
       elapsedMs,
       responseChars: raw.length,
+      ...usage,
     });
-    return { data: parsed, finishReason };
+    return { data: parsed, finishReason, ...meta };
   } catch {
     const jsonMatch = raw.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
     if (jsonMatch) {
@@ -400,11 +471,13 @@ export async function geminiGenerateJsonWithMeta<T>(params: {
         const parsed = JSON.parse(jsonMatch[0]) as T;
         geminiLog(scope, 'success_salvaged', {
           model,
+          thinkingLevel: thinkingLevel ?? null,
           finishReason,
           elapsedMs,
           responseChars: raw.length,
+          ...usage,
         });
-        return { data: parsed, finishReason };
+        return { data: parsed, finishReason, ...meta };
       } catch {
         // cae al throw de abajo
       }
@@ -427,6 +500,118 @@ export async function geminiGenerateJsonWithMeta<T>(params: {
     }
     throw new Error(message);
   }
+}
+
+function visibleCandidateText(data: GeminiGenerateContentResponse): string {
+  const parts = data.candidates?.[0]?.content?.parts ?? [];
+  return parts.filter((part) => !part.thought).map((part) => part.text ?? '').join('');
+}
+
+/**
+ * streamGenerateContent (SSE). `onText` recibe el texto acumulado, sin partes de razonamiento.
+ * El resultado final tiene la misma forma que una llamada JSON, para poder parsearlo al cerrar.
+ */
+export async function geminiStreamGenerateContent(params: {
+  apiKey: string;
+  model?: string;
+  systemInstruction?: string;
+  prompt: string;
+  maxOutputTokens?: number;
+  responseJsonSchema?: Record<string, unknown>;
+  thinkingLevel?: GeminiThinkingLevel;
+  logScope?: string;
+  onText?: (accumulated: string) => void;
+}): Promise<GeminiJsonResult<string>> {
+  const model = params.model ??
+    resolveGeminiModel('GEMINI_MODEL_JSON', DEFAULT_GEMINI_MODEL);
+  const thinkingLevel = resolveThinkingLevel(model, params.thinkingLevel);
+  const scope = params.logScope ?? 'gemini-stream';
+  const url = `${GEMINI_BASE_URL}/models/${model}:streamGenerateContent?alt=sse`;
+  const body: GeminiGenerateContentRequest = {
+    contents: [{ role: 'user', parts: [{ text: params.prompt }] }],
+    generationConfig: buildGeminiGenerationConfig(model, {
+      maxOutputTokens: params.maxOutputTokens ?? 8192,
+      responseMimeType: 'application/json',
+      responseJsonSchema: params.responseJsonSchema,
+      thinkingLevel: params.thinkingLevel,
+    }),
+  };
+  if (params.systemInstruction) {
+    body.systemInstruction = { parts: [{ text: params.systemInstruction }] };
+  }
+
+  geminiLog(scope, 'request', {
+    model,
+    thinkingLevel: thinkingLevel ?? null,
+    promptChars: params.prompt.length,
+  });
+  const started = Date.now();
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': params.apiKey,
+    },
+    signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
+    body: JSON.stringify(body),
+  });
+  if (!response.ok || !response.body) {
+    const errorBody = await response.text().catch(() => '');
+    throw new Error(`Gemini API respondió ${response.status}: ${errorBody.slice(0, 200)}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let pending = '';
+  let accumulated = '';
+  let finishReason: string | undefined;
+  let usage = readGeminiUsageMetadata(null);
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    pending += decoder.decode(chunk.value, { stream: true });
+    const events = pending.split('\n\n');
+    pending = events.pop() ?? '';
+    for (const event of events) {
+      const dataLine = event
+        .split('\n')
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice(5).trim())
+        .join('');
+      if (!dataLine || dataLine === '[DONE]') continue;
+      let parsed: GeminiGenerateContentResponse;
+      try {
+        parsed = JSON.parse(dataLine) as GeminiGenerateContentResponse;
+      } catch {
+        continue;
+      }
+      accumulated += visibleCandidateText(parsed);
+      finishReason = parsed.candidates?.[0]?.finishReason ?? finishReason;
+      const nextUsage = readGeminiUsageMetadata(parsed);
+      if (nextUsage.promptTokenCount != null || nextUsage.thoughtsTokenCount != null) {
+        usage = nextUsage;
+      }
+      params.onText?.(accumulated);
+    }
+  }
+
+  const elapsedMs = Date.now() - started;
+  geminiLog(scope, 'success', {
+    model,
+    thinkingLevel: thinkingLevel ?? null,
+    finishReason,
+    elapsedMs,
+    responseChars: accumulated.length,
+    ...usage,
+  });
+  return {
+    data: accumulated,
+    finishReason,
+    model,
+    thinkingLevel,
+    elapsedMs,
+    usage,
+  };
 }
 
 /**
