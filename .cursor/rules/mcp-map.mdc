@@ -13,7 +13,7 @@ Casa: `prosavis-firebase/docs/desarrollo/mcp-setup.md`.
 | CRM Postgres, migraciones, Edge | `supabase` |
 | Deploys CRM / web | `vercel` |
 | Templates y mensajes WABA | `prosavis-waba` |
-| Ops suite (citas, inbox, From comercial@, finanzas) | `grok-ops-mcp` con el `bot_role` de la tool |
+| Ops suite (citas, inbox, From comercial@, finanzas) | Hasta el corte: `grok-ops-mcp` con el `bot_role` de la tool. Después: `prosavis-hub`, asiento en el token, sin `bot_role`. |
 | Inbox support@ (etiquetas, clasificar) | plugin Gmail. No tiene campo `from`. |
 | Inbox plataforma («organiza 28») | `user-gmail-28`. No mezclar IDs con el plugin. No `mcp_auth` del plugin para esa cuenta. |
 

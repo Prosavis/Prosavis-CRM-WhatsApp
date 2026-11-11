@@ -21,7 +21,7 @@ El goteo `promo_pro` (26/08) salió por **`support@`** porque el plugin no tiene
 3. Esperar su respuesta de **este** turno. Sin línea elegida: borrador como mucho, **no** enviar.
 4. **Cómo poner el From**
    - Plugin Gmail (`create_draft` / `send_message` / `reply`): **no tiene `from`**. Sale `support@`. Úsalo para inbox, etiquetas y ops 1:1 por support@.
-   - Personalizado / comercial@: **`grok-ops-mcp`** (`bot_role=publicidad` u otro rol con la tool) → `gmail_create_draft` / `gmail_send` / `gmail_send_draft` con `from=comercial@prosavis.com`. Allowlist: solo `support@` o `comercial@`.
+   - Personalizado / comercial@: hasta el corte, **`grok-ops-mcp`** (`bot_role=publicidad` u otro rol con la tool) → `gmail_create_draft` / `gmail_send` / `gmail_send_draft` con `from=comercial@prosavis.com`. Después del corte, el asiento del Hub usa `correo.gmail.*` con el mismo `from`. Allowlist: solo `support@` o `comercial@`.
    - Tras un draft del puente, Cursor **sí** puede `send_message(draftId)` del plugin: manda el draft tal cual (From ya puesto).
 5. Lote empresas / cron: From `comercial@` (`GMAIL_OPS_FROM` en Supabase). El 1:1 de Grok sigue preguntando. No fingir From. No re-autenticar a `prosavis28@` ni a otra cuenta para «cambiar el From».
 6. Enviar solo si Nicolás dice **manda** + línea en **ese** turno. Firma Francy si toca.
