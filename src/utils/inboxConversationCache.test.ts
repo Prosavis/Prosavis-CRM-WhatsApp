@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { WhatsAppConversation } from '@/services/whatsappService';
 import {
   applyInboxRealtimeEvent,
+  applyServerConversationRows,
   conversationMatchesListFilter,
   createInboxRealtimeCoalescer,
   keepNewerPreview,
@@ -33,6 +34,7 @@ function mapRow(row: InboxConversationRowLike): WhatsAppConversation {
     isPinned: row.is_pinned === true,
     isArchived: row.is_archived === true,
     lastMessageText: row.last_message_text ? String(row.last_message_text) : undefined,
+    updatedAt: row.updated_at ? new Date(String(row.updated_at)) : undefined,
   });
 }
 
@@ -250,6 +252,7 @@ describe('inboxConversationCache', () => {
     expect(INBOX_CONVERSATION_SELECT).toContain('ctwa_source_id');
     expect(INBOX_CONVERSATION_SELECT).toContain('review_intent_mark');
     expect(INBOX_CONVERSATION_SELECT).toContain('intake_intent_label');
+    expect(INBOX_CONVERSATION_SELECT).toContain('updated_at');
     expect(INBOX_CONVERSATION_SELECT).not.toContain('metadata');
   });
 
@@ -434,5 +437,64 @@ describe('inboxConversationCache', () => {
         created_at: '2026-08-02T00:00:00Z',
       }),
     ).toBeNull();
+  });
+
+  it('an older server row does not restore a stale unread count', () => {
+    const current = [
+      conv({
+        id: 'a',
+        unreadCount: 0,
+        lastMessageText: 'nuevo',
+        lastMessageAt: new Date('2026-08-02T00:00:10Z'),
+        updatedAt: new Date('2026-08-02T00:00:10Z'),
+      }),
+    ];
+    const result = applyInboxRealtimeEvent(
+      current,
+      new Map(),
+      {
+        eventType: 'UPDATE',
+        new: {
+          id: 'uuid-a',
+          stable_key: 'a',
+          phone_number_id: bot,
+          unread_count: 4,
+          last_message_text: 'nuevo',
+          last_message_at: '2026-08-02T00:00:10Z',
+          updated_at: '2026-08-02T00:00:01Z',
+        },
+      },
+      filter,
+      mapRow,
+    );
+    expect(result.changed).toBe(false);
+    expect(result.conversations[0].unreadCount).toBe(0);
+    expect(result.conversations[0]).toBe(current[0]);
+  });
+
+  it('a catch-up row inserts a chat on this line and drops one that moved away', () => {
+    const current = [
+      conv({ id: 'stay', phoneNumberId: bot, updatedAt: new Date('2026-08-01T00:00:00Z') }),
+      conv({ id: 'moved', phoneNumberId: bot, updatedAt: new Date('2026-08-01T00:00:00Z') }),
+    ];
+    const next = applyServerConversationRows(
+      current,
+      [
+        conv({
+          id: 'fresh',
+          phoneNumberId: bot,
+          lastMessageAt: new Date('2026-08-03T00:00:00Z'),
+          lastMessageText: 'hola',
+          updatedAt: new Date('2026-08-03T00:00:00Z'),
+        }),
+        conv({
+          id: 'moved',
+          phoneNumberId: 'commercial',
+          updatedAt: new Date('2026-08-03T00:00:01Z'),
+        }),
+      ],
+      filter,
+    );
+    expect(next.map((row) => row.id)).toEqual(['fresh', 'stay']);
   });
 });

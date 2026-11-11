@@ -103,3 +103,74 @@ export async function fetchDirectoryMetaByPhones(
   );
   return directoryMetaFromRows(pages.flat());
 }
+
+export const DIRECTORY_META_REFRESH_MS = 300;
+
+export function directoryPhoneFromChange(row: {
+  phone?: unknown;
+  phone_key?: unknown;
+} | null | undefined): string | null {
+  const phoneKey = typeof row?.phone_key === 'string' ? row.phone_key : null;
+  const phone = typeof row?.phone === 'string' ? row.phone : null;
+  return directoryPhoneKey(phoneKey) || directoryPhoneKey(phone);
+}
+
+/** Reemplaza solo los teléfonos refrescados. Si el directorio ya no los tiene, se quitan. */
+export function mergePhoneMeta(
+  current: Map<string, DirectoryContactMeta>,
+  phoneKeys: string[],
+  loaded: Map<string, DirectoryContactMeta>,
+): Map<string, DirectoryContactMeta> {
+  const next = new Map(current);
+  for (const key of phoneKeys) {
+    const meta = loaded.get(key);
+    if (meta) next.set(key, meta);
+    else next.delete(key);
+  }
+  return next;
+}
+
+export function createDirectoryChangeBatch(options: {
+  debounceMs?: number;
+  schedule?: (fn: () => void, ms: number) => { cancel: () => void };
+  onFlush: (change: { phones: string[] } | { reloadAll: true }) => void;
+}) {
+  const debounceMs = options.debounceMs ?? DIRECTORY_META_REFRESH_MS;
+  const schedule =
+    options.schedule ??
+    ((fn, ms) => {
+      const id = setTimeout(fn, ms);
+      return { cancel: () => clearTimeout(id) };
+    });
+  let phones = new Set<string>();
+  let reloadAll = false;
+  let timer: { cancel: () => void } | null = null;
+  let disposed = false;
+
+  const flush = () => {
+    timer = null;
+    if (disposed) return;
+    const change = reloadAll ? ({ reloadAll: true } as const) : { phones: [...phones] };
+    phones = new Set();
+    reloadAll = false;
+    if (!('reloadAll' in change) && change.phones.length === 0) return;
+    options.onFlush(change);
+  };
+
+  return {
+    push(phone: string | null) {
+      if (disposed) return;
+      if (!phone) reloadAll = true;
+      else phones.add(phone);
+      if (timer) return;
+      timer = schedule(flush, debounceMs);
+    },
+    dispose() {
+      disposed = true;
+      timer?.cancel();
+      timer = null;
+      phones = new Set();
+      reloadAll = false;
+    },
+  };
+}

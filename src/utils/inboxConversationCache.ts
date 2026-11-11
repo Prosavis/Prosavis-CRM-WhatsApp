@@ -2,6 +2,7 @@ import type { WhatsAppConversation } from '@/services/whatsappService';
 
 export const INBOX_REALTIME_DEBOUNCE_MS = 150;
 export const INBOX_VISIBILITY_STALE_MS = 30_000;
+export const INBOX_CATCHUP_OVERLAP_MS = 2 * 60 * 1000;
 
 export const INBOX_CONVERSATION_SELECT = [
   'id',
@@ -36,6 +37,7 @@ export const INBOX_CONVERSATION_SELECT = [
   'review_intent_mark',
   'review_intent_label',
   'intake_intent_label',
+  'updated_at',
 ].join(',');
 
 export type InboxRealtimeEventType = 'INSERT' | 'UPDATE' | 'DELETE';
@@ -144,6 +146,7 @@ export function keepNewerPreview(
     ...incoming,
     id: incoming.id || current.id,
     lastInboundAt: laterDate(current.lastInboundAt, incoming.lastInboundAt),
+    updatedAt: laterDate(current.updatedAt, incoming.updatedAt),
   };
 
   if (incomingAt > currentAt) {
@@ -188,6 +191,73 @@ export function keepNewerPreview(
   };
 }
 
+/** Una fila con updatedAt más viejo no pisa el estado local (p. ej. un no leído ya reseteado). */
+export function preferNewerConversationRow(
+  current: WhatsAppConversation,
+  incoming: WhatsAppConversation,
+): WhatsAppConversation {
+  const currentVersion = current.updatedAt?.getTime();
+  const incomingVersion = incoming.updatedAt?.getTime();
+  if (
+    currentVersion != null &&
+    incomingVersion != null &&
+    !Number.isNaN(currentVersion) &&
+    !Number.isNaN(incomingVersion) &&
+    incomingVersion < currentVersion
+  ) {
+    return current;
+  }
+  return keepNewerPreview(current, incoming);
+}
+
+export function maxConversationUpdatedAt(rows: WhatsAppConversation[]): number | null {
+  let max: number | null = null;
+  for (const row of rows) {
+    const time = row.updatedAt?.getTime();
+    if (time == null || Number.isNaN(time)) continue;
+    if (max == null || time > max) max = time;
+  }
+  return max;
+}
+
+export function inboxCatchupSince(latestServerUpdatedAtMs: number | null, now = Date.now()): string {
+  return new Date((latestServerUpdatedAtMs ?? now) - INBOX_CATCHUP_OVERLAP_MS).toISOString();
+}
+
+export function applyServerConversationRows(
+  current: WhatsAppConversation[],
+  incoming: WhatsAppConversation[],
+  filter: InboxListFilter,
+): WhatsAppConversation[] {
+  let next = current;
+  let changed = false;
+  for (const row of incoming) {
+    const matches = conversationMatchesListFilter(
+      { stable_key: row.id, phone_number_id: row.phoneNumberId ?? null },
+      filter,
+    );
+    const idx = next.findIndex((item) => item.id === row.id);
+    if (!matches) {
+      if (idx === -1) continue;
+      next = next.filter((item) => item.id !== row.id);
+      changed = true;
+      continue;
+    }
+    if (idx === -1) {
+      next = [...next, row];
+      changed = true;
+      continue;
+    }
+    const merged = preferNewerConversationRow(next[idx], row);
+    if (merged === next[idx]) continue;
+    const copy = [...next];
+    copy[idx] = merged;
+    next = copy;
+    changed = true;
+  }
+  return changed ? sortInboxConversations(next) : next;
+}
+
 export function mergeNewerConversationPreviews(
   fetched: WhatsAppConversation[],
   local: WhatsAppConversation[],
@@ -198,7 +268,7 @@ export function mergeNewerConversationPreviews(
   const merged = fetched.map((row) => {
     const prev = localById.get(row.id);
     if (!prev) return row;
-    const next = keepNewerPreview(prev, row);
+    const next = preferNewerConversationRow(prev, row);
     if ((next.lastMessageAt?.getTime() ?? 0) !== (row.lastMessageAt?.getTime() ?? 0)) resort = true;
     return next;
   });
@@ -322,7 +392,8 @@ export function applyInboxRealtimeEvent(
         changed = true;
       } else {
         const prev = next[idx];
-        const merged = keepNewerPreview(prev, mapped);
+        const merged = preferNewerConversationRow(prev, mapped);
+        if (merged === prev) break;
         const samePreview =
           prev.lastMessageAt?.getTime() === merged.lastMessageAt?.getTime() &&
           prev.isPinned === merged.isPinned;

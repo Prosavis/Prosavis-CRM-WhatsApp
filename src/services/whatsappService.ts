@@ -187,6 +187,7 @@ export function mapConversationRow(
         : undefined,
     reviewIntentLabel: asOptionalString(record.review_intent_label),
     intakeIntentLabel: asOptionalString(record.intake_intent_label),
+    updatedAt: toDate(asOptionalString(record.updated_at)),
   };
 }
 
@@ -299,6 +300,8 @@ export interface WhatsAppConversation {
   reviewIntentMark?: 'apto' | 'queja' | 'no_pedir';
   reviewIntentLabel?: string;
   intakeIntentLabel?: string;
+  /** Versión de servidor (`whatsapp_conversations.updated_at`). */
+  updatedAt?: Date;
 }
 
 export interface WhatsAppLocation {
@@ -451,6 +454,7 @@ export type FetchConversationsOptions = {
   includeOrphans?: boolean;
   skipInitialLoad?: boolean;
   getSnapshot?: () => WhatsAppConversation[];
+  onResubscribed?: () => void;
 };
 
 async function fetchConversations(
@@ -530,7 +534,29 @@ export function subscribeToConversations(
     channelName: `whatsapp-conversations:${phoneNumberId ?? 'all'}:${options?.includeOrphans === false ? 'strict' : 'orphans'}`,
     skipInitialLoad: options?.skipInitialLoad,
     getSnapshot: options?.getSnapshot,
+    onResubscribed: options?.onResubscribed,
   });
+}
+
+export async function fetchConversationsUpdatedSince(
+  sinceIso: string,
+): Promise<WhatsAppConversation[]> {
+  const allRows: InboxConversationRowLike[] = [];
+  for (let page = 0; page < CONVERSATIONS_MAX_PAGES; page += 1) {
+    const from = page * CONVERSATIONS_PAGE_SIZE;
+    const to = from + CONVERSATIONS_PAGE_SIZE - 1;
+    const { data, error } = await supabase
+      .from('whatsapp_conversations')
+      .select(INBOX_CONVERSATION_SELECT as '*')
+      .gt('updated_at', sinceIso)
+      .order('updated_at', { ascending: true })
+      .range(from, to);
+    if (error) throw error;
+    const batch = (data ?? []) as unknown as InboxConversationRowLike[];
+    allRows.push(...batch);
+    if (batch.length < CONVERSATIONS_PAGE_SIZE) break;
+  }
+  return allRows.map(mapConversationRow);
 }
 
 /** Números únicos (solo dígitos, 10–15) de conversaciones de la línea, para envío masivo. */
@@ -576,8 +602,9 @@ export async function fetchConversationMessages(
 export function subscribeToMessageInserts(
   onInsert: (message: ConversationPreviewMessage) => void,
   channelName: string,
+  onResubscribed?: () => void,
 ): Unsubscribe {
-  return subscribeInboxMessageInserts({ supabase, channelName, onInsert });
+  return subscribeInboxMessageInserts({ supabase, channelName, onInsert, onResubscribed });
 }
 
 export function subscribeToMessages(
