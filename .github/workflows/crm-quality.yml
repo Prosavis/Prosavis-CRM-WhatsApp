@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '22.23.5'
           cache: npm
       - run: npm ci
       - run: npm test
@@ -57,7 +57,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '22.23.5'
           cache: npm
       - run: npm ci
       - name: Smoke audit (A2, B1–B3, C1, I1, I4)
