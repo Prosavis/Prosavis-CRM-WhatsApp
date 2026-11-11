@@ -10,9 +10,11 @@ export function detectNewInboundConversations<T extends InboundAlertConversation
   now = Date.now(),
   newConvMaxAgeMs = 120_000,
 ): { nextSnapshot: Map<string, number>; candidates: T[] } {
-  const nextSnapshot = new Map<string, number>();
+  const nextSnapshot = new Map(prevSnapshot);
   for (const conversation of conversations) {
-    nextSnapshot.set(conversation.id, conversation.lastMessageAt?.getTime() ?? 0);
+    const at = conversation.lastMessageAt?.getTime() ?? 0;
+    const prev = nextSnapshot.get(conversation.id);
+    if (prev === undefined || at > prev) nextSnapshot.set(conversation.id, at);
   }
 
   const candidates: T[] = [];

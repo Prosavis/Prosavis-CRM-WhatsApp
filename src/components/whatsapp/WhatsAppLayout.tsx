@@ -246,9 +246,10 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   } | null>(null);
 
   const inboundBaselineReadyRef = useRef(false);
-  const inboundPrevSnapshotRef = useRef<Map<string, number>>(new Map());
-  const siblingInboundBaselineReadyRef = useRef(false);
-  const siblingInboundPrevSnapshotRef = useRef<Map<string, number>>(new Map());
+  const seenInboundRef = useRef<Map<string, number>>(new Map());
+  const announceInboundRef = useRef<
+    (conversation: WhatsAppConversation, opts?: { snackbar?: boolean }) => void
+  >(() => {});
   const [siblingAlertConversations, setSiblingAlertConversations] = useState<WhatsAppConversation[]>([]);
   const focusRefetchAttemptedRef = useRef<string | null>(null);
   /** Token del deep-link ya aplicado (evita re-seleccionar mientras se limpia la URL). */
@@ -284,9 +285,6 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
 
   useEffect(() => {
     inboundBaselineReadyRef.current = false;
-    inboundPrevSnapshotRef.current = new Map();
-    siblingInboundBaselineReadyRef.current = false;
-    siblingInboundPrevSnapshotRef.current = new Map();
     setSiblingAlertConversations([]);
     appliedDeepLinkTokenRef.current = null;
     focusRefetchAttemptedRef.current = null;
@@ -349,12 +347,32 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
     }
     const siblingFilter = lineFilter === 'commercial' ? 'bot' : 'commercial';
     const siblingPhoneNumberId = phoneNumberIdForFilter(siblingFilter);
-    return subscribeToConversations(
-      setSiblingAlertConversations,
+    let active = true;
+    let firstLoad = true;
+    const unsubscribe = subscribeToConversations(
+      (rows) => {
+        if (!active) return;
+        setSiblingAlertConversations(rows);
+        const { nextSnapshot, candidates } = detectNewInboundConversations(
+          rows,
+          seenInboundRef.current,
+        );
+        seenInboundRef.current = nextSnapshot;
+        if (firstLoad) {
+          firstLoad = false;
+          return;
+        }
+        const best = pickLatestInbound(candidates);
+        if (best) announceInboundRef.current(best);
+      },
       siblingPhoneNumberId,
       undefined,
       { includeOrphans: siblingFilter !== 'commercial' },
     );
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, [authLoading, session?.access_token, lineFilter]);
 
   const loadTags = useCallback(async () => {
@@ -464,42 +482,27 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   }, [openInboundConversation]);
 
   useEffect(() => {
+    announceInboundRef.current = announceInbound;
+  }, [announceInbound]);
+
+  useEffect(() => {
     if (loading) return;
 
     const { nextSnapshot, candidates } = detectNewInboundConversations(
       conversations,
-      inboundPrevSnapshotRef.current,
+      seenInboundRef.current,
     );
 
     if (!inboundBaselineReadyRef.current) {
       inboundBaselineReadyRef.current = true;
-      inboundPrevSnapshotRef.current = nextSnapshot;
+      seenInboundRef.current = nextSnapshot;
       return;
     }
 
-    inboundPrevSnapshotRef.current = nextSnapshot;
+    seenInboundRef.current = nextSnapshot;
     const best = pickLatestInbound(candidates);
     if (best) announceInbound(best);
   }, [announceInbound, conversations, loading]);
-
-  useEffect(() => {
-    if (lineFilter === 'all') return;
-
-    const { nextSnapshot, candidates } = detectNewInboundConversations(
-      siblingAlertConversations,
-      siblingInboundPrevSnapshotRef.current,
-    );
-
-    if (!siblingInboundBaselineReadyRef.current) {
-      siblingInboundBaselineReadyRef.current = true;
-      siblingInboundPrevSnapshotRef.current = nextSnapshot;
-      return;
-    }
-
-    siblingInboundPrevSnapshotRef.current = nextSnapshot;
-    const best = pickLatestInbound(candidates);
-    if (best) announceInbound(best);
-  }, [announceInbound, lineFilter, siblingAlertConversations]);
 
   useEffect(() => {
     if (selectedConversation) {
