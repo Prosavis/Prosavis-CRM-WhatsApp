@@ -302,7 +302,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [optimisticMessages, setOptimisticMessages] = useState<WhatsAppMessage[]>([]);
   const [hasOlder, setHasOlder] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const sendAbortRef = useRef<AbortController | null>(null);
   const pinToBottomRef = useRef(true);
   const programmaticScrollRef = useRef(false);
   const userScrollIntentRef = useRef(false);
@@ -586,14 +585,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     }
   }, [externalDraft, onExternalDraftConsumed]);
 
-  useEffect(() => {
-    sendAbortRef.current?.abort();
-    sendAbortRef.current = new AbortController();
-    return () => {
-      sendAbortRef.current?.abort();
-    };
-  }, [conversation.id]);
-
   // === Presencia: track/untrack en canal Realtime (sin heartbeat SQL) ===
   const currentActivityRef = useRef<'viewing' | 'typing'>('viewing');
 
@@ -712,7 +703,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           sendPhoneNumberId,
           replyId,
           clientRequestId,
-          sendAbortRef.current?.signal,
         );
         markInboxPerf(INBOX_PERF_MARKS.sendAck);
       } catch (error) {

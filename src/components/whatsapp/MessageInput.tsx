@@ -565,6 +565,15 @@ const MessageInput: React.FC<MessageInputProps> = ({
     if (disabled || sending) return;
     setSendError(null);
     stopTypingNow();
+    const sentConversationKey = conversationKey;
+    const confirmSendOnOpenChat = () => {
+      clearComposerDraft(sentConversationKey);
+      if (conversationKeyRef.current !== sentConversationKey) return;
+      lexicalEditorRef.current?.setWhatsAppText('');
+      textRef.current = '';
+      lexicalEditorRef.current?.focus();
+      playInboxSound(inboxLine, 'outbound');
+    };
 
     if (pendingFiles.length > 0 && (onSendMediaBatch || onSendMedia)) {
       setSending(true);
@@ -601,22 +610,15 @@ const MessageInput: React.FC<MessageInputProps> = ({
             playError();
             crmToast.error('Algunos adjuntos no se enviaron');
           } else {
-            lexicalEditorRef.current?.setWhatsAppText('');
-            textRef.current = '';
-            clearComposerDraft(conversationKey);
+            confirmSendOnOpenChat();
             clearPendingFile();
-            playInboxSound(inboxLine, 'outbound');
           }
         } else if (onSendMedia && pendingFiles[0]) {
           const first = pendingFiles[0];
           await onSendMedia(first.file, first.mediaType, text.trim() || undefined);
-          lexicalEditorRef.current?.setWhatsAppText('');
-          textRef.current = '';
-          clearComposerDraft(conversationKey);
+          confirmSendOnOpenChat();
           clearPendingFile(first.id);
-          playInboxSound(inboxLine, 'outbound');
         }
-        lexicalEditorRef.current?.focus();
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'No se pudo enviar el archivo';
         setSendError(msg);
@@ -634,11 +636,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
     setSending(true);
     try {
       await onSend(trimmed);
-      lexicalEditorRef.current?.setWhatsAppText('');
-      textRef.current = '';
-      clearComposerDraft(conversationKey);
-      lexicalEditorRef.current?.focus();
-      playInboxSound(inboxLine, 'outbound');
+      confirmSendOnOpenChat();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'No se pudo enviar el mensaje';
       setSendError(msg);
