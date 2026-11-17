@@ -13,8 +13,8 @@ export const EMPRESAS_OUTREACH_BATCH = 100;
 export const EMPRESAS_OUTREACH_PASS = 20;
 /** Tope email por invocación Edge (2–3 pases cierran 100). */
 export const EMPRESAS_OUTREACH_EMAIL_PASS = 50;
-/** Tool Grok/Cursor. El cron usa sendEmpresasOutreach.<ventana> y no entra aquí. */
-export const EMPRESAS_GROK_SCHEDULER = 'grokOpsMcp.ops_empresas_outreach';
+/** run_next manual. El cron usa sendEmpresasOutreach.<ventana> y no entra aquí. */
+export const EMPRESAS_GROK_SCHEDULER = 'correo.empresas.siguiente';
 /** Tope Workspace del día para el correo de la tool. El cron sigue en 100 por ventana. */
 export const EMPRESAS_OUTREACH_EMAIL_DAY_CAP = 2000;
 /** Tope del día Bogotá para WhatsApp de la tool. El cron sigue en 100 por ventana. */
