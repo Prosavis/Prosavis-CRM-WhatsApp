@@ -5,6 +5,7 @@ import {
   type DirectoryLidRemapClient,
 } from './directoryLidRemap.ts';
 import { directoryPhoneKey } from './directoryPhone.ts';
+import { nextLastInboundAt } from './metaSessionWindow.ts';
 import { normalizePhone } from './whatsappIdentity.ts';
 import { lidCustomerKey } from './whatsappInboundIdentity.ts';
 import {
@@ -84,7 +85,7 @@ export async function claimLidConversationPhone(params: {
   const { data: lidConv, error: lidReadError } = await params.supabase
     .from('whatsapp_conversations')
     .select(
-      'stable_key, unread_count, contact_name, contact_name_locked, whatsapp_profile_name, contact_photo_url, last_message_text, last_message_at, last_message_direction, last_message_outbound_status, last_intent, assigned_to, is_archived, is_pinned, state, tag_ids, metadata, phone_number_id',
+      'stable_key, unread_count, contact_name, contact_name_locked, whatsapp_profile_name, contact_photo_url, last_message_text, last_message_at, last_message_direction, last_message_outbound_status, last_inbound_at, bsuid, last_intent, assigned_to, is_archived, is_pinned, state, tag_ids, metadata, phone_number_id',
     )
     .eq('stable_key', lidKey)
     .maybeSingle();
@@ -93,7 +94,7 @@ export async function claimLidConversationPhone(params: {
 
   const { data: phoneConv, error: phoneReadError } = await params.supabase
     .from('whatsapp_conversations')
-    .select('unread_count, last_message_at, last_message_text, last_message_direction, metadata')
+    .select('unread_count, last_message_at, last_message_text, last_message_direction, last_inbound_at, bsuid, metadata')
     .eq('stable_key', phoneKey)
     .maybeSingle();
   if (phoneReadError) throw phoneReadError;
@@ -121,6 +122,8 @@ export async function claimLidConversationPhone(params: {
       last_message_at: lidConv.last_message_at,
       last_message_direction: lidConv.last_message_direction,
       last_message_outbound_status: lidConv.last_message_outbound_status,
+      last_inbound_at: lidConv.last_inbound_at ?? null,
+      bsuid: params.userId,
       last_intent: lidConv.last_intent,
       assigned_to: lidConv.assigned_to,
       is_pinned: lidConv.is_pinned,
@@ -145,6 +148,8 @@ export async function claimLidConversationPhone(params: {
         contact_phone: phone,
         unread_count: Number(phoneConv.unread_count ?? 0) + Number(lidConv.unread_count ?? 0),
         metadata: nextMetadata,
+        last_inbound_at: nextLastInboundAt(phoneConv.last_inbound_at, lidConv.last_inbound_at),
+        bsuid: phoneConv.bsuid || params.userId,
         ...(mergeNewer
           ? {
             last_message_text: lidConv.last_message_text,
@@ -185,6 +190,52 @@ export async function claimLidConversationPhone(params: {
   if (deleteLidError) throw deleteLidError;
 
   return { stableKey: phoneKey, directoryId };
+}
+
+export function claimedPhoneStableKey(
+  rows: readonly {
+    stable_key?: string | null;
+    bsuid?: string | null;
+    phone_number_id?: string | null;
+    last_message_at?: string | null;
+  }[],
+  userId: string,
+  phoneNumberId: string | null,
+): string | null {
+  const wanted = userId.trim();
+  if (!wanted) return null;
+  const line = phoneNumberId?.trim() || null;
+  let bestKey: string | null = null;
+  let bestAt = -1;
+  for (const row of rows) {
+    if ((row.bsuid ?? '').trim() !== wanted) continue;
+    const rowLine = row.phone_number_id?.trim() || null;
+    if (rowLine !== line) continue;
+    const key = (row.stable_key ?? '').trim();
+    if (!key || isLidStableKey(key)) continue;
+    const at = row.last_message_at ? new Date(row.last_message_at).getTime() : 0;
+    if (at < bestAt) continue;
+    bestKey = key;
+    bestAt = Number.isFinite(at) ? at : 0;
+  }
+  return bestKey;
+}
+
+/** Hilo de teléfono que ya absorbió este BSUID en la misma línea. */
+export async function findClaimedPhoneStableKey(params: {
+  supabase: SupabaseClient;
+  userId: string;
+  phoneNumberId: string | null;
+}): Promise<string | null> {
+  const userId = params.userId.trim();
+  if (!userId) return null;
+  const { data, error } = await params.supabase
+    .from('whatsapp_conversations')
+    .select('stable_key, bsuid, phone_number_id, last_message_at')
+    .eq('bsuid', userId)
+    .limit(8);
+  if (error) throw error;
+  return claimedPhoneStableKey(data ?? [], userId, params.phoneNumberId);
 }
 
 /**

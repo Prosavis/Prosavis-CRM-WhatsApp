@@ -3,6 +3,7 @@ import { requireCrmAdmin } from '../_shared/supabase.ts';
 import {
   assertMetaSendEnabled,
   buildTemplateDisplayBody,
+  conversationGraphTarget,
   ensureConversation,
   formatError,
   getGraphCredentials,
@@ -60,8 +61,13 @@ Deno.serve(async (req) => {
     }
 
     const graph = getGraphCredentials(phoneNumberId);
+    const stableKey = outboundConversationKey(recipientKey, graph.phoneNumberId);
+    const authTemplate = templateCategory?.trim().toUpperCase() === 'AUTHENTICATION';
+    const graphTarget = authTemplate
+      ? { to: recipientKey, bsuid: null as string | null }
+      : await conversationGraphTarget(supabase, stableKey, recipientKey);
     const metaResult = await sendToMeta({
-      to: recipientKey,
+      to: graphTarget.to,
       phoneNumberId: graph.phoneNumberId,
       accessToken: graph.accessToken,
       templateName,
@@ -71,7 +77,6 @@ Deno.serve(async (req) => {
       supabase,
     });
 
-    const stableKey = outboundConversationKey(recipientKey, graph.phoneNumberId);
     const recipientIdentity = outboundRecipientLogIdentity(recipientKey);
 
     await ensureConversation(supabase, stableKey, recipientKey, graph.phoneNumberId);
@@ -81,7 +86,7 @@ Deno.serve(async (req) => {
       {
         conversation_stable_key: stableKey,
         recipient_phone: recipientIdentity.recipientPhone,
-        recipient_bsuid: recipientIdentity.recipientBsuid,
+        recipient_bsuid: graphTarget.bsuid ?? recipientIdentity.recipientBsuid,
         direction: 'outbound',
         sender_type: 'agent',
         message_body: displayMessageBody,

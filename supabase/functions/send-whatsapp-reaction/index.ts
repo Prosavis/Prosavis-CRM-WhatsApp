@@ -10,6 +10,7 @@ import {
   metaErrorCode,
   metaErrorMessage,
   outboundConversationKey,
+  conversationGraphTarget,
   persistOutboundLog,
   rejectIfSessionWindowClosed,
   sendToMeta,
@@ -58,9 +59,10 @@ Deno.serve(async (req) => {
       }, 409);
     }
     const reactionRemoved = emoji.trim() === '';
+    const graphTarget = await conversationGraphTarget(supabase, sessionKey, to);
 
     const metaResult = await sendToMeta({
-      to,
+      to: graphTarget.to,
       phoneNumberId: graph.phoneNumberId,
       accessToken: graph.accessToken,
       reactionToWaMessageId: reactToWaMessageId,
@@ -72,7 +74,7 @@ Deno.serve(async (req) => {
       {
         conversation_stable_key: stableKey,
         recipient_phone: recipientPhone,
-        recipient_bsuid: recipient.bsuid ?? null,
+        recipient_bsuid: graphTarget.bsuid ?? recipient.bsuid ?? null,
         direction: 'outbound',
         sender_type: 'agent',
         message_body: emoji,

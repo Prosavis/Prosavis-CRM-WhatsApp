@@ -5,6 +5,7 @@ import {
   buildRecipientPayload,
   getBlocklistKey,
   getStableKeyFromRecipient,
+  graphSendTarget,
   normalizePhone,
   resolveRecipient,
 } from './whatsappIdentity.ts';
@@ -215,6 +216,38 @@ export async function rejectIfSessionWindowClosed(
   const reason = freeformSendBlockReason(data?.last_inbound_at ?? null);
   if (!reason) return null;
   return { success: false, error: reason };
+}
+
+function asMetadata(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+/** Destino Graph del hilo. El stable key del CRM no cambia. */
+export async function conversationGraphTarget(
+  supabase: SupabaseClient,
+  stableKey: string,
+  fallbackTo: string,
+): Promise<{ to: string; bsuid: string | null }> {
+  const { data, error } = await supabase
+    .from('whatsapp_conversations')
+    .select('bsuid, metadata')
+    .eq('stable_key', stableKey)
+    .maybeSingle();
+  if (error) throw error;
+  const metadata = asMetadata(data?.metadata);
+  const columnBsuid = typeof data?.bsuid === 'string' ? data.bsuid.trim() : '';
+  const metaBsuid = typeof metadata.lidUserId === 'string' ? metadata.lidUserId.trim() : '';
+  const bsuid = columnBsuid || metaBsuid || null;
+  return {
+    to: graphSendTarget({
+      to: fallbackTo,
+      bsuid,
+      phoneFromMeta: metadata.waPhoneFromMeta === true,
+    }),
+    bsuid,
+  };
 }
 
 export async function isRecipientBlocked(
@@ -716,6 +749,7 @@ export async function sendWhatsAppMediaOutbound(
 
   const sessionBlock = await rejectIfSessionWindowClosed(supabase, stableKey);
   if (sessionBlock) return sessionBlock;
+  const graphTarget = await conversationGraphTarget(supabase, stableKey, recipientPhone);
 
   // Meta no puede descargar signed URLs de Supabase de forma fiable (131053 / HTTP 500).
   // Subimos el binario a Graph `/media` y enviamos por `id`.
@@ -736,7 +770,7 @@ export async function sendWhatsAppMediaOutbound(
   const { mediaUrlForLog, mediaId } = resolvedMedia;
 
   const metaResult = await sendToMeta({
-    to: recipientPhone,
+    to: graphTarget.to,
     phoneNumberId: graph.phoneNumberId,
     accessToken: graph.accessToken,
     ...(mediaId ? { mediaId } : { mediaUrl: mediaUrlForLog }),
@@ -749,7 +783,7 @@ export async function sendWhatsAppMediaOutbound(
   const insertRow: Record<string, unknown> = {
     conversation_stable_key: stableKey,
     recipient_phone: recipientIdentity.recipientPhone,
-    recipient_bsuid: recipientIdentity.recipientBsuid,
+    recipient_bsuid: graphTarget.bsuid ?? recipientIdentity.recipientBsuid,
     direction: 'outbound',
     sender_type: 'agent',
     message_body: metaResult.logMessageBody,
@@ -841,9 +875,10 @@ export async function sendTextOutbound(
 
   const sessionBlock = await rejectIfSessionWindowClosed(supabase, stableKey);
   if (sessionBlock) return sessionBlock;
+  const graphTarget = await conversationGraphTarget(supabase, stableKey, recipientPhone);
 
   const metaResult = await sendToMeta({
-    to: recipientPhone,
+    to: graphTarget.to,
     phoneNumberId: graph.phoneNumberId,
     accessToken: graph.accessToken,
     messageBody: params.text,
@@ -853,7 +888,7 @@ export async function sendTextOutbound(
   const insertRow: Record<string, unknown> = {
     conversation_stable_key: stableKey,
     recipient_phone: recipientIdentity.recipientPhone,
-    recipient_bsuid: recipientIdentity.recipientBsuid,
+    recipient_bsuid: graphTarget.bsuid ?? recipientIdentity.recipientBsuid,
     direction: 'outbound',
     sender_type: 'agent',
     message_body: params.text,

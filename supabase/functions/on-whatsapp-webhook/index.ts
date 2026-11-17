@@ -11,11 +11,11 @@ import { nextLastInboundAt } from '../_shared/metaSessionWindow.ts';
 import { recomputeWhatsAppConversationPreview } from '../_shared/recomputeConversationPreview.ts';
 import { UNARCHIVE_CONVERSATION_PATCH } from '../_shared/whatsappOutbound.ts';
 import { directoryPhoneKey } from '../_shared/directoryPhone.ts';
-import { claimLidConversationPhone } from '../_shared/whatsappLidClaim.ts';
+import { claimLidConversationPhone, findClaimedPhoneStableKey } from '../_shared/whatsappLidClaim.ts';
 import { REACTIVATION_SEQUENCE } from '../_shared/reactivationCadence.ts';
 import { applyColdFailureTag, removeColdFailureTags } from '../_shared/coldAppUserOutreach.ts';
 import { isOutboundDeliverySuccess } from '../_shared/whatsappDeliveryStatus.ts';
-import { conversationStableKey, envString } from '../_shared/whatsappLines.ts';
+import { conversationStableKey, customerPhoneFromStableKey, envString } from '../_shared/whatsappLines.ts';
 import {
   captureCtwaClick,
   persistCommercialOrphanStatus,
@@ -175,7 +175,16 @@ async function processInboundMessage(params: {
   const phoneNumberId = getString(metadata.phone_number_id) || null;
   const isLid = identity.kind === 'lid';
   const customerKey = identity.customerKey;
-  const stableKey = conversationStableKey(customerKey, phoneNumberId);
+  let stableKey = conversationStableKey(customerKey, phoneNumberId);
+  if (isLid && identity.userId) {
+    const claimed = await findClaimedPhoneStableKey({
+      supabase: params.supabase,
+      userId: identity.userId,
+      phoneNumberId,
+    });
+    if (claimed) stableKey = claimed;
+  }
+  const routedToClaimedPhone = isLid && stableKey !== conversationStableKey(customerKey, phoneNumberId);
 
   const { data: existingMessage, error: existingError } = await params.supabase
     .from('whatsapp_message_log')
@@ -258,6 +267,7 @@ async function processInboundMessage(params: {
   const nextMetadata: JsonRecord = { ...asRecord(existingConversation?.metadata) };
   if (identity.userId) nextMetadata.lidUserId = identity.userId;
   if (identity.username) nextMetadata.username = identity.username;
+  if (!isLid) nextMetadata.waPhoneFromMeta = true;
 
   const conversationPatch: Record<string, unknown> = {
     stable_key: stableKey,
@@ -272,6 +282,7 @@ async function processInboundMessage(params: {
     metadata: nextMetadata,
     ...UNARCHIVE_CONVERSATION_PATCH,
   };
+  if (identity.userId) conversationPatch.bsuid = identity.userId;
 
   if (!isLid) {
     conversationPatch.phone = customerKey;
@@ -307,7 +318,8 @@ async function processInboundMessage(params: {
     .from('whatsapp_message_log')
     .insert({
       conversation_stable_key: stableKey,
-      recipient_phone: customerKey,
+      recipient_phone: routedToClaimedPhone ? customerPhoneFromStableKey(stableKey) : customerKey,
+      recipient_bsuid: identity.userId,
       direction: 'inbound',
       sender_type: 'user',
       message_body: content.messageBody,

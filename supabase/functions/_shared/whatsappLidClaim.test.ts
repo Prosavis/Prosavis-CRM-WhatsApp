@@ -3,6 +3,7 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import {
   absorbDirectoryLidLinkedToPhone,
   claimLidConversationPhone,
+  claimedPhoneStableKey,
 } from './whatsappLidClaim.ts';
 
 type Row = Record<string, unknown>;
@@ -81,6 +82,36 @@ const LID_KEY = 'lid:CO.1719788609662814';
 const PHONE = '573186638852';
 const BOT_LINE = '1035566289641219';
 
+Deno.test('a later LID inbound stays on the claimed phone thread of the same line', () => {
+  const rows = [
+    {
+      stable_key: LID_KEY,
+      bsuid: 'CO.1719788609662814',
+      phone_number_id: BOT_LINE,
+    },
+    {
+      stable_key: `${PHONE}__1043086062223440`,
+      bsuid: 'CO.1719788609662814',
+      phone_number_id: '1043086062223440',
+    },
+    {
+      stable_key: PHONE,
+      bsuid: 'CO.1719788609662814',
+      phone_number_id: BOT_LINE,
+      last_message_at: '2026-10-29T16:13:27.000Z',
+    },
+    {
+      stable_key: '573000000000',
+      bsuid: 'CO.1719788609662814',
+      phone_number_id: BOT_LINE,
+      last_message_at: '2026-11-01T12:00:00.000Z',
+    },
+  ];
+  assertEquals(claimedPhoneStableKey(rows, 'CO.1719788609662814', BOT_LINE), '573000000000');
+  assertEquals(claimedPhoneStableKey(rows, 'CO.1719788609662814', '1043086062223440'), `${PHONE}__1043086062223440`);
+  assertEquals(claimedPhoneStableKey(rows, 'CO.other', BOT_LINE), null);
+});
+
 Deno.test('claim moves a LID-only chat onto the phone and keeps the directory row', async () => {
   const store = createMemorySupabase({
     crm_directory: [{
@@ -96,6 +127,7 @@ Deno.test('claim moves a LID-only chat onto the phone and keeps the directory ro
       last_message_text: 'Gracias',
       last_message_at: '2026-10-29T16:13:27.000Z',
       last_message_direction: 'inbound',
+      last_inbound_at: '2026-10-29T16:13:27.000Z',
       metadata: { username: 'Damaher2' },
       phone_number_id: BOT_LINE,
       state: 'active',
@@ -124,6 +156,8 @@ Deno.test('claim moves a LID-only chat onto the phone and keeps the directory ro
   assertEquals(conversation?.phone, PHONE);
   assertEquals(conversation?.contact_phone, PHONE);
   assertEquals(conversation?.contact_name, 'Damaris Cerritos Campestre');
+  assertEquals(conversation?.last_inbound_at, '2026-10-29T16:13:27.000Z');
+  assertEquals(conversation?.bsuid, 'CO.1719788609662814');
   const metadata = conversation?.metadata as Record<string, unknown>;
   assertEquals(metadata.lidUserId, 'CO.1719788609662814');
   assertEquals(metadata.remappedFromLid, LID_KEY);
@@ -153,6 +187,7 @@ Deno.test('claim folds a LID chat into the phone chat that already exists', asyn
         last_message_text: 'Gracias',
         last_message_at: '2026-10-29T16:13:27.000Z',
         last_message_direction: 'inbound',
+        last_inbound_at: '2026-10-29T16:13:27.000Z',
         metadata: { username: 'Damaher2' },
         phone_number_id: BOT_LINE,
         state: 'active',
@@ -166,6 +201,7 @@ Deno.test('claim folds a LID chat into the phone chat that already exists', asyn
         last_message_text: 'Servicio finalizado',
         last_message_at: '2026-11-03T15:38:47.000Z',
         last_message_direction: 'outbound',
+        last_inbound_at: '2026-09-01T12:00:00.000Z',
         metadata: { source: 'confirmacion' },
         phone_number_id: BOT_LINE,
       },
@@ -198,6 +234,8 @@ Deno.test('claim folds a LID chat into the phone chat that already exists', asyn
   const conversation = store.tables.whatsapp_conversations[0];
   assertEquals(conversation?.unread_count, 4);
   assertEquals(conversation?.last_message_text, 'Servicio finalizado');
+  assertEquals(conversation?.last_inbound_at, '2026-10-29T16:13:27.000Z');
+  assertEquals(conversation?.bsuid, 'CO.1719788609662814');
   const metadata = conversation?.metadata as Record<string, unknown>;
   assertEquals(metadata.lidUserId, 'CO.1719788609662814');
   assertEquals(metadata.remappedFromLid, LID_KEY);

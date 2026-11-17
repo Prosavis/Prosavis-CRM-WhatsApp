@@ -24,6 +24,22 @@ export function normalizePhone(phone: string): string {
   return cleaned;
 }
 
+/**
+ * Mientras Meta no haya mandado `from` con el teléfono, la ventana de 24 h
+ * sigue en el BSUID. Si el payload lleva `to`, Meta ignora `recipient`.
+ */
+export function graphSendTarget(params: {
+  to: string;
+  bsuid?: string | null;
+  phoneFromMeta?: boolean;
+}): string {
+  const bsuid = (params.bsuid ?? '').trim();
+  if (bsuid && params.phoneFromMeta !== true) {
+    return bsuid.startsWith(LID_CUSTOMER_PREFIX) ? bsuid : `${LID_CUSTOMER_PREFIX}${bsuid}`;
+  }
+  return params.to;
+}
+
 export function resolveRecipient(value: string): WhatsAppRecipient {
   const recipientValue = value.trim().startsWith(LID_CUSTOMER_PREFIX)
     ? value.trim().slice(LID_CUSTOMER_PREFIX.length)
