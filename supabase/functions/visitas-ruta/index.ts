@@ -206,11 +206,17 @@ async function persistGeocodedDirectoryStops(
       stop,
     );
     if (!patched) continue;
-    await supabase.from("crm_directory").update({
+    const directoryPatch: Record<string, unknown> = {
       service_addresses: patched.serviceAddresses,
-      preferred_google_maps_url: patched.preferredGoogleMapsUrl,
-      preferred_waze_url: patched.preferredWazeUrl,
-    }).eq("id", stop.directoryId);
+    };
+    if (patched.preferredGoogleMapsUrl && patched.preferredWazeUrl) {
+      directoryPatch.preferred_google_maps_url = patched.preferredGoogleMapsUrl;
+      directoryPatch.preferred_waze_url = patched.preferredWazeUrl;
+    }
+    await supabase.from("crm_directory").update(directoryPatch).eq(
+      "id",
+      stop.directoryId,
+    );
   }
 }
 

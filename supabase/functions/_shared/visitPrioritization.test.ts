@@ -761,6 +761,37 @@ Deno.test("writes geocoded coords back onto the matching directory address", () 
     }),
   );
   assertEquals(patched?.serviceAddresses[0].lat, 4.82);
-  assertEquals(patched?.preferredWazeUrl.includes("-75.69"), true);
+  assertEquals(patched?.preferredWazeUrl?.includes("-75.69"), true);
+});
+
+Deno.test("geocode de otra línea no pisa la preferida ni su link", () => {
+  const patched = applyGeocodeToDirectoryAddresses(
+    [
+      {
+        id: "addr-a",
+        addressLine: "Casa A",
+        isDefault: true,
+        googleMapsUrl: "https://maps.example/a",
+      },
+      {
+        id: "addr-b",
+        addressLine: "Casa B",
+        isDefault: false,
+      },
+    ],
+    stop({
+      clientReference: "nando",
+      directoryId: "6bca1e61-151e-4e3e-86ab-615cf60ebf90",
+      sequence: 6,
+      latitude: 4.82,
+      longitude: -75.69,
+      addressLine: "casa b",
+      locationSource: "geocode",
+    }),
+  );
+  assertEquals(patched?.serviceAddresses[0].googleMapsUrl, "https://maps.example/a");
+  assertEquals(patched?.serviceAddresses[0].lat, undefined);
+  assertEquals(patched?.serviceAddresses[1].lat, 4.82);
+  assertEquals(patched?.preferredGoogleMapsUrl, undefined);
 });
 

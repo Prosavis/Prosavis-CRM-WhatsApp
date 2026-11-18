@@ -983,29 +983,41 @@ export async function hydrateStopsWithGeocode(
   return { stops: next, changed };
 }
 
+function sameDirectoryAddressLine(left: string, right: string): boolean {
+  const norm = (line: string) =>
+    line
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+  return norm(left) === norm(right) && norm(left).length > 0;
+}
+
 export function applyGeocodeToDirectoryAddresses(
   addresses: unknown,
   stop: VisitRouteStop,
 ): {
   serviceAddresses: Array<Record<string, unknown>>;
-  preferredGoogleMapsUrl: string;
-  preferredWazeUrl: string;
+  preferredGoogleMapsUrl?: string;
+  preferredWazeUrl?: string;
 } | null {
   const point = candidatePoint(stop);
   if (!point || !isInCleaningCoverage(point) || !stop.directoryId) return null;
   const links = navLinksFromPoint(point);
   const rows = Array.isArray(addresses) ? addresses.filter(isRecord) : [];
   const address = stop.addressLine?.trim() ?? "";
+  if (!address) return null;
   let matched = false;
+  let updatedDefault = false;
   const serviceAddresses = (rows.length > 0 ? rows : [{
     addressLine: address,
     isDefault: true,
   }]).map((row) => {
-    const sameLine = typeof row.addressLine === "string" &&
-      row.addressLine.trim() === address;
-    const take = sameLine || (!matched && row.isDefault === true);
-    if (!take) return row;
+    const line = typeof row.addressLine === "string" ? row.addressLine : "";
+    if (!sameDirectoryAddressLine(line, address)) return row;
     matched = true;
+    if (row.isDefault === true) updatedDefault = true;
     return {
       ...row,
       lat: point.latitude,
@@ -1014,20 +1026,26 @@ export function applyGeocodeToDirectoryAddresses(
       wazeUrl: links.wazeUrl,
     };
   });
-  if (!matched && address) {
+  if (!matched) {
+    const isDefault = serviceAddresses.length === 0;
     serviceAddresses.push({
       addressLine: address,
-      isDefault: serviceAddresses.length === 0,
+      isDefault,
       lat: point.latitude,
       lng: point.longitude,
       googleMapsUrl: links.googleMapsUrl,
       wazeUrl: links.wazeUrl,
     });
+    updatedDefault = isDefault;
   }
   return {
     serviceAddresses,
-    preferredGoogleMapsUrl: links.googleMapsUrl,
-    preferredWazeUrl: links.wazeUrl,
+    ...(updatedDefault
+      ? {
+        preferredGoogleMapsUrl: links.googleMapsUrl,
+        preferredWazeUrl: links.wazeUrl,
+      }
+      : {}),
   };
 }
 
