@@ -21,6 +21,7 @@ import {
   getFirestoreDocument,
   getFirestoreUserPhone,
 } from '../_shared/firebaseAdminRest.ts';
+import { applyPendingDirectoryClientAliases } from '../_shared/reassignDirectoryAppointmentClientIds.ts';
 
 // deno-lint-ignore no-explicit-any
 type SupabaseClient = any;
@@ -427,11 +428,7 @@ async function applySuggestionRow(supabase: SupabaseClient, suggestion: Row): Pr
         : relatedEntryIds;
       for (const dupId of related) {
         if (dupId && dupId !== entryId) {
-          const { error } = await supabase.rpc('merge_directory_entries', {
-            p_primary: entryId,
-            p_duplicate: dupId,
-          });
-          if (error) throw new Error(formatError(error));
+          await mergeDirectoryEntries(supabase, entryId, dupId);
         }
       }
       break;
@@ -653,9 +650,23 @@ async function unifyContactName(supabase: SupabaseClient, entryId: string) {
   return { success: true };
 }
 
+async function mergeDirectoryEntries(
+  supabase: SupabaseClient,
+  primaryId: string,
+  duplicateId: string,
+): Promise<void> {
+  const { error } = await supabase.rpc('merge_directory_entries', {
+    p_primary: primaryId,
+    p_duplicate: duplicateId,
+  });
+  if (error) throw new Error(formatError(error));
+  await applyPendingDirectoryClientAliases(supabase);
+}
+
 async function runDetection(supabase: SupabaseClient) {
   const { data, error } = await supabase.rpc('detect_directory_issues');
   if (error) throw new Error(formatError(error));
+  await applyPendingDirectoryClientAliases(supabase);
   return { detected: typeof data === 'number' ? data : 0 };
 }
 
@@ -867,11 +878,7 @@ async function cleanupOpenIssues(
           .maybeSingle();
         if (existing?.id) {
           if (!dryRun) {
-            const { error: mergeErr } = await supabase.rpc('merge_directory_entries', {
-              p_primary: existing.id,
-              p_duplicate: entry.id,
-            });
-            if (mergeErr) throw new Error(formatError(mergeErr));
+            await mergeDirectoryEntries(supabase, existing.id, entry.id);
           }
           if (summary.samples.length < 40) {
             summary.samples.push({
@@ -1274,11 +1281,12 @@ Deno.serve(async (req) => {
         return jsonResponse({ success: true });
       }
       case 'mergeEntries': {
-        const { error } = await supabase.rpc('merge_directory_entries', {
-          p_primary: String(body.primaryId ?? ''),
-          p_duplicate: String(body.duplicateId ?? ''),
-        });
-        if (error) throw new Error(formatError(error));
+        await applyPendingDirectoryClientAliases(supabase);
+        await mergeDirectoryEntries(
+          supabase,
+          String(body.primaryId ?? ''),
+          String(body.duplicateId ?? ''),
+        );
         return jsonResponse({ success: true });
       }
       case 'unifyContactName':

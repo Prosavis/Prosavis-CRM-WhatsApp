@@ -307,9 +307,8 @@ export const directoryMonitorService = {
 
   /** Fusiona el duplicado dentro de la entrada principal. */
   async mergeEntries(primaryId: string, duplicateId: string): Promise<void> {
-    const { error } = await supabase.rpc('merge_directory_entries', {
-      p_primary: primaryId,
-      p_duplicate: duplicateId,
+    const { error } = await supabase.functions.invoke('directory-monitor', {
+      body: { action: 'mergeEntries', primaryId, duplicateId },
     });
     if (error) throw error;
   },
