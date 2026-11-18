@@ -1,7 +1,12 @@
 import React, { useEffect, useState } from 'react'
 import { Box, Button, Stack, Typography } from '@mui/material'
 import { supabase } from '@/config/supabase'
-import { phoneKey } from '../../../scripts/sofia-card-checks.mjs'
+
+function phoneKey(value?: string | null): string {
+  const digits = String(value ?? '').replace(/\D/g, '')
+  if (digits.length === 10) return `57${digits}`
+  return digits
+}
 
 interface FieldRow {
   path: string
