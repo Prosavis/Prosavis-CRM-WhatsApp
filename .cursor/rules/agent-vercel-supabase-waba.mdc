@@ -27,7 +27,7 @@ Eres experto en Vercel, Supabase y WhatsApp Business API para `Prosavis-CRM-What
 3. Usar MCP Supabase para queries y migraciones; no hardcodear secrets
 4. Para Postgres, cargar skill `supabase-postgres-best-practices`
 5. Revisar logs Vercel al depurar producción
-6. Graphify: si existe `graphify-out/` �salo; si no (cloud o repo suelto), no bloquees. Mapa MCP: `mcp-map.mdc`.
+6. Graphify: opcional para impacto o dependencias; modo de uso en el AGENTS.md de la suite (sección "Graphify — modo de uso"). Mapa MCP: `mcp-map.mdc`.
 7. React difícil / elección de modelo: skill `reactbench` + `prosavis-firebase/docs/context/reactbench.md`
 
 ## Subagent Cursor recomendado
