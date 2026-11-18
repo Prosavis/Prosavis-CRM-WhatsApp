@@ -13,6 +13,8 @@ function analysisFailureMessage(reason: string | undefined): string {
       return 'El archivo todavía no está en Storage.';
     case 'not_pdf':
       return 'Solo se analizan PDF.';
+    case 'not_document':
+      return 'Ese documento no se puede analizar. Sirven Word, Excel, PowerPoint, TXT y scripts de texto.';
     case 'not_image':
       return 'Este mensaje no se puede analizar.';
     case 'not_inbound':

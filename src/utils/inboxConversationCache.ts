@@ -37,6 +37,7 @@ export const INBOX_CONVERSATION_SELECT = [
   'review_intent_mark',
   'review_intent_label',
   'intake_intent_label',
+  'loss_reason',
   'updated_at',
 ].join(',');
 

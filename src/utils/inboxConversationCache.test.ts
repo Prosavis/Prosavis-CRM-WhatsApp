@@ -252,6 +252,7 @@ describe('inboxConversationCache', () => {
     expect(INBOX_CONVERSATION_SELECT).toContain('ctwa_source_id');
     expect(INBOX_CONVERSATION_SELECT).toContain('review_intent_mark');
     expect(INBOX_CONVERSATION_SELECT).toContain('intake_intent_label');
+    expect(INBOX_CONVERSATION_SELECT).toContain('loss_reason');
     expect(INBOX_CONVERSATION_SELECT).toContain('updated_at');
     expect(INBOX_CONVERSATION_SELECT).not.toContain('metadata');
   });

@@ -982,6 +982,7 @@ export type Database = {
       whatsapp_message_log: {
         Row: {
           agent_uid: string | null
+          author_kind: string | null
           batch_id: string | null
           batch_index: number | null
           campaign_type: string | null
@@ -1022,6 +1023,7 @@ export type Database = {
         }
         Insert: {
           agent_uid?: string | null
+          author_kind?: string | null
           batch_id?: string | null
           batch_index?: number | null
           campaign_type?: string | null
@@ -1062,6 +1064,7 @@ export type Database = {
         }
         Update: {
           agent_uid?: string | null
+          author_kind?: string | null
           batch_id?: string | null
           batch_index?: number | null
           campaign_type?: string | null

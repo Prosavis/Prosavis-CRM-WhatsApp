@@ -30,6 +30,7 @@ describe('parseInboxAiContextPackRequest', () => {
       includeImageAnalysis: false,
       includeCachedImageAnalysis: true,
       durationMinutes: 240,
+      desiredDate: null,
     });
   });
 
@@ -67,6 +68,7 @@ describe('parseInboxAiContextPackRequest', () => {
       includeImageAnalysis: false,
       includeCachedImageAnalysis: true,
       durationMinutes: 360,
+      desiredDate: null,
     });
   });
 });

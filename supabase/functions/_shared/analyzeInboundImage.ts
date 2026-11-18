@@ -3,6 +3,7 @@ import { DEFAULT_HISTORY_LIMIT } from './conversationHistory.ts';
 import {
   DEFAULT_GEMINI_MODEL,
   getGeminiApiKey,
+  geminiAnalyzeDocument,
   geminiAnalyzeImage,
   geminiAnalyzePdf,
   resolveGeminiModel,
@@ -19,6 +20,7 @@ import {
   countsTowardVisionQuota,
   pickImagesToAnalyze,
   remainingVisionQuota,
+  resolveInboundDocumentForGemini,
   visionSinceIso,
 } from './inboxAiMediaLimits.ts';
 import { downloadWhatsAppBucketBytes } from './whatsappMediaStorage.ts';
@@ -183,7 +185,7 @@ export async function analyzeInboundImageById(
 
   try {
     const buffer = await downloadWhatsAppBucketBytes(supabase, String(row.storage_path));
-    const maxBytes = analyzable.kind === 'pdf' ? MAX_PDF_ANALYSIS_BYTES : MAX_IMAGE_ANALYSIS_BYTES;
+    const maxBytes = analyzable.kind === 'image' ? MAX_IMAGE_ANALYSIS_BYTES : MAX_PDF_ANALYSIS_BYTES;
     if (buffer.byteLength > maxBytes) {
       await persistAnalysis(supabase, messageLogId, {
         media_analysis_status: 'failed',
@@ -194,16 +196,34 @@ export async function analyzeInboundImageById(
     }
 
     const model = resolveGeminiModel('GEMINI_MODEL_IMAGE_ANALYSIS', DEFAULT_GEMINI_MODEL);
-    const analysis = await withOneRetry(() => (
-      analyzable.kind === 'pdf'
-        ? geminiAnalyzePdf({ apiKey, buffer, model })
-        : geminiAnalyzeImage({
-          apiKey,
-          buffer,
-          mimeType: String(row.mime_type || 'image/jpeg'),
-          model,
-        })
-    ));
+    const analysis = await withOneRetry(() => {
+      switch (analyzable.kind) {
+        case 'pdf':
+          return geminiAnalyzePdf({ apiKey, buffer, model });
+        case 'document': {
+          const resolved = resolveInboundDocumentForGemini(row);
+          if (!resolved) throw new Error('not_document');
+          return geminiAnalyzeDocument({
+            apiKey,
+            buffer,
+            mimeType: resolved.geminiMimeType,
+            code: resolved.code,
+            model,
+          });
+        }
+        case 'image':
+          return geminiAnalyzeImage({
+            apiKey,
+            buffer,
+            mimeType: String(row.mime_type || 'image/jpeg'),
+            model,
+          });
+        default: {
+          const unexpected: never = analyzable.kind;
+          throw new Error(unexpected);
+        }
+      }
+    });
     const status = imageAnalysisStatusFromFinishReason(analysis.finishReason);
 
     await persistAnalysis(supabase, messageLogId, {

@@ -28,7 +28,7 @@ import {
 } from './whatsappLines.ts';
 import { queuePersistedAudioTranscription } from './whatsappMediaHydrate.ts';
 import { absorbDirectoryLidLinkedToPhone } from './whatsappLidClaim.ts';
-import { type OutboundSentVia } from './outboundSentVia.ts';
+import { authorKindForSentVia, type OutboundSentVia } from './outboundSentVia.ts';
 import {
   SESSION_WINDOW_CLOSED_CODE,
   SESSION_WINDOW_CLOSED_MESSAGE,
@@ -663,7 +663,12 @@ export async function persistOutboundLog(
   agentUid: string | null,
   sentVia: OutboundSentVia,
 ): Promise<{ messageId?: string; createdAt?: string }> {
-  const baseRow = { ...row, agent_uid: agentUid, sent_via: sentVia };
+  const baseRow = {
+    ...row,
+    agent_uid: agentUid,
+    sent_via: sentVia,
+    author_kind: row.author_kind ?? authorKindForSentVia(sentVia),
+  };
 
   const attemptInsert = async (payload: Record<string, unknown>) =>
     supabase
@@ -679,6 +684,7 @@ export async function persistOutboundLog(
       ...row,
       agent_uid: null,
       sent_via: sentVia,
+      author_kind: row.author_kind ?? authorKindForSentVia(sentVia),
     }));
   }
 

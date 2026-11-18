@@ -107,14 +107,15 @@ async function resolveAvailability(params: {
   prefetched: Map<number, AvailabilityLoadResult>;
   availabilityStarted: number;
   stageTimer: StageTimer;
-}): Promise<string[]> {
+}): Promise<AvailabilityLoadResult> {
   const picked = pickPrefetchedAvailability(params.prefetched, params.duration);
   const resolved = picked ?? await loadRealAvailabilityDetailed(params.duration);
   params.stageTimer.record('availability', Date.now() - params.availabilityStarted, {
     outcome: resolved.outcome,
+    estado: resolved.estado,
     prefetched: picked != null,
   });
-  return resolved.slots;
+  return resolved;
 }
 
 async function loadPrepared(params: CreateInboxSuggestionParams, pipeline: SuggestPipeline) {
@@ -221,14 +222,15 @@ async function completeLegacyCall(
   const priced = resolveBookingPricingCheckout(groundedPaymentContext, ctx.phone);
   const groundedBookingContext = groundBookingClientInfo(priced.bookingContext, ctx);
   const prefetched = await prepared.availabilityPromise;
-  const slots = await resolveAvailability({
+  const availability = await resolveAvailability({
     duration: groundedBookingContext.collectedData.duration,
     prefetched,
     availabilityStarted: prepared.availabilityStarted,
     stageTimer: params.stageTimer,
   });
+  const slots = availability.slots;
   const bookingContext = overwriteBookingAvailability(groundedBookingContext, slots);
-  const groundedContext = appendRealAvailabilityContext(ctx.formattedBlock, slots);
+  const groundedContext = appendRealAvailabilityContext(ctx.formattedBlock, availability);
   const anchor = await latestVisibleMessageAnchor(params.supabase, params.stableKey);
   const extras: Record<string, unknown> = {
     pipeline: 'legacy',
@@ -331,12 +333,13 @@ async function completeSingleCall(
   const priced = resolveBookingPricingCheckout(groundedPaymentContext, ctx.phone);
   const groundedBookingContext = groundBookingClientInfo(priced.bookingContext, ctx);
   const prefetched = await prepared.availabilityPromise;
-  const slots = await resolveAvailability({
+  const availability = await resolveAvailability({
     duration: groundedBookingContext.collectedData.duration,
     prefetched,
     availabilityStarted: prepared.availabilityStarted,
     stageTimer: params.stageTimer,
   });
+  const slots = availability.slots;
   const bookingContext = overwriteBookingAvailability(groundedBookingContext, slots);
   const suggestionOutput = normalizeInboxAiSuggestionOutput({
     suggestion: raw.suggestion,

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   IMAGE_ANALYSIS_MAX_OUTPUT_TOKENS,
   IMAGE_ANALYSIS_THINKING_LEVEL,
+  geminiAnalyzeDocument,
   geminiAnalyzeImage,
   geminiAnalyzePdf,
   geminiGenerateJson,
@@ -181,5 +182,41 @@ describe('geminiAnalyzeImage HTTP transport', () => {
     };
     expect(body.contents[0]?.parts[0]?.inlineData?.mimeType).toBe('application/pdf');
     expect(body.contents[0]?.parts[1]?.text).toContain('monto, banco, referencia, fecha');
+    expect(body.contents[0]?.parts[1]?.text).not.toContain('No lo ejecutes');
+  });
+
+  it('sends Office with its MIME and scripts as plain text', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
+      candidates: [{
+        content: { parts: [{ text: 'Hoja de vida de Carolina.' }] },
+        finishReason: 'STOP',
+      }],
+    }), { status: 200 })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const docxMime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    await geminiAnalyzeDocument({
+      apiKey: 'test-api-key',
+      buffer: new Uint8Array([1, 2, 3]),
+      mimeType: docxMime,
+    });
+    await geminiAnalyzeDocument({
+      apiKey: 'test-api-key',
+      buffer: new Uint8Array([4, 5, 6]),
+      mimeType: 'text/plain',
+      code: true,
+    });
+
+    const officeBody = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body)) as {
+      contents: Array<{ parts: Array<{ inlineData?: { mimeType?: string }; text?: string }> }>;
+    };
+    const codeBody = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)) as {
+      contents: Array<{ parts: Array<{ inlineData?: { mimeType?: string }; text?: string }> }>;
+    };
+    expect(officeBody.contents[0]?.parts[0]?.inlineData?.mimeType).toBe(docxMime);
+    expect(officeBody.contents[0]?.parts[1]?.text).toContain('monto, banco, referencia, fecha');
+    expect(officeBody.contents[0]?.parts[1]?.text).not.toContain('No lo ejecutes');
+    expect(codeBody.contents[0]?.parts[0]?.inlineData?.mimeType).toBe('text/plain');
+    expect(codeBody.contents[0]?.parts[1]?.text).toContain('No lo ejecutes');
   });
 });

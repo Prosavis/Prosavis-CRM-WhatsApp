@@ -34,6 +34,7 @@ import {
 import type { WhatsAppContactContextValue } from '@/hooks/useWhatsAppContactContext';
 import { directoryService } from '@/services/directoryService';
 import DirectoryClassificationTagPicker from '@/components/directory/DirectoryClassificationTagPicker';
+import { SofiaTrialCard } from '@/components/whatsapp/SofiaTrialCard';
 import { AppointmentService } from '@/services/appointmentService';
 import type { Appointment } from '@/types/appointment';
 import type { DirectoryChannel, DirectoryEntry } from '@/types/lead';
@@ -817,6 +818,8 @@ const WhatsAppContactSidePanel: React.FC<WhatsAppContactSidePanelProps> = ({
                 sx={{ mb: 1.5 }}
               />
             )}
+
+            <SofiaTrialCard phone={conversation.contactPhone || conversation.phone} />
 
             {/* === Perfil WhatsApp / override === */}
             <SectionTitle>Perfil WhatsApp</SectionTitle>

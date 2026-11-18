@@ -60,6 +60,11 @@ export interface Database {
           crm_force_unread: boolean;
           user_id: string | null;
           last_intent: string | null;
+          loss_reason: string | null;
+          loss_reason_note: string | null;
+          loss_reason_at: string | null;
+          loss_reason_by: string | null;
+          loss_reason_source: 'persona' | 'sofia_propuesta' | null;
           parent_bsuid: string | null;
           metadata: Json;
           created_at: string;
@@ -79,6 +84,14 @@ export interface Database {
           direction: 'inbound' | 'outbound';
           sender_type: 'bot' | 'agent' | 'system' | 'user' | 'app';
           sent_via: 'crm' | 'grok' | 'app' | 'system' | null;
+          author_kind:
+            | 'persona'
+            | 'sugerencia_ia'
+            | 'automatica'
+            | 'hub'
+            | 'sofia'
+            | 'bot_anterior'
+            | null;
           agent_uid: string | null;
           message_body: string | null;
           media_type: 'image' | 'audio' | 'video' | 'document' | 'sticker' | null;

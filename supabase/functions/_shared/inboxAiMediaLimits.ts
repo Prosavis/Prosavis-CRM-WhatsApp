@@ -59,6 +59,101 @@ export function isAnalyzableInboundImage(row: {
   return { ok: true };
 }
 
+const OFFICE_MIME_BY_EXTENSION: Record<string, string> = {
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  dotx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.template',
+  odt: 'application/vnd.oasis.opendocument.text',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  odp: 'application/vnd.oasis.opendocument.presentation',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ods: 'application/vnd.oasis.opendocument.spreadsheet',
+};
+
+const TEXT_EXTENSIONS = new Set([
+  'txt', 'csv', 'md', 'markdown', 'html', 'htm', 'xml', 'json', 'log',
+]);
+
+const CODE_EXTENSIONS = new Set([
+  'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'py', 'sql', 'sh', 'bash', 'ps1',
+  'php', 'rb', 'go', 'java', 'cs', 'dart', 'yml', 'yaml',
+]);
+
+const BLOCKED_EXTENSIONS = new Set([
+  'docm', 'xlsm', 'pptm', 'env', 'pem', 'key', 'p12', 'pfx',
+]);
+
+const BLOCKED_MIMES = new Set([
+  'application/vnd.ms-word.document.macroenabled.12',
+  'application/vnd.ms-excel.sheet.macroenabled.12',
+  'application/vnd.ms-powerpoint.presentation.macroenabled.12',
+]);
+
+const CODE_MIMES = new Set([
+  'text/javascript',
+  'application/javascript',
+  'application/x-javascript',
+  'text/typescript',
+  'application/typescript',
+  'text/x-python',
+  'application/x-python',
+  'text/x-python-script',
+  'application/sql',
+  'text/x-sql',
+  'application/x-sh',
+  'text/x-sh',
+  'text/x-shellscript',
+  'application/x-php',
+  'text/x-php',
+  'text/x-ruby',
+  'application/x-ruby',
+  'text/x-go',
+  'text/x-java-source',
+  'text/x-csharp',
+  'text/x-dart',
+  'text/yaml',
+  'text/x-yaml',
+  'application/yaml',
+  'application/x-yaml',
+]);
+
+const TEXT_MIMES = new Set([
+  'text/plain',
+  'text/csv',
+  'text/html',
+  'text/markdown',
+  'text/md',
+  'text/xml',
+  'application/xml',
+  'application/json',
+  'text/json',
+  'application/xhtml+xml',
+]);
+
+const GENERIC_DOCUMENT_MIMES = new Set([
+  '',
+  'application/octet-stream',
+  'application/binary',
+  'binary/octet-stream',
+]);
+
+function baseMime(mime: unknown): string {
+  return String(mime ?? '').split(';')[0].trim().toLowerCase();
+}
+
+function inboundDocumentExtension(filename: unknown): string {
+  const trimmed = String(filename ?? '').trim().toLowerCase();
+  const slash = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+  const base = slash >= 0 ? trimmed.slice(slash + 1) : trimmed;
+  if (!base || base === '.' || base === '..') return '';
+  if (base === '.env' || base.endsWith('.env') || base.includes('.env.')) return 'env';
+  const dot = base.lastIndexOf('.');
+  if (dot <= 0) return '';
+  return base.slice(dot + 1);
+}
+
 export function isInboundPdfDocument(row: {
   media_type?: unknown;
   mime_type?: unknown;
@@ -66,10 +161,51 @@ export function isInboundPdfDocument(row: {
 }): boolean {
   const mediaType = String(row.media_type ?? '').trim().toLowerCase();
   if (mediaType !== 'document') return false;
-  const mime = String(row.mime_type ?? '').split(';')[0].trim().toLowerCase();
+  const mime = baseMime(row.mime_type);
   if (mime === 'application/pdf') return true;
-  const filename = String(row.filename ?? '').trim().toLowerCase();
-  return filename.endsWith('.pdf');
+  return inboundDocumentExtension(row.filename) === 'pdf';
+}
+
+/**
+ * Word, Excel, PowerPoint, TXT y scripts de texto.
+ * PDF no entra: sigue en `isInboundPdfDocument`.
+ * El MIME que devuelve es el que se manda a Gemini (`text/plain` si es texto o código).
+ */
+export function resolveInboundDocumentForGemini(row: {
+  media_type?: unknown;
+  mime_type?: unknown;
+  filename?: unknown;
+}): { geminiMimeType: string; code: boolean } | null {
+  if (String(row.media_type ?? '').trim().toLowerCase() !== 'document') return null;
+  if (isInboundPdfDocument(row)) return null;
+  const extension = inboundDocumentExtension(row.filename);
+  if (BLOCKED_EXTENSIONS.has(extension)) return null;
+  const mime = baseMime(row.mime_type);
+  if (BLOCKED_MIMES.has(mime)) return null;
+
+  const officeFromMime = Object.values(OFFICE_MIME_BY_EXTENSION).includes(mime) ? mime : '';
+  if (officeFromMime && GENERIC_DOCUMENT_MIMES.has(mime) === false) {
+    return { geminiMimeType: officeFromMime, code: false };
+  }
+  const officeFromExtension = OFFICE_MIME_BY_EXTENSION[extension];
+  if (officeFromExtension) {
+    return { geminiMimeType: officeFromExtension, code: false };
+  }
+  if (CODE_EXTENSIONS.has(extension) || CODE_MIMES.has(mime)) {
+    return { geminiMimeType: 'text/plain', code: true };
+  }
+  if (TEXT_EXTENSIONS.has(extension) || TEXT_MIMES.has(mime)) {
+    return { geminiMimeType: 'text/plain', code: false };
+  }
+  return null;
+}
+
+export function isInboundOfficeOrTextDocument(row: {
+  media_type?: unknown;
+  mime_type?: unknown;
+  filename?: unknown;
+}): boolean {
+  return resolveInboundDocumentForGemini(row) !== null;
 }
 
 export function isAnalyzableInboundPdf(row: {
@@ -90,6 +226,24 @@ export function isAnalyzableInboundPdf(row: {
   return { ok: true };
 }
 
+export function isAnalyzableInboundDocument(row: {
+  direction?: unknown;
+  media_type?: unknown;
+  storage_path?: unknown;
+  size_bytes?: unknown;
+  mime_type?: unknown;
+  filename?: unknown;
+}): { ok: true } | { ok: false; reason: string } {
+  if (row.direction !== 'inbound') return { ok: false, reason: 'not_inbound' };
+  if (!isInboundOfficeOrTextDocument(row)) return { ok: false, reason: 'not_document' };
+  if (!String(row.storage_path ?? '').trim()) return { ok: false, reason: 'no_storage_path' };
+  const size = Number(row.size_bytes ?? 0);
+  if (Number.isFinite(size) && size > MAX_PDF_ANALYSIS_BYTES) {
+    return { ok: false, reason: 'too_large' };
+  }
+  return { ok: true };
+}
+
 export function classifyAnalyzableInboundMedia(row: {
   direction?: unknown;
   media_type?: unknown;
@@ -97,16 +251,31 @@ export function classifyAnalyzableInboundMedia(row: {
   size_bytes?: unknown;
   mime_type?: unknown;
   filename?: unknown;
-}): { ok: true; kind: 'image' | 'pdf' } | { ok: false; reason: string } {
+}): { ok: true; kind: 'image' | 'pdf' | 'document' } | { ok: false; reason: string } {
   const mediaType = String(row.media_type ?? '').trim().toLowerCase();
   if (mediaType === 'document') {
     const pdf = isAnalyzableInboundPdf(row);
     if (pdf.ok) return { ok: true, kind: 'pdf' };
-    return pdf;
+    if (isInboundPdfDocument(row)) return pdf;
+    const document = isAnalyzableInboundDocument(row);
+    if (document.ok) return { ok: true, kind: 'document' };
+    return document;
   }
   const image = isAnalyzableInboundImage(row);
   if (image.ok) return { ok: true, kind: 'image' };
   return image;
+}
+
+export function shouldQueueInboundMediaAnalysis(row: {
+  media_type?: unknown;
+  mime_type?: unknown;
+  filename?: unknown;
+}): boolean {
+  const mediaType = String(row.media_type ?? '').trim().toLowerCase();
+  if (mediaType === 'image') return true;
+  if (mediaType !== 'document') return false;
+  if (isInboundPdfDocument(row)) return true;
+  return isInboundOfficeOrTextDocument(row);
 }
 
 export function countsTowardVisionQuota(

@@ -311,6 +311,7 @@ export async function persistCoexMessage(params: {
       mediaId: content.mediaId,
       mediaType: content.mediaType,
       mimeType: content.mimeType,
+      filename: content.filename,
     });
     return 'updated';
   }
@@ -394,6 +395,7 @@ export async function persistCoexMessage(params: {
       mediaId: content.mediaId,
       mediaType: content.mediaType,
       mimeType: content.mimeType,
+      filename: content.filename,
     });
     await captureCtwaClick({
       supabase: params.supabase,
@@ -467,6 +469,7 @@ export async function persistCoexMessage(params: {
     mediaId: content.mediaId,
     mediaType: content.mediaType,
     mimeType: content.mimeType,
+    filename: content.filename,
   });
   await captureCtwaClick({
     supabase: params.supabase,

@@ -235,6 +235,36 @@ describe('getConversationHistoryWithMeta', () => {
     expect(result.turns[0]?.text).toContain('Comparto comprobante de pago');
   });
 
+  it('labels a cached Word analysis as a document, not a PDF', async () => {
+    const query = {
+      select: () => query,
+      eq: () => query,
+      order: () => query,
+      limit: () => Promise.resolve({
+        data: [{
+          direction: 'inbound',
+          message_body: 'Hoja_de_vida_Carolina.docx',
+          media_type: 'document',
+          mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          filename: 'Hoja_de_vida_Carolina.docx',
+          media_analysis_text: 'Carolina Jaramillo. Vive en Pereira. Experiencia en aseo.',
+          created_at: '2026-11-18T16:26:00.000Z',
+        }],
+        error: null,
+      }),
+    };
+    const result = await getConversationHistoryWithMeta(
+      { from: () => query },
+      '573216517907',
+      10,
+      { includeImageAnalysis: true },
+    );
+
+    expect(result.turns[0]?.text).toContain('[Documento]:');
+    expect(result.turns[0]?.text).not.toContain('[PDF]:');
+    expect(result.turns[0]?.text).toContain('Pereira');
+  });
+
   it('keeps the [document] placeholder when analysis is disabled', async () => {
     const query = {
       select: () => query,

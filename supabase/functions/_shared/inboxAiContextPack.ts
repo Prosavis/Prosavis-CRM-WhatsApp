@@ -6,6 +6,7 @@
 import {
   appendRealAvailabilityContext,
   resolveOfficialDuration,
+  type AvailabilityLoadResult,
 } from './availability.ts';
 import type { ConversationHistoryMeta } from './conversationHistory.ts';
 import type { InboxAiPropertySummary } from './inboxAiContextFormat.ts';
@@ -23,6 +24,7 @@ export interface InboxAiContextPack {
   formattedBlock: string;
   usedContext: InboxAiContextPackUsedContext;
   availableSlots: string[];
+  availability: AvailabilityLoadResult;
   wompiLinks: Record<number, string>;
   appointmentsLoadFailed: boolean;
   lastTurnRole: 'user' | 'bot' | null;
@@ -36,6 +38,7 @@ export type InboxAiContextPackRequest =
     includeImageAnalysis: boolean;
     includeCachedImageAnalysis: boolean;
     durationMinutes: number;
+    desiredDate: string | null;
   }
   | {
     ok: false;
@@ -77,7 +80,13 @@ export function parseInboxAiContextPackRequest(
     includeImageAnalysis: record.includeImageAnalysis === true,
     includeCachedImageAnalysis: record.includeCachedImageAnalysis !== false,
     durationMinutes: resolveOfficialDuration(asDurationMinutes(record.durationMinutes)),
+    desiredDate: desiredDateOf(record),
   };
+}
+
+function desiredDateOf(record: Record<string, unknown>): string | null {
+  const raw = asTrimmedString(record.fecha) || asTrimmedString(record.desiredDate);
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
 }
 
 export function isInboxAiContextApiKeyValid(
@@ -104,13 +113,23 @@ export function buildInboxAiContextPack(input: {
   appointmentsLoadFailed: boolean;
   lastTurnRole: 'user' | 'bot' | null;
   availableSlots: string[];
+  availability?: AvailabilityLoadResult;
   wompiLinks: Record<number, string>;
 }): InboxAiContextPack {
+  const availability = input.availability ?? {
+    slots: input.availableSlots,
+    outcome: 'ok',
+    estado: input.availableSlots.length > 0 ? 'ok' : 'sin_cupo',
+    motivo: null,
+    startDate: null,
+    endDate: null,
+  };
   return {
     formattedBlock: appendRealAvailabilityContext(
       input.formattedBlock,
-      input.availableSlots,
+      availability,
     ),
+    availability,
     usedContext: {
       historyMeta: input.historyMeta,
       conversationTags: [...input.conversationTags],

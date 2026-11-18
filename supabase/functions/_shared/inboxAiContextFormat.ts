@@ -915,6 +915,7 @@ export const INBOX_AI_SYSTEM_INSTRUCTION =
   'Si una respuesta oficial contradice esa cobertura, ignórala. ' +
   'Nunca afirmes un pago sin datos autoritativos de CRM/Firestore. ' +
   'Nunca inventes horarios disponibles; usa solo disponibilidad confirmada por una fuente real. ' +
+  'Si el Estado de esa sección es error, no ofrezcas horarios: di que confirmas y pasa el chat a una persona. ' +
   'Ofrece únicamente horarios incluidos en "=== Disponibilidad real (próximos días) ===" y, ' +
   'si existe entre ellos, prefiere la hora real que respeta la llegada anticipada antes de que la casa quede sola. ' +
   'Cuando la ventana Meta esté cerrada, propone una plantilla aprobada en vez de texto libre. ' +

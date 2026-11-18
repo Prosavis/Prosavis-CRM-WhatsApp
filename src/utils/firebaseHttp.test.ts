@@ -52,7 +52,7 @@ describe('postFirebaseJson', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('aborts after at most four seconds even when a larger timeout is requested', async () => {
+  it('aborts after at most eight seconds even when a larger timeout is requested', async () => {
     vi.useFakeTimers();
     let signal: AbortSignal | undefined;
     const fetchImpl = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
@@ -68,7 +68,7 @@ describe('postFirebaseJson', () => {
       timeoutMs: 10_000,
     });
     const rejection = expect(request).rejects.toThrow('aborted');
-    await vi.advanceTimersByTimeAsync(3_999);
+    await vi.advanceTimersByTimeAsync(7_999);
     expect(signal?.aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     await rejection;

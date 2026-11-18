@@ -8,6 +8,7 @@ import React, {
 } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { IntakeIntentMenu } from '@/components/whatsapp/IntakeIntentMenu';
+import { LossReasonMenu } from '@/components/whatsapp/LossReasonMenu';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   Box,
@@ -1319,8 +1320,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         patch: { isArchived: !conversation.isArchived },
       });
       setSnack({ open: true, message: conversation.isArchived ? 'Conversación desarchivada' : 'Conversación archivada', severity: 'success' });
-    } catch {
-      setSnack({ open: true, message: 'Error al cambiar estado de archivo', severity: 'error' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Error al cambiar estado de archivo';
+      setSnack({ open: true, message, severity: 'error' });
     }
   }, [conversation.id, conversation.isArchived]);
 
@@ -1598,6 +1600,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 <IntakeIntentMenu
                   stableKey={conversation.id}
                   label={conversation.intakeIntentLabel}
+                  onError={(message) => setSnack({ open: true, message, severity: 'error' })}
+                />
+                <LossReasonMenu
+                  stableKey={conversation.id}
+                  reason={conversation.lossReason}
                   onError={(message) => setSnack({ open: true, message, severity: 'error' })}
                 />
                 {conversation.reviewIntentMark && (
@@ -1984,7 +1991,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 }
                 label={
                   <Typography variant="caption">
-                    Usar análisis de imágenes y PDF ya guardados
+                    Usar análisis de imágenes y documentos ya guardados
                   </Typography>
                 }
                 sx={{ m: 0 }}

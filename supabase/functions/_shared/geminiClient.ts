@@ -724,6 +724,11 @@ const OPERATOR_MEDIA_NOTE =
   '(dirección, metros, suciedad, tipo de inmueble, monto, banco, referencia, fecha). ' +
   'No inventes precios ni disponibilidad. Si no se entiende, dilo sin especular.';
 
+const CODE_MEDIA_NOTE =
+  `${OPERATOR_MEDIA_NOTE} ` +
+  'Si el archivo es código o un script, di en pocas líneas qué es, qué hace y qué datos maneja. ' +
+  'No lo ejecutes ni inventes comportamiento que no esté en el archivo.';
+
 /**
  * Describe una foto o un PDF inbound para el operador / packer de inbox.
  * thinkingLevel low: 3.8 no admite minimal. maxOutputTokens incluye el razonamiento.
@@ -733,6 +738,7 @@ async function geminiAnalyzeOperatorMedia(params: {
   buffer: Uint8Array;
   mimeType: string;
   model?: string;
+  instruction?: string;
 }): Promise<{ text: string; finishReason?: string }> {
   const model = params.model ??
     resolveGeminiModel('GEMINI_MODEL_IMAGE_ANALYSIS', DEFAULT_GEMINI_MODEL);
@@ -744,7 +750,7 @@ async function geminiAnalyzeOperatorMedia(params: {
       role: 'user',
       parts: [
         { inlineData: { mimeType: params.mimeType, data: bytesToBase64(params.buffer) } },
-        { text: OPERATOR_MEDIA_NOTE },
+        { text: params.instruction ?? OPERATOR_MEDIA_NOTE },
       ],
     }],
     maxOutputTokens: IMAGE_ANALYSIS_MAX_OUTPUT_TOKENS,
@@ -774,6 +780,24 @@ export async function geminiAnalyzePdf(params: {
   return geminiAnalyzeOperatorMedia({
     ...params,
     mimeType: 'application/pdf',
+  });
+}
+
+export async function geminiAnalyzeDocument(params: {
+  apiKey: string;
+  buffer: Uint8Array;
+  mimeType: string;
+  code?: boolean;
+  model?: string;
+}): Promise<{ text: string; finishReason?: string }> {
+  const mime = params.mimeType.split(';')[0].trim().toLowerCase();
+  if (!mime) throw new Error('Falta el MIME del documento');
+  return geminiAnalyzeOperatorMedia({
+    apiKey: params.apiKey,
+    buffer: params.buffer,
+    model: params.model,
+    mimeType: mime,
+    instruction: params.code ? CODE_MEDIA_NOTE : OPERATOR_MEDIA_NOTE,
   });
 }
 

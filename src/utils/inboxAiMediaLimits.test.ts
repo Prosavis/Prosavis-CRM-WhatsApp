@@ -6,10 +6,14 @@ import {
   MAX_PDF_ANALYSIS_BYTES,
   canTranscribePersistedAudio,
   countsTowardVisionQuota,
+  classifyAnalyzableInboundMedia,
   inboundAudioNeedsAutoTranscription,
+  isAnalyzableInboundDocument,
   isAnalyzableInboundImage,
   isAnalyzableInboundPdf,
   isVoiceTranscriptionFeatureEnabled,
+  resolveInboundDocumentForGemini,
+  shouldQueueInboundMediaAnalysis,
   pickImagesToAnalyze,
   remainingVisionQuota,
 } from '../../supabase/functions/_shared/inboxAiMediaLimits';
@@ -140,6 +144,82 @@ describe('isAnalyzableInboundPdf', () => {
       ok: false,
       reason: 'too_large',
     });
+  });
+});
+
+describe('isAnalyzableInboundDocument', () => {
+  const base = {
+    direction: 'inbound',
+    media_type: 'document',
+    storage_path: '57300/hoja.docx',
+    size_bytes: 80_000,
+    mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    filename: 'Hoja_de_vida_Carolina.docx',
+  };
+
+  it('accepts Office, text and scripts under 10 MB, including octet-stream plus extension', () => {
+    expect(isAnalyzableInboundDocument(base)).toEqual({ ok: true });
+    expect(classifyAnalyzableInboundMedia(base)).toEqual({ ok: true, kind: 'document' });
+    expect(resolveInboundDocumentForGemini(base)).toEqual({
+      geminiMimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      code: false,
+    });
+    expect(resolveInboundDocumentForGemini({
+      ...base,
+      mime_type: 'application/octet-stream',
+      filename: 'tarifas.xlsx',
+    })?.geminiMimeType).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    expect(resolveInboundDocumentForGemini({
+      ...base,
+      mime_type: 'application/octet-stream',
+      filename: 'notas.txt',
+    })).toEqual({ geminiMimeType: 'text/plain', code: false });
+    expect(resolveInboundDocumentForGemini({
+      ...base,
+      mime_type: 'application/octet-stream',
+      filename: 'limpieza.py',
+    })).toEqual({ geminiMimeType: 'text/plain', code: true });
+    expect(shouldQueueInboundMediaAnalysis({
+      media_type: 'document',
+      mime_type: 'application/octet-stream',
+      filename: 'deck.pptx',
+    })).toBe(true);
+  });
+
+  it('keeps PDF on its own path and rejects macros, secrets, zip and oversized files', () => {
+    expect(classifyAnalyzableInboundMedia({
+      ...base,
+      mime_type: 'application/pdf',
+      filename: 'comprobante.pdf',
+    })).toEqual({ ok: true, kind: 'pdf' });
+    expect(isAnalyzableInboundDocument({
+      ...base,
+      filename: 'macros.docm',
+      mime_type: 'application/vnd.ms-word.document.macroEnabled.12',
+    })).toEqual({ ok: false, reason: 'not_document' });
+    expect(isAnalyzableInboundDocument({
+      ...base,
+      filename: '.env',
+      mime_type: 'text/plain',
+    })).toEqual({ ok: false, reason: 'not_document' });
+    expect(isAnalyzableInboundDocument({
+      ...base,
+      filename: 'archivo.zip',
+      mime_type: 'application/zip',
+    })).toEqual({ ok: false, reason: 'not_document' });
+    expect(isAnalyzableInboundDocument({
+      ...base,
+      size_bytes: MAX_PDF_ANALYSIS_BYTES + 1,
+    })).toEqual({ ok: false, reason: 'too_large' });
+    expect(shouldQueueInboundMediaAnalysis({
+      media_type: 'image',
+      mime_type: 'image/jpeg',
+    })).toBe(true);
+    expect(shouldQueueInboundMediaAnalysis({
+      media_type: 'document',
+      mime_type: 'application/pdf',
+      filename: 'a.pdf',
+    })).toBe(true);
   });
 });
 

@@ -1,4 +1,8 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
+import {
+  phoneHasLiveAppointment,
+  salesChatNeedsLossReason,
+} from '../_shared/lossReasonGate.ts';
 import { requireCrmAdmin } from '../_shared/supabase.ts';
 
 function toDbPatch(patch: Record<string, unknown>) {
@@ -56,6 +60,41 @@ async function resolveStableKey(
   return null;
 }
 
+async function lossReasonBlocksArchive(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  stableKey: string,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('whatsapp_conversations')
+    .select('intake_intent_label, ctwa_source_id, ctwa_clid, loss_reason, phone, contact_phone')
+    .eq('stable_key', stableKey)
+    .maybeSingle();
+  if (error) throw error;
+  const phone = String(data?.contact_phone || data?.phone || '');
+  const digits = phone.replace(/\D/g, '').slice(-10);
+  let rows: Array<{ client_phone?: string | null; status?: string | null }> = [];
+  if (digits.length === 10) {
+    const appointments = await supabase
+      .from('crm_appointments')
+      .select('client_phone, status')
+      .ilike('client_phone', `%${digits}%`)
+      .limit(30);
+    if (appointments.error) throw appointments.error;
+    rows = appointments.data ?? [];
+  }
+  return salesChatNeedsLossReason({
+    archiving: true,
+    intake: typeof data?.intake_intent_label === 'string' ? data.intake_intent_label : null,
+    fromAd: Boolean(String(data?.ctwa_source_id || data?.ctwa_clid || '').trim()),
+    hasAppointment: phoneHasLiveAppointment(phone, rows.map((row) => ({
+      clientPhone: row.client_phone ?? null,
+      status: row.status ?? null,
+    }))),
+    lossReason: typeof data?.loss_reason === 'string' ? data.loss_reason : null,
+  });
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -74,6 +113,15 @@ Deno.serve(async (req) => {
         { error: `Conversación no encontrada para key: ${rawKey}` },
         404,
       );
+    }
+
+    if (patch.is_archived === true) {
+      const blocked = await lossReasonBlocksArchive(supabase, stableKey);
+      if (blocked) {
+        return jsonResponse({
+          error: 'Elige el motivo de pérdida antes de archivar este chat de venta.',
+        }, 409);
+      }
     }
 
     const { data, error } = await supabase

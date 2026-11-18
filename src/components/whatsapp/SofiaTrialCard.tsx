@@ -1,0 +1,117 @@
+import React, { useEffect, useState } from 'react'
+import { Box, Button, Stack, Typography } from '@mui/material'
+import { supabase } from '@/config/supabase'
+import { phoneKey } from '../../../scripts/sofia-card-checks.mjs'
+
+interface FieldRow {
+  path: string
+  valor: string
+}
+
+function fieldsOf(value: unknown, path = ''): FieldRow[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => fieldsOf(item, `${path}[${index}]`))
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    if ('valor' in record) {
+      return [{ path: path || 'ficha', valor: String(record.valor ?? '') }]
+    }
+    return Object.entries(record).flatMap(([key, child]) =>
+      fieldsOf(child, path ? `${path}.${key}` : key),
+    )
+  }
+  if (!path || value == null || value === '') return []
+  return [{ path, valor: String(value) }]
+}
+
+interface SofiaTrialCardProps {
+  phone?: string | null
+}
+
+export const SofiaTrialCard: React.FC<SofiaTrialCardProps> = ({ phone }) => {
+  const key = phoneKey(phone)
+  const [fields, setFields] = useState<FieldRow[]>([])
+  const [marks, setMarks] = useState<Record<string, 'correcto' | 'error'>>({})
+  const [missing, setMissing] = useState(false)
+
+  useEffect(() => {
+    if (!key) return
+    let cancel = false
+    void (async () => {
+      const card = await supabase
+        .from('whatsapp_client_cards')
+        .select('ficha')
+        .eq('phone', key)
+        .eq('modo', 'prueba')
+        .maybeSingle()
+      const reviews = await supabase
+        .from('whatsapp_client_card_reviews')
+        .select('field_path, verdict')
+        .eq('phone', key)
+      if (cancel) return
+      setMissing(!card.data)
+      setFields(fieldsOf(card.data?.ficha ?? {}).slice(0, 40))
+      const next: Record<string, 'correcto' | 'error'> = {}
+      for (const row of reviews.data ?? []) {
+        if (row.verdict === 'correcto' || row.verdict === 'error') next[row.field_path] = row.verdict
+      }
+      setMarks(next)
+    })()
+    return () => {
+      cancel = true
+    }
+  }, [key])
+
+  const mark = async (path: string, verdict: 'correcto' | 'error') => {
+    const { data } = await supabase.auth.getUser()
+    const reviewer = data.user?.id
+    if (!reviewer) return
+    setMarks((current) => ({ ...current, [path]: verdict }))
+    await supabase.from('whatsapp_client_card_reviews').upsert({
+      phone: key,
+      field_path: path,
+      verdict,
+      reviewer,
+      reviewed_at: new Date().toISOString(),
+    })
+  }
+
+  if (!key) return null
+
+  return (
+    <Box sx={{ mb: 2 }}>
+      <Typography variant="overline">Ficha (prueba)</Typography>
+      {missing ? (
+        <Typography variant="body2" color="text.secondary">
+          Este teléfono todavía no tiene ficha de prueba.
+        </Typography>
+      ) : (
+        <Stack spacing={0.75} sx={{ maxHeight: 280, overflow: 'auto' }}>
+          {fields.map((field) => (
+            <Stack key={field.path} direction="row" spacing={0.5} alignItems="center">
+              <Typography variant="caption" sx={{ flex: 1, minWidth: 0 }} noWrap title={field.valor}>
+                {field.path}: {field.valor}
+              </Typography>
+              <Button
+                size="small"
+                variant={marks[field.path] === 'correcto' ? 'contained' : 'text'}
+                onClick={() => void mark(field.path, 'correcto')}
+              >
+                correcto
+              </Button>
+              <Button
+                size="small"
+                color="warning"
+                variant={marks[field.path] === 'error' ? 'contained' : 'text'}
+                onClick={() => void mark(field.path, 'error')}
+              >
+                error
+              </Button>
+            </Stack>
+          ))}
+        </Stack>
+      )}
+    </Box>
+  )
+}

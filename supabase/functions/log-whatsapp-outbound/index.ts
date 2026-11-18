@@ -62,6 +62,7 @@ Deno.serve(async (req) => {
       direction: 'outbound',
       sender_type: 'system',
       sent_via: 'system',
+      author_kind: 'automatica',
       message_body: displayMessageBody || templateName || '',
       status: 'sent',
       wa_message_id: waMessageId,

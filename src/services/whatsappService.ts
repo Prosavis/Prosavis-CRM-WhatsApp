@@ -188,6 +188,7 @@ export function mapConversationRow(
         : undefined,
     reviewIntentLabel: asOptionalString(record.review_intent_label),
     intakeIntentLabel: asOptionalString(record.intake_intent_label),
+    lossReason: asOptionalString(record.loss_reason),
     updatedAt: toDate(asOptionalString(record.updated_at)),
   };
 }
@@ -301,6 +302,7 @@ export interface WhatsAppConversation {
   reviewIntentMark?: 'apto' | 'queja' | 'no_pedir';
   reviewIntentLabel?: string;
   intakeIntentLabel?: string;
+  lossReason?: string;
   /** Versión de servidor (`whatsapp_conversations.updated_at`). */
   updatedAt?: Date;
 }

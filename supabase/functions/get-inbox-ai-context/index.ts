@@ -1,6 +1,6 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { formatError } from '../_shared/whatsappOutbound.ts';
-import { loadRealAvailability } from '../_shared/availability.ts';
+import { loadRealAvailabilityDetailed } from '../_shared/availability.ts';
 import { buildInboxAiContext } from '../_shared/inboxAiContext.ts';
 import { resolveInboxAiOrGrokClient } from '../_shared/inboxAiContextAuth.ts';
 import {
@@ -36,7 +36,9 @@ Deno.serve(async (req) => {
       throw err;
     }
 
-    const availableSlots = await loadRealAvailability(parsed.durationMinutes);
+    const availability = await loadRealAvailabilityDetailed(parsed.durationMinutes, {
+      desiredDate: parsed.desiredDate,
+    });
     return jsonResponse(buildInboxAiContextPack({
       formattedBlock: ctx.formattedBlock,
       historyMeta: ctx.historyMeta,
@@ -46,7 +48,8 @@ Deno.serve(async (req) => {
       greetingFirstName: ctx.greetingFirstName,
       appointmentsLoadFailed: ctx.appointmentsLoadFailed,
       lastTurnRole: ctx.lastTurnRole,
-      availableSlots,
+      availableSlots: availability.slots,
+      availability,
       wompiLinks: STATIC_WOMPI_LINKS_BY_AMOUNT_COP,
     }));
   } catch (error) {

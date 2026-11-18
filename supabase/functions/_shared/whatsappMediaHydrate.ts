@@ -1,7 +1,10 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { scheduleBackgroundWork } from './edgeBackground.ts';
 import { analyzeInboundImageById } from './analyzeInboundImage.ts';
-import { inboundAudioNeedsAutoTranscription } from './inboxAiMediaLimits.ts';
+import {
+  inboundAudioNeedsAutoTranscription,
+  shouldQueueInboundMediaAnalysis,
+} from './inboxAiMediaLimits.ts';
 import {
   isVoiceTranscriptionEnabled,
   transcribeInboundAudioById,
@@ -78,16 +81,6 @@ export async function queuePersistedAudioTranscription(
   );
 }
 
-function shouldQueueInboundVision(
-  mediaType: string | null,
-  mimeType: string | null,
-): boolean {
-  const type = (mediaType ?? '').toLowerCase();
-  const mime = (mimeType ?? '').toLowerCase();
-  if (type === 'image') return true;
-  return type === 'document' && mime.includes('pdf');
-}
-
 export async function hydratePersistedMessageMedia(params: {
   supabase: SupabaseClient;
   messageLogId: string | null;
@@ -95,6 +88,7 @@ export async function hydratePersistedMessageMedia(params: {
   mediaId: string | null;
   mediaType: string | null;
   mimeType: string | null;
+  filename?: string | null;
 }): Promise<void> {
   const messageLogId = params.messageLogId;
   if (!params.mediaId || !messageLogId) return;
@@ -125,7 +119,11 @@ export async function hydratePersistedMessageMedia(params: {
       });
     }
 
-    if (!mediaUpdateError && shouldQueueInboundVision(params.mediaType, params.mimeType)) {
+    if (!mediaUpdateError && shouldQueueInboundMediaAnalysis({
+      media_type: params.mediaType,
+      mime_type: params.mimeType,
+      filename: params.filename,
+    })) {
       scheduleBackgroundWork(
         analyzeInboundImageById(params.supabase, messageLogId),
         'auto-image-analysis',

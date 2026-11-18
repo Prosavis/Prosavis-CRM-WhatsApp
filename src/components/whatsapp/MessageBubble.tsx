@@ -61,7 +61,10 @@ import ClientDateText from '@/components/common/ClientDateText';
 import { AnalysisMarkdown } from '@/components/whatsapp/AnalysisMarkdown';
 import { MediaInsightPanel } from '@/components/whatsapp/MediaInsightPanel';
 import { looksIncompleteImageAnalysis } from '../../../supabase/functions/_shared/imageAnalysisCache';
-import { isInboundPdfDocument } from '../../../supabase/functions/_shared/inboxAiMediaLimits';
+import {
+  isInboundOfficeOrTextDocument,
+  isInboundPdfDocument,
+} from '../../../supabase/functions/_shared/inboxAiMediaLimits';
 import { WhatsAppFormattedText } from '@/utils/whatsappTextFormatting';
 import { crmToast } from '@/utils/crmToast';
 import { COLOMBIA_TIME_ZONE } from '@/utils/colombiaTime';
@@ -480,6 +483,11 @@ const MediaContent: React.FC<{
     mime_type: message.mimeType,
     filename: message.filename,
   });
+  const inboundDocument = message.direction === 'inbound' && isInboundOfficeOrTextDocument({
+    media_type: message.mediaType,
+    mime_type: message.mimeType,
+    filename: message.filename,
+  });
   const inboundImage = message.mediaType === 'image' && message.direction === 'inbound';
 
   const transcriptionControls =
@@ -521,14 +529,16 @@ const MediaContent: React.FC<{
       </Box>
     ) : null;
 
-  const imageAnalysisControls = (inboundImage || inboundPdf) ? (
+  const imageAnalysisControls = (inboundImage || inboundPdf || inboundDocument) ? (
     <Box sx={{ mt: 0.75 }}>
       {imageAnalysis ? (
         <MediaInsightPanel
-          title={inboundPdf ? 'Análisis de PDF' : 'Análisis de imagen'}
+          title={inboundPdf ? 'Análisis de PDF' : inboundDocument ? 'Análisis de documento' : 'Análisis de imagen'}
           icon={inboundPdf
             ? <PictureAsPdfIcon sx={{ fontSize: 14 }} />
-            : <ImageIcon sx={{ fontSize: 14 }} />}
+            : inboundDocument
+              ? <InsertDriveFileIcon sx={{ fontSize: 14 }} />
+              : <ImageIcon sx={{ fontSize: 14 }} />}
           preview={imageAnalysis}
           note={(imageAnalysisStatus === 'partial' || looksIncompleteImageAnalysis(imageAnalysis))
             ? 'Incompleto — se puede volver a analizar.'
@@ -548,7 +558,9 @@ const MediaContent: React.FC<{
             ? <CircularProgress size={14} />
             : inboundPdf
               ? <PictureAsPdfIcon />
-              : <ImageIcon />}
+              : inboundDocument
+                ? <InsertDriveFileIcon />
+                : <ImageIcon />}
           disabled={analyzingImage || !message.storagePath}
           onClick={() => void handleAnalyzeImage(false)}
         >
@@ -556,7 +568,9 @@ const MediaContent: React.FC<{
             ? 'Analizando…'
             : inboundPdf
               ? 'Analizar PDF'
-              : 'Analizar imagen'}
+              : inboundDocument
+                ? 'Analizar documento'
+                : 'Analizar imagen'}
         </Button>
       )}
       {imageAnalysisError && (

@@ -355,6 +355,7 @@ async function processInboundMessage(params: {
     mediaId: content.mediaId,
     mediaType: content.mediaType,
     mimeType: content.mimeType,
+    filename: content.filename,
   });
 
   // Actualiza directorio: last_response_at + opt-out por "PARAR".

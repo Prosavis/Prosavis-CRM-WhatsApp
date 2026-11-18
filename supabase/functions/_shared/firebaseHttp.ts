@@ -7,7 +7,7 @@ export const DEFAULT_FIREBASE_CRM_APPOINTMENT_ACTIONS_URL =
 export const DEFAULT_VISIT_INTELLIGENCE_EVENT_URL =
   'https://us-central1-prosavis.cloudfunctions.net/visitIntelligenceCrmEvent';
 
-const SLOT_MAX_TIMEOUT_MS = 4_000;
+const SLOT_MAX_TIMEOUT_MS = 8_000;
 const APPOINTMENT_MAX_TIMEOUT_MS = 8_000;
 
 type EnvReader = (name: string) => string | undefined;

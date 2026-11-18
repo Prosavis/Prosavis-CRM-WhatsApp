@@ -1,5 +1,9 @@
 // deno-lint-ignore-file no-explicit-any
 import { looksIncompleteImageAnalysis } from './imageAnalysisCache.ts';
+import {
+  isInboundPdfDocument,
+  resolveInboundDocumentForGemini,
+} from './inboxAiMediaLimits.ts';
 
 /** Cliente Supabase tipado de forma laxa para poder testear helpers puros con Vitest. */
 type SupabaseClient = any;
@@ -29,6 +33,7 @@ export const DEFAULT_TRANSCRIPT_CHAR_BUDGET = 60_000;
 export const AUDIO_TRANSCRIPT_PREFIX = '[Audio transcrito]:';
 export const IMAGE_ANALYSIS_PREFIX = '[Imagen]:';
 export const PDF_ANALYSIS_PREFIX = '[PDF]:';
+export const DOCUMENT_ANALYSIS_PREFIX = '[Documento]:';
 
 function asTrimmedText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -48,6 +53,8 @@ export function resolveConversationTurnText(
     message_body?: unknown;
     caption?: unknown;
     media_type?: unknown;
+    mime_type?: unknown;
+    filename?: unknown;
     voice_transcription?: unknown;
     media_analysis_text?: unknown;
   },
@@ -95,7 +102,10 @@ export function resolveConversationTurnText(
   }
 
   if (imageAnalysis && mediaType === 'document') {
-    const labeled = `${PDF_ANALYSIS_PREFIX} ${imageAnalysis}`;
+    const prefix = isInboundPdfDocument(row) || !resolveInboundDocumentForGemini(row)
+      ? PDF_ANALYSIS_PREFIX
+      : DOCUMENT_ANALYSIS_PREFIX;
+    const labeled = `${prefix} ${imageAnalysis}`;
     const captionOrBody = caption || (body && !isMediaPlaceholder(body, mediaType) ? body : '');
     if (captionOrBody && captionOrBody !== imageAnalysis) {
       return `${captionOrBody}\n${labeled}`;
@@ -140,7 +150,7 @@ export async function getConversationHistoryWithMeta(
   const { data, error } = await supabase
     .from('whatsapp_message_log')
     .select(
-      'direction,message_body,caption,media_type,voice_transcription,media_analysis_text,hidden_from_panel,created_at',
+      'direction,message_body,caption,media_type,mime_type,filename,voice_transcription,media_analysis_text,hidden_from_panel,created_at',
     )
     .eq('conversation_stable_key', stableKey)
     .eq('hidden_from_panel', false)
