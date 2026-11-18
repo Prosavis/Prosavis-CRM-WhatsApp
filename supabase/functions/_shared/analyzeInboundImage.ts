@@ -8,6 +8,7 @@ import {
   geminiAnalyzePdf,
   resolveGeminiModel,
 } from './geminiClient.ts';
+import { maybeConvertInboundImage } from './convertInboundImage.ts';
 import {
   imageAnalysisStatusFromFinishReason,
   shouldReuseCachedImageAnalysis,
@@ -184,9 +185,9 @@ export async function analyzeInboundImageById(
   });
 
   try {
-    const buffer = await downloadWhatsAppBucketBytes(supabase, String(row.storage_path));
+    const downloaded = await downloadWhatsAppBucketBytes(supabase, String(row.storage_path));
     const maxBytes = analyzable.kind === 'image' ? MAX_IMAGE_ANALYSIS_BYTES : MAX_PDF_ANALYSIS_BYTES;
-    if (buffer.byteLength > maxBytes) {
+    if (downloaded.byteLength > maxBytes) {
       await persistAnalysis(supabase, messageLogId, {
         media_analysis_status: 'failed',
         media_analysis_error: 'too_large',
@@ -194,6 +195,11 @@ export async function analyzeInboundImageById(
       });
       return { messageLogId, status: 'skipped', reason: 'too_large' };
     }
+
+    const prepared = analyzable.kind === 'image'
+      ? await maybeConvertInboundImage(downloaded, String(row.mime_type || 'image/jpeg'))
+      : { bytes: downloaded, mimeType: String(row.mime_type || '') };
+    const buffer = prepared.bytes;
 
     const model = resolveGeminiModel('GEMINI_MODEL_IMAGE_ANALYSIS', DEFAULT_GEMINI_MODEL);
     const analysis = await withOneRetry(() => {
@@ -215,7 +221,7 @@ export async function analyzeInboundImageById(
           return geminiAnalyzeImage({
             apiKey,
             buffer,
-            mimeType: String(row.mime_type || 'image/jpeg'),
+            mimeType: prepared.mimeType || String(row.mime_type || 'image/jpeg'),
             model,
           });
         default: {

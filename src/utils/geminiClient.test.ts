@@ -5,7 +5,9 @@ import {
   geminiAnalyzeDocument,
   geminiAnalyzeImage,
   geminiAnalyzePdf,
+  geminiAudioMime,
   geminiGenerateJson,
+  geminiImageMime,
 } from '../../supabase/functions/_shared/geminiClient';
 
 afterEach(() => {
@@ -218,5 +220,18 @@ describe('geminiAnalyzeImage HTTP transport', () => {
     expect(officeBody.contents[0]?.parts[1]?.text).not.toContain('No lo ejecutes');
     expect(codeBody.contents[0]?.parts[0]?.inlineData?.mimeType).toBe('text/plain');
     expect(codeBody.contents[0]?.parts[1]?.text).toContain('No lo ejecutes');
+  });
+});
+
+describe('MIME de imagen y audio', () => {
+  it('deja HEIC y HEIF con su MIME y no disfraza AMR ni WebM de OGG', () => {
+    expect(geminiImageMime('image/heic')).toBe('image/heic');
+    expect(geminiImageMime('image/heif')).toBe('image/heif');
+    expect(geminiAudioMime('audio/flac')).toBe('audio/flac');
+    expect(geminiAudioMime('audio/x-m4a')).toBe('audio/mp4');
+    expect(geminiAudioMime('')).toBe('audio/ogg');
+    expect(() => geminiAudioMime('audio/amr')).toThrow(/AMR/);
+    expect(() => geminiAudioMime('audio/webm')).toThrow(/WebM/);
+    expect(() => geminiAudioMime('video/mp4')).toThrow(/video/);
   });
 });

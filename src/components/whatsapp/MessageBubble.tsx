@@ -62,6 +62,7 @@ import { AnalysisMarkdown } from '@/components/whatsapp/AnalysisMarkdown';
 import { MediaInsightPanel } from '@/components/whatsapp/MediaInsightPanel';
 import { looksIncompleteImageAnalysis } from '../../../supabase/functions/_shared/imageAnalysisCache';
 import {
+  inboundMediaBlockReason,
   isInboundOfficeOrTextDocument,
   isInboundPdfDocument,
 } from '../../../supabase/functions/_shared/inboxAiMediaLimits';
@@ -489,9 +490,17 @@ const MediaContent: React.FC<{
     filename: message.filename,
   });
   const inboundImage = message.mediaType === 'image' && message.direction === 'inbound';
+  const inboundSticker = message.mediaType === 'sticker' && message.direction === 'inbound';
+  const blockReason = message.direction === 'inbound'
+    ? inboundMediaBlockReason({
+      media_type: message.mediaType,
+      mime_type: message.mimeType,
+      filename: message.filename,
+    })
+    : null;
 
   const transcriptionControls =
-    message.mediaType === 'audio' && Boolean(message.mediaId || message.storagePath) ? (
+    message.mediaType === 'audio' && !blockReason && Boolean(message.mediaId || message.storagePath) ? (
       <Box sx={{ mt: 0.75 }}>
         {transcript ? (
           <MediaInsightPanel
@@ -529,11 +538,11 @@ const MediaContent: React.FC<{
       </Box>
     ) : null;
 
-  const imageAnalysisControls = (inboundImage || inboundPdf || inboundDocument) ? (
+  const imageAnalysisControls = (inboundImage || inboundPdf || inboundDocument || inboundSticker) && !blockReason ? (
     <Box sx={{ mt: 0.75 }}>
       {imageAnalysis ? (
         <MediaInsightPanel
-          title={inboundPdf ? 'Análisis de PDF' : inboundDocument ? 'Análisis de documento' : 'Análisis de imagen'}
+          title={inboundPdf ? 'Análisis de PDF' : inboundDocument ? 'Análisis de documento' : inboundSticker ? 'Análisis de sticker' : 'Análisis de imagen'}
           icon={inboundPdf
             ? <PictureAsPdfIcon sx={{ fontSize: 14 }} />
             : inboundDocument
@@ -570,7 +579,9 @@ const MediaContent: React.FC<{
               ? 'Analizar PDF'
               : inboundDocument
                 ? 'Analizar documento'
-                : 'Analizar imagen'}
+                : inboundSticker
+                  ? 'Analizar sticker'
+                  : 'Analizar imagen'}
         </Button>
       )}
       {imageAnalysisError && (
@@ -584,46 +595,48 @@ const MediaContent: React.FC<{
   if (message.mediaType === 'sticker') {
     if (effectiveUrl) {
       return (
-        <Box
-          sx={{
-            mb: 0.5,
-            maxWidth: 180,
-            position: 'relative',
-            '&:hover .sticker-actions': { opacity: 1 },
-          }}
-        >
+        <Box sx={{ mb: 0.5, maxWidth: 220 }}>
           <Box
-            component="img"
-            src={effectiveUrl}
-            alt="Sticker"
-            loading="lazy"
             sx={{
-              display: 'block',
-              maxHeight: 180,
               maxWidth: 180,
-              objectFit: 'contain',
-            }}
-          />
-          <Box
-            className="sticker-actions"
-            sx={{
-              display: 'flex',
-              gap: 0.5,
-              opacity: 0,
-              position: 'absolute',
-              right: 0,
-              top: 0,
-              transition: 'opacity 0.2s',
+              position: 'relative',
+              '&:hover .sticker-actions': { opacity: 1 },
             }}
           >
-            <IconButton
-              size="small"
-              sx={{ bgcolor: 'rgba(0,0,0,0.45)', color: '#fff', '&:hover': { bgcolor: 'rgba(0,0,0,0.65)' } }}
-              onClick={handleDownload}
+            <Box
+              component="img"
+              src={effectiveUrl}
+              alt="Sticker"
+              loading="lazy"
+              sx={{
+                display: 'block',
+                maxHeight: 180,
+                maxWidth: 180,
+                objectFit: 'contain',
+              }}
+            />
+            <Box
+              className="sticker-actions"
+              sx={{
+                display: 'flex',
+                gap: 0.5,
+                opacity: 0,
+                position: 'absolute',
+                right: 0,
+                top: 0,
+                transition: 'opacity 0.2s',
+              }}
             >
-              <DownloadIcon fontSize="small" />
-            </IconButton>
+              <IconButton
+                size="small"
+                sx={{ bgcolor: 'rgba(0,0,0,0.45)', color: '#fff', '&:hover': { bgcolor: 'rgba(0,0,0,0.65)' } }}
+                onClick={handleDownload}
+              >
+                <DownloadIcon fontSize="small" />
+              </IconButton>
+            </Box>
           </Box>
+          {imageAnalysisControls}
         </Box>
       );
     }
@@ -701,6 +714,11 @@ const MediaContent: React.FC<{
             {audioMessageMenu}
           </Box>
           {transcriptionControls}
+        {blockReason ? (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+            {blockReason}
+          </Typography>
+        ) : null}
         </Box>
       );
     }
@@ -722,6 +740,11 @@ const MediaContent: React.FC<{
           {audioMessageMenu}
         </Box>
         {transcriptionControls}
+        {blockReason ? (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+            {blockReason}
+          </Typography>
+        ) : null}
       </Box>
     );
   }
@@ -736,6 +759,9 @@ const MediaContent: React.FC<{
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 0.25 }}>
             <IconButton size="small" onClick={handleDownload}><DownloadIcon fontSize="small" /></IconButton>
           </Box>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', px: 0.5, pb: 0.5 }}>
+            El video no se analiza.
+          </Typography>
         </Box>
       );
     }
@@ -769,6 +795,11 @@ const MediaContent: React.FC<{
             </IconButton>
           ) : null}
         </Box>
+        {blockReason ? (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+            {blockReason}
+          </Typography>
+        ) : null}
         {imageAnalysisControls}
       </Box>
     );

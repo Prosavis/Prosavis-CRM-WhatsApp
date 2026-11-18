@@ -2,6 +2,7 @@ import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { formatError } from '../_shared/whatsappOutbound.ts';
 import { loadRealAvailabilityDetailed } from '../_shared/availability.ts';
 import { buildInboxAiContext } from '../_shared/inboxAiContext.ts';
+import { pendingInboundAttachment } from '../_shared/inboxAiMediaLimits.ts';
 import { resolveInboxAiOrGrokClient } from '../_shared/inboxAiContextAuth.ts';
 import {
   buildInboxAiContextPack,
@@ -39,19 +40,41 @@ Deno.serve(async (req) => {
     const availability = await loadRealAvailabilityDetailed(parsed.durationMinutes, {
       desiredDate: parsed.desiredDate,
     });
-    return jsonResponse(buildInboxAiContextPack({
-      formattedBlock: ctx.formattedBlock,
-      historyMeta: ctx.historyMeta,
-      conversationTags: ctx.conversationTags,
-      propertySummary: ctx.propertySummary,
-      sessionWindow: ctx.sessionWindow,
-      greetingFirstName: ctx.greetingFirstName,
-      appointmentsLoadFailed: ctx.appointmentsLoadFailed,
-      lastTurnRole: ctx.lastTurnRole,
-      availableSlots: availability.slots,
-      availability,
-      wompiLinks: STATIC_WOMPI_LINKS_BY_AMOUNT_COP,
-    }));
+    const pendingQuery = await auth.supabase
+      .from('whatsapp_message_log')
+      .select('id, direction, media_type, mime_type, filename, media_analysis_text, voice_transcription')
+      .eq('conversation_stable_key', parsed.stableKey)
+      .eq('direction', 'inbound')
+      .order('created_at', { ascending: false })
+      .limit(40);
+    const adjuntos_sin_analizar = (pendingQuery.data ?? [])
+      .map((row: {
+        id?: unknown;
+        direction?: unknown;
+        media_type?: unknown;
+        mime_type?: unknown;
+        filename?: unknown;
+        media_analysis_text?: unknown;
+        voice_transcription?: unknown;
+      }) => pendingInboundAttachment(row))
+      .filter((row: ReturnType<typeof pendingInboundAttachment>) => row !== null)
+      .slice(0, 12);
+    return jsonResponse({
+      ...buildInboxAiContextPack({
+        formattedBlock: ctx.formattedBlock,
+        historyMeta: ctx.historyMeta,
+        conversationTags: ctx.conversationTags,
+        propertySummary: ctx.propertySummary,
+        sessionWindow: ctx.sessionWindow,
+        greetingFirstName: ctx.greetingFirstName,
+        appointmentsLoadFailed: ctx.appointmentsLoadFailed,
+        lastTurnRole: ctx.lastTurnRole,
+        availableSlots: availability.slots,
+        availability,
+        wompiLinks: STATIC_WOMPI_LINKS_BY_AMOUNT_COP,
+      }),
+      adjuntos_sin_analizar,
+    });
   } catch (error) {
     if (error instanceof Response) return error;
     return jsonResponse({ error: formatError(error) }, 500);

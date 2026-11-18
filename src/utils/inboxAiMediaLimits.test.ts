@@ -51,6 +51,13 @@ describe('inboundAudioNeedsAutoTranscription', () => {
       messageLogId: 'm1',
       mediaId: null,
     })).toBe(false);
+    expect(inboundAudioNeedsAutoTranscription({
+      mediaType: 'document',
+      messageLogId: 'm1',
+      storagePath: 'nota.m4a',
+      mimeType: 'audio/mp4',
+      filename: 'nota.m4a',
+    })).toBe(true);
   });
 });
 
@@ -83,15 +90,13 @@ describe('isAnalyzableInboundImage', () => {
     mime_type: 'image/jpeg',
   };
 
-  it('accepts a stored inbound photo under 5 MB', () => {
+  it('accepts a stored inbound photo under 10 MB, including a sticker on demand', () => {
     expect(isAnalyzableInboundImage(base)).toEqual({ ok: true });
+    expect(isAnalyzableInboundImage({ ...base, media_type: 'sticker', mime_type: 'image/webp' })).toEqual({ ok: true });
+    expect(shouldQueueInboundMediaAnalysis({ media_type: 'sticker', mime_type: 'image/webp' })).toBe(false);
   });
 
-  it('rejects stickers, missing storage, and oversized files', () => {
-    expect(isAnalyzableInboundImage({ ...base, media_type: 'sticker' })).toEqual({
-      ok: false,
-      reason: 'not_image',
-    });
+  it('rejects missing storage and oversized files', () => {
     expect(isAnalyzableInboundImage({ ...base, storage_path: null })).toEqual({
       ok: false,
       reason: 'no_storage_path',
@@ -116,7 +121,7 @@ describe('isAnalyzableInboundPdf', () => {
     filename: 'Prosavis $88.000 9112026.pdf',
   };
 
-  it('accepts a stored inbound PDF under 10 MB', () => {
+  it('accepts a stored inbound PDF under 30 MB', () => {
     expect(isAnalyzableInboundPdf(base)).toEqual({ ok: true });
     expect(isAnalyzableInboundPdf({
       ...base,
@@ -157,7 +162,7 @@ describe('isAnalyzableInboundDocument', () => {
     filename: 'Hoja_de_vida_Carolina.docx',
   };
 
-  it('accepts Office, text and scripts under 10 MB, including octet-stream plus extension', () => {
+  it('accepts Office, text and scripts under 30 MB, including octet-stream plus extension', () => {
     expect(isAnalyzableInboundDocument(base)).toEqual({ ok: true });
     expect(classifyAnalyzableInboundMedia(base)).toEqual({ ok: true, kind: 'document' });
     expect(resolveInboundDocumentForGemini(base)).toEqual({
@@ -220,6 +225,32 @@ describe('isAnalyzableInboundDocument', () => {
       mime_type: 'application/pdf',
       filename: 'a.pdf',
     })).toBe(true);
+    expect(classifyAnalyzableInboundMedia({
+      ...base,
+      mime_type: 'image/heic',
+      filename: 'foto.heic',
+    })).toEqual({ ok: true, kind: 'image' });
+    expect(classifyAnalyzableInboundMedia({
+      ...base,
+      mime_type: 'audio/mp4',
+      filename: 'nota.m4a',
+    })).toEqual({ ok: false, reason: 'es_audio' });
+    expect(shouldQueueInboundMediaAnalysis({
+      media_type: 'document',
+      mime_type: 'video/mp4',
+      filename: 'clip.mp4',
+    })).toBe(false);
+    expect(classifyAnalyzableInboundMedia({
+      ...base,
+      mime_type: 'video/mp4',
+      filename: 'clip.mp4',
+    })).toEqual({ ok: false, reason: 'video_no_soportado' });
+    expect(classifyAnalyzableInboundMedia({
+      ...base,
+      media_type: 'audio',
+      mime_type: 'audio/amr',
+      filename: 'nota.amr',
+    })).toEqual({ ok: false, reason: 'formato_no_soportado' });
   });
 });
 

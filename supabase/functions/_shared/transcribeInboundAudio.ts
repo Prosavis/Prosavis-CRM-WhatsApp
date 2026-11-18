@@ -3,6 +3,7 @@ import { getGeminiApiKey, geminiTranscribeAudioComplete, resolveGeminiModel, DEF
 import { shouldReuseCachedTranscript } from './transcriptContinuation.ts';
 import {
   canTranscribePersistedAudio,
+  inboundMediaBlockReason,
   isVoiceTranscriptionFeatureEnabled,
   MAX_STT_AUDIO_BYTES,
 } from './inboxAiMediaLimits.ts';
@@ -96,6 +97,15 @@ export async function transcribeInboundAudioById(
   if (!canTranscribePersistedAudio(row)) {
     return { ok: false, error: 'Solo se pueden transcribir audios con mediaId o storage_path.', status: 400 };
   }
+  const block = inboundMediaBlockReason(row);
+  if (block) {
+    await supabase.from('whatsapp_message_log').update({
+      voice_transcription_status: 'failed',
+      voice_transcription_error: block,
+      voice_transcription_failed_at: new Date().toISOString(),
+    }).eq('id', messageLogId);
+    return { ok: false, error: block, status: 400 };
+  }
 
   if (shouldReuseCachedTranscript(row, options?.force)) {
     return { ok: true, cached: true, transcript: String(row.voice_transcription) };
@@ -109,10 +119,23 @@ export async function transcribeInboundAudioById(
   try {
     const media = await loadInboundAudioBytes(supabase, row);
     if (!media.mimeType.startsWith('audio/')) {
-      return { ok: false, error: 'El adjunto no es un audio válido.', status: 400 };
+      const blocked = inboundMediaBlockReason({ mime_type: media.mimeType, filename: row.filename });
+      const message = blocked || 'El adjunto no es un audio válido.';
+      await supabase.from('whatsapp_message_log').update({
+        voice_transcription_status: 'failed',
+        voice_transcription_error: message,
+        voice_transcription_failed_at: new Date().toISOString(),
+      }).eq('id', messageLogId);
+      return { ok: false, error: message, status: 400 };
     }
     if (media.buffer.byteLength > MAX_STT_AUDIO_BYTES) {
-      return { ok: false, error: 'El audio supera el límite de 16 MB para transcripción.', status: 400 };
+      const message = 'El audio supera el límite de 20 MB para transcripción.';
+      await supabase.from('whatsapp_message_log').update({
+        voice_transcription_status: 'failed',
+        voice_transcription_error: message,
+        voice_transcription_failed_at: new Date().toISOString(),
+      }).eq('id', messageLogId);
+      return { ok: false, error: message, status: 400 };
     }
 
     const result = await withOneRetry(() => geminiTranscribeAudioComplete({

@@ -627,15 +627,23 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-/** Normaliza MIME type de audio para Gemini. */
-function audioMimeType(mimeType: string): string {
+/** Normaliza MIME type de audio para Gemini. Un formato desconocido no se disfraza de OGG. */
+export function geminiAudioMime(mimeType: string): string {
   const base = mimeType.split(';')[0].trim().toLowerCase();
-  if (base === 'audio/x-wav' || base === 'audio/wav') return 'audio/wav';
+  if (!base) return 'audio/ogg';
+  if (base === 'audio/ogg' || base === 'audio/opus' || base === 'application/ogg') return 'audio/ogg';
+  if (base === 'audio/x-wav' || base === 'audio/wav' || base === 'audio/wave') return 'audio/wav';
   if (base === 'audio/mp3' || base === 'audio/mpeg') return 'audio/mpeg';
-  if (base === 'audio/mp4') return 'audio/mp4';
-  if (base === 'audio/aac') return 'audio/aac';
-  // ogg/opus es el formato común de WhatsApp
-  return 'audio/ogg';
+  if (base === 'audio/mp4' || base === 'audio/m4a' || base === 'audio/x-m4a' || base === 'audio/mp4a-latm') {
+    return 'audio/mp4';
+  }
+  if (base === 'audio/aac' || base === 'audio/aacp') return 'audio/aac';
+  if (base === 'audio/flac' || base === 'audio/x-flac') return 'audio/flac';
+  if (base === 'audio/aiff' || base === 'audio/x-aiff') return 'audio/aiff';
+  if (base === 'audio/amr' || base === 'audio/amr-wb') throw new Error('Formato AMR no soportado.');
+  if (base === 'audio/webm' || base === 'video/webm') throw new Error('Formato WebM no soportado.');
+  if (base.startsWith('video/')) throw new Error('El video no se analiza.');
+  throw new Error('formato_no_soportado');
 }
 
 /**
@@ -654,8 +662,7 @@ export async function geminiTranscribeAudio(params: {
   const model = params.model ??
     resolveGeminiModel('GEMINI_MODEL_TRANSCRIBE', DEFAULT_GEMINI_MODEL);
 
-  const mime = audioMimeType(params.mimeType);
-  const audioB64 = bytesToBase64(params.buffer);
+  const mime = geminiAudioMime(params.mimeType);
 
   const instruction = params.instruction ??
     ('Transcribe este audio de WhatsApp en español de Colombia. ' +
@@ -667,7 +674,12 @@ export async function geminiTranscribeAudio(params: {
     contents: [{
       role: 'user',
       parts: [
-        { inlineData: { mimeType: mime, data: audioB64 } },
+        await mediaContentPart({
+          apiKey: params.apiKey,
+          buffer: params.buffer,
+          mimeType: mime,
+          displayName: 'audio',
+        }),
         { text: instruction },
       ],
     }],
@@ -709,12 +721,40 @@ export async function geminiTranscribeAudioComplete(params: {
   return { text: assembled, complete };
 }
 
-function imageMimeType(mimeType: string): string {
+export function geminiImageMime(mimeType: string): string {
   const base = mimeType.split(';')[0].trim().toLowerCase();
   if (base === 'image/png') return 'image/png';
   if (base === 'image/webp') return 'image/webp';
   if (base === 'image/gif') return 'image/gif';
-  return 'image/jpeg';
+  if (base === 'image/heic' || base === 'image/heic-sequence') return 'image/heic';
+  if (base === 'image/heif' || base === 'image/heif-sequence') return 'image/heif';
+  if (base === 'image/bmp' || base === 'image/x-ms-bmp') return 'image/bmp';
+  if (base === 'image/tiff' || base === 'image/tif') return 'image/tiff';
+  if (base === 'image/avif') return 'image/avif';
+  if (base === 'image/svg+xml') return 'image/svg+xml';
+  if (!base || base === 'image/jpg' || base === 'image/jpeg' || base === 'image/pjpeg') return 'image/jpeg';
+  if (base.startsWith('video/')) throw new Error('El video no se analiza.');
+  throw new Error('formato_no_soportado');
+}
+
+const MEDIA_ANALYSIS_INLINE_BYTES = 15 * 1024 * 1024;
+
+async function mediaContentPart(params: {
+  apiKey: string;
+  buffer: Uint8Array;
+  mimeType: string;
+  displayName: string;
+}): Promise<GeminiPart> {
+  if (params.buffer.byteLength <= MEDIA_ANALYSIS_INLINE_BYTES) {
+    return { inlineData: { mimeType: params.mimeType, data: bytesToBase64(params.buffer) } };
+  }
+  const file = await uploadGeminiFile({
+    apiKey: params.apiKey,
+    buffer: params.buffer,
+    mimeType: params.mimeType,
+    displayName: params.displayName,
+  });
+  return { fileData: { mimeType: file.mimeType, fileUri: file.uri } };
 }
 
 const OPERATOR_MEDIA_NOTE =
@@ -749,7 +789,12 @@ async function geminiAnalyzeOperatorMedia(params: {
     contents: [{
       role: 'user',
       parts: [
-        { inlineData: { mimeType: params.mimeType, data: bytesToBase64(params.buffer) } },
+        await mediaContentPart({
+          apiKey: params.apiKey,
+          buffer: params.buffer,
+          mimeType: params.mimeType,
+          displayName: 'adjunto',
+        }),
         { text: params.instruction ?? OPERATOR_MEDIA_NOTE },
       ],
     }],
@@ -768,7 +813,7 @@ export async function geminiAnalyzeImage(params: {
 }): Promise<{ text: string; finishReason?: string }> {
   return geminiAnalyzeOperatorMedia({
     ...params,
-    mimeType: imageMimeType(params.mimeType),
+    mimeType: geminiImageMime(params.mimeType),
   });
 }
 

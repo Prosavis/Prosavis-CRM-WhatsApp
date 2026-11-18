@@ -15,6 +15,12 @@ function analysisFailureMessage(reason: string | undefined): string {
       return 'Solo se analizan PDF.';
     case 'not_document':
       return 'Ese documento no se puede analizar. Sirven Word, Excel, PowerPoint, TXT y scripts de texto.';
+    case 'es_audio':
+      return 'Eso es un audio. Usa transcribir.';
+    case 'video_no_soportado':
+      return 'El video no se analiza.';
+    case 'formato_no_soportado':
+      return 'Ese formato no se puede analizar.';
     case 'not_image':
       return 'Este mensaje no se puede analizar.';
     case 'not_inbound':

@@ -1,6 +1,7 @@
 // deno-lint-ignore-file no-explicit-any
 import { looksIncompleteImageAnalysis } from './imageAnalysisCache.ts';
 import {
+  isInboundImageAttachment,
   isInboundPdfDocument,
   resolveInboundDocumentForGemini,
 } from './inboxAiMediaLimits.ts';
@@ -84,7 +85,11 @@ export function resolveConversationTurnText(
     ? rawImageAnalysis
     : '';
 
-  if (transcription && (mediaType === 'audio' || isMediaPlaceholder(body, mediaType))) {
+  if (transcription && (
+    mediaType === 'audio'
+    || isMediaPlaceholder(body, mediaType)
+    || (mediaType === 'document' && !isInboundPdfDocument(row) && !resolveInboundDocumentForGemini(row) && !isInboundImageAttachment(row))
+  )) {
     const labeled = `${AUDIO_TRANSCRIPT_PREFIX} ${transcription}`;
     if (caption && caption !== transcription && !isMediaPlaceholder(caption, mediaType)) {
       return `${caption}\n${labeled}`;
@@ -102,9 +107,11 @@ export function resolveConversationTurnText(
   }
 
   if (imageAnalysis && mediaType === 'document') {
-    const prefix = isInboundPdfDocument(row) || !resolveInboundDocumentForGemini(row)
-      ? PDF_ANALYSIS_PREFIX
-      : DOCUMENT_ANALYSIS_PREFIX;
+    const prefix = isInboundImageAttachment(row)
+      ? IMAGE_ANALYSIS_PREFIX
+      : isInboundPdfDocument(row) || !resolveInboundDocumentForGemini(row)
+        ? PDF_ANALYSIS_PREFIX
+        : DOCUMENT_ANALYSIS_PREFIX;
     const labeled = `${prefix} ${imageAnalysis}`;
     const captionOrBody = caption || (body && !isMediaPlaceholder(body, mediaType) ? body : '');
     if (captionOrBody && captionOrBody !== imageAnalysis) {

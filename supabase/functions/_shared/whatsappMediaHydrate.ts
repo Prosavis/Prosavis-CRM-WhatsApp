@@ -143,12 +143,14 @@ export async function hydratePersistedMessageMedia(params: {
   }
 
   if (
-    inboundAudioNeedsAutoTranscription({
-      mediaType: params.mediaType,
-      messageLogId: messageLogId,
-      mediaId: params.mediaId,
-      storagePath: persisted.storagePath,
-    }) &&
+      inboundAudioNeedsAutoTranscription({
+        mediaType: params.mediaType,
+        messageLogId: messageLogId,
+        mediaId: params.mediaId,
+        storagePath: persisted.storagePath,
+        mimeType: params.mimeType,
+        filename: params.filename,
+      }) &&
     isVoiceTranscriptionEnabled()
   ) {
     await queuePersistedAudioTranscription(params.supabase, messageLogId);

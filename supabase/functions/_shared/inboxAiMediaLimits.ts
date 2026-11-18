@@ -1,6 +1,6 @@
-export const MAX_STT_AUDIO_BYTES = 16 * 1024 * 1024;
-export const MAX_IMAGE_ANALYSIS_BYTES = 5 * 1024 * 1024;
-export const MAX_PDF_ANALYSIS_BYTES = 10 * 1024 * 1024;
+export const MAX_STT_AUDIO_BYTES = 20 * 1024 * 1024;
+export const MAX_IMAGE_ANALYSIS_BYTES = 10 * 1024 * 1024;
+export const MAX_PDF_ANALYSIS_BYTES = 30 * 1024 * 1024;
 export const MAX_IMAGES_PER_ANALYSIS_REQUEST = 8;
 export const MAX_IMAGE_ANALYSES_PER_CONVERSATION_24H = 20;
 export const IMAGE_ANALYSIS_PREFIX = '[Imagen]:';
@@ -17,12 +17,15 @@ export function canTranscribePersistedAudio(row: {
   media_type?: unknown;
   media_id?: unknown;
   storage_path?: unknown;
+  mime_type?: unknown;
+  filename?: unknown;
 }): boolean {
-  const mediaType = String(row.media_type ?? '').trim().toLowerCase();
-  if (mediaType !== 'audio') return false;
   const mediaId = String(row.media_id ?? '').trim();
   const storagePath = String(row.storage_path ?? '').trim();
-  return Boolean(mediaId || storagePath);
+  if (!mediaId && !storagePath) return false;
+  const mediaType = String(row.media_type ?? '').trim().toLowerCase();
+  if (mediaType === 'audio') return true;
+  return isAudioAttachment(row);
 }
 
 export function inboundAudioNeedsAutoTranscription(params: {
@@ -30,12 +33,16 @@ export function inboundAudioNeedsAutoTranscription(params: {
   messageLogId?: string | null;
   mediaId?: string | null;
   storagePath?: string | null;
+  mimeType?: string | null;
+  filename?: string | null;
 }): boolean {
   return Boolean(params.messageLogId)
     && canTranscribePersistedAudio({
       media_type: params.mediaType,
       media_id: params.mediaId,
       storage_path: params.storagePath,
+      mime_type: params.mimeType,
+      filename: params.filename,
     });
 }
 
@@ -45,17 +52,18 @@ export function isAnalyzableInboundImage(row: {
   storage_path?: unknown;
   size_bytes?: unknown;
   mime_type?: unknown;
+  filename?: unknown;
 }): { ok: true } | { ok: false; reason: string } {
   if (row.direction !== 'inbound') return { ok: false, reason: 'not_inbound' };
-  const mediaType = String(row.media_type ?? '').trim().toLowerCase();
-  if (mediaType !== 'image') return { ok: false, reason: 'not_image' };
+  const block = inboundMediaBlockReason(row);
+  if (block?.startsWith('El video')) return { ok: false, reason: 'video_no_soportado' };
+  if (block) return { ok: false, reason: 'formato_no_soportado' };
+  if (!isInboundImageAttachment(row)) return { ok: false, reason: 'not_image' };
   if (!String(row.storage_path ?? '').trim()) return { ok: false, reason: 'no_storage_path' };
   const size = Number(row.size_bytes ?? 0);
   if (Number.isFinite(size) && size > MAX_IMAGE_ANALYSIS_BYTES) {
     return { ok: false, reason: 'too_large' };
   }
-  const mime = String(row.mime_type ?? '').trim().toLowerCase();
-  if (mime && !mime.startsWith('image/')) return { ok: false, reason: 'bad_mime' };
   return { ok: true };
 }
 
@@ -73,7 +81,7 @@ const OFFICE_MIME_BY_EXTENSION: Record<string, string> = {
 };
 
 const TEXT_EXTENSIONS = new Set([
-  'txt', 'csv', 'md', 'markdown', 'html', 'htm', 'xml', 'json', 'log',
+  'txt', 'csv', 'md', 'markdown', 'html', 'htm', 'xml', 'json', 'log', 'rtf',
 ]);
 
 const CODE_EXTENSIONS = new Set([
@@ -152,6 +160,62 @@ function inboundDocumentExtension(filename: unknown): string {
   const dot = base.lastIndexOf('.');
   if (dot <= 0) return '';
   return base.slice(dot + 1);
+}
+
+const IMAGE_EXTENSIONS = new Set([
+  'jpg', 'jpeg', 'png', 'webp', 'gif', 'heic', 'heif', 'bmp', 'tif', 'tiff', 'avif', 'svg',
+]);
+
+const AUDIO_EXTENSIONS = new Set([
+  'ogg', 'opus', 'mp3', 'wav', 'aac', 'm4a', 'm4b', 'flac', 'aiff', 'aif',
+]);
+
+const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'avi', 'mkv', '3gp', '3gpp', 'm4v']);
+
+export function inboundMediaBlockReason(row: {
+  media_type?: unknown;
+  mime_type?: unknown;
+  filename?: unknown;
+}): string | null {
+  const mime = baseMime(row.mime_type);
+  const ext = inboundDocumentExtension(row.filename);
+  const mediaType = String(row.media_type ?? '').trim().toLowerCase();
+  if (mediaType === 'video' || mime.startsWith('video/') || VIDEO_EXTENSIONS.has(ext)) {
+    return 'El video no se analiza.';
+  }
+  if (ext === 'amr' || mime === 'audio/amr' || mime === 'audio/amr-wb') {
+    return 'Formato AMR no soportado.';
+  }
+  if (ext === 'webm' || mime === 'audio/webm' || mime === 'video/webm') {
+    return 'Formato WebM no soportado.';
+  }
+  return null;
+}
+
+export function isInboundImageAttachment(row: {
+  media_type?: unknown;
+  mime_type?: unknown;
+  filename?: unknown;
+}): boolean {
+  if (inboundMediaBlockReason(row)) return false;
+  const mediaType = String(row.media_type ?? '').trim().toLowerCase();
+  const mime = baseMime(row.mime_type);
+  const ext = inboundDocumentExtension(row.filename);
+  if (mediaType === 'image' || mediaType === 'sticker') return true;
+  return mediaType === 'document' && (mime.startsWith('image/') || IMAGE_EXTENSIONS.has(ext));
+}
+
+function isAudioAttachment(row: {
+  media_type?: unknown;
+  mime_type?: unknown;
+  filename?: unknown;
+}): boolean {
+  if (inboundMediaBlockReason(row)) return false;
+  const mediaType = String(row.media_type ?? '').trim().toLowerCase();
+  const mime = baseMime(row.mime_type);
+  const ext = inboundDocumentExtension(row.filename);
+  if (mediaType === 'audio') return true;
+  return mediaType === 'document' && (mime.startsWith('audio/') || AUDIO_EXTENSIONS.has(ext));
 }
 
 export function isInboundPdfDocument(row: {
@@ -252,7 +316,16 @@ export function classifyAnalyzableInboundMedia(row: {
   mime_type?: unknown;
   filename?: unknown;
 }): { ok: true; kind: 'image' | 'pdf' | 'document' } | { ok: false; reason: string } {
+  const block = inboundMediaBlockReason(row);
+  if (block?.startsWith('El video')) return { ok: false, reason: 'video_no_soportado' };
+  if (block) return { ok: false, reason: 'formato_no_soportado' };
+  if (isInboundImageAttachment(row)) {
+    const image = isAnalyzableInboundImage(row);
+    if (image.ok) return { ok: true, kind: 'image' };
+    return image;
+  }
   const mediaType = String(row.media_type ?? '').trim().toLowerCase();
+  if (mediaType === 'document' && isAudioAttachment(row)) return { ok: false, reason: 'es_audio' };
   if (mediaType === 'document') {
     const pdf = isAnalyzableInboundPdf(row);
     if (pdf.ok) return { ok: true, kind: 'pdf' };
@@ -271,11 +344,47 @@ export function shouldQueueInboundMediaAnalysis(row: {
   mime_type?: unknown;
   filename?: unknown;
 }): boolean {
+  if (inboundMediaBlockReason(row)) return false;
   const mediaType = String(row.media_type ?? '').trim().toLowerCase();
+  if (mediaType === 'sticker') return false;
   if (mediaType === 'image') return true;
   if (mediaType !== 'document') return false;
+  if (isAudioAttachment(row)) return false;
+  if (isInboundImageAttachment(row)) return true;
   if (isInboundPdfDocument(row)) return true;
   return isInboundOfficeOrTextDocument(row);
+}
+
+export interface PendingInboundAttachment {
+  messageLogId: string;
+  tipo: 'image' | 'audio' | 'document';
+  filename: string;
+}
+
+export function pendingInboundAttachment(row: {
+  id?: unknown;
+  media_type?: unknown;
+  mime_type?: unknown;
+  filename?: unknown;
+  media_analysis_text?: unknown;
+  voice_transcription?: unknown;
+  direction?: unknown;
+}): PendingInboundAttachment | null {
+  if (row.direction && String(row.direction) !== 'inbound') return null;
+  if (inboundMediaBlockReason(row)) return null;
+  const id = String(row.id ?? '').trim();
+  if (!id) return null;
+  const filename = String(row.filename ?? '').trim();
+  if (isAudioAttachment(row)) {
+    if (String(row.voice_transcription ?? '').trim()) return null;
+    return { messageLogId: id, tipo: 'audio', filename };
+  }
+  if (isInboundImageAttachment(row) || isInboundPdfDocument(row) || isInboundOfficeOrTextDocument(row)) {
+    if (String(row.media_analysis_text ?? '').trim()) return null;
+    const tipo = isInboundImageAttachment(row) ? 'image' as const : 'document' as const;
+    return { messageLogId: id, tipo, filename };
+  }
+  return null;
 }
 
 export function countsTowardVisionQuota(
