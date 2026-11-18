@@ -18,15 +18,31 @@ export interface FirebaseAvailabilityRequest {
 
 export interface AvailabilityLoadOptions {
   now?: Date;
+  desiredDate?: string | null;
   request?: (body: FirebaseAvailabilityRequest) => Promise<unknown>;
 }
 
-export type AvailabilityOutcome = 'ok' | '401' | 'timeout' | 'error' | 'unconfigured';
+export type AvailabilityOutcome =
+  | 'ok'
+  | '401'
+  | 'timeout'
+  | 'error'
+  | 'unconfigured'
+  | 'fecha_invalida'
+  | 'fuera_de_horizonte';
+
+export type AvailabilityEstado = 'ok' | 'sin_cupo' | 'error';
 
 export interface AvailabilityLoadResult {
   slots: string[];
   outcome: AvailabilityOutcome;
+  estado: AvailabilityEstado;
+  motivo: string | null;
+  startDate: string | null;
+  endDate: string | null;
 }
+
+const MAX_HORIZON_DAYS = 45;
 
 export function classifyAvailabilityFailure(error: unknown): AvailabilityOutcome {
   const message = error instanceof Error ? error.message : String(error);
@@ -67,6 +83,20 @@ export function getBogotaAvailabilityHorizon(
   };
 }
 
+export function resolveAvailabilityWindow(
+  now = new Date(),
+  desiredDate?: string | null,
+): { startDate: string; endDate: string } | { error: 'fecha_invalida' | 'fuera_de_horizonte' } {
+  if (desiredDate == null || desiredDate === '') return getBogotaAvailabilityHorizon(now);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(desiredDate)) return { error: 'fecha_invalida' };
+  const today = bogotaDateKey(now);
+  const horizonEnd = addDays(today, MAX_HORIZON_DAYS);
+  if (desiredDate < today || desiredDate > horizonEnd) return { error: 'fuera_de_horizonte' };
+  const start = addDays(desiredDate, -3) < today ? today : addDays(desiredDate, -3);
+  const end = addDays(start, 6) > horizonEnd ? horizonEnd : addDays(start, 6);
+  return { startDate: start, endDate: end };
+}
+
 export function resolveOfficialDuration(value: unknown): number {
   return typeof value === 'number' &&
       Number.isInteger(value) &&
@@ -100,14 +130,35 @@ export async function loadRealAvailabilityDetailed(
   options: AvailabilityLoadOptions = {},
 ): Promise<AvailabilityLoadResult> {
   const request = options.request ?? postFirebaseJson;
-  const horizon = getBogotaAvailabilityHorizon(options.now);
+  const window = resolveAvailabilityWindow(options.now, options.desiredDate);
   const officialDuration = resolveOfficialDuration(duration);
+  if ('error' in window) {
+    return {
+      slots: [],
+      outcome: window.error,
+      estado: 'error',
+      motivo: window.error,
+      startDate: null,
+      endDate: null,
+    };
+  }
   try {
     const payload = await request({
-      ...horizon,
+      startDate: window.startDate,
+      endDate: window.endDate,
       duration: officialDuration,
     });
-    return { slots: normalizeAvailabilitySlots(payload), outcome: 'ok' };
+    const slots = normalizeAvailabilitySlots(payload);
+    const reported = isRecord(payload) && payload.estado === 'sin_cupo' ? 'sin_cupo' : null;
+    const estado: AvailabilityEstado = slots.length > 0 ? 'ok' : (reported ?? 'sin_cupo');
+    return {
+      slots,
+      outcome: 'ok',
+      estado,
+      motivo: null,
+      startDate: window.startDate,
+      endDate: window.endDate,
+    };
   } catch (error) {
     const outcome = classifyAvailabilityFailure(error);
     console.warn(JSON.stringify({
@@ -117,7 +168,14 @@ export async function loadRealAvailabilityDetailed(
       duration: officialDuration,
       error: error instanceof Error ? error.message : String(error),
     }));
-    return { slots: [], outcome };
+    return {
+      slots: [],
+      outcome,
+      estado: 'error',
+      motivo: outcome,
+      startDate: window.startDate,
+      endDate: window.endDate,
+    };
   }
 }
 
@@ -158,14 +216,32 @@ export function overwriteBookingAvailability<T extends object>(
   };
 }
 
-function formatRealAvailabilitySection(slots: string[]): string {
-  const normalized = normalizeAvailabilitySlots({ slots });
-  return [
-    REAL_AVAILABILITY_HEADING,
-    ...(normalized.length
-      ? normalized.map((slot) => `- ${slot}`)
-      : ['- Sin horarios reales disponibles.']),
-  ].join('\n');
+function formatRealAvailabilitySection(input: string[] | AvailabilityLoadResult): string {
+  const result: AvailabilityLoadResult = Array.isArray(input)
+    ? {
+      slots: input,
+      outcome: 'ok',
+      estado: input.length > 0 ? 'ok' : 'sin_cupo',
+      motivo: null,
+      startDate: null,
+      endDate: null,
+    }
+    : input;
+  const normalized = normalizeAvailabilitySlots({ slots: result.slots });
+  const lines = [REAL_AVAILABILITY_HEADING];
+  if (result.startDate && result.endDate) {
+    lines.push(`Ventana: ${result.startDate} a ${result.endDate}`);
+  }
+  lines.push(`Estado: ${result.estado}`);
+  if (result.estado === 'error') {
+    lines.push('- No se pudo calcular la disponibilidad. No ofrezcas horarios. Di que confirmas y pásale el chat a una persona.');
+    if (result.motivo) lines.push(`Motivo: ${result.motivo}`);
+  } else if (normalized.length === 0) {
+    lines.push('- No hay cupo en esta ventana.');
+  } else {
+    lines.push(...normalized.map((slot) => `- ${slot}`));
+  }
+  return lines.join('\n');
 }
 
 function clipBaseContext(baseContext: string, budget: number): string {
@@ -182,7 +258,7 @@ function clipBaseContext(baseContext: string, budget: number): string {
 
 export function appendRealAvailabilityContext(
   baseContext: string,
-  slots: string[],
+  slots: string[] | AvailabilityLoadResult,
   totalBudget = INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET,
 ): string {
   const section = formatRealAvailabilitySection(slots);

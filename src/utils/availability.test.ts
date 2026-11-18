@@ -4,8 +4,10 @@ import {
   getBogotaAvailabilityHorizon,
   classifyAvailabilityFailure,
   loadRealAvailability,
+  loadRealAvailabilityDetailed,
   normalizeAvailabilitySlots,
   overwriteBookingAvailability,
+  resolveAvailabilityWindow,
   resolveOfficialDuration,
 } from '../../supabase/functions/_shared/availability';
 import { INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET } from '../../supabase/functions/_shared/inboxAiContextFormat';
@@ -27,6 +29,30 @@ describe('getBogotaAvailabilityHorizon', () => {
     )).toEqual({
       startDate: '2026-08-06',
       endDate: '2026-08-12',
+    });
+  });
+});
+
+describe('resolveAvailabilityWindow', () => {
+  const now = new Date('2026-08-06T15:00:00.000Z');
+
+  it('keeps the next seven days when no date is requested', () => {
+    expect(resolveAvailabilityWindow(now, null)).toEqual({
+      startDate: '2026-08-06',
+      endDate: '2026-08-12',
+    });
+  });
+
+  it('loads the week around a date four weeks out and rejects day 46', () => {
+    expect(resolveAvailabilityWindow(now, '2026-09-03')).toEqual({
+      startDate: '2026-08-31',
+      endDate: '2026-09-06',
+    });
+    expect(resolveAvailabilityWindow(now, '2026-09-21')).toEqual({
+      error: 'fuera_de_horizonte',
+    });
+    expect(resolveAvailabilityWindow(now, 'mañana')).toEqual({
+      error: 'fecha_invalida',
     });
   });
 });
@@ -129,7 +155,34 @@ describe('booking availability grounding', () => {
 
     expect(context).toContain('=== Disponibilidad real (próximos días) ===');
     expect(context).toContain('- 2026-08-06T12:00:00.000Z');
+    expect(context).toContain('Estado: ok');
     expect(context).toContain(latest);
     expect(context.length).toBeLessThanOrEqual(INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET);
+  });
+
+  it('tells the model not to offer hours when the calendar could not be calculated', () => {
+    const context = appendRealAvailabilityContext('base', {
+      slots: [],
+      outcome: 'timeout',
+      estado: 'error',
+      motivo: 'timeout',
+      startDate: '2026-08-06',
+      endDate: '2026-08-12',
+    });
+    expect(context).toContain('Estado: error');
+    expect(context).toContain('No ofrezcas horarios');
+    expect(context).not.toContain('No hay cupo');
+  });
+
+  it('says there is no capacity when the calendar is empty', async () => {
+    const request = vi.fn().mockResolvedValue({ slots: [], estado: 'sin_cupo' });
+    const result = await loadRealAvailabilityDetailed(240, {
+      now: new Date('2026-08-06T15:00:00.000Z'),
+      request,
+    });
+    expect(result.estado).toBe('sin_cupo');
+    const context = appendRealAvailabilityContext('base', result);
+    expect(context).toContain('No hay cupo en esta ventana.');
+    expect(context).not.toContain('No ofrezcas horarios');
   });
 });
