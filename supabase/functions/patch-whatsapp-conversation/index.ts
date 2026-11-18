@@ -1,4 +1,5 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
+import { loadAppointmentsForContact } from '../_shared/inboxAiContext.ts';
 import {
   phoneHasLiveAppointment,
   salesChatNeedsLossReason,
@@ -72,25 +73,21 @@ async function lossReasonBlocksArchive(
     .maybeSingle();
   if (error) throw error;
   const phone = String(data?.contact_phone || data?.phone || '');
-  const digits = phone.replace(/\D/g, '').slice(-10);
-  let rows: Array<{ client_phone?: string | null; status?: string | null }> = [];
-  if (digits.length === 10) {
-    const appointments = await supabase
-      .from('crm_appointments')
-      .select('client_phone, status')
-      .ilike('client_phone', `%${digits}%`)
-      .limit(30);
-    if (appointments.error) throw appointments.error;
-    rows = appointments.data ?? [];
+  const loaded = await loadAppointmentsForContact({ phone });
+  if (loaded.appointmentsLoadFailed) {
+    throw new Error('No se pudo comprobar si hay cita. No se archivó.');
   }
   return salesChatNeedsLossReason({
     archiving: true,
     intake: typeof data?.intake_intent_label === 'string' ? data.intake_intent_label : null,
     fromAd: Boolean(String(data?.ctwa_source_id || data?.ctwa_clid || '').trim()),
-    hasAppointment: phoneHasLiveAppointment(phone, rows.map((row) => ({
-      clientPhone: row.client_phone ?? null,
-      status: row.status ?? null,
-    }))),
+    hasAppointment: phoneHasLiveAppointment(
+      phone,
+      loaded.allAppointments.map((row) => ({
+        clientPhone: phone,
+        status: row.status,
+      })),
+    ),
     lossReason: typeof data?.loss_reason === 'string' ? data.loss_reason : null,
   });
 }
