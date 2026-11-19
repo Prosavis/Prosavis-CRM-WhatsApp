@@ -343,6 +343,8 @@ export async function buildInboxAiContext(
     promptLayout?: 'legacy' | 'compact';
     memoryRefresh?: 'inline' | 'background';
     stageTimer?: StageTimer;
+    /** Corta el historial. El examen lo usa para no ver la respuesta humana. */
+    asOf?: string;
   },
 ): Promise<InboxAiContext> {
   const phone = normalizePhone(customerPhoneFromStableKey(stableKey));
@@ -355,6 +357,7 @@ export async function buildInboxAiContext(
     includeVoiceTranscriptions: options?.includeVoiceTranscriptions === true,
     includeImageAnalysis: options?.includeImageAnalysis === true,
     includeCachedImageAnalysis,
+    asOf: options?.asOf,
   };
 
   if (options?.includeImageAnalysis === true) {

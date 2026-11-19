@@ -72,6 +72,7 @@ export async function createGeneratedInboxAiSuggestionResponse(params: {
   suggestionLog?: SuggestionLogWriteParams | null;
   onModel?: (meta: GeminiJsonResult<unknown>) => void;
   stageTimer?: StageTimer;
+  includeUsage?: boolean;
 }): Promise<Response> {
   const detailed = await generateInboxAiSuggestionDetailed({
     apiKey: params.apiKey,
@@ -142,5 +143,12 @@ export async function createGeneratedInboxAiSuggestionResponse(params: {
     ...(wompiCheckoutUrl ? { wompiCheckoutUrl } : {}),
     ...(wompiPaymentReference ? { wompiPaymentReference } : {}),
     ...(wompiAmountCOP ? { wompiAmountCOP } : {}),
+    ...(params.includeUsage ? {
+      usage: {
+        model: detailed.meta.model,
+        inputTokens: detailed.meta.usage.promptTokenCount ?? 0,
+        outputTokens: detailed.meta.usage.candidatesTokenCount ?? 0,
+      },
+    } : {}),
   });
 }

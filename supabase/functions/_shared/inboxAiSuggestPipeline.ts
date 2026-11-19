@@ -72,7 +72,15 @@ const BOOKING_PROMPT =
 async function resolveSuggestionInstruction(
   supabase: SupabaseClient,
   stableKey: string,
+  rulesOverride?: string,
 ): Promise<string> {
+  if (rulesOverride?.trim()) {
+    return resolveInboxSystemInstruction({
+      sofiaPrompt: true,
+      botLine: true,
+      rules: rulesOverride,
+    });
+  }
   if (!sofiaPromptV1Enabled()) {
     return resolveInboxSystemInstruction({ sofiaPrompt: false, botLine: false });
   }
@@ -105,6 +113,12 @@ export interface CreateInboxSuggestionParams {
   stageTimer: StageTimer;
   allowPrefetchHit?: boolean;
   onSuggestionText?: (text: string) => void;
+  /** Examen: no lee la caché, no escribe el log y no envía. */
+  dryRun?: boolean;
+  /** Corta el historial en este instante, así la respuesta humana queda fuera. */
+  asOf?: string;
+  /** Reglas de una versión propuesta. No lee la versión activa. */
+  rulesOverride?: string;
 }
 
 function parseModelJson(text: string): unknown {
@@ -160,6 +174,7 @@ async function loadPrepared(params: CreateInboxSuggestionParams, pipeline: Sugge
     historyLimit: fast ? SUGGEST_HISTORY_TURN_LIMIT : undefined,
     transcriptCharBudget: fast ? SUGGEST_TRANSCRIPT_CHAR_BUDGET : undefined,
     stageTimer: params.stageTimer,
+    asOf: params.asOf,
   });
   return { ctx, availabilityPromise, availabilityStarted };
 }
@@ -179,7 +194,12 @@ export async function createInboxSuggestion(
   params: CreateInboxSuggestionParams,
 ): Promise<Response> {
   const pipeline = resolveSuggestPipeline();
-  if (params.allowPrefetchHit !== false && suggestionPrefetchEnabled() && !params.forceGenerate) {
+  if (
+    !params.dryRun
+    && params.allowPrefetchHit !== false
+    && suggestionPrefetchEnabled()
+    && !params.forceGenerate
+  ) {
     const anchor = await latestVisibleMessageAnchor(params.supabase, params.stableKey);
     const cached = anchor
       ? await readSuggestionPrefetch(params.supabase, params.stableKey, anchor.id)
@@ -292,7 +312,11 @@ async function completeLegacyCall(
     },
   };
 
-  const systemInstruction = await resolveSuggestionInstruction(params.supabase, params.stableKey);
+  const systemInstruction = await resolveSuggestionInstruction(
+    params.supabase,
+    params.stableKey,
+    params.rulesOverride,
+  );
   return createGeneratedInboxAiSuggestionResponse({
     apiKey: params.apiKey,
     systemInstruction,
@@ -310,13 +334,14 @@ async function completeLegacyCall(
     },
     responseContext: responseFields(ctx),
     greetingFirstName: ctx.greetingFirstName,
-    suggestionLog: {
+    suggestionLog: params.dryRun ? null : {
       supabase: params.supabase,
       stableKey: params.stableKey,
       createdBy: params.createdBy,
       extras,
     },
     stageTimer: params.stageTimer,
+    includeUsage: params.dryRun === true,
     onModel: (meta) => {
       params.stageTimer.record('gemini_suggestion', meta.elapsedMs, usageFields(meta));
       extras.timing = params.stageTimer.snapshot();
@@ -338,7 +363,11 @@ async function completeSingleCall(
     'En el mismo JSON devuelve booking, suggestion y proposedActions. ' +
     'suggestion es el borrador de WhatsApp. No incluyas precios ni links; el código los agrega. ' +
     `Teléfono cliente: ${ctx.phone}`;
-  const systemInstruction = await resolveSuggestionInstruction(params.supabase, params.stableKey);
+  const systemInstruction = await resolveSuggestionInstruction(
+    params.supabase,
+    params.stableKey,
+    params.rulesOverride,
+  );
 
   let meta: GeminiJsonResult<unknown>;
   if (params.onSuggestionText) {
@@ -420,7 +449,9 @@ async function completeSingleCall(
   };
 
   let suggestionLogId: string | null = null;
-  if (suggestionOutput.suggestion) {
+  if (params.dryRun) {
+    params.stageTimer.record('log_insert', 0, { skipped: true, dryRun: true });
+  } else if (suggestionOutput.suggestion) {
     const contextMeta = buildSuggestionLogContextMeta({
       historyMeta: ctx.historyMeta,
       conversationTags: ctx.conversationTags,
@@ -453,5 +484,12 @@ async function completeSingleCall(
     ...(priced.wompiCheckoutUrl ? { wompiCheckoutUrl: priced.wompiCheckoutUrl } : {}),
     ...(priced.wompiPaymentReference ? { wompiPaymentReference: priced.wompiPaymentReference } : {}),
     ...(priced.wompiAmountCOP ? { wompiAmountCOP: priced.wompiAmountCOP } : {}),
+    ...(params.dryRun ? {
+      usage: {
+        model: meta.model,
+        inputTokens: meta.usage.promptTokenCount ?? 0,
+        outputTokens: meta.usage.candidatesTokenCount ?? 0,
+      },
+    } : {}),
   });
 }
