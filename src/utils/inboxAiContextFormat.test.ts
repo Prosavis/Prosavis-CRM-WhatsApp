@@ -538,6 +538,9 @@ describe('INBOX_AI_SYSTEM_INSTRUCTION', () => {
   it('requires grounded prices, payments, availability and Meta templates', () => {
     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/precios.+catálogo oficial/i);
     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/únicamente 4, 6 u 8 horas/i);
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/hora adicional.*22\.000/i);
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/máximo una hora adicional/i);
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/sobre 8 horas.*pasa a una persona/i);
     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(
       /respuesta oficial contradice ese catálogo.+ignórala/i,
     );

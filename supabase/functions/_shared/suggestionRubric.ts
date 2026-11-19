@@ -52,6 +52,9 @@ export function scoreSuggestionRules(input: SuggestionRuleInput): SuggestionRule
       break;
     }
   }
+  if (/8 horas/i.test(folded) && /hora adicional/i.test(folded)) {
+    violations.push('hora-adicional');
+  }
   const catalog = new Set(input.catalogAmounts ?? []);
   if (catalog.size > 0) {
     for (const amount of amountsInText(text)) {

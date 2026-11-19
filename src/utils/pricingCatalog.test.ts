@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  EXTRA_HOUR_PRICE_COP,
   formatPricingCatalogBlock,
   groundBookingPricing,
   resolveBookingPricingCheckout,
   resolvePriceForDuration,
+  resolvePriceWithExtraHour,
 } from '../../supabase/functions/_shared/pricingCatalog';
 
 const TEST_PHONE = '573001112233';
@@ -64,6 +66,22 @@ describe('resolvePriceForDuration', () => {
   });
 });
 
+describe('resolvePriceWithExtraHour', () => {
+  it('adds one extra hour at COP 22,000 on the 4 and 6 hour plans', () => {
+    expect(resolvePriceWithExtraHour(240, false)).toEqual({
+      basePriceCOP: 88_000,
+      extraHourCOP: EXTRA_HOUR_PRICE_COP,
+      kitSurchargeCOP: 0,
+      totalCOP: 110_000,
+    });
+    expect(resolvePriceWithExtraHour(360, true)?.totalCOP).toBe(170_000);
+  });
+
+  it.each([120, 180, 480])('refuses an extra hour on %i minutes', (minutes) => {
+    expect(resolvePriceWithExtraHour(minutes, false)).toBeNull();
+  });
+});
+
 describe('formatPricingCatalogBlock', () => {
   it('lists only bookable durations with property hints and forbids legacy 2h/3h quotes', () => {
     const block = formatPricingCatalogBlock();
@@ -75,6 +93,9 @@ describe('formatPricingCatalogBlock', () => {
     expect(block).toContain('8 horas (480 min) → COP 148.000');
     expect(block).toContain('más de 100 m²');
     expect(block).toContain('Kit de limpieza Prosavis → COP 30.000 adicionales');
+    expect(block).toContain('Hora adicional → COP 22.000');
+    expect(block).toMatch(/máximo 1 hora adicional/i);
+    expect(block).toMatch(/más de 8 horas, pasa el caso a una persona/i);
     expect(block).toMatch(/no ofrezcas 2 horas ni 3 horas/i);
     expect(block).not.toContain('120 minutos → COP 58.000');
     expect(block).not.toContain('180 minutos → COP 78.000');

@@ -11,6 +11,10 @@ import {
 
 export const PROFESSIONAL_KIT_SURCHARGE_COP = 30_000;
 
+/** Una sola hora, y solo sobre los planes de 4 y 6 horas. Sobre 8 horas pasa a una persona. */
+export const EXTRA_HOUR_PRICE_COP = 22_000;
+const EXTRA_HOUR_BASE_MINUTES = [240, 360] as const;
+
 /** Incluye tarifas legacy (2h/3h) para citas históricas y cobros; no cotizar. */
 const BASE_PRICE_BY_DURATION_MINUTES: Readonly<Record<number, number>> = {
   120: 58_000,
@@ -34,6 +38,33 @@ export interface ResolvedDurationPrice {
   basePriceCOP: number;
   kitSurchargeCOP: number;
   totalCOP: number;
+}
+
+export interface ResolvedExtraHourPrice extends ResolvedDurationPrice {
+  extraHourCOP: number;
+}
+
+/**
+ * Precio de un plan de 4 o 6 horas más una hora adicional.
+ * Devuelve null en 2, 3 y 8 horas: sobre 8 horas el caso pasa a una persona.
+ */
+export function resolvePriceWithExtraHour(
+  minutes: number | null | undefined,
+  withKit: boolean,
+): ResolvedExtraHourPrice | null {
+  if (
+    typeof minutes !== 'number' ||
+    !EXTRA_HOUR_BASE_MINUTES.includes(minutes as (typeof EXTRA_HOUR_BASE_MINUTES)[number])
+  ) {
+    return null;
+  }
+  const base = resolvePriceForDuration(minutes, withKit);
+  if (!base) return null;
+  return {
+    ...base,
+    extraHourCOP: EXTRA_HOUR_PRICE_COP,
+    totalCOP: base.totalCOP + EXTRA_HOUR_PRICE_COP,
+  };
 }
 
 export function resolvePriceForDuration(
@@ -69,6 +100,8 @@ export function formatPricingCatalogBlock(): string {
     'Duraciones agendables (únicas que puedes ofrecer en cotizaciones nuevas):',
     ...bookableLines,
     `- Kit de limpieza Prosavis → COP ${formatCOP(PROFESSIONAL_KIT_SURCHARGE_COP)} adicionales (opcional)`,
+    `- Hora adicional → COP ${formatCOP(EXTRA_HOUR_PRICE_COP)}. Máximo 1 hora adicional, y solo sobre los planes de 4 y 6 horas.`,
+    'Si piden más de 8 horas, pasa el caso a una persona. No ofrezcas una segunda hora adicional.',
     'No ofrezcas 2 horas ni 3 horas en cotizaciones nuevas (tarifas legacy, no agendables).',
     'Elige la duración según el tamaño del inmueble (habitaciones/baños) usando las pistas de arriba.',
     'No inventes, estimes ni modifiques estos valores.',

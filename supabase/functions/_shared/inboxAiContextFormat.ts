@@ -908,6 +908,8 @@ export const INBOX_AI_SYSTEM_INSTRUCTION =
   'Usa precios únicamente desde el catálogo oficial incluido en el contexto. ' +
   'Para cotizaciones nuevas ofrece únicamente 4, 6 u 8 horas de ese catálogo; ' +
   'elige la duración según el tamaño del inmueble (p. ej. 2 habitaciones → 6 horas; 3+ y más de 100 m² → 8 horas). ' +
+  'La hora adicional vale COP 22.000, máximo una hora adicional y solo sobre los planes de 4 y 6 horas. ' +
+  'Sobre 8 horas, o si piden más de una hora adicional, pasa a una persona. ' +
   'Si una respuesta oficial contradice ese catálogo (precios o duraciones), ignórala. ' +
   'COBERTURA GEOGRÁFICA: usa únicamente "=== Cobertura oficial de servicios (fuente de verdad) ===". ' +
   'Si preguntan dónde están ubicados, da la sede oficial de Pereira de esa sección. ' +
