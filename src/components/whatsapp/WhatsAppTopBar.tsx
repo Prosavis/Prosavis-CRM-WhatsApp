@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
+  Alert,
   Avatar,
   Box,
   BottomNavigation,
@@ -41,6 +42,7 @@ import { directoryNavMeta, inboxLineNavMeta } from '@/utils/whatsappInboxNav';
 import { isWhatsAppAdminTab, type WhatsAppTabKey } from '@/utils/whatsappTabs';
 import CompanyHandbookBook from './CompanyHandbookBook';
 import CrmTutorialPlaceholder from './CrmTutorialPlaceholder';
+import { SofiaModeButton } from './SofiaModeButton';
 
 export interface WhatsAppTopBarProps {
   activeTab: WhatsAppTabKey;
@@ -179,6 +181,7 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
   const [adminAnchor, setAdminAnchor] = useState<null | HTMLElement>(null);
   const [accountAnchor, setAccountAnchor] = useState<null | HTMLElement>(null);
   const [mobileMoreAnchor, setMobileMoreAnchor] = useState<null | HTMLElement>(null);
+  const [modeError, setModeError] = useState<string | null>(null);
   const adminOpen = Boolean(adminAnchor);
   const accountOpen = Boolean(accountAnchor);
   const adminActive = isWhatsAppAdminTab(activeTab);
@@ -226,6 +229,9 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
         <Typography variant="subtitle1" fontWeight={800} noWrap sx={{ flex: 1 }}>
           {MOBILE_TAB_LABELS[activeTab]}
         </Typography>
+        {botSelected && (
+          <SofiaModeButton onError={(message) => setModeError(message)} />
+        )}
         <IconButton
           aria-label="Cuenta"
           onClick={(event) => setAccountAnchor(event.currentTarget)}
@@ -431,6 +437,11 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
         flexItem
         sx={{ display: { xs: 'none', md: 'block' }, alignSelf: 'stretch', my: 0.5 }}
       />
+
+      {botSelected && <SofiaModeButton onError={(message) => setModeError(message)} />}
+      {modeError && (
+        <Alert severity="warning" onClose={() => setModeError(null)}>{modeError}</Alert>
+      )}
 
       <Stack
         direction="row"
