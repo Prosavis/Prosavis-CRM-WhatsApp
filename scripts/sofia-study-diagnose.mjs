@@ -51,6 +51,7 @@ async function main() {
   let spent = 0;
   let firstFailure = null;
   let stopped = false;
+  let passes = 0;
   while (spent < usdMax && reviewed < countCap) {
     const room = Number.isFinite(countCap) ? Math.min(12, countCap - reviewed) : 12;
     if (room <= 0) break;
@@ -71,7 +72,18 @@ async function main() {
       console.log(JSON.stringify({ rubrica_medida: counted, ...batch }));
       return;
     }
-    if ((batch.revisados ?? 0) === 0 && (batch.fallos ?? 0) === 0) break;
+    if ((batch.revisados ?? 0) === 0 && (batch.fallos ?? 0) === 0) {
+      if (passes >= 1) break;
+      const waiting = await rest('whatsapp_study_chat_reviews?select=stable_key&diagnostico_error=eq.reintento&limit=1');
+      if (!Array.isArray(waiting) || waiting.length === 0) break;
+      await rest('whatsapp_study_chat_reviews?diagnostico_error=eq.reintento', {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ diagnostico_error: null }),
+      });
+      passes += 1;
+      continue;
+    }
     if (batch.detenido_por_tope || batch.fallo_sistemico) {
       stopped = true;
       break;

@@ -168,6 +168,8 @@ async function history(url, key, stableKey) {
   }));
 }
 
+const RETRYABLE = new Set([429, 500, 502, 503, 520, 529]);
+
 async function sonnet(anthropicKey, model, chat) {
   const payload = JSON.stringify({
     model,
@@ -178,24 +180,21 @@ async function sonnet(anthropicKey, model, chat) {
     },
     messages: [{ role: 'user', content: JSON.stringify(chat) }],
   });
+  const headers = {
+    'x-api-key': anthropicKey,
+    'anthropic-version': '2023-06-01',
+    'content-type': 'application/json',
+  };
   let response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: {
-      'x-api-key': anthropicKey,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    },
+    headers,
     body: payload,
   });
-  if (response.status === 429 || response.status === 529) {
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+  for (let attempt = 0; attempt < 3 && RETRYABLE.has(response.status); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 2000 * (attempt + 1)));
     response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {
-        'x-api-key': anthropicKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
+      headers,
       body: payload,
     });
   }
@@ -225,8 +224,16 @@ function failureKind(error) {
   return 'otro';
 }
 
+function gateway(kind) {
+  return /^modelo (429|500|502|503|520|529)/.test(kind);
+}
+
+function stopsRun(kind) {
+  return kind.startsWith('Supabase') || /^modelo (401|403|404)/.test(kind);
+}
+
 function skipsChat(kind) {
-  return kind === 'json' || kind === 'max_tokens' || kind === 'otro';
+  return kind === 'json' || kind === 'max_tokens' || kind === 'otro' || gateway(kind);
 }
 
 /**
@@ -347,6 +354,11 @@ export async function runDiagnosisBatch({
         const kind = failureKind(error);
         if (!firstFailure) firstFailure = kind;
         await remember(error?.usage).catch(() => null);
+        if (stopsRun(kind)) {
+          systemic = true;
+          stopped = true;
+          return;
+        }
         if (!skipsChat(kind)) {
           systemic = true;
           stopped = true;
@@ -355,7 +367,7 @@ export async function runDiagnosisBatch({
         await rest(supabaseUrl, serviceKey, `whatsapp_study_chat_reviews?stable_key=eq.${encodeURIComponent(row.stable_key)}`, {
           method: 'PATCH',
           headers: { Prefer: 'return=minimal' },
-          body: JSON.stringify({ diagnostico_error: kind }),
+          body: JSON.stringify({ diagnostico_error: gateway(kind) ? 'reintento' : kind }),
         }).catch(() => null);
         marked += 1;
       }
