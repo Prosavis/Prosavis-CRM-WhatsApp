@@ -7,8 +7,16 @@ export interface SuggestionRuleInput {
   allowedAccounts?: string[];
 }
 
-/** Números propios que el borrador sí puede repetir: 312, 311 y soporte. */
-export const OFFICIAL_CONTACT_NUMBERS = ['573122531271', '573112121108', '573246549657'];
+/** Números propios que el borrador sí puede repetir: 312, 311, soporte y la cuenta Bancolombia. */
+export const OFFICIAL_CONTACT_NUMBERS = [
+  '573122531271',
+  '573112121108',
+  '573246549657',
+  '27000013673',
+  '0091529095',
+  '9020271371',
+  '902027137',
+];
 
 const MAX_BUBBLE_CHARS = 200;
 const TU_RE = /(^|[\s,.;:¿¡])(te|tu|tus|ti|contigo)(?=$|[\s,.;:?!])/i;

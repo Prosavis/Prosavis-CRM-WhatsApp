@@ -82,7 +82,15 @@ async function resolveSuggestionInstruction(
     .eq('stable_key', stableKey)
     .maybeSingle();
   const botLine = data?.phone_number_id === BOT_PHONE_NUMBER_ID;
-  return resolveInboxSystemInstruction({ sofiaPrompt: true, botLine });
+  if (!botLine) return resolveInboxSystemInstruction({ sofiaPrompt: true, botLine: false });
+  const { data: version, error } = await supabase
+    .from('sofia_prompt_versions')
+    .select('body')
+    .eq('status', 'activa')
+    .limit(1)
+    .maybeSingle();
+  const rules = !error && typeof version?.body === 'string' ? version.body : undefined;
+  return resolveInboxSystemInstruction({ sofiaPrompt: true, botLine: true, rules });
 }
 
 export interface CreateInboxSuggestionParams {

@@ -12,6 +12,7 @@ import {
   groundBookingPayment,
   mapInboxAiAppointmentPayment,
   resolveInboxSystemInstruction,
+  SOFIA_PROMPT_V2_RULES,
   normalizeAddressKey,
   type InboxAiSectionHeading,
 } from '../../supabase/functions/_shared/inboxAiContextFormat';
@@ -488,7 +489,8 @@ describe('formatInboxAiContextBlock', () => {
     expect(block).toContain('ÚLTIMO MENSAJE');
     expect(block.length).toBeLessThanOrEqual(INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET);
     expect(SECTION_CHAR_BUDGETS['=== Memoria del cliente ===']).toBe(3_000);
-    expect(SECTION_CHAR_BUDGETS['=== Historial WhatsApp ===']).toBe(57_500);
+    expect(SECTION_CHAR_BUDGETS['=== Ficha de la clienta ===']).toBe(3_000);
+    expect(SECTION_CHAR_BUDGETS['=== Historial WhatsApp ===']).toBe(55_700);
   });
 });
 
@@ -546,13 +548,19 @@ describe('formatSofiaCardSection', () => {
     comercial: { objeciones: { valor: 'le pareció caro' } },
   };
 
-  it('lists only the seven usable fields', () => {
-    const section = formatSofiaCardSection(ficha);
+  it('lists the fields that can be said and keeps internal notes out', () => {
+    const section = formatSofiaCardSection(ficha, {
+      bookings: ['2026-11-01 240 min completada'],
+      diagnosis: 'Confirmar la dirección.',
+    });
     expect(section).toContain('Saludo: Ana');
     expect(section).toContain('Duración habitual: 4');
     expect(section).toContain('Medio de pago habitual: bancolombia_qr');
+    expect(section).toContain('Nunca nombres a una auxiliar');
+    expect(section).toContain('Auxiliar preferida: Laura');
+    expect(section).toContain('Últimas citas: 2026-11-01 240 min completada');
+    expect(section).toContain('Diagnóstico: Confirmar la dirección.');
     expect(section).not.toContain('dato interno');
-    expect(section).not.toContain('Laura');
     expect(section).not.toContain('caro');
   });
 
@@ -589,6 +597,18 @@ describe('resolveInboxSystemInstruction', () => {
 
   it('proposes the previous service to a returning client instead of asking from scratch', () => {
     expect(v1).toMatch(/cliente con historial.*lo de la vez anterior/i);
+  });
+
+  it('keeps v2 as an explicit rules override and not the default', () => {
+    expect(v1).not.toContain('Sofía v2');
+    const v2 = resolveInboxSystemInstruction({
+      sofiaPrompt: true,
+      botLine: true,
+      rules: SOFIA_PROMPT_V2_RULES,
+    });
+    expect(v2).toContain('El equipo a veces tutea; tú no.');
+    expect(v2).toContain('27000013673');
+    expect(v2).toContain('No ofrezcas la línea 311');
   });
 });
 

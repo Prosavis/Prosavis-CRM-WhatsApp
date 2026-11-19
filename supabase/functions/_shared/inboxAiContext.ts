@@ -122,6 +122,34 @@ async function loadSofiaCard(
   return data?.ficha ?? null;
 }
 
+async function loadSofiaCardContext(
+  supabase: SupabaseClient,
+  phone: string,
+  stableKey: string,
+  appointments: InboxAiAppointment[],
+): Promise<{ ficha?: unknown; bookings?: string[]; diagnosis?: string }> {
+  if (!sofiaCardContextEnabled()) return {};
+  const { data: settings, error } = await supabase
+    .from('sofia_settings')
+    .select('card_context')
+    .eq('id', 1)
+    .maybeSingle();
+  if (error || settings?.card_context !== true) return {};
+  const ficha = await loadSofiaCard(supabase, phone);
+  const bookings = appointments.slice(0, 3).map((appointment) => {
+    const date = appointment.scheduledDate.slice(0, 10);
+    const minutes = appointment.duration ? `${appointment.duration} min` : '';
+    return [date, minutes, appointment.status ?? ''].filter(Boolean).join(' ');
+  });
+  const { data: review } = await supabase
+    .from('whatsapp_study_chat_reviews')
+    .select('siguiente_accion, mejora')
+    .eq('stable_key', stableKey)
+    .maybeSingle();
+  const diagnosis = [review?.siguiente_accion, review?.mejora].filter(Boolean).join(' · ');
+  return { ficha, bookings, diagnosis: diagnosis || undefined };
+}
+
 function asTrimmedString(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const t = value.trim();
@@ -511,7 +539,7 @@ export async function buildInboxAiContext(
       directory?.preferredServiceAddress ?? directory?.address ?? null,
   });
 
-  const sofiaCard = sofiaCardContextEnabled() ? await loadSofiaCard(supabase, phone) : undefined;
+  const cardContext = await loadSofiaCardContext(supabase, phone, stableKey, allAppointments);
   const formatStarted = Date.now();
   const formattedBlock = formatInboxAiContextBlock({
     phone,
@@ -533,7 +561,9 @@ export async function buildInboxAiContext(
     appointmentsLoadFailed,
     includeProviderNames: options?.includeProviderNames === true,
     promptLayout: options?.promptLayout,
-    sofiaCard,
+    sofiaCard: cardContext.ficha,
+    sofiaCardBookings: cardContext.bookings,
+    sofiaCardDiagnosis: cardContext.diagnosis,
   });
   timer?.record('format', Date.now() - formatStarted);
 

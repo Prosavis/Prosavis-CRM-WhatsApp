@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { scoreSuggestionRules } from '../../supabase/functions/_shared/suggestionRubric';
+import { OFFICIAL_CONTACT_NUMBERS, scoreSuggestionRules } from '../../supabase/functions/_shared/suggestionRubric';
 
 const catalog = [68000, 88000, 108000, 30000];
 
@@ -62,5 +62,19 @@ describe('scoreSuggestionRules', () => {
     });
     expect(result.score).toBe(0);
     expect(result.violations.length).toBeGreaterThan(0);
+  });
+
+  it('allows the official Bancolombia account and rejects another one', () => {
+    expect(OFFICIAL_CONTACT_NUMBERS).toContain('27000013673');
+    const official = scoreSuggestionRules({
+      suggestion: 'La cuenta de ahorros es 27000013673.',
+      allowedAccounts: OFFICIAL_CONTACT_NUMBERS,
+    });
+    expect(official.violations).not.toContain('cuenta');
+    const other = scoreSuggestionRules({
+      suggestion: 'Consigna a la cuenta 12345678901.',
+      allowedAccounts: OFFICIAL_CONTACT_NUMBERS,
+    });
+    expect(other.violations).toContain('cuenta');
   });
 });
