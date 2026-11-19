@@ -76,13 +76,16 @@ async function sonnet(chat) {
       model,
       max_tokens: 300,
       system: 'Diagnosticas un chat de Prosavis Limpieza. No inventes datos. Responde solo JSON con bien, mal y mejor. Cada uno es una línea, sin nombres ni teléfonos. Juzga empatía, brevedad, hechos de limpieza (4, 6 u 8 horas; hora adicional 22000; cobertura Pereira y Dosquebradas) y si escaló una queja, un empleo o un precio especial.',
-      messages: [{ role: 'user', content: JSON.stringify(chat) }],
+      messages: [
+        { role: 'user', content: JSON.stringify(chat) },
+        { role: 'assistant', content: '{' },
+      ],
     }),
   });
   if (response.status === 404) throw new Error('modelo 404');
   if (!response.ok) throw new Error(`modelo ${response.status}`);
   const body = await response.json();
-  const text = (body.content ?? []).map((part) => part.text ?? '').join('');
+  const text = '{' + (body.content ?? []).map((part) => part.text ?? '').join('');
   const json = text.match(/\{[\s\S]*\}/);
   return JSON.parse(json ? json[0] : text);
 }
