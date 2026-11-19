@@ -39,6 +39,11 @@ export function sofiaPromptV1Enabled(): boolean {
   return readEdgeEnv('SOFIA_PROMPT_V1') === '1';
 }
 
+/** La ficha de la clienta entra al contexto. Apagado por defecto. */
+export function sofiaCardContextEnabled(): boolean {
+  return readEdgeEnv('SOFIA_CARD_CONTEXT') === '1';
+}
+
 export interface DraftGateInput {
   /** El prompt v1 está encendido para este chat. */
   sofiaPrompt: boolean;

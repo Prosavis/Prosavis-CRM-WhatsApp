@@ -56,6 +56,7 @@ import {
   loadOrRefreshInboxAiMemory,
   type InboxAiMemory,
 } from './inboxAiMemory.ts';
+import { sofiaCardContextEnabled } from './inboxAiSuggestConfig.ts';
 import {
   resolveInboxAiCanonicalName,
   resolveInboxAiGreetingFirstName,
@@ -106,6 +107,19 @@ export interface InboxAiContext {
   canonicalName: string | null;
   greetingFirstName: string | null;
   appointmentsLoadFailed: boolean;
+}
+
+/** Lee la ficha por teléfono. Si no hay fila, devuelve null y la sección sale vacía. */
+async function loadSofiaCard(
+  supabase: SupabaseClient,
+  phone: string,
+): Promise<unknown> {
+  const { data } = await supabase
+    .from('whatsapp_client_cards')
+    .select('ficha')
+    .eq('phone', phone)
+    .maybeSingle();
+  return data?.ficha ?? null;
 }
 
 function asTrimmedString(value: unknown): string | null {
@@ -497,6 +511,7 @@ export async function buildInboxAiContext(
       directory?.preferredServiceAddress ?? directory?.address ?? null,
   });
 
+  const sofiaCard = sofiaCardContextEnabled() ? await loadSofiaCard(supabase, phone) : undefined;
   const formatStarted = Date.now();
   const formattedBlock = formatInboxAiContextBlock({
     phone,
@@ -518,6 +533,7 @@ export async function buildInboxAiContext(
     appointmentsLoadFailed,
     includeProviderNames: options?.includeProviderNames === true,
     promptLayout: options?.promptLayout,
+    sofiaCard,
   });
   timer?.record('format', Date.now() - formatStarted);
 

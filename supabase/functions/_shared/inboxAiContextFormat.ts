@@ -32,6 +32,7 @@ export const SECTION_CHAR_BUDGETS = Object.freeze({
   '=== Momento actual ===': 700,
   '=== Canal / ventana WhatsApp ===': 350,
   '=== Memoria del cliente ===': 3_000,
+  '=== Ficha de la clienta ===': 1_200,
   '=== Perfil directorio ===': 1_200,
   '=== Contexto operativo de conversación ===': 1_000,
   '=== Clasificación CRM ===': 900,
@@ -441,6 +442,52 @@ function formatOfficialAnswers(answers?: InboxAiOfficialAnswers): string[] {
 }
 
 /** Formatea el bloque de contexto CRM (puro, testeable). */
+function cardValue(node: unknown): string {
+  if (!node || typeof node !== 'object') return '';
+  const value = (node as { valor?: unknown }).valor;
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number') return String(value);
+  return '';
+}
+
+function cardListValue(node: unknown, field: string): string {
+  if (!Array.isArray(node)) return '';
+  return node
+    .map((item) => cardValue((item as Record<string, unknown>)?.[field]))
+    .filter(Boolean)
+    .join(', ');
+}
+
+/**
+ * Sección de la ficha de Sofía para el contexto del ✨.
+ * Solo entran los 7 campos que se pueden decir. Las notas internas, las auxiliares
+ * y las objeciones nunca llegan al prompt.
+ */
+export function formatSofiaCardSection(ficha: unknown): string {
+  const card = ficha && typeof ficha === 'object' ? ficha as Record<string, unknown> : null;
+  const servicio = card?.servicio && typeof card.servicio === 'object'
+    ? card.servicio as Record<string, unknown>
+    : null;
+  const pago = card?.pago && typeof card.pago === 'object'
+    ? card.pago as Record<string, unknown>
+    : null;
+  const fields: Array<[string, string]> = [
+    ['Saludo', cardValue(card?.nombre_saludo)],
+    ['Inmueble', cardListValue(card?.inmuebles, 'tipo')],
+    ['Duración habitual', cardValue(servicio?.duracion_habitual)],
+    ['Franjas', cardValue(servicio?.franjas)],
+    ['Instrucciones permanentes', cardValue(servicio?.instrucciones_permanentes)],
+    ['Tareas extra', cardValue(servicio?.tareas_extra)],
+    ['Medio de pago habitual', cardValue(pago?.medio_habitual)],
+  ];
+  const lines = fields.map(([label, value]) => `${label}: ${value || '—'}`);
+  const hasData = fields.some(([, value]) => value.length > 0);
+  return buildSection('=== Ficha de la clienta ===', [
+    hasData ? 'Datos que la clienta ya dio. Úsalos; no los vuelvas a preguntar.' : 'Sin ficha para este teléfono.',
+    ...lines,
+  ]);
+}
+
 export function formatInboxAiContextBlock(params: {
   phone: string;
   transcript: string;
@@ -462,6 +509,8 @@ export function formatInboxAiContextBlock(params: {
   appointmentsLoadFailed?: boolean;
   includeProviderNames?: boolean;
   promptLayout?: 'legacy' | 'compact';
+  /** Ficha de Sofía. Solo se incluye cuando SOFIA_CARD_CONTEXT está encendida. */
+  sofiaCard?: unknown;
 }): string {
   const includeProviderNames = params.includeProviderNames === true;
   const nowIso = params.nowIso ?? new Date().toISOString();
@@ -490,6 +539,8 @@ export function formatInboxAiContextBlock(params: {
     '=== Memoria del cliente ===',
     formatMemoryLines(params.memory),
   ));
+
+  sections.push(formatSofiaCardSection(params.sofiaCard));
 
   const directoryLines: string[] = [];
   if (directory) {

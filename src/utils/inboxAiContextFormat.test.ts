@@ -6,6 +6,7 @@ import {
   buildPropertyLocationSummary,
   formatBogotaDateTime,
   formatInboxAiContextBlock,
+  formatSofiaCardSection,
   getSectionCharBudget,
   groundBookingClientInfo,
   groundBookingPayment,
@@ -526,6 +527,37 @@ describe('formatInboxAiContextBlock layout', () => {
   it('includes the cleaner name only when Grok asks for it', () => {
     const named = formatInboxAiContextBlock({ ...shared, includeProviderNames: true });
     expect(named).toContain('auxiliar: Laura Gómez');
+  });
+});
+
+describe('formatSofiaCardSection', () => {
+  const ficha = {
+    nombre_saludo: { valor: 'Ana' },
+    inmuebles: [{ tipo: { valor: 'apto' }, habitaciones: { valor: 2 } }],
+    servicio: {
+      duracion_habitual: { valor: '4' },
+      franjas: { valor: 'jueves en la tarde' },
+      instrucciones_permanentes: { valor: 'llevar las llaves' },
+      tareas_extra: { valor: 'loza' },
+    },
+    pago: { medio_habitual: { valor: 'bancolombia_qr' } },
+    notas_internas: { valor: 'dato interno que no debe salir' },
+    auxiliar: { preferidas: { valor: 'Laura' } },
+    comercial: { objeciones: { valor: 'le pareció caro' } },
+  };
+
+  it('lists only the seven usable fields', () => {
+    const section = formatSofiaCardSection(ficha);
+    expect(section).toContain('Saludo: Ana');
+    expect(section).toContain('Duración habitual: 4');
+    expect(section).toContain('Medio de pago habitual: bancolombia_qr');
+    expect(section).not.toContain('dato interno');
+    expect(section).not.toContain('Laura');
+    expect(section).not.toContain('caro');
+  });
+
+  it('says there is no card when the ficha is empty', () => {
+    expect(formatSofiaCardSection(null)).toMatch(/sin ficha/i);
   });
 });
 
