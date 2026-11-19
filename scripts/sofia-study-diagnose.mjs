@@ -7,7 +7,15 @@ const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const anthropic = process.env.ANTHROPIC_API_KEY || '';
 const model = process.env.ANTHROPIC_MODEL || '';
 const limitArg = process.argv.find((arg) => arg.startsWith('--limit='));
-const limit = limitArg ? Number(limitArg.slice('--limit='.length)) : 1565;
+const cap = Number(process.env.SOFIA_DIAGNOSE_MAX || '40');
+const requested = limitArg ? Number(limitArg.slice('--limit='.length)) : cap;
+const limit = Math.min(requested, Number.isFinite(cap) && cap > 0 ? cap : 40);
+
+function redact(text) {
+  return String(text ?? '')
+    .replace(/\d{7,}/g, '[numero]')
+    .replace(/\b(?:calle|carrera|cra\.?|kr\.?|diagonal|transversal|avenida|av\.?|manzana|apto|apartamento)\b[^.]{0,48}/gi, '[direccion]');
+}
 
 function headers(extra = {}) {
   return {
@@ -48,7 +56,7 @@ async function history(stableKey) {
   );
   return (rows ?? []).reverse().map((row) => ({
     quien: row.direction === 'inbound' ? 'cliente' : (row.author_kind || 'equipo'),
-    texto: String(row.message_body ?? '').slice(0, 280),
+    texto: redact(row.message_body).slice(0, 280),
     plantilla: row.template_name || null,
   }));
 }
