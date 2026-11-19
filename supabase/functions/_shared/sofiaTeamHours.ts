@@ -32,3 +32,15 @@ export function bridgeGreeting(now: Date): string {
   const greeting = hour < 12 ? 'Buenos días' : hour < 19 ? 'Buenas tardes' : 'Buenas noches';
   return `${greeting}. ${BRIDGE_BODY}`;
 }
+
+/** Medianoche siguiente en Bogotá. Colombia no cambia de hora: UTC-5. */
+export function nextBogotaMidnight(now: Date): Date {
+  const ymd = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+  const [year, month, day] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day + 1, 5, 0, 0));
+}

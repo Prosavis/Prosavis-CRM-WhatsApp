@@ -159,6 +159,8 @@ import { coloredChipSx } from '@/utils/coloredChipStyles';
 import { prepareWhatsAppSticker } from '@/utils/prepareWhatsAppSticker';
 import { summarizePeerPresences } from '@/utils/whatsappAdminPresence';
 import { customerPhoneFromStableKey, isLidStableKey, resolveWhatsAppLine } from '@/utils/whatsappLines';
+import { supabase } from '@/config/supabase';
+import { nextBogotaMidnight } from '../../../supabase/functions/_shared/sofiaTeamHours';
 import { SofiaDraftPanel } from './SofiaDraftPanel';
 import {
   getDirectoryMetaForConversation,
@@ -664,6 +666,14 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     );
   }, [queryClient, stableKey]);
 
+  const quietSofiaUntilTomorrow = useCallback(() => {
+    if (resolveWhatsAppLine(sendPhoneNumberId) !== 'bot' || !stableKey) return;
+    void supabase
+      .from('whatsapp_conversations')
+      .update({ sofia_muted_until: nextBogotaMidnight(new Date()).toISOString() })
+      .eq('stable_key', stableKey);
+  }, [sendPhoneNumberId, stableKey]);
+
   const handleSend = useCallback(
     async (text: string) => {
       if (sessionWindowClosed) {
@@ -708,6 +718,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           clientRequestId,
         );
         markInboxPerf(INBOX_PERF_MARKS.sendAck);
+        quietSofiaUntilTomorrow();
       } catch (error) {
         const message = error instanceof Error ? error.message : 'No se pudo enviar el mensaje';
         setOptimisticMessages((current) => markOptimisticFailed(current, optimisticId, message));
@@ -733,7 +744,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         }
       }
     },
-    [customerPhone, failListPreview, patchListPreview, sendPhoneNumberId, replyToMessage, sessionWindowClosed, stableKey, myUid],
+    [customerPhone, failListPreview, patchListPreview, quietSofiaUntilTomorrow, sendPhoneNumberId, replyToMessage, sessionWindowClosed, stableKey, myUid],
   );
 
   const handleLoadOlder = useCallback(async () => {
@@ -799,12 +810,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           ...(sendPhoneNumberId ? { phoneNumberId: sendPhoneNumberId } : {}),
           ...(replyId ? { replyToWaMessageId: replyId } : {}),
         });
+        quietSofiaUntilTomorrow();
       } catch (error) {
         failListPreview(preview);
         throw error;
       }
     },
-    [customerPhone, failListPreview, patchListPreview, sendPhoneNumberId, replyToMessage, sessionWindowClosed, stableKey],
+    [customerPhone, failListPreview, patchListPreview, quietSofiaUntilTomorrow, sendPhoneNumberId, replyToMessage, sessionWindowClosed, stableKey],
   );
 
   const handleUploadSticker = useCallback(async (
@@ -856,11 +868,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         sizeBytes: sticker.sizeBytes,
         isAnimatedSticker: sticker.isAnimated === true,
       });
+      quietSofiaUntilTomorrow();
     } catch (error) {
       failListPreview(preview);
       throw error;
     }
-  }, [customerPhone, failListPreview, patchListPreview, sendPhoneNumberId, replyToMessage, sessionWindowClosed, stableKey]);
+  }, [customerPhone, failListPreview, patchListPreview, quietSofiaUntilTomorrow, sendPhoneNumberId, replyToMessage, sessionWindowClosed, stableKey]);
 
   const handleSendMediaBatch = useCallback(
     async (
@@ -939,13 +952,15 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         }
       }
 
+      if (result.results.some((item) => item.success)) quietSofiaUntilTomorrow();
+
       attachments
         .filter((attachment) => !uploaded.some((item) => item.clientAttachmentId === attachment.id))
         .forEach((attachment) => failedIds.add(attachment.id));
 
       return { failedClientAttachmentIds: [...failedIds] };
     },
-    [sendPhoneNumberId, replyToMessage, customerPhone, sessionWindowClosed],
+    [quietSofiaUntilTomorrow, sendPhoneNumberId, replyToMessage, customerPhone, sessionWindowClosed],
   );
 
   const handleRequestSuggestion = useCallback(async (forceGenerate = false, extraContext?: string) => {

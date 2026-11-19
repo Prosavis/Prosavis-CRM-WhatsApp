@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bridgeGreeting, teamIsInOffice } from '../../supabase/functions/_shared/sofiaTeamHours';
+import { bridgeGreeting, nextBogotaMidnight, teamIsInOffice } from '../../supabase/functions/_shared/sofiaTeamHours';
 
 const at = (iso: string) => new Date(iso);
 
@@ -17,6 +17,14 @@ describe('teamIsInOffice', () => {
 
   it('is out on a public holiday even on a weekday', () => {
     expect(teamIsInOffice(at('2026-12-08T15:00:00Z'))).toBe(false);
+  });
+});
+
+describe('nextBogotaMidnight', () => {
+  it('is the next midnight in Bogota, which is 05:00 UTC', () => {
+    expect(nextBogotaMidnight(at('2026-11-19T19:00:00Z')).toISOString()).toBe(
+      '2026-11-20T05:00:00.000Z',
+    );
   });
 });
 
