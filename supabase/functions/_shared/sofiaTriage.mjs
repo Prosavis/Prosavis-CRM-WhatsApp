@@ -71,26 +71,37 @@ async function neighbors(url, key, row) {
   };
 }
 
+const RETRYABLE = new Set([408, 429, 500, 502, 503, 520, 529]);
+
 async function gemini(apiKey, model, prompt) {
-  const response = await fetch(
+  const payload = JSON.stringify({
+    systemInstruction: { parts: [{ text: SYSTEM }] },
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseJsonSchema: SCHEMA,
+      maxOutputTokens: 200,
+    },
+  });
+  let response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
     {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-goog-api-key': apiKey,
-      },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM }] },
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseJsonSchema: SCHEMA,
-          maxOutputTokens: 200,
-        },
-      }),
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+      body: payload,
     },
   );
+  for (let attempt = 0; attempt < 3 && RETRYABLE.has(response.status); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 2000 * (attempt + 1)));
+    response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+        body: payload,
+      },
+    );
+  }
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     const message = String(body?.error?.message ?? '').slice(0, 160);
@@ -101,7 +112,7 @@ async function gemini(apiKey, model, prompt) {
   try {
     parsed = JSON.parse(text);
   } catch {
-    parsed = { label: 'duda', motivo: 'respuesta ilegible' };
+    throw new Error('json');
   }
   const usage = body.usageMetadata ?? {};
   return {
@@ -140,7 +151,7 @@ export async function runTriageClassify({
   const rows = await rest(
     supabaseUrl,
     serviceKey,
-    `whatsapp_message_log?select=id,conversation_stable_key,created_at,media_type,filename,caption,direction&media_triage_label=is.null&media_type=in.(image,document)&order=created_at.asc&limit=${batch}`,
+    `whatsapp_message_log?select=id,conversation_stable_key,created_at,media_type,filename,caption,direction&media_triage_label=is.null&or=(media_triage_reason.is.null,media_triage_reason.neq.reintento)&media_type=in.(image,document)&order=created_at.asc&limit=${batch}`,
   );
   let spent = 0;
   let classified = 0;
@@ -191,7 +202,11 @@ export async function runTriageClassify({
       if (result.note.label === 'duda') doubts += 1;
     } catch (error) {
       firstFailure = error instanceof Error ? error.message.slice(0, 160) : 'otro';
-      break;
+      await rest(supabaseUrl, serviceKey, `whatsapp_message_log?id=eq.${encodeURIComponent(row.id)}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ media_triage_reason: 'reintento' }),
+      }).catch(() => null);
     }
   }
   return {

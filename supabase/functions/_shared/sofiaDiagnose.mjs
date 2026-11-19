@@ -168,7 +168,7 @@ async function history(url, key, stableKey) {
   }));
 }
 
-const RETRYABLE = new Set([429, 500, 502, 503, 520, 529]);
+const RETRYABLE = new Set([408, 429, 500, 502, 503, 520, 529]);
 
 async function sonnet(anthropicKey, model, chat) {
   const payload = JSON.stringify({
@@ -224,12 +224,12 @@ function failureKind(error) {
   return 'otro';
 }
 
-function gateway(kind) {
-  return /^modelo (429|500|502|503|520|529)/.test(kind);
+function stopsRun(kind) {
+  return kind.startsWith('Supabase') || /^modelo (400|401|403|404)/.test(kind);
 }
 
-function stopsRun(kind) {
-  return kind.startsWith('Supabase') || /^modelo (401|403|404)/.test(kind);
+function gateway(kind) {
+  return kind.startsWith('modelo ') && !stopsRun(kind);
 }
 
 function skipsChat(kind) {

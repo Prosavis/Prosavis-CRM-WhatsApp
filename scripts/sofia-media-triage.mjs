@@ -22,6 +22,7 @@ async function main() {
   let doubts = 0;
   let stopped = false;
   let firstFailure = null;
+  let passes = 0;
   while (spent < usdMax) {
     const batch = await runTriageClassify({
       supabaseUrl: url,
@@ -37,12 +38,30 @@ async function main() {
     spent += batch.gastado_usd ?? 0;
     if (batch.primer_fallo) firstFailure = batch.primer_fallo;
     if (batch.error === 'sin_clave') break;
-    if ((batch.clasificados ?? 0) === 0) break;
+    const stalled = (batch.clasificados ?? 0) === 0;
+    if (stalled) {
+      if (passes >= 1) break;
+      const waiting = await fetch(`${url}/rest/v1/whatsapp_message_log?select=id&media_triage_label=is.null&media_triage_reason=eq.reintento&limit=1`, {
+        headers: { apikey: key, Authorization: `Bearer ${key}` },
+      }).then((response) => response.json()).catch(() => []);
+      if (!Array.isArray(waiting) || waiting.length === 0) break;
+      await fetch(`${url}/rest/v1/whatsapp_message_log?media_triage_label=is.null&media_triage_reason=eq.reintento`, {
+        method: 'PATCH',
+        headers: {
+          apikey: key,
+          Authorization: `Bearer ${key}`,
+          'Content-Type': 'application/json',
+          Prefer: 'return=minimal',
+        },
+        body: JSON.stringify({ media_triage_reason: null }),
+      });
+      passes += 1;
+      continue;
+    }
     if (batch.detenido_por_tope) {
       stopped = true;
       break;
     }
-    if (batch.primer_fallo) break;
   }
   const report = await triageReport({ supabaseUrl: url, serviceKey: key });
   console.log(JSON.stringify({
