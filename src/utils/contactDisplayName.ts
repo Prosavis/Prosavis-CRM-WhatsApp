@@ -9,7 +9,7 @@ export interface ContactNameSources {
   whatsappProfileName?: string | null;
   phone?: string | null;
   conversationId?: string | null;
-  /** Si true, contact_name bloqueado gana sobre el directorio (p. ej. DETEKTOR). */
+  /** Si true, contact_name bloqueado gana sobre el directorio (p. ej. una marca). */
   contactNameLocked?: boolean | null;
 }
 
@@ -43,7 +43,7 @@ export function directoryNameHasEmoji(name: string | null | undefined): boolean 
 
 /**
  * Prioridad:
- * 1. contact_name usable + locked (nombre CRM manual / marca, p. ej. DETEKTOR)
+ * 1. contact_name usable + locked (nombre CRM manual o marca)
  * 2. directorio usable
  * 3. contact_name usable
  * 4. whatsapp_profile_name usable
@@ -75,7 +75,7 @@ export function resolveContactDisplayName(sources: ContactNameSources): string {
 
 /**
  * True cuando el directorio tiene nombre válido y contact_name debería alinearse.
- * No aplica si el nombre actual está bloqueado (se preserva, p. ej. DETEKTOR).
+ * No aplica si el nombre actual está bloqueado (se preserva, p. ej. una marca).
  */
 export function shouldSyncContactNameFromDirectory(
   dirName: string | null | undefined,

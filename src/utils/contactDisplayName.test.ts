@@ -16,32 +16,32 @@ describe('isUsableName', () => {
   });
 
   it('accepts names with letters, including emoji suffix', () => {
-    expect(isUsableName('Roberto Dunoyer')).toBe(true);
-    expect(isUsableName('Jules🍉')).toBe(true);
+    expect(isUsableName('Ana Perez')).toBe(true);
+    expect(isUsableName('Lina🍉')).toBe(true);
   });
 });
 
 describe('resolveContactDisplayName', () => {
-  it('prefers locked contact_name over directory (DETEKTOR)', () => {
+  it('prefers locked contact_name over directory (brand name)', () => {
     expect(
       resolveContactDisplayName({
-        directoryDisplayName: 'Jennifer Molina',
-        contactName: 'DETEKTOR',
+        directoryDisplayName: 'Marta Lopez',
+        contactName: 'ACME',
         contactNameLocked: true,
-        phone: '+573215565169',
+        phone: '+573001112233',
       }),
-    ).toBe('DETEKTOR');
+    ).toBe('ACME');
   });
 
   it('skips emoji-only contact_name and uses directory', () => {
     expect(
       resolveContactDisplayName({
-        directoryDisplayName: 'Roberto Dunoyer',
+        directoryDisplayName: 'Ana Perez',
         contactName: '😍😍',
         whatsappProfileName: '🤩🥰',
         phone: '+573001234567',
       }),
-    ).toBe('Roberto Dunoyer');
+    ).toBe('Ana Perez');
   });
 
   it('falls back to phone when names are not usable', () => {
@@ -57,29 +57,29 @@ describe('resolveContactDisplayName', () => {
   it('uses directory over unlocked wrong contact_name', () => {
     expect(
       resolveContactDisplayName({
-        directoryDisplayName: 'Johanna Guerra',
+        directoryDisplayName: 'Lucia Gomez',
         contactName: 'Maria Helena',
         contactNameLocked: false,
       }),
-    ).toBe('Johanna Guerra');
+    ).toBe('Lucia Gomez');
   });
 });
 
 describe('shouldSyncContactNameFromDirectory', () => {
   it('does not sync when contact name is locked', () => {
     expect(
-      shouldSyncContactNameFromDirectory('Jennifer Molina', 'DETEKTOR', {
+      shouldSyncContactNameFromDirectory('Marta Lopez', 'ACME', {
         contactNameLocked: true,
       }),
     ).toBe(false);
   });
 
   it('syncs emoji-only toward directory name', () => {
-    expect(shouldSyncContactNameFromDirectory('Roberto Dunoyer', '😍😍')).toBe(true);
+    expect(shouldSyncContactNameFromDirectory('Ana Perez', '😍😍')).toBe(true);
   });
 
   it('does not sync when already aligned', () => {
-    expect(shouldSyncContactNameFromDirectory('Johanna Guerra', 'Johanna Guerra')).toBe(false);
+    expect(shouldSyncContactNameFromDirectory('Lucia Gomez', 'Lucia Gomez')).toBe(false);
   });
 });
 
@@ -87,8 +87,8 @@ describe('resolveOutboundContactName', () => {
   it('never overwrites a locked contact name', () => {
     expect(
       resolveOutboundContactName({
-        incomingName: 'Linda Guzman',
-        existingContactName: 'Alexandra Idarraga',
+        incomingName: 'Carla Ruiz',
+        existingContactName: 'Sofia Ramirez',
         contactNameLocked: true,
       }),
     ).toBeNull();
@@ -97,8 +97,8 @@ describe('resolveOutboundContactName', () => {
   it('preserves an already-usable contact name (cleaner reminder case)', () => {
     expect(
       resolveOutboundContactName({
-        incomingName: 'Linda Guzman',
-        existingContactName: 'Doris Alexandra Idarraga',
+        incomingName: 'Carla Ruiz',
+        existingContactName: 'Sofia Elena Ramirez',
         contactNameLocked: false,
       }),
     ).toBeNull();
@@ -107,18 +107,18 @@ describe('resolveOutboundContactName', () => {
   it('sets name when conversation has no usable name yet', () => {
     expect(
       resolveOutboundContactName({
-        incomingName: 'Linda Guzman',
+        incomingName: 'Carla Ruiz',
         existingContactName: null,
         contactNameLocked: false,
       }),
-    ).toBe('Linda Guzman');
+    ).toBe('Carla Ruiz');
   });
 
   it('fills WhatsApp push name when the stored name is only a phone number', () => {
     expect(
       resolveOutboundContactName({
         incomingName: 'Nati',
-        existingContactName: '573116838597',
+        existingContactName: '573001110099',
         contactNameLocked: false,
       }),
     ).toBe('Nati');
@@ -136,10 +136,10 @@ describe('resolveOutboundContactName', () => {
 
 describe('contactNameForReminderRecipient', () => {
   it('passes clientName only for client recipients', () => {
-    expect(contactNameForReminderRecipient('client', 'Linda Guzman')).toBe('Linda Guzman');
+    expect(contactNameForReminderRecipient('client', 'Carla Ruiz')).toBe('Carla Ruiz');
   });
 
   it('omits name for professional recipients (prevents client→cleaner overwrite)', () => {
-    expect(contactNameForReminderRecipient('professional', 'Linda Guzman')).toBeUndefined();
+    expect(contactNameForReminderRecipient('professional', 'Carla Ruiz')).toBeUndefined();
   });
 });
