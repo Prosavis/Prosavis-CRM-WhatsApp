@@ -264,7 +264,7 @@ export async function runDiagnosisBatch({
     );
     for (const row of page ?? []) {
       const messages = Number(row.rubric?.entrantes ?? 0) + Number(row.rubric?.salientes ?? 0);
-      if (messages >= 5) pending.push(row);
+      if (messages >= 1) pending.push(row);
       if (pending.length >= batch) break;
     }
     if (!page || page.length < 1000) break;
