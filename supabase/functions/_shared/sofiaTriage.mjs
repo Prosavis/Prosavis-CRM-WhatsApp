@@ -80,7 +80,7 @@ async function gemini(apiKey, model, prompt) {
     generationConfig: {
       responseMimeType: 'application/json',
       responseJsonSchema: SCHEMA,
-      maxOutputTokens: 200,
+          maxOutputTokens: 2048,
     },
   });
   let response = await fetch(
