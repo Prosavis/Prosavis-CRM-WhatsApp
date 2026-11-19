@@ -36,8 +36,11 @@ async function rest(path, init = {}) {
 }
 
 async function measurable() {
-  const written = await rest('rpc/refresh_whatsapp_study_reviews', { method: 'POST', body: '{}' });
-  return written;
+  try {
+    return await rest('rpc/refresh_whatsapp_study_reviews', { method: 'POST', body: '{}' });
+  } catch {
+    return 'omitido';
+  }
 }
 
 async function pages(path) {
