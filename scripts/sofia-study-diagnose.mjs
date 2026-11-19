@@ -83,7 +83,8 @@ async function sonnet(chat) {
   if (!response.ok) throw new Error(`modelo ${response.status}`);
   const body = await response.json();
   const text = (body.content ?? []).map((part) => part.text ?? '').join('');
-  return JSON.parse(text);
+  const json = text.match(/\{[\s\S]*\}/);
+  return JSON.parse(json ? json[0] : text);
 }
 
 async function qualitative() {
@@ -94,6 +95,7 @@ async function qualitative() {
     .slice(0, limit);
   let reviewed = 0;
   let failed = 0;
+  let firstFailure = '';
   let cursor = 0;
   const worker = async () => {
     while (cursor < pending.length) {
@@ -113,13 +115,23 @@ async function qualitative() {
           }),
         });
         reviewed += 1;
-      } catch {
+      } catch (error) {
         failed += 1;
+        if (!firstFailure) {
+          const message = error instanceof Error ? error.message : '';
+          if (message.startsWith('Supabase') || message.startsWith('modelo')) {
+            firstFailure = message.split('?')[0].slice(0, 60);
+          } else if (message.includes('JSON')) {
+            firstFailure = 'json';
+          } else {
+            firstFailure = 'otro';
+          }
+        }
       }
     }
   };
   await Promise.all(Array.from({ length: 2 }, () => worker()));
-  return { sonnet: model, revisados: reviewed, fallos: failed };
+  return { sonnet: model, revisados: reviewed, fallos: failed, primer_fallo: firstFailure || null };
 }
 
 async function main() {
