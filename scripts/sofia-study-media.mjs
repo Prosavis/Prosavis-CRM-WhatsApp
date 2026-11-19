@@ -76,6 +76,8 @@ async function analyzeOne(id) {
     headers: headers({ 'x-api-key': contextKey }),
     body: JSON.stringify({ messageLogId: id }),
   });
+  const body = await response.text();
+  if (body.includes('cupo de análisis')) return 'cap';
   return response.ok ? 'ok' : 'failed';
 }
 
@@ -98,11 +100,13 @@ async function main() {
   const videos = pending.filter((row) => row.media_type === 'video').length;
   let analyzed = 0;
   let failed = 0;
+  let stopped = false;
   const ids = pending.filter((row) => row.media_type !== 'video').map((row) => row.id);
-  for (let index = 0; index < ids.length; index += 3) {
+  for (let index = 0; index < ids.length && !stopped; index += 3) {
     const results = await Promise.all(ids.slice(index, index + 3).map((id) => analyzeOne(id)));
     for (const result of results) {
-      if (result === 'ok') analyzed += 1;
+      if (result === 'cap') stopped = true;
+      else if (result === 'ok') analyzed += 1;
       else failed += 1;
     }
     if (index > 0 && index % 60 === 0) {
@@ -115,6 +119,7 @@ async function main() {
     fallos: failed,
     videos_sin_analizar: videos,
     pendientes: ids.length,
+    detenido_por_cupo: stopped,
   }));
 }
 
