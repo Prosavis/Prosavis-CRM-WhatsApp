@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Alert, Box, Button, Drawer } from '@mui/material';
 import { crmToast } from '@/utils/crmToast';
 import { alpha, useTheme } from '@mui/material/styles';
@@ -34,7 +35,14 @@ import {
   type WhatsAppSnippet,
   type WhatsAppAdminPresence,
 } from '@/services/whatsappService';
+import { ArchiveLossReasonDialog } from './ArchiveLossReasonDialog';
 import TagManagerDialog from './TagManagerDialog';
+import {
+  isLossReasonRequiredError,
+  patchLossReason,
+  saveLossReason,
+  type LossReason,
+} from '@/services/lossReasonService';
 import NewContactDialog from './NewContactDialog';
 import OutOfCoverageTagsDialog from './OutOfCoverageTagsDialog';
 import {
@@ -116,6 +124,26 @@ async function runBulk(
     else fail += 1;
   }
   return { ok, fail };
+}
+
+type ArchiveAttempt =
+  | { ok: true }
+  | { ok: false; needReason: boolean; message: string };
+
+async function attemptArchive(id: string, archive: boolean): Promise<ArchiveAttempt> {
+  try {
+    await patchWhatsAppConversationAdmin({
+      conversationId: id,
+      patch: { isArchived: archive },
+    });
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      needReason: archive && isLossReasonRequiredError(error),
+      message: error instanceof Error ? error.message : 'No se pudo actualizar el archivo',
+    };
+  }
 }
 
 function notifyBulkResult(
@@ -213,7 +241,10 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const [newContactOpen, setNewContactOpen] = useState(false);
   const [outOfCoverageDialogOpen, setOutOfCoverageDialogOpen] = useState(false);
+  const [archiveLossKeys, setArchiveLossKeys] = useState<string[]>([]);
+  const [archiveLossSaving, setArchiveLossSaving] = useState(false);
   const [categoryTagOverrides, setCategoryTagOverrides] = useState<CategoryTagIdOverrides>({});
+  const queryClient = useQueryClient();
 
   const [inboundPulseLine, setInboundPulseLine] = useState<'bot' | 'commercial' | null>(null);
 
@@ -794,18 +825,17 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
   }, [phoneNumberId, notifyAction]);
 
   const handleContextArchiveToggle = useCallback(async (conversation: WhatsAppConversation) => {
-    try {
-      await patchWhatsAppConversationAdmin({
-        conversationId: conversation.id,
-        patch: { isArchived: !conversation.isArchived },
-      });
-      notifyAction(
-        conversation.isArchived ? 'Conversación desarchivada' : 'Conversación archivada',
-        'success',
-      );
-    } catch {
-      notifyAction('No se pudo actualizar el archivo', 'error');
+    const archive = !conversation.isArchived;
+    const result = await attemptArchive(conversation.id, archive);
+    if (result.ok) {
+      notifyAction(archive ? 'Conversación archivada' : 'Conversación desarchivada', 'success');
+      return;
     }
+    if (result.needReason) {
+      setArchiveLossKeys([conversation.id]);
+      return;
+    }
+    notifyAction(result.message, 'error');
   }, [notifyAction]);
 
   const handleContextPinToggle = useCallback(async (conversation: WhatsAppConversation) => {
@@ -895,14 +925,60 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
 
   const handleBulkArchive = useCallback(async (conversationIds: string[], archive: boolean) => {
     if (conversationIds.length === 0) return;
-    const result = await runBulk(conversationIds, async (id) => {
-      await patchWhatsAppConversationAdmin({
-        conversationId: id,
-        patch: { isArchived: archive },
+    if (!archive) {
+      const result = await runBulk(conversationIds, async (id) => {
+        const attempt = await attemptArchive(id, false);
+        if (!attempt.ok) throw new Error(attempt.message);
       });
+      notifyBulkResult(notifyAction, 'desarchivados', result);
+      return;
+    }
+    const results = await Promise.all(conversationIds.map((id) => attemptArchive(id, true)));
+    const needReason = conversationIds.filter((_, index) => {
+      const attempt = results[index];
+      return attempt != null && !attempt.ok && attempt.needReason;
     });
-    notifyBulkResult(notifyAction, archive ? 'archivados' : 'desarchivados', result);
+    const ok = results.filter((attempt) => attempt.ok).length;
+    const fail = results.length - ok - needReason.length;
+    if (needReason.length > 0) setArchiveLossKeys(needReason);
+    if (fail > 0) {
+      notifyAction(`${ok} archivados, ${fail} fallaron`, 'error');
+    } else if (ok > 0 && needReason.length === 0) {
+      notifyAction(`${ok} chat${ok === 1 ? '' : 's'} archivados`, 'success');
+    } else if (ok > 0) {
+      notifyAction(`${ok} archivados. Elige el motivo de los demás.`, 'success');
+    }
   }, [notifyAction]);
+
+  const confirmArchiveLoss = useCallback(async (reason: LossReason) => {
+    const keys = archiveLossKeys;
+    if (keys.length === 0) return;
+    setArchiveLossSaving(true);
+    try {
+      await Promise.all(keys.map(async (stableKey) => {
+        patchLossReason(queryClient, stableKey, reason);
+        try {
+          await saveLossReason({ stableKey, next: reason });
+        } catch (error) {
+          patchLossReason(queryClient, stableKey, null);
+          throw error;
+        }
+      }));
+      const results = await Promise.all(keys.map((id) => attemptArchive(id, true)));
+      const fail = results.filter((attempt) => !attempt.ok).length;
+      const ok = results.length - fail;
+      setArchiveLossKeys([]);
+      if (fail === 0) {
+        notifyAction(ok === 1 ? 'Conversación archivada' : `${ok} chats archivados`, 'success');
+      } else {
+        notifyAction(`${ok} archivados, ${fail} fallaron`, 'error');
+      }
+    } catch (error) {
+      notifyAction(error instanceof Error ? error.message : 'No se pudo guardar el motivo', 'error');
+    } finally {
+      setArchiveLossSaving(false);
+    }
+  }, [archiveLossKeys, notifyAction, queryClient]);
 
   const handleBulkMarkRead = useCallback(async (conversationIds: string[], read: boolean) => {
     if (conversationIds.length === 0) return;
@@ -1109,6 +1185,7 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
               adminById={adminById}
               onLoadedConversationInbound={setLoadedConversationInbound}
               onBack={handleBackToInbox}
+              onArchiveToggle={() => { void handleContextArchiveToggle(selectedConversation); }}
             />
           ) : (
             <WhatsAppEmptyState />
@@ -1211,6 +1288,16 @@ const WhatsAppLayout: React.FC<WhatsAppLayoutProps> = ({
         folders={tagFolders}
         tagCounts={inboxMetrics.tagCountsById}
         onTagsChanged={loadTags}
+      />
+
+      <ArchiveLossReasonDialog
+        open={archiveLossKeys.length > 0}
+        count={archiveLossKeys.length}
+        saving={archiveLossSaving}
+        onClose={() => {
+          if (!archiveLossSaving) setArchiveLossKeys([]);
+        }}
+        onChoose={(reason) => { void confirmArchiveLoss(reason); }}
       />
 
       <OutOfCoverageTagsDialog

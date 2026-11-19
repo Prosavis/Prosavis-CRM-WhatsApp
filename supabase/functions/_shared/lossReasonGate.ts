@@ -14,6 +14,40 @@ export type LossReason = (typeof LOSS_REASONS)[number];
 
 const CLOSED_APPOINTMENT = new Set(['CANCELED', 'REJECTED']);
 
+export const LOSS_REASON_REQUIRED_CODE = 'loss_reason_required';
+export const APPOINTMENTS_UNKNOWN_CODE = 'appointments_unknown';
+
+export type ArchiveLossDecision = 'allow' | 'need_reason' | 'appointments_unknown';
+
+/** Misma regla que `salesChatNeedsLossReason`. Firestore solo hace falta si esto no es `allow`. */
+export function archiveLossDecision(input: {
+  intake: string | null;
+  fromAd: boolean;
+  lossReason: string | null;
+  appointmentsLoadFailed: boolean;
+  hasAppointment: boolean;
+}): ArchiveLossDecision {
+  const needsReasonWithoutAppointment = salesChatNeedsLossReason({
+    archiving: true,
+    intake: input.intake,
+    fromAd: input.fromAd,
+    hasAppointment: false,
+    lossReason: input.lossReason,
+  });
+  if (!needsReasonWithoutAppointment) return 'allow';
+  if (input.appointmentsLoadFailed) return 'appointments_unknown';
+  if (input.hasAppointment) return 'allow';
+  return 'need_reason';
+}
+
+export function isLossReasonRequiredError(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === 'object'
+    && (error as { code?: unknown }).code === LOSS_REASON_REQUIRED_CODE,
+  );
+}
+
 export function salesChatNeedsLossReason(input: {
   archiving: boolean;
   intake: string | null;

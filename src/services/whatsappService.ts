@@ -56,6 +56,21 @@ const DEFAULT_MESSAGE_LIMIT = 200;
 const CONVERSATIONS_PAGE_SIZE = 1000;
 const CONVERSATIONS_MAX_PAGES = 50;
 
+type InvokeFailure = Error & { statusCode?: number; code?: string };
+
+function readInvokeCode(raw: unknown): string | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const code = (raw as { code?: unknown }).code;
+  return typeof code === 'string' && code.trim() ? code.trim() : undefined;
+}
+
+function invokeFailure(message: string, statusCode?: number, code?: string): InvokeFailure {
+  const failure = new Error(message) as InvokeFailure;
+  if (statusCode) failure.statusCode = statusCode;
+  if (code) failure.code = code;
+  return failure;
+}
+
 function formatInvokeError(raw: unknown, fallback: string): string {
   if (typeof raw === 'string' && raw.trim()) return raw;
   if (raw instanceof Error && raw.message) return raw.message;
@@ -86,25 +101,25 @@ async function invokeFn<T>(
   if (error) {
     // Prefer parsed body when present (response stream may already be consumed).
     if (data && typeof data === 'object') {
-      const message = formatInvokeError(data, error.message);
-      const enriched = new Error(message) as Error & { statusCode?: number };
       const ctx = error as { context?: Response };
-      if (ctx.context?.status) enriched.statusCode = ctx.context.status;
-      throw enriched;
+      throw invokeFailure(
+        formatInvokeError(data, error.message),
+        ctx.context?.status,
+        readInvokeCode(data),
+      );
     }
     const ctx = error as { context?: Response };
     const response = ctx.context;
     if (response) {
       try {
         const payload = await response.json();
-        const message = formatInvokeError(payload, error.message);
-        const enriched = new Error(message) as Error & {
-          statusCode?: number;
-          code?: string;
-        };
-        enriched.statusCode = response.status;
-        throw enriched;
+        throw invokeFailure(
+          formatInvokeError(payload, error.message),
+          response.status,
+          readInvokeCode(payload),
+        );
       } catch (parseError) {
+        if (parseError instanceof Error && (parseError as InvokeFailure).code) throw parseError;
         if (parseError instanceof Error && parseError.message !== error.message) {
           throw parseError;
         }
@@ -121,7 +136,7 @@ async function invokeFn<T>(
     'error' in data &&
     (data as { error?: unknown }).error
   ) {
-    throw new Error(formatInvokeError(data, `Error en ${name}`));
+    throw invokeFailure(formatInvokeError(data, `Error en ${name}`), undefined, readInvokeCode(data));
   }
   return data;
 }

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { phoneHasLiveAppointment, salesChatNeedsLossReason } from '../../supabase/functions/_shared/lossReasonGate';
+import {
+  archiveLossDecision,
+  isLossReasonRequiredError,
+  phoneHasLiveAppointment,
+  salesChatNeedsLossReason,
+} from '../../supabase/functions/_shared/lossReasonGate';
 
 describe('salesChatNeedsLossReason', () => {
   it('blocks a sales chat with no appointment and no reason', () => {
@@ -48,6 +53,65 @@ describe('salesChatNeedsLossReason', () => {
       hasAppointment: false,
       lossReason: null,
     })).toBe(false);
+  });
+});
+
+describe('archiveLossDecision', () => {
+  it('asks for a reason only after a sales chat is known to have no live appointment', () => {
+    expect(archiveLossDecision({
+      intake: 'hogar',
+      fromAd: false,
+      lossReason: null,
+      appointmentsLoadFailed: false,
+      hasAppointment: false,
+    })).toBe('need_reason');
+    expect(archiveLossDecision({
+      intake: 'empleo',
+      fromAd: true,
+      lossReason: null,
+      appointmentsLoadFailed: false,
+      hasAppointment: false,
+    })).toBe('need_reason');
+  });
+
+  it('allows the archive when there is a reason, an appointment, or the chat is not a sale', () => {
+    expect(archiveLossDecision({
+      intake: 'hogar',
+      fromAd: false,
+      lossReason: 'precio',
+      appointmentsLoadFailed: true,
+      hasAppointment: false,
+    })).toBe('allow');
+    expect(archiveLossDecision({
+      intake: 'empresas',
+      fromAd: false,
+      lossReason: null,
+      appointmentsLoadFailed: false,
+      hasAppointment: true,
+    })).toBe('allow');
+    expect(archiveLossDecision({
+      intake: 'empleo',
+      fromAd: false,
+      lossReason: null,
+      appointmentsLoadFailed: true,
+      hasAppointment: false,
+    })).toBe('allow');
+  });
+
+  it('stops a sales chat when appointments cannot be checked', () => {
+    expect(archiveLossDecision({
+      intake: 'hogar',
+      fromAd: false,
+      lossReason: null,
+      appointmentsLoadFailed: true,
+      hasAppointment: false,
+    })).toBe('appointments_unknown');
+  });
+
+  it('recognizes the archive rejection by code', () => {
+    expect(isLossReasonRequiredError({ code: 'loss_reason_required' })).toBe(true);
+    expect(isLossReasonRequiredError({ code: 'appointments_unknown' })).toBe(false);
+    expect(isLossReasonRequiredError(new Error('Elige el motivo'))).toBe(false);
   });
 });
 

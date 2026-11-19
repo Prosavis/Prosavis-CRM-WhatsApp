@@ -202,6 +202,8 @@ interface ChatAreaProps {
   adminById?: ReadonlyMap<string, AdminSenderProfile>;
   onLoadedConversationInbound?: (inbound: LoadedConversationInbound) => void;
   onBack?: () => void;
+  /** Archiva o desarchiva. Si falta el motivo de pérdida, el padre abre el diálogo. */
+  onArchiveToggle?: () => void;
 }
 
 function reactionActorKey(message: Pick<WhatsAppMessage, 'direction' | 'agentUid' | 'senderType'>): string {
@@ -281,6 +283,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   adminById,
   onLoadedConversationInbound,
   onBack,
+  onArchiveToggle,
 }) => {
   const theme = useTheme();
   const queryClient = useQueryClient();
@@ -1664,7 +1667,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 bookingLoading={bookingContextLoading}
                 onOpenTags={setTagAnchor}
                 onSelectMessages={() => setSelectionMode(true)}
-                onArchiveToggle={() => void handleArchiveToggle()}
+                onArchiveToggle={onArchiveToggle ?? (() => { void handleArchiveToggle(); })}
                 onPinToggle={() => void handlePinToggle()}
                 onMarkUnread={() => void handleMarkUnread()}
                 onOpenContact={onToggleContactPanel}
@@ -1692,7 +1695,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               </IconButton>
             </Tooltip>
             <Tooltip title={conversation.isArchived ? 'Desarchivar' : 'Archivar'}>
-              <IconButton size="small" onClick={handleArchiveToggle}>
+              <IconButton size="small" onClick={onArchiveToggle ?? handleArchiveToggle}>
                 {conversation.isArchived ? <UnarchiveIcon fontSize="small" /> : <ArchiveIcon fontSize="small" />}
               </IconButton>
             </Tooltip>

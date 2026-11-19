@@ -1,8 +1,11 @@
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { loadAppointmentsForContact } from '../_shared/inboxAiContext.ts';
 import {
+  APPOINTMENTS_UNKNOWN_CODE,
+  archiveLossDecision,
+  LOSS_REASON_REQUIRED_CODE,
   phoneHasLiveAppointment,
-  salesChatNeedsLossReason,
+  type ArchiveLossDecision,
 } from '../_shared/lossReasonGate.ts';
 import { requireCrmAdmin } from '../_shared/supabase.ts';
 
@@ -61,26 +64,37 @@ async function resolveStableKey(
   return null;
 }
 
-async function lossReasonBlocksArchive(
+async function decideArchive(
   // deno-lint-ignore no-explicit-any
   supabase: any,
   stableKey: string,
-): Promise<boolean> {
+): Promise<ArchiveLossDecision> {
   const { data, error } = await supabase
     .from('whatsapp_conversations')
     .select('intake_intent_label, ctwa_source_id, ctwa_clid, loss_reason, phone, contact_phone')
     .eq('stable_key', stableKey)
     .maybeSingle();
   if (error) throw error;
+
+  const intake = typeof data?.intake_intent_label === 'string' ? data.intake_intent_label : null;
+  const fromAd = Boolean(String(data?.ctwa_source_id || data?.ctwa_clid || '').trim());
+  const lossReason = typeof data?.loss_reason === 'string' ? data.loss_reason : null;
+  const withoutAppointments = archiveLossDecision({
+    intake,
+    fromAd,
+    lossReason,
+    appointmentsLoadFailed: false,
+    hasAppointment: false,
+  });
+  if (withoutAppointments === 'allow') return 'allow';
+
   const phone = String(data?.contact_phone || data?.phone || '');
   const loaded = await loadAppointmentsForContact({ phone });
-  if (loaded.appointmentsLoadFailed) {
-    throw new Error('No se pudo comprobar si hay cita. No se archivó.');
-  }
-  return salesChatNeedsLossReason({
-    archiving: true,
-    intake: typeof data?.intake_intent_label === 'string' ? data.intake_intent_label : null,
-    fromAd: Boolean(String(data?.ctwa_source_id || data?.ctwa_clid || '').trim()),
+  return archiveLossDecision({
+    intake,
+    fromAd,
+    lossReason,
+    appointmentsLoadFailed: loaded.appointmentsLoadFailed,
     hasAppointment: phoneHasLiveAppointment(
       phone,
       loaded.allAppointments.map((row) => ({
@@ -88,7 +102,6 @@ async function lossReasonBlocksArchive(
         status: row.status,
       })),
     ),
-    lossReason: typeof data?.loss_reason === 'string' ? data.loss_reason : null,
   });
 }
 
@@ -113,11 +126,24 @@ Deno.serve(async (req) => {
     }
 
     if (patch.is_archived === true) {
-      const blocked = await lossReasonBlocksArchive(supabase, stableKey);
-      if (blocked) {
-        return jsonResponse({
-          error: 'Elige el motivo de pérdida antes de archivar este chat de venta.',
-        }, 409);
+      const decision = await decideArchive(supabase, stableKey);
+      switch (decision) {
+        case 'allow':
+          break;
+        case 'need_reason':
+          return jsonResponse({
+            error: 'Elige el motivo de pérdida antes de archivar este chat de venta.',
+            code: LOSS_REASON_REQUIRED_CODE,
+          }, 409);
+        case 'appointments_unknown':
+          return jsonResponse({
+            error: 'No se pudo comprobar si hay cita. No se archivó.',
+            code: APPOINTMENTS_UNKNOWN_CODE,
+          }, 503);
+        default: {
+          const exhaustive: never = decision;
+          throw new Error(exhaustive);
+        }
       }
     }
 

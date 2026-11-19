@@ -1,9 +1,14 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { supabase } from '@/config/supabase'
 import type { WhatsAppConversation } from '@/services/whatsappService'
-import { LOSS_REASONS, type LossReason } from '../../supabase/functions/_shared/lossReasonGate'
+import {
+  isLossReasonRequiredError,
+  LOSS_REASONS,
+  type LossReason,
+} from '../../supabase/functions/_shared/lossReasonGate'
 
 export type { LossReason }
+export { isLossReasonRequiredError }
 
 export const LOSS_REASON_CHOICES: Array<{ id: LossReason; label: string }> = [
   { id: 'precio', label: 'Precio' },
