@@ -304,7 +304,258 @@ async function updateCard(phone, messages, appointments) {
   };
 }
 
+const STUDY_VERSION = 'estudio-1';
+const TIPOS = new Set(['cliente', 'posible_cliente', 'auxiliar', 'empresa', 'proveedor', 'equipo']);
+const MOTIVOS = new Set([
+  'precio', 'sin_cupo', 'fuera_de_cobertura', 'dejo_de_responder', 'buscaba_empleo',
+  'no_se_ofrece', 'cerro_por_fuera', 'solo_informandose', 'otro',
+]);
+
+const STUDY_PROMPT = `${PROMPT}
+
+Esta corrida es el estudio completo. Además del diff de la ficha, el JSON incluye siempre:
+- tipo_contacto: cliente, posible_cliente, auxiliar, empresa, proveedor o equipo.
+- motivo_propuesto: un motivo de la lista cerrada, o null si el chat no está perdido.
+- resultado: cómo terminó el chat, máximo 12 palabras.
+- propuesta_cajon: vigente (1 a 4 líneas) y entry (una línea de hechos). Sin teléfonos, precios ni fechas de citas.
+Los mensajes anteriores al bloque reciente ya vienen resumidos. No los copies literales.`;
+
+async function restPages(path) {
+  const rows = [];
+  for (let offset = 0; offset < 20000; offset += 1000) {
+    const page = await rest(`${path}&limit=1000&offset=${offset}`);
+    rows.push(...(page ?? []));
+    if (!page || page.length < 1000) break;
+  }
+  return rows;
+}
+
+function lineOf(row, key) {
+  const body = String(row.message_body ?? '').trim();
+  const audio = String(row.voice_transcription ?? '').trim();
+  const media = String(row.media_analysis_text ?? '').trim();
+  const text = [body, audio ? `[audio] ${audio}` : '', media ? `[archivo] ${media}` : '']
+    .filter(Boolean)
+    .join(' ')
+    .slice(0, 500);
+  if (!text) return null;
+  return { direction: row.direction, at: row.created_at, text, key };
+}
+
+async function fullHistory(phone) {
+  const like = `or=(conversation_stable_key.eq.${phone},conversation_stable_key.like.${phone}__*)`;
+  const likeQuery = `${like}&order=created_at.desc&limit=400`;
+  const [log, archive] = await Promise.all([
+    rest(`whatsapp_message_log?select=direction,message_body,created_at,voice_transcription,media_analysis_text&${likeQuery}`),
+    rest(`whatsapp_message_log_archive?select=direction,message_body,created_at&${likeQuery}`),
+  ]);
+  const mapped = [...(log ?? []), ...(archive ?? [])]
+    .map((row) => lineOf(row))
+    .filter(Boolean)
+    .sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  if (mapped.length <= 40) return { recientes: mapped, anteriores: '' };
+  const older = mapped.slice(0, -40).slice(-30);
+  return {
+    recientes: mapped.slice(-40),
+    anteriores: older.map((row) => `${row.direction}: ${row.text.slice(0, 100)}`).join('\n').slice(0, 1200),
+  };
+}
+
+function cleanProposal(raw, lines) {
+  const vigente = String(raw?.vigente ?? '').split(/\n/).map((line) => line.trim()).filter(Boolean).slice(0, 4).join(' ');
+  const entry = String(raw?.entry ?? '').trim().slice(0, 280);
+  if (!vigente || !entry) return null;
+  const only311 = Array.isArray(lines) && lines.includes('311') && !lines.includes('312');
+  return { vigente, entry, source: only311 ? 'comercial 311' : 'bot 312' };
+}
+
+async function studyCard(phone, history, inventory, attempt = 0) {
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${geminiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: STUDY_PROMPT }] },
+        contents: [{
+          role: 'user',
+          parts: [{
+            text: JSON.stringify({
+              ficha: { telefono: phone },
+              mensajes: history.recientes,
+              mensajes_anteriores: history.anteriores,
+              sistema: {
+                intake: inventory.intake,
+                etiquetas: inventory.directory_tags,
+                clasificacion: inventory.classification,
+                es_usuario_app: inventory.is_app_user,
+                lista_empresas: inventory.b2b,
+                postulacion: inventory.job_stage,
+                citas: inventory.appointment_count,
+                duracion_fuera_de_catalogo: inventory.off_catalog_duration,
+                horas_hasta_respuesta_real: inventory.first_real_hours,
+              },
+            }),
+          }],
+        }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          thinkingConfig: { thinkingLevel: 'low' },
+        },
+      }),
+    },
+  );
+  const body = await response.json().catch(() => ({}));
+  if (response.status === 429 && attempt < 3) {
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 4000 * (attempt + 1)));
+    return studyCard(phone, history, inventory, attempt + 1);
+  }
+  if (!response.ok) throw new Error(`modelo ${response.status}`);
+  const text = body?.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('') ?? '{}';
+  const usage = body?.usageMetadata ?? {};
+  return {
+    parsed: JSON.parse(text),
+    usage: {
+      entrada: Number(usage.promptTokenCount) || 0,
+      salida: Number(usage.candidatesTokenCount) || 0,
+      razonamiento: Number(usage.thoughtsTokenCount) || 0,
+    },
+  };
+}
+
+async function runStudy() {
+  if (!url || !key || !geminiKey) {
+    console.error('Faltan SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY o GEMINI_API_KEY. No se escribió nada.');
+    process.exit(1);
+  }
+  const doneRows = [];
+  let afterDone = '';
+  while (doneRows.length < 20000) {
+    const page = await rest(
+      `whatsapp_client_cards?select=phone&version_estudio=eq.estudio-1&order=phone.asc&limit=1000${afterDone ? `&phone=gt.${afterDone}` : ''}`,
+    );
+    doneRows.push(...(page ?? []));
+    if (!page || page.length < 1000) break;
+    afterDone = page[page.length - 1].phone;
+  }
+  const done = new Set(doneRows.map((row) => row.phone));
+  const pendingRows = [];
+  let afterPhone = '';
+  while (pendingRows.length < 20000) {
+    const page = await rest(
+      `whatsapp_study_contacts?select=phone,intake,directory_tags,classification,is_app_user,b2b,job_stage,appointment_count,off_catalog_duration,message_count,lines,first_real_hours&has_inbound=eq.true&order=phone.asc&limit=1000${afterPhone ? `&phone=gt.${afterPhone}` : ''}`,
+    );
+    pendingRows.push(...(page ?? []));
+    if (!page || page.length < 1000) break;
+    afterPhone = page[page.length - 1].phone;
+  }
+  const pending = pendingRows.filter((row) => !done.has(row.phone));
+  const contacts = process.argv.some((arg) => arg.startsWith('--limit=')) ? pending.slice(0, limit) : pending;
+  const tokens = { entrada: 0, salida: 0, razonamiento: 0 };
+  let written = 0;
+  let failed = 0;
+  let closedProblems = 0;
+  let copied = 0;
+  let health = 0;
+  let blocked = 0;
+  let cursor = 0;
+  let stop = false;
+  const cards = [];
+  const worker = async () => {
+    while (!stop) {
+      const index = cursor;
+      cursor += 1;
+      const row = contacts[index];
+      if (!row) return;
+      try {
+        const history = await fullHistory(row.phone);
+        const updated = await studyCard(row.phone, history, row);
+        tokens.entrada += updated.usage.entrada;
+        tokens.salida += updated.usage.salida;
+        tokens.razonamiento += updated.usage.razonamiento;
+        const usd = (tokens.entrada * INPUT_USD_PER_MILLION + (tokens.salida + tokens.razonamiento) * OUTPUT_USD_PER_MILLION) / 1_000_000;
+        if (usd > 30) stop = true;
+        const parsed = updated.parsed ?? {};
+        const tipo = TIPOS.has(parsed.tipo_contacto) ? parsed.tipo_contacto : null;
+        const motivo = MOTIVOS.has(parsed.motivo_propuesto) ? parsed.motivo_propuesto : null;
+        const resultado = String(parsed.resultado ?? '').trim().slice(0, 160);
+        const propuesta = cleanProposal(parsed.propuesta_cajon, row.lines);
+        delete parsed.tipo_contacto;
+        delete parsed.motivo_propuesto;
+        delete parsed.resultado;
+        delete parsed.propuesta_cajon;
+        const current = { telefono: row.phone };
+        const violations = blockedFieldViolations(current, parsed);
+        const ficha = applyCardDiff(current, parsed);
+        const problems = closedValueProblems(ficha);
+        const copiedFacts = copiesLiveFacts(ficha, []);
+        const healthData = hasHealthData(ficha);
+        closedProblems += problems.length;
+        copied += copiedFacts ? 1 : 0;
+        health += healthData ? 1 : 0;
+        blocked += violations.length;
+        await rest('whatsapp_client_cards', {
+          method: 'POST',
+          headers: { Prefer: 'resolution=merge-duplicates' },
+          body: JSON.stringify({
+            phone: row.phone,
+            ficha,
+            resumen: '',
+            version_molde: '1',
+            modo: 'prueba',
+            chequeo: { problems, copiedFacts, healthData, violations },
+            propuesta_cajon: propuesta ?? {},
+            tipo_contacto: tipo,
+            motivo_propuesto: motivo,
+            resultado,
+            version_estudio: STUDY_VERSION,
+          }),
+        });
+        cards.push(ficha);
+        written += 1;
+        if (written % 50 === 0) {
+          console.log(JSON.stringify({ escritas: written, fallos: failed, usd: Number(usd.toFixed(2)) }));
+        }
+      } catch (error) {
+        failed += 1;
+        if (failed <= 5 && error instanceof Error && /^(Supabase|modelo) /.test(error.message)) {
+          console.error(error.message.slice(0, 80));
+        }
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: 4 }, () => worker()));
+  const usd = (tokens.entrada * INPUT_USD_PER_MILLION + (tokens.salida + tokens.razonamiento) * OUTPUT_USD_PER_MILLION) / 1_000_000;
+  const report = evaluateMold({
+    closedProblems,
+    copied,
+    health,
+    blocked,
+    reviews: [],
+    candidates: sinCampoCandidates(cards),
+  });
+  console.log(JSON.stringify({
+    pendientes: contacts.length,
+    escritas: written,
+    fallos: failed,
+    tokens,
+    usd_estimado: Number(usd.toFixed(4)),
+    ...report,
+  }));
+}
+
 async function main() {
+  if (args.has('--estudio')) {
+    if (!apply) {
+      console.log(JSON.stringify({
+        modo: 'sin_apply',
+        nota: 'No se leyó producción ni se llamó al modelo. El estudio usa --estudio --apply.',
+      }));
+      return;
+    }
+    await runStudy();
+    return;
+  }
   if (!apply) {
     console.log(JSON.stringify({
       modo: 'sin_apply',

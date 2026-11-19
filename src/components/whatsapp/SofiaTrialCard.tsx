@@ -30,6 +30,13 @@ function fieldsOf(value: unknown, path = ''): FieldRow[] {
   return [{ path, valor: String(value) }]
 }
 
+interface TrialExtra {
+  tipo_contacto?: string | null
+  motivo_propuesto?: string | null
+  resultado?: string | null
+  propuesta_cajon?: { vigente?: string; entry?: string; source?: string } | null
+}
+
 interface SofiaTrialCardProps {
   phone?: string | null
 }
@@ -46,7 +53,7 @@ export const SofiaTrialCard: React.FC<SofiaTrialCardProps> = ({ phone }) => {
     void (async () => {
       const card = await supabase
         .from('whatsapp_client_cards')
-        .select('ficha')
+        .select('ficha, tipo_contacto, motivo_propuesto, resultado, propuesta_cajon')
         .eq('phone', key)
         .eq('modo', 'prueba')
         .maybeSingle()
@@ -56,7 +63,17 @@ export const SofiaTrialCard: React.FC<SofiaTrialCardProps> = ({ phone }) => {
         .eq('phone', key)
       if (cancel) return
       setMissing(!card.data)
-      setFields(fieldsOf(card.data?.ficha ?? {}).slice(0, 40))
+      const extra = (card.data ?? {}) as TrialExtra
+      const proposal = extra.propuesta_cajon ?? {}
+      const head: FieldRow[] = [
+        extra.tipo_contacto ? { path: 'tipo_contacto', valor: extra.tipo_contacto } : null,
+        extra.motivo_propuesto ? { path: 'motivo_propuesto', valor: extra.motivo_propuesto } : null,
+        extra.resultado ? { path: 'resultado', valor: extra.resultado } : null,
+        proposal.vigente ? { path: 'propuesta_cajon.vigente', valor: proposal.vigente } : null,
+        proposal.entry ? { path: 'propuesta_cajon.entry', valor: proposal.entry } : null,
+        proposal.source ? { path: 'propuesta_cajon.source', valor: proposal.source } : null,
+      ].filter((row): row is FieldRow => row != null)
+      setFields([...head, ...fieldsOf(card.data?.ficha ?? {}).slice(0, 40)])
       const next: Record<string, 'correcto' | 'error'> = {}
       for (const row of reviews.data ?? []) {
         if (row.verdict === 'correcto' || row.verdict === 'error') next[row.field_path] = row.verdict
@@ -92,7 +109,7 @@ export const SofiaTrialCard: React.FC<SofiaTrialCardProps> = ({ phone }) => {
           Este teléfono todavía no tiene ficha de prueba.
         </Typography>
       ) : (
-        <Stack spacing={0.75} sx={{ maxHeight: 280, overflow: 'auto' }}>
+        <Stack spacing={0.75} sx={{ maxHeight: 360, overflow: 'auto' }}>
           {fields.map((field) => (
             <Stack key={field.path} direction="row" spacing={0.5} alignItems="center">
               <Typography variant="caption" sx={{ flex: 1, minWidth: 0 }} noWrap title={field.valor}>
