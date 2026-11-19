@@ -237,7 +237,7 @@ async function completeLegacyCall(
 ): Promise<Response> {
   const { ctx } = prepared;
   const bookingStarted = Date.now();
-  let bookingMeta: GeminiJsonResult<Record<string, unknown>> | null = null;
+  let bookingMeta: GeminiJsonResult<Record<string, unknown>> | null;
   try {
     bookingMeta = await geminiGenerateJsonWithMeta<Record<string, unknown>>({
       apiKey: params.apiKey,
