@@ -311,3 +311,6 @@ verify_jwt = false
 
 [functions.ruta-notify]
 verify_jwt = false
+
+[functions.sofia-draft-sweep]
+verify_jwt = false

@@ -159,6 +159,7 @@ import { coloredChipSx } from '@/utils/coloredChipStyles';
 import { prepareWhatsAppSticker } from '@/utils/prepareWhatsAppSticker';
 import { summarizePeerPresences } from '@/utils/whatsappAdminPresence';
 import { customerPhoneFromStableKey, isLidStableKey, resolveWhatsAppLine } from '@/utils/whatsappLines';
+import { SofiaDraftPanel } from './SofiaDraftPanel';
 import {
   getDirectoryMetaForConversation,
   useDirectoryContactMeta,
@@ -2096,6 +2097,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             aria-disabled={sessionComposerLocked}
             sx={sessionWindowClosed ? { opacity: 0.45, pointerEvents: 'none' } : undefined}
           >
+          {resolveWhatsAppLine(sendPhoneNumberId) === 'bot' && (
+            <SofiaDraftPanel stableKey={stableKey} onSend={handleSend} />
+          )}
           <MessageInput
             conversationKey={stableKey}
             disabled={sessionComposerLocked}
