@@ -37,16 +37,28 @@ async function transcribeBatch() {
 
 async function pendingMedia() {
   const rows = [];
-  for (const type of ['image', 'document', 'video']) {
+  for (const type of ['image', 'document']) {
     for (let offset = 0; offset < 5000; offset += 1000) {
       const page = await rest(
-        `whatsapp_message_log?select=id,media_type&direction=eq.inbound&media_type=eq.${type}&media_analysis_text=is.null&order=created_at.asc&limit=1000&offset=${offset}`,
+        `whatsapp_message_log?select=id,media_type&direction=eq.inbound&media_type=eq.${type}&media_triage_label=eq.util&media_analysis_text=is.null&order=created_at.asc&limit=1000&offset=${offset}`,
       );
       rows.push(...(page ?? []).map((row) => ({ ...row, media_type: type })));
       if (!page || page.length < 1000) break;
     }
   }
   return rows;
+}
+
+async function countVideos() {
+  let total = 0;
+  for (let offset = 0; offset < 5000; offset += 1000) {
+    const page = await rest(
+      `whatsapp_message_log?select=id&direction=eq.inbound&media_type=eq.video&limit=1000&offset=${offset}`,
+    );
+    total += page?.length ?? 0;
+    if (!page || page.length < 1000) break;
+  }
+  return total;
 }
 
 async function pendingAudios() {
@@ -97,11 +109,11 @@ async function main() {
     }
   }
   const pending = await pendingMedia();
-  const videos = pending.filter((row) => row.media_type === 'video').length;
+  const videos = await countVideos();
   let analyzed = 0;
   let failed = 0;
   let stopped = false;
-  const ids = pending.filter((row) => row.media_type !== 'video').map((row) => row.id);
+  const ids = pending.map((row) => row.id);
   for (let index = 0; index < ids.length && !stopped; index += 3) {
     const results = await Promise.all(ids.slice(index, index + 3).map((id) => analyzeOne(id)));
     for (const result of results) {

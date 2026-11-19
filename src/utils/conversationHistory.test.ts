@@ -37,6 +37,8 @@ describe('getConversationHistoryWithMeta', () => {
     const query = {
       select: () => query,
       eq: () => query,
+      or: () => query,
+      lte: () => query,
       order: () => query,
       limit(value: number) {
         requestedLimit = value;
@@ -69,6 +71,8 @@ describe('getConversationHistoryWithMeta', () => {
     const query = {
       select: () => query,
       eq: () => query,
+      or: () => query,
+      lte: () => query,
       order: () => query,
       limit: () => Promise.resolve({
         data: [{
@@ -101,6 +105,8 @@ describe('getConversationHistoryWithMeta', () => {
     const query = {
       select: () => query,
       eq: () => query,
+      or: () => query,
+      lte: () => query,
       order: () => query,
       limit: () => Promise.resolve({
         data: [{
@@ -130,6 +136,8 @@ describe('getConversationHistoryWithMeta', () => {
     const query = {
       select: () => query,
       eq: () => query,
+      or: () => query,
+      lte: () => query,
       order: () => query,
       limit: () => Promise.resolve({
         data: [{
@@ -157,6 +165,8 @@ describe('getConversationHistoryWithMeta', () => {
     const query = {
       select: () => query,
       eq: () => query,
+      or: () => query,
+      lte: () => query,
       order: () => query,
       limit: () => Promise.resolve({
         data: [{
@@ -184,6 +194,8 @@ describe('getConversationHistoryWithMeta', () => {
     const query = {
       select: () => query,
       eq: () => query,
+      or: () => query,
+      lte: () => query,
       order: () => query,
       limit: () => Promise.resolve({
         data: [{
@@ -210,6 +222,8 @@ describe('getConversationHistoryWithMeta', () => {
     const query = {
       select: () => query,
       eq: () => query,
+      or: () => query,
+      lte: () => query,
       order: () => query,
       limit: () => Promise.resolve({
         data: [{
@@ -239,6 +253,8 @@ describe('getConversationHistoryWithMeta', () => {
     const query = {
       select: () => query,
       eq: () => query,
+      or: () => query,
+      lte: () => query,
       order: () => query,
       limit: () => Promise.resolve({
         data: [{
@@ -269,6 +285,8 @@ describe('getConversationHistoryWithMeta', () => {
     const query = {
       select: () => query,
       eq: () => query,
+      or: () => query,
+      lte: () => query,
       order: () => query,
       limit: () => Promise.resolve({
         data: [{
@@ -295,6 +313,8 @@ describe('getConversationHistoryWithMeta', () => {
     const query = {
       select: () => query,
       eq: () => query,
+      or: () => query,
+      lte: () => query,
       order: () => query,
       limit: () => Promise.resolve({
         data: [{

@@ -129,7 +129,7 @@ async function persistAnalysis(
 export async function analyzeInboundImageById(
   supabase: SupabaseClient,
   messageLogId: string,
-  options?: { force?: boolean },
+  options?: { force?: boolean; ignoreDailyCap?: boolean },
 ): Promise<AnalyzeImageItemResult> {
   const { data: row, error } = await supabase
     .from('whatsapp_message_log')
@@ -169,9 +169,11 @@ export async function analyzeInboundImageById(
     return { messageLogId, status: 'reused', analysis: reused.text };
   }
 
-  const used = await countRecentVisionUsage(supabase, String(row.conversation_stable_key));
-  if (remainingVisionQuota(used) <= 0) {
-    return { messageLogId, status: 'skipped', reason: 'daily_cap' };
+  if (!options?.ignoreDailyCap) {
+    const used = await countRecentVisionUsage(supabase, String(row.conversation_stable_key));
+    if (remainingVisionQuota(used) <= 0) {
+      return { messageLogId, status: 'skipped', reason: 'daily_cap' };
+    }
   }
 
   const apiKey = getGeminiApiKey();

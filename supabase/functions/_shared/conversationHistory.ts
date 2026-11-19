@@ -152,15 +152,20 @@ export async function getConversationHistoryWithMeta(
     includeVoiceTranscriptions?: boolean;
     includeImageAnalysis?: boolean;
     includeCachedImageAnalysis?: boolean;
+    /** Corta el historial en este instante. Lo usa el examen, sin el mensaje posterior. */
+    asOf?: string;
   },
 ): Promise<ConversationHistoryResult> {
-  const { data, error } = await supabase
+  let query = supabase
     .from('whatsapp_message_log')
     .select(
       'direction,message_body,caption,media_type,mime_type,filename,voice_transcription,media_analysis_text,hidden_from_panel,created_at',
     )
     .eq('conversation_stable_key', stableKey)
     .eq('hidden_from_panel', false)
+    .or('media_triage_label.is.null,media_triage_label.eq.util,media_triage_label.eq.duda');
+  if (options?.asOf) query = query.lte('created_at', options.asOf);
+  const { data, error } = await query
     .order('created_at', { ascending: false })
     .limit(limit + 1);
 

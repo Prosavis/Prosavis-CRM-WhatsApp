@@ -314,3 +314,6 @@ verify_jwt = false
 
 [functions.sofia-draft-sweep]
 verify_jwt = false
+
+[functions.sofia-media-triage]
+verify_jwt = false
