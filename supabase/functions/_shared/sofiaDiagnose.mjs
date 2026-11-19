@@ -49,6 +49,7 @@ const SYSTEM = [
   'hora adicional de 22000 solo sobre 4 o 6; cobertura Pereira y Dosquebradas.',
   'Una queja, un empleo o un precio especial se escalan a una persona.',
   'sofia_puede_tomar_control es true solo si el caso cabe en esas reglas y no hubo un error grave.',
+  'funciono, mejora, siguiente_accion y motivo_control son una oración cada uno, de menos de 180 caracteres.',
 ].join(' ');
 
 export const DIAGNOSIS_TOOL = {
@@ -61,11 +62,11 @@ export const DIAGNOSIS_TOOL = {
       flujos: { type: 'array', items: { type: 'string', enum: DIAGNOSIS_FLOWS } },
       etapa: { type: 'string', enum: DIAGNOSIS_STAGES },
       errores: { type: 'array', items: { type: 'string', enum: DIAGNOSIS_ERRORS } },
-      funciono: { type: 'string' },
-      mejora: { type: 'string' },
-      siguiente_accion: { type: 'string' },
+      funciono: { type: 'string', description: 'Una oración, menos de 180 caracteres.' },
+      mejora: { type: 'string', description: 'Una oración, menos de 180 caracteres.' },
+      siguiente_accion: { type: 'string', description: 'Una oración, menos de 180 caracteres.' },
       sofia_puede_tomar_control: { type: 'boolean' },
-      motivo_control: { type: 'string' },
+      motivo_control: { type: 'string', description: 'Una oración, menos de 180 caracteres.' },
       etiquetas: { type: 'array', items: { type: 'string' } },
     },
     required: [
@@ -170,7 +171,7 @@ async function history(url, key, stableKey) {
 async function sonnet(anthropicKey, model, chat) {
   const payload = JSON.stringify({
     model,
-    max_tokens: 700,
+    max_tokens: 1600,
     system: SYSTEM,
     output_config: {
       format: { type: 'json_schema', schema: DIAGNOSIS_TOOL.input_schema },
@@ -199,23 +200,33 @@ async function sonnet(anthropicKey, model, chat) {
     });
   }
   const body = await response.json().catch(() => ({}));
-  if (response.status === 404) throw new Error('modelo 404');
-  if (!response.ok) {
-    const message = String(body?.error?.message ?? '').slice(0, 160);
-    throw new Error(`modelo ${response.status} ${message}`);
-  }
-  return {
-    note: normalizeDiagnosis(structuredNote(body)),
+  const usage = {
     inputTokens: Number(body.usage?.input_tokens) || 0,
     outputTokens: Number(body.usage?.output_tokens) || 0,
   };
+  if (response.status === 404) throw Object.assign(new Error('modelo 404'), { usage });
+  if (!response.ok) {
+    const message = String(body?.error?.message ?? '').slice(0, 160);
+    throw Object.assign(new Error(`modelo ${response.status} ${message}`), { usage });
+  }
+  if (body.stop_reason === 'max_tokens') throw Object.assign(new Error('max_tokens'), { usage });
+  try {
+    return { note: normalizeDiagnosis(structuredNote(body)), ...usage };
+  } catch (error) {
+    throw Object.assign(error instanceof Error ? error : new Error('json'), { usage });
+  }
 }
 
 function failureKind(error) {
   const message = error instanceof Error ? error.message : '';
+  if (message === 'max_tokens') return 'max_tokens';
   if (message.startsWith('Supabase') || message.startsWith('modelo')) return message.split('?')[0].slice(0, 160);
   if (message.includes('json') || message.includes('JSON')) return 'json';
   return 'otro';
+}
+
+function skipsChat(kind) {
+  return kind === 'json' || kind === 'max_tokens' || kind === 'otro';
 }
 
 /**
@@ -242,7 +253,7 @@ export async function runDiagnosisBatch({
     const page = await rest(
       supabaseUrl,
       serviceKey,
-      `whatsapp_study_chat_reviews?select=stable_key,rubric&flujos=is.null&order=stable_key.asc&limit=1000&offset=${offset}`,
+      `whatsapp_study_chat_reviews?select=stable_key,rubric&flujos=is.null&diagnostico_error=is.null&order=stable_key.asc&limit=1000&offset=${offset}`,
     );
     for (const row of page ?? []) {
       const messages = Number(row.rubric?.entrantes ?? 0) + Number(row.rubric?.salientes ?? 0);
@@ -254,10 +265,34 @@ export async function runDiagnosisBatch({
 
   let reviewed = 0;
   let failed = 0;
+  let marked = 0;
   let spent = 0;
   let firstFailure = '';
   let stopped = false;
+  let systemic = false;
   let cursor = 0;
+
+  async function remember(usage) {
+    const inputTokens = Number(usage?.inputTokens) || 0;
+    const outputTokens = Number(usage?.outputTokens) || 0;
+    if (inputTokens === 0 && outputTokens === 0) return 0;
+    const cost = llmCostUsd('anthropic', inputTokens, outputTokens);
+    spent += cost;
+    await rest(supabaseUrl, serviceKey, 'sofia_llm_usage', {
+      method: 'POST',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({
+        provider: 'anthropic',
+        model,
+        purpose: 'diagnosis',
+        run_id: runId ?? null,
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+        cost_usd: cost,
+      }),
+    });
+    return cost;
+  }
 
   const worker = async () => {
     while (cursor < pending.length) {
@@ -271,21 +306,7 @@ export async function runDiagnosisBatch({
       try {
         const messages = await history(supabaseUrl, serviceKey, row.stable_key);
         const result = await sonnet(anthropicKey, model, { rubrica: row.rubric, mensajes: messages });
-        const cost = llmCostUsd('anthropic', result.inputTokens, result.outputTokens);
-        spent += cost;
-        await rest(supabaseUrl, serviceKey, 'sofia_llm_usage', {
-          method: 'POST',
-          headers: { Prefer: 'return=minimal' },
-          body: JSON.stringify({
-            provider: 'anthropic',
-            model,
-            purpose: 'diagnosis',
-            run_id: runId ?? null,
-            input_tokens: result.inputTokens,
-            output_tokens: result.outputTokens,
-            cost_usd: cost,
-          }),
-        });
+        await remember(result);
         const note = result.note;
         await rest(supabaseUrl, serviceKey, `whatsapp_study_chat_reviews?stable_key=eq.${encodeURIComponent(row.stable_key)}`, {
           method: 'PATCH',
@@ -323,7 +344,20 @@ export async function runDiagnosisBatch({
         reviewed += 1;
       } catch (error) {
         failed += 1;
-        if (!firstFailure) firstFailure = failureKind(error);
+        const kind = failureKind(error);
+        if (!firstFailure) firstFailure = kind;
+        await remember(error?.usage).catch(() => null);
+        if (!skipsChat(kind)) {
+          systemic = true;
+          stopped = true;
+          return;
+        }
+        await rest(supabaseUrl, serviceKey, `whatsapp_study_chat_reviews?stable_key=eq.${encodeURIComponent(row.stable_key)}`, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({ diagnostico_error: kind }),
+        }).catch(() => null);
+        marked += 1;
       }
     }
   };
@@ -333,8 +367,10 @@ export async function runDiagnosisBatch({
     sonnet: model,
     revisados: reviewed,
     fallos: failed,
+    marcados: marked,
     gastado_usd: Math.round(spent * 1_000_000) / 1_000_000,
-    detenido_por_tope: stopped,
+    detenido_por_tope: stopped && !systemic,
+    fallo_sistemico: systemic,
     primer_fallo: firstFailure || null,
     tomados: pending.length,
   };

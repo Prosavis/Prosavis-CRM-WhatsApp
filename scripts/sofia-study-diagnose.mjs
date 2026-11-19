@@ -72,11 +72,11 @@ async function main() {
       return;
     }
     if ((batch.revisados ?? 0) === 0 && (batch.fallos ?? 0) === 0) break;
-    if (batch.detenido_por_tope) {
+    if (batch.detenido_por_tope || batch.fallo_sistemico) {
       stopped = true;
       break;
     }
-    if ((batch.fallos ?? 0) > 0 && (batch.revisados ?? 0) === 0) break;
+    if ((batch.revisados ?? 0) === 0 && (batch.marcados ?? 0) === 0 && (batch.fallos ?? 0) > 0) break;
   }
   console.log(JSON.stringify({
     rubrica_medida: counted,
