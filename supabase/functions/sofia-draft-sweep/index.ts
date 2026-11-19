@@ -5,6 +5,14 @@ import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { getServiceClient } from '../_shared/supabase.ts';
 import { createInboxSuggestion } from '../_shared/inboxAiSuggestPipeline.ts';
 import { createStageTimer } from '../_shared/suggestTiming.ts';
+import { bridgeGreeting, teamIsInOffice } from '../_shared/sofiaTeamHours.ts';
+import { BOT_PHONE_NUMBER_ID } from '../_shared/whatsappLines.ts';
+import {
+  getGraphCredentials,
+  persistOutboundLog,
+  sendToMeta,
+  updateConversationPreview,
+} from '../_shared/whatsappOutbound.ts';
 
 const SILENCE_FLOOR_SECONDS = 60;
 const SILENCE_CEILING_SECONDS = 90;
@@ -49,8 +57,11 @@ Deno.serve(async (req) => {
     });
   if (error) return jsonResponse({ error: error.message }, 500);
 
+  const inOffice = teamIsInOffice(new Date());
   let drafted = 0;
+  let bridged = 0;
   for (const candidate of (candidates ?? []) as Candidate[]) {
+    if (!inOffice) bridged += await sendBridge(supabase, candidate.stable_key) ? 1 : 0;
     const response = await createInboxSuggestion({
       supabase,
       apiKey,
@@ -77,5 +88,52 @@ Deno.serve(async (req) => {
     if (!writeError) drafted += 1;
   }
 
-  return jsonResponse({ drafted });
+  return jsonResponse({ drafted, bridged });
 });
+
+/** Un solo mensaje puente por conversación y por día fuera de horario. Devuelve true si lo envió. */
+async function sendBridge(
+  supabase: ReturnType<typeof getServiceClient>,
+  stableKey: string,
+): Promise<boolean> {
+  const windowDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
+  const { data: already } = await supabase
+    .from('sofia_bridge_log')
+    .select('stable_key')
+    .eq('stable_key', stableKey)
+    .eq('window_date', windowDate)
+    .maybeSingle();
+  if (already) return false;
+
+  const { data: conversation } = await supabase
+    .from('whatsapp_conversations')
+    .select('phone')
+    .eq('stable_key', stableKey)
+    .maybeSingle();
+  const phone = conversation?.phone?.trim();
+  if (!phone) return false;
+
+  const graph = getGraphCredentials(BOT_PHONE_NUMBER_ID);
+  const text = bridgeGreeting(new Date());
+  const metaResult = await sendToMeta({
+    to: phone,
+    phoneNumberId: graph.phoneNumberId,
+    accessToken: graph.accessToken,
+    messageBody: text,
+  });
+  await persistOutboundLog(supabase, {
+    conversation_stable_key: stableKey,
+    recipient_phone: phone,
+    direction: 'outbound',
+    sender_type: 'system',
+    message_body: text,
+    status: metaResult.status,
+    wa_message_id: metaResult.waMessageId,
+    campaign_type: 'OTHER',
+    phone_number_id: graph.phoneNumberId,
+    raw_payload: metaResult.payload,
+  }, null, 'system');
+  await updateConversationPreview(supabase, stableKey, text, metaResult.status, new Date().toISOString());
+  await supabase.from('sofia_bridge_log').insert({ stable_key: stableKey, window_date: windowDate });
+  return metaResult.status !== 'failed';
+}
