@@ -1,4 +1,5 @@
 ﻿import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
+import { isInboxAiContextApiKeyValid } from '../_shared/inboxAiContextPack.ts';
 import { resolveInboxAiOrGrokClient } from '../_shared/inboxAiContextAuth.ts';
 import { canTranscribePersistedAudio } from '../_shared/inboxAiMediaLimits.ts';
 import { getServiceClient, requireCrmAdmin } from '../_shared/supabase.ts';
@@ -26,7 +27,10 @@ Deno.serve(async (req) => {
     const force = body.force === true;
 
     if (body.backfill === true) {
-      if (!isServiceRoleRequest(req)) {
+      const grokKey = req.headers.get('x-api-key')?.trim() ?? '';
+      const expectedGrok = Deno.env.get('GROK_INBOX_AI_CONTEXT_KEY')?.trim() ?? '';
+      const grokOk = isInboxAiContextApiKeyValid(grokKey, expectedGrok);
+      if (!isServiceRoleRequest(req) && !grokOk) {
         await requireCrmAdmin(req);
       }
       const supabase = getServiceClient();
