@@ -10,6 +10,7 @@ import {
   groundBookingClientInfo,
   groundBookingPayment,
   mapInboxAiAppointmentPayment,
+  resolveInboxSystemInstruction,
   normalizeAddressKey,
   type InboxAiSectionHeading,
 } from '../../supabase/functions/_shared/inboxAiContextFormat';
@@ -525,6 +526,37 @@ describe('formatInboxAiContextBlock layout', () => {
   it('includes the cleaner name only when Grok asks for it', () => {
     const named = formatInboxAiContextBlock({ ...shared, includeProviderNames: true });
     expect(named).toContain('auxiliar: Laura Gómez');
+  });
+});
+
+describe('resolveInboxSystemInstruction', () => {
+  const v1 = resolveInboxSystemInstruction({ sofiaPrompt: true, botLine: true });
+
+  it('keeps the current prompt unless the flag is on and the chat is on the bot line', () => {
+    expect(resolveInboxSystemInstruction({ sofiaPrompt: false, botLine: true })).toBe(
+      INBOX_AI_SYSTEM_INSTRUCTION,
+    );
+    expect(resolveInboxSystemInstruction({ sofiaPrompt: true, botLine: false })).toBe(
+      INBOX_AI_SYSTEM_INSTRUCTION,
+    );
+  });
+
+  it('writes in usted, with at most two bubbles and a single question', () => {
+    expect(v1).toMatch(/habla de usted/i);
+    expect(v1).toMatch(/máximo 2 mensajes/i);
+    expect(v1).toMatch(/una sola pregunta/);
+    expect(v1).toMatch(/asistente virtual/);
+  });
+
+  it('asks for Bancolombia first, never confirms a payment and escalates 2027 dates', () => {
+    expect(v1).toMatch(/Bancolombia/);
+    expect(v1).toMatch(/nunca confirmes un pago/i);
+    expect(v1).toMatch(/2027.*pasa a una persona/i);
+    expect(v1).toMatch(/efectivo.*confirma.*encargado/i);
+  });
+
+  it('proposes the previous service to a returning client instead of asking from scratch', () => {
+    expect(v1).toMatch(/cliente con historial.*lo de la vez anterior/i);
   });
 });
 

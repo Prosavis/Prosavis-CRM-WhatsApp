@@ -18,10 +18,10 @@ import {
   type AvailabilityLoadResult,
 } from './availability.ts';
 import {
-  INBOX_AI_SYSTEM_INSTRUCTION,
   buildInboxAiContext,
   groundBookingClientInfo,
   groundBookingPayment,
+  resolveInboxSystemInstruction,
   type InboxAiContext,
 } from './inboxAiContext.ts';
 import {
@@ -45,9 +45,12 @@ import {
   SUGGEST_PREFETCH_DURATIONS,
   SUGGEST_TRANSCRIPT_CHAR_BUDGET,
   resolveSuggestPipeline,
+  sofiaPromptV1Enabled,
+  suggestionDraftBlocked,
   suggestionPrefetchEnabled,
   type SuggestPipeline,
 } from './inboxAiSuggestConfig.ts';
+import { BOT_PHONE_NUMBER_ID } from './whatsappLines.ts';
 import { readSuggestionPrefetch, latestVisibleMessageAnchor } from './suggestionPrefetch.ts';
 import type { StageTimer } from './suggestTiming.ts';
 
@@ -64,6 +67,23 @@ const BOOKING_PROMPT =
   'Usa el perfil CRM y citas como fuente de verdad cuando existan; no inventes citas. ' +
   'SEGURIDAD: si el cliente dice que a la hora H se va / no habrá nadie, pon collectedData.time una hora ANTES ' +
   '(p. ej. se van a las 08:00 → time "07:00"), nunca H exacta cuando la casa quedaría sola.';
+
+/** El prompt v1 solo aplica en la línea 312 y con la variable encendida. */
+async function resolveSuggestionInstruction(
+  supabase: SupabaseClient,
+  stableKey: string,
+): Promise<string> {
+  if (!sofiaPromptV1Enabled()) {
+    return resolveInboxSystemInstruction({ sofiaPrompt: false, botLine: false });
+  }
+  const { data } = await supabase
+    .from('whatsapp_conversations')
+    .select('phone_number_id')
+    .eq('stable_key', stableKey)
+    .maybeSingle();
+  const botLine = data?.phone_number_id === BOT_PHONE_NUMBER_ID;
+  return resolveInboxSystemInstruction({ sofiaPrompt: true, botLine });
+}
 
 export interface CreateInboxSuggestionParams {
   supabase: SupabaseClient;
@@ -177,6 +197,23 @@ export async function createInboxSuggestion(
     uniqueProperties: ctx.propertySummary.uniquePropertyCount,
   }));
 
+  if (
+    suggestionDraftBlocked({
+      sofiaPrompt: sofiaPromptV1Enabled(),
+      appointmentsLoadFailed: ctx.appointmentsLoadFailed,
+    })
+  ) {
+    return jsonResponse({
+      suggestion: null,
+      proposedActions: [],
+      lastMessageIsOutbound: false,
+      hint: 'No se pudieron cargar las citas. El chat pasa a una persona.',
+      needsHuman: true,
+      suggestionLogId: null,
+      ...responseFields(ctx),
+    });
+  }
+
   if (ctx.lastTurnRole === 'bot' && !params.forceGenerate) {
     return createLastOutboundInboxAiSuggestionResponse({
       historyMeta: ctx.historyMeta,
@@ -247,9 +284,10 @@ async function completeLegacyCall(
     },
   };
 
+  const systemInstruction = await resolveSuggestionInstruction(params.supabase, params.stableKey);
   return createGeneratedInboxAiSuggestionResponse({
     apiKey: params.apiKey,
-    systemInstruction: INBOX_AI_SYSTEM_INSTRUCTION,
+    systemInstruction,
     contextPrompt:
       `${params.extraContext ? `Contexto extra del agente:\n${params.extraContext}\n\n` : ''}` +
       `${groundedContext}\n\n` +
@@ -292,7 +330,7 @@ async function completeSingleCall(
     'En el mismo JSON devuelve booking, suggestion y proposedActions. ' +
     'suggestion es el borrador de WhatsApp. No incluyas precios ni links; el código los agrega. ' +
     `Teléfono cliente: ${ctx.phone}`;
-  const systemInstruction = INBOX_AI_SYSTEM_INSTRUCTION;
+  const systemInstruction = await resolveSuggestionInstruction(params.supabase, params.stableKey);
 
   let meta: GeminiJsonResult<unknown>;
   if (params.onSuggestionText) {

@@ -3,7 +3,12 @@ export interface SuggestionRuleInput {
   forbiddenNames?: string[];
   catalogAmounts?: number[];
   allowedSlots?: string[];
+  /** Cuentas y teléfonos que sí se pueden mencionar. Si se pasa, cualquier otro número largo es violación. */
+  allowedAccounts?: string[];
 }
+
+const MAX_BUBBLE_CHARS = 200;
+const TU_RE = /(^|[\s,.;:¿¡])(te|tu|tus|ti|contigo)(?=$|[\s,.;:?!])/i;
 
 export interface SuggestionRuleScore {
   violations: string[];
@@ -54,6 +59,24 @@ export function scoreSuggestionRules(input: SuggestionRuleInput): SuggestionRule
   }
   if (/8 horas/i.test(folded) && /hora adicional/i.test(folded)) {
     violations.push('hora-adicional');
+  }
+  const bubbles = text.split(/\n\s*\n/).map((part) => part.trim()).filter(Boolean);
+  if (bubbles.length > 2 || bubbles.some((bubble) => bubble.length > MAX_BUBBLE_CHARS)) {
+    violations.push('largo');
+  }
+  const questions = text.match(/\?/g) ?? [];
+  if (questions.length > 1) violations.push('preguntas');
+  if (TU_RE.test(text)) violations.push('tuteo');
+  if (input.allowedAccounts) {
+    const allowed = new Set(input.allowedAccounts.map((account) => account.replace(/\D/g, '')));
+    const numbers = text.match(/\d[\d\s-]{6,}\d/g) ?? [];
+    for (const number of numbers) {
+      const digits = number.replace(/\D/g, '');
+      if (digits.length >= 8 && !allowed.has(digits)) {
+        violations.push('cuenta');
+        break;
+      }
+    }
   }
   const catalog = new Set(input.catalogAmounts ?? []);
   if (catalog.size > 0) {

@@ -15,6 +15,7 @@ import {
   insertWhatsAppAiSuggestionLog,
 } from './inboxAiSuggestionLog.ts';
 import { rewriteSuggestionGreetingName } from './inboxAiNameGrounding.ts';
+import { scoreSuggestionRules } from './suggestionRubric.ts';
 import type { StageTimer } from './suggestTiming.ts';
 
 /** Cliente Supabase tipado de forma laxa. */
@@ -94,6 +95,8 @@ export async function createGeneratedInboxAiSuggestionResponse(params: {
   let suggestionLogId: string | null = null;
 
   if (params.suggestionLog && suggestionOutput.suggestion) {
+    // La rúbrica solo registra. No bloquea el borrador ni el envío.
+    const rubric = scoreSuggestionRules({ suggestion: suggestionOutput.suggestion });
     const contextMeta = buildSuggestionLogContextMeta({
       historyMeta: params.responseContext.historyMeta,
       conversationTags: params.responseContext.conversationTags,
@@ -102,6 +105,7 @@ export async function createGeneratedInboxAiSuggestionResponse(params: {
       proposedActionTypes: suggestionOutput.proposedActions.map((a) => a.type),
       extras: {
         ...(params.suggestionLog.extras ?? {}),
+        rubric: { violations: rubric.violations, score: rubric.score },
         geminiSuggestion: {
           model: detailed.meta.model,
           thinkingLevel: detailed.meta.thinkingLevel ?? null,

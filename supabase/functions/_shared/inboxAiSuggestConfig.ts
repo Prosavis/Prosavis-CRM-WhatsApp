@@ -33,3 +33,23 @@ export function suggestionPrefetchEnabled(): boolean {
 export function directoryNotesSummaryEnabled(): boolean {
   return readEdgeEnv('CRM_DIRECTORY_NOTES_SUMMARY') === '1';
 }
+
+/** Prompt v1 de Sofía. Apagado por defecto: solo con el valor exacto `1`. */
+export function sofiaPromptV1Enabled(): boolean {
+  return readEdgeEnv('SOFIA_PROMPT_V1') === '1';
+}
+
+export interface DraftGateInput {
+  /** El prompt v1 está encendido para este chat. */
+  sofiaPrompt: boolean;
+  /** Las citas no se pudieron cargar. */
+  appointmentsLoadFailed: boolean;
+}
+
+/**
+ * Con el prompt v1, un contexto sin citas no produce borrador: el chat pasa a una persona.
+ * Con el prompt vigente el borrador se redacta igual que hoy.
+ */
+export function suggestionDraftBlocked(input: DraftGateInput): boolean {
+  return input.sofiaPrompt && input.appointmentsLoadFailed;
+}

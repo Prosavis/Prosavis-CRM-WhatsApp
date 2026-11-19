@@ -31,6 +31,28 @@ describe('scoreSuggestionRules', () => {
     expect(onEight.score).toBe(0);
   });
 
+  it('records length, question count, tuteo and accounts outside the allow list', () => {
+    const result = scoreSuggestionRules({
+      suggestion:
+        'Hola, te cuento que tu servicio queda listo y puedes escribirnos cuando quieras para coordinar todo con calma y sin afán, porque nos gusta dejarte cada detalle claro antes de empezar. ' +
+        '¿Qué día te sirve? ¿En la mañana o en la tarde? ' +
+        'Consigna a la cuenta 999000111.',
+      allowedAccounts: ['123456789'],
+    });
+    expect(result.violations).toEqual(
+      expect.arrayContaining(['largo', 'preguntas', 'tuteo', 'cuenta']),
+    );
+  });
+
+  it('accepts a short usted reply that uses an allowed account', () => {
+    const result = scoreSuggestionRules({
+      suggestion: 'Buenas tardes. El servicio de 4 horas queda en COP 88.000. ¿Le agendo?',
+      catalogAmounts: catalog,
+      allowedAccounts: ['123456789'],
+    });
+    expect(result.violations).toEqual([]);
+  });
+
   it('scores zero when a fixed rule is broken', () => {
     const result = scoreSuggestionRules({
       suggestion: 'Te dejo con la misma auxiliar Laura Gómez y el Kit profesional por COP 50.000 a las 7:15 a. m.',

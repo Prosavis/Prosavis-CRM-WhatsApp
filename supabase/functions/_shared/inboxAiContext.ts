@@ -40,6 +40,7 @@ import {
   groundBookingClientInfo,
   groundBookingPayment,
   mapInboxAiAppointmentPayment,
+  resolveInboxSystemInstruction,
   type InboxAiAppointment,
   type InboxAiDirectory,
   type InboxAiPropertySummary,
@@ -73,6 +74,7 @@ export {
   formatInboxAiContextBlock,
   groundBookingClientInfo,
   groundBookingPayment,
+  resolveInboxSystemInstruction,
 };
 export type { InboxAiAppointment, InboxAiDirectory, InboxAiPropertySummary };
 export type { InboxAiConversationContext, InboxAiOfficialAnswers };
