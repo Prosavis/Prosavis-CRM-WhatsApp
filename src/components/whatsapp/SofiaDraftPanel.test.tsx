@@ -1,5 +1,5 @@
 import '@/test/setup';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -7,6 +7,8 @@ import { supabase } from '@/config/supabase';
 import { SofiaDraftPanel } from './SofiaDraftPanel';
 
 const state = vi.hoisted(() => ({
+  mode: 'supervisada',
+  reads: 0,
   draft: null as null | { suggestion: string; suggestion_log_id: string | null; created_at: string },
   review: null as null | { verdict: string; feedback: string | null; created_at: string },
   rpcError: null as { message: string } | null,
@@ -20,7 +22,10 @@ vi.mock('@/config/supabase', () => {
       eq: () => chain,
       order: () => chain,
       limit: () => chain,
-      maybeSingle: () => Promise.resolve({ data: read(), error: null }),
+      maybeSingle: () => {
+        state.reads += 1;
+        return Promise.resolve({ data: read(), error: null });
+      },
     };
     return chain;
   }
@@ -34,6 +39,7 @@ vi.mock('@/config/supabase', () => {
   return {
     supabase: {
       from: (table: string) => builder(() => {
+        if (table === 'sofia_settings') return { mode: state.mode };
         if (table === 'sofia_pending_drafts') return state.draft;
         if (table === 'sofia_draft_reviews') return state.review;
         return null;
@@ -56,6 +62,8 @@ function renderPanel(onSend = vi.fn(async () => undefined)) {
 
 describe('SofiaDraftPanel', () => {
   beforeEach(() => {
+    state.mode = 'supervisada';
+    state.reads = 0;
     state.draft = null;
     state.review = null;
     state.rpcError = null;
@@ -95,5 +103,39 @@ describe('SofiaDraftPanel', () => {
     expect(onSend).toHaveBeenCalledWith('Buenas tardes');
     expect(await screen.findByText('El mensaje salió, pero el borrador no se cerró.')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Buenas tardes')).toBeInTheDocument();
+  });
+
+  it('muestra el motivo cuando el envío falla', async () => {
+    const user = userEvent.setup();
+    state.draft = {
+      suggestion: 'Buenas tardes',
+      suggestion_log_id: null,
+      created_at: '2026-11-20T15:00:00.000Z',
+    };
+    const notice = 'Este número está bloqueado por Decline. Quita esa etiqueta para poder escribir.';
+    renderPanel(vi.fn(async () => {
+      throw new Error(notice);
+    }));
+
+    await screen.findByDisplayValue('Buenas tardes');
+    await user.click(screen.getByRole('button', { name: 'Enviar' }));
+
+    expect(await screen.findByText(notice)).toBeInTheDocument();
+    expect(screen.queryByText('No se pudo enviar el mensaje.')).not.toBeInTheDocument();
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it('oculta el borrador cuando Sofía está apagada', async () => {
+    state.mode = 'apagada';
+    state.draft = {
+      suggestion: 'Buenas tardes, ¿le agendo?',
+      suggestion_log_id: null,
+      created_at: '2026-11-20T15:00:00.000Z',
+    };
+    renderPanel();
+
+    await waitFor(() => expect(state.reads).toBeGreaterThan(0));
+    expect(screen.queryByDisplayValue('Buenas tardes, ¿le agendo?')).not.toBeInTheDocument();
+    expect(screen.queryByText('Borrador de Sofía')).not.toBeInTheDocument();
   });
 });

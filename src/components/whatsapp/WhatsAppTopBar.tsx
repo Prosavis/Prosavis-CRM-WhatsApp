@@ -43,6 +43,7 @@ import { isWhatsAppAdminTab, type WhatsAppTabKey } from '@/utils/whatsappTabs';
 import CompanyHandbookBook from './CompanyHandbookBook';
 import CrmTutorialPlaceholder from './CrmTutorialPlaceholder';
 import { SofiaModeButton } from './SofiaModeButton';
+import { SofiaMonitor } from './SofiaMonitor';
 
 export interface WhatsAppTopBarProps {
   activeTab: WhatsAppTabKey;
@@ -230,7 +231,10 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
           {MOBILE_TAB_LABELS[activeTab]}
         </Typography>
         {botSelected && (
-          <SofiaModeButton onError={(message) => setModeError(message)} />
+          <Stack direction="row" spacing={0.5} alignItems="center">
+            <SofiaModeButton onError={(message) => setModeError(message)} />
+            <SofiaMonitor />
+          </Stack>
         )}
         <IconButton
           aria-label="Cuenta"
@@ -438,7 +442,12 @@ const WhatsAppTopBar: React.FC<WhatsAppTopBarProps> = ({
         sx={{ display: { xs: 'none', md: 'block' }, alignSelf: 'stretch', my: 0.5 }}
       />
 
-      {botSelected && <SofiaModeButton onError={(message) => setModeError(message)} />}
+      {botSelected && (
+        <Stack direction="row" spacing={0.5} alignItems="center">
+          <SofiaModeButton onError={(message) => setModeError(message)} />
+          <SofiaMonitor />
+        </Stack>
+      )}
       {modeError && (
         <Alert severity="warning" onClose={() => setModeError(null)}>{modeError}</Alert>
       )}

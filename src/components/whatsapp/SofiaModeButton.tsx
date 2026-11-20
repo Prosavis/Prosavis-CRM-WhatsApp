@@ -12,7 +12,7 @@ import {
 import { supabase } from '@/config/supabase';
 import { openPostgresChannel } from '@/utils/inboxRealtimeSync';
 
-type SofiaMode = 'apagada' | 'supervisada';
+type SofiaMode = 'apagada' | 'supervisada' | 'sola';
 
 interface ModeChange {
   actor_email: string | null;
@@ -22,9 +22,26 @@ interface ModeChange {
 const MODES: Array<{ value: SofiaMode; label: string }> = [
   { value: 'apagada', label: 'Apagada' },
   { value: 'supervisada', label: 'Supervisada' },
+  { value: 'sola', label: 'Automática' },
 ];
 
 const SUPERVISED_WARNING = 'Fuera de horario Sofía envía sola el mensaje puente a la clienta. Los borradores siempre los envía una persona.';
+const AUTOMATIC_WARNING = 'Sofía va a escribirles a clientas reales, agendar la cita si hay cupo y dejar el pago pendiente.';
+
+function modeLabel(mode: SofiaMode): string {
+  switch (mode) {
+    case 'apagada':
+      return 'apagada';
+    case 'supervisada':
+      return 'supervisada';
+    case 'sola':
+      return 'automática';
+    default: {
+      const never: never = mode;
+      return never;
+    }
+  }
+}
 
 function dayNotice(mode: SofiaMode): string | null {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -39,17 +56,19 @@ function dayNotice(mode: SofiaMode): string | null {
   const ymd = `${byType.year}-${byType.month}-${byType.day}`;
   const hour = Number(byType.hour ?? '0');
   const slot = hour >= 18 || hour < 8 ? 'cierre' : 'apertura';
-  const key = `sofia-modo-aviso:${ymd}:${slot}`;
+  const key = `sofia-modo-aviso:${ymd}:${slot}:${mode}`;
   try {
     if (window.localStorage.getItem(key)) return null;
     window.localStorage.setItem(key, '1');
   } catch {
     return null;
   }
-  const where = slot === 'cierre'
-    ? 'Fuera del horario de oficina solo sale el mensaje puente.'
-    : 'En horario de oficina el borrador espera a que alguien lo envíe.';
-  return `Sofía está ${mode}. ${where}`;
+  const where = mode === 'sola'
+    ? 'Contesta, agenda y deja el pago pendiente.'
+    : slot === 'cierre'
+      ? 'Fuera del horario de oficina solo sale el mensaje puente.'
+      : 'En horario de oficina el borrador espera a que alguien lo envíe.';
+  return `Sofía está ${modeLabel(mode)}. ${where}`;
 }
 
 function actorLabel(email: string | null): string {
@@ -109,7 +128,7 @@ async function readSofiaMode(): Promise<{ mode: SofiaMode; change: ModeChange | 
       .maybeSingle(),
   ]);
   const mode = settings.data?.mode;
-  if (settings.error || (mode !== 'apagada' && mode !== 'supervisada')) return null;
+  if (settings.error || (mode !== 'apagada' && mode !== 'supervisada' && mode !== 'sola')) return null;
   const row = events.error ? null : events.data;
   return {
     mode,
@@ -121,7 +140,8 @@ async function readSofiaMode(): Promise<{ mode: SofiaMode; change: ModeChange | 
 
 /**
  * Modo global de Sofía, visible en la cabecera del inbox del 312.
- * El servidor solo deja cambiarlo a Marian, Nicolás y Francy, y rechaza el modo sola.
+ * El servidor solo deja cambiarlo a Marian, Nicolás y Francy.
+ * Automática guarda el valor sola y no se enciende sola.
  */
 export function SofiaModeButton({ onError }: { onError: (message: string) => void }) {
   const [mode, setMode] = useState<SofiaMode>('apagada');
@@ -129,7 +149,7 @@ export function SofiaModeButton({ onError }: { onError: (message: string) => voi
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [change, setChange] = useState<ModeChange | null>(null);
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmMode, setConfirmMode] = useState<Exclude<SofiaMode, 'apagada'> | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -167,7 +187,7 @@ export function SofiaModeButton({ onError }: { onError: (message: string) => voi
   }, [ready, mode]);
 
   const apply = async (next: SofiaMode) => {
-    setConfirmOpen(false);
+    setConfirmMode(null);
     setBusy(true);
     const { error } = await supabase.rpc('set_sofia_mode', { next_mode: next });
     if (error) {
@@ -191,12 +211,26 @@ export function SofiaModeButton({ onError }: { onError: (message: string) => voi
 
   const changeMode = (next: SofiaMode) => {
     if (next === mode || busy) return;
-    if (next === 'supervisada') {
-      setConfirmOpen(true);
+    if (next === 'supervisada' || next === 'sola') {
+      setConfirmMode(next);
       return;
     }
     void apply(next);
   };
+
+  const confirmCopy = (next: Exclude<SofiaMode, 'apagada'>): { title: string; body: string; action: string } => {
+    switch (next) {
+      case 'supervisada':
+        return { title: 'Pasar a supervisada', body: SUPERVISED_WARNING, action: 'Pasar a supervisada' };
+      case 'sola':
+        return { title: 'Pasar a automática', body: AUTOMATIC_WARNING, action: 'Pasar a automática' };
+      default: {
+        const never: never = next;
+        return never;
+      }
+    }
+  };
+  const pending = confirmMode ? confirmCopy(confirmMode) : null;
 
   const who = formatModeChange(change);
 
@@ -222,14 +256,19 @@ export function SofiaModeButton({ onError }: { onError: (message: string) => voi
       {notice ? (
         <Typography variant="caption" color="text.secondary">{notice}</Typography>
       ) : null}
-      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}>
-        <DialogTitle>Pasar a supervisada</DialogTitle>
+      <Dialog open={pending !== null} onClose={() => setConfirmMode(null)}>
+        <DialogTitle>{pending?.title}</DialogTitle>
         <DialogContent>
-          <DialogContentText>{SUPERVISED_WARNING}</DialogContentText>
+          <DialogContentText>{pending?.body}</DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setConfirmOpen(false)}>Cancelar</Button>
-          <Button variant="contained" onClick={() => void apply('supervisada')}>Pasar a supervisada</Button>
+          <Button onClick={() => setConfirmMode(null)}>Cancelar</Button>
+          <Button
+            variant="contained"
+            onClick={() => { if (confirmMode) void apply(confirmMode); }}
+          >
+            {pending?.action}
+          </Button>
         </DialogActions>
       </Dialog>
     </Stack>

@@ -108,7 +108,8 @@ export function SofiaDraftPanel({
 
     const load = async () => {
       const ticket = ++generation;
-      const [draftResult, reviewResult, cardResult] = await Promise.all([
+      const [modeResult, draftResult, reviewResult, cardResult] = await Promise.all([
+        supabase.from('sofia_settings').select('mode').eq('id', 1).maybeSingle(),
         supabase
           .from('sofia_pending_drafts')
           .select('suggestion, suggestion_log_id, created_at')
@@ -128,6 +129,10 @@ export function SofiaDraftPanel({
           .maybeSingle(),
       ]);
       if (!active || ticket !== generation) return;
+      if (modeResult.data?.mode !== 'supervisada') {
+        setDraft(null);
+        return;
+      }
       const nextDraft = draftResult.data as PendingDraft | null;
       if (!nextDraft?.suggestion || nextDraft.created_at === closedAt.current) {
         setDraft(null);
@@ -168,6 +173,10 @@ export function SofiaDraftPanel({
           },
           callback: () => { void load(); },
         },
+        {
+          filter: { event: '*', schema: 'public', table: 'sofia_settings', filter: 'id=eq.1' },
+          callback: () => { void load(); },
+        },
       ],
     });
     const timer = window.setInterval(() => { void load(); }, DRAFT_POLL_MS);
@@ -189,9 +198,10 @@ export function SofiaDraftPanel({
     if (sent) {
       try {
         await onSend(text.trim());
-      } catch {
+      } catch (error) {
         setBusy(false);
-        setResolveNotice('No se pudo enviar el mensaje.');
+        const message = error instanceof Error ? error.message.trim() : '';
+        setResolveNotice(message || 'No se pudo enviar el mensaje.');
         return;
       }
     }

@@ -82,6 +82,20 @@ describe('SofiaModeButton', () => {
     expect(screen.getByRole('button', { name: 'Apagada' })).toHaveAttribute('aria-pressed', 'true');
   });
 
+  it('pide confirmación antes de automática y no la enciende al primer clic', async () => {
+    const user = userEvent.setup();
+    renderButton();
+
+    await user.click(await screen.findByRole('button', { name: 'Automática' }));
+    expect(supabase.rpc).not.toHaveBeenCalled();
+    expect(screen.getByText('Sofía va a escribirles a clientas reales, agendar la cita si hay cupo y dejar el pago pendiente.')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Pasar a automática' }));
+    await waitFor(() => {
+      expect(supabase.rpc).toHaveBeenCalledWith('set_sofia_mode', { next_mode: 'sola' });
+    });
+  });
+
   it('distingue modo no permitido y falla del servidor', () => {
     expect(sofiaModeErrorText({ message: 'modo no permitido en esta fase', code: '22023' }))
       .toBe('Ese modo no está permitido.');
