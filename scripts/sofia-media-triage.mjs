@@ -17,6 +17,7 @@ async function main() {
   }
   const rules = await runTriageRules({ supabaseUrl: url, serviceKey: key });
   const runId = randomUUID();
+  console.log(JSON.stringify({ paso: 'inicio', run_id: runId, tope_usd: usdMax }));
   let classified = 0;
   let spent = 0;
   let doubts = 0;
@@ -36,15 +37,38 @@ async function main() {
     classified += batch.clasificados ?? 0;
     doubts += batch.dudas ?? 0;
     spent += batch.gastado_usd ?? 0;
+    console.log(JSON.stringify({
+      paso: 'lote',
+      clasificados: classified,
+      dudas: doubts,
+      gastado_usd: Math.round(spent * 1_000_000) / 1_000_000,
+    }));
     if (batch.primer_fallo) firstFailure = batch.primer_fallo;
     if (batch.error === 'sin_clave') break;
     const stalled = (batch.clasificados ?? 0) === 0;
     if (stalled) {
-      if (passes >= 1) break;
       const waiting = await fetch(`${url}/rest/v1/whatsapp_message_log?select=id&media_triage_label=is.null&media_triage_reason=eq.reintento&limit=1`, {
         headers: { apikey: key, Authorization: `Bearer ${key}` },
       }).then((response) => response.json()).catch(() => []);
-      if (!Array.isArray(waiting) || waiting.length === 0) break;
+      const hasRetry = Array.isArray(waiting) && waiting.length > 0;
+      if (!hasRetry) break;
+      if (passes >= 1) {
+        await fetch(`${url}/rest/v1/whatsapp_message_log?media_triage_label=is.null&media_triage_reason=eq.reintento`, {
+          method: 'PATCH',
+          headers: {
+            apikey: key,
+            Authorization: `Bearer ${key}`,
+            'Content-Type': 'application/json',
+            Prefer: 'return=minimal',
+          },
+          body: JSON.stringify({
+            media_triage_label: 'duda',
+            media_triage_reason: 'reintento',
+            media_triage_at: new Date().toISOString(),
+          }),
+        });
+        break;
+      }
       await fetch(`${url}/rest/v1/whatsapp_message_log?media_triage_label=is.null&media_triage_reason=eq.reintento`, {
         method: 'PATCH',
         headers: {

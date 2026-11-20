@@ -46,6 +46,7 @@ async function main() {
   }
   const counted = await measurable();
   const runId = randomUUID();
+  console.log(JSON.stringify({ paso: 'inicio', run_id: runId, tope_usd: usdMax }));
   let reviewed = 0;
   let failed = 0;
   let spent = 0;
@@ -67,15 +68,29 @@ async function main() {
     reviewed += batch.revisados ?? 0;
     failed += batch.fallos ?? 0;
     spent += batch.gastado_usd ?? 0;
+    console.log(JSON.stringify({
+      paso: 'lote',
+      revisados: reviewed,
+      fallos: failed,
+      gastado_usd: Math.round(spent * 1_000_000) / 1_000_000,
+    }));
     if (!firstFailure && batch.primer_fallo) firstFailure = batch.primer_fallo;
     if (batch.sonnet === 'sin_clave' || batch.sonnet === 'sin_modelo') {
       console.log(JSON.stringify({ rubrica_medida: counted, ...batch }));
       return;
     }
     if ((batch.revisados ?? 0) === 0 && (batch.fallos ?? 0) === 0) {
-      if (passes >= 1) break;
       const waiting = await rest('whatsapp_study_chat_reviews?select=stable_key&diagnostico_error=eq.reintento&limit=1');
-      if (!Array.isArray(waiting) || waiting.length === 0) break;
+      const hasRetry = Array.isArray(waiting) && waiting.length > 0;
+      if (!hasRetry) break;
+      if (passes >= 1) {
+        await rest('whatsapp_study_chat_reviews?diagnostico_error=eq.reintento', {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({ diagnostico_error: 'duda' }),
+        });
+        break;
+      }
       await rest('whatsapp_study_chat_reviews?diagnostico_error=eq.reintento', {
         method: 'PATCH',
         headers: { Prefer: 'return=minimal' },
