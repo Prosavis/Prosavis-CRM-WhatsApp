@@ -35,9 +35,13 @@ export async function reviewDraft(params) {
     },
     body: JSON.stringify({
       model: 'claude-sonnet-5-5',
-      max_tokens: 400,
+      max_tokens: 800,
+      thinking: { type: 'between_tools' },
       system: 'Revisas un borrador de Sofía antes de que una persona lo envíe. No bloqueas el envío. aprueba si cumple las reglas. devuelve si se puede corregir con una nota. riesgo si hay cuenta, pago, precio inventado o una promesa indebida. La nota tiene que ser concreta.',
-      output_config: { format: { type: 'json_schema', schema: REVIEW_SCHEMA } },
+      output_config: {
+        effort: 'low',
+        format: { type: 'json_schema', schema: REVIEW_SCHEMA },
+      },
       messages: [{
         role: 'user',
         content: JSON.stringify({
@@ -52,16 +56,29 @@ export async function reviewDraft(params) {
     let kind = '';
     try {
       const body = await response.json();
-      kind = typeof body?.error?.type === 'string' ? body.error.type : '';
+      const tipo = typeof body?.error?.type === 'string' ? body.error.type : '';
+      const nota = typeof body?.error?.message === 'string' ? body.error.message.slice(0, 80) : '';
+      kind = `${tipo} ${nota}`.trim();
     } catch {
       kind = '';
     }
     throw new Error(`revisor ${response.status} ${kind}`.trim());
   }
-  const payload = await response.json();
-  const text = payload?.content?.find((block) => block.type === 'text')?.text ?? '';
+  const payload = await response.json().catch(() => null);
+  if (!payload) throw new Error('revisor cuerpo vacio');
+  const types = (payload.content ?? []).map((block) => block?.type ?? 'otro').join(',') || 'sin-bloques';
+  const text = (payload.content ?? []).map((block) => block?.text ?? '').join('');
+  if (!text.trim()) {
+    throw new Error(`revisor vacio ${payload.stop_reason ?? 'sin-motivo'} ${types}`.trim());
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`revisor json ${payload.stop_reason ?? 'sin-motivo'} ${types}`.trim());
+  }
   return {
-    review: normalizeReview(JSON.parse(text)),
+    review: normalizeReview(parsed),
     inputTokens: payload?.usage?.input_tokens ?? 0,
     outputTokens: payload?.usage?.output_tokens ?? 0,
   };

@@ -43,6 +43,52 @@ export function claimsBooked(text: string): boolean {
   return /qued[oó] agendad|cita qued[oó] confirmad|ya qued[oó] la (cita|visita)/i.test(text);
 }
 
+const PAYMENT_CONFIRMED = /ya (les |nos )?pag[oó]|pago (recibido|confirmado|verificado)|recibimos (el |su )?pago/i;
+
+/** El borrador ya revisado se envía. Se retiene si afirma una cita o un pago. */
+export function storedDraftSend(text: string): 'enviar' | 'retener' {
+  const draft = text.trim();
+  if (!draft || claimsBooked(draft) || PAYMENT_CONFIRMED.test(draft)) return 'retener';
+  return 'enviar';
+}
+
+export const AUTO_REWRITES = 1;
+
+export type ReviewStep = 'enviar' | 'reescribir' | 'elevar' | 'saltar';
+
+type ReviewVerdict = 'aprobar' | 'devolver' | 'riesgo' | 'otro';
+
+function reviewVerdict(value: string): ReviewVerdict {
+  if (value === 'aprobar' || value === 'devolver' || value === 'riesgo') return value;
+  return 'otro';
+}
+
+/** Un «devolver» se reescribe. El riesgo y una cita inventada se elevan. */
+export function reviewDisposition(input: {
+  verdict: string;
+  feedback: string;
+  draft: string;
+  attempt: number;
+  maxRewrites: number;
+}): ReviewStep {
+  if (input.feedback === 'El revisor no respondió' && !claimsBooked(input.draft)) return 'saltar';
+  if (claimsBooked(input.draft)) return 'elevar';
+  const verdict = reviewVerdict(input.verdict);
+  switch (verdict) {
+    case 'aprobar':
+      return 'enviar';
+    case 'devolver':
+      return input.attempt <= input.maxRewrites ? 'reescribir' : 'elevar';
+    case 'riesgo':
+    case 'otro':
+      return 'elevar';
+    default: {
+      const unexpected: never = verdict;
+      return unexpected;
+    }
+  }
+}
+
 export function noticeName(nombre: string): string {
   const cleaned = nombre.replace(/\d{8,}/g, '').replace(/\s+/g, ' ').trim();
   return cleaned || 'Sin nombre';

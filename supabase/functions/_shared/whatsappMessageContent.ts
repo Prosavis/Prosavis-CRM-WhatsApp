@@ -166,8 +166,18 @@ export function getMessageContent(message: JsonRecord): WhatsAppMessageContent {
   if (type === 'interactive') {
     const interactive = asRecord(message.interactive);
     const button = asRecord(interactive.button_reply);
-    const title = getString(button.title) || getString(button.id);
+    const listReply = asRecord(interactive.list_reply);
+    const title = getString(button.title)
+      || getString(button.id)
+      || getString(listReply.title)
+      || getString(listReply.id);
     return emptyNonMediaContent(title || '[interactive]');
+  }
+
+  if (type === 'button') {
+    const button = asRecord(message.button);
+    const label = getString(button.text) || getString(button.payload);
+    return emptyNonMediaContent(label || '[button]');
   }
 
   if (type === 'reaction') {

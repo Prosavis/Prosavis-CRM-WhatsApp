@@ -31,6 +31,28 @@ Deno.test('Cloud API revoke keeps original id when Meta sends it', () => {
   });
 });
 
+Deno.test('a template quick reply keeps the button the person tapped', () => {
+  assertEquals(
+    getMessageContent({
+      type: 'button',
+      button: { text: 'Quiero agendar', payload: 'Quiero agendar' },
+    }).messageBody,
+    'Quiero agendar',
+  );
+  assertEquals(
+    getMessageContent({ type: 'button', button: { payload: 'Ver precios' } }).messageBody,
+    'Ver precios',
+  );
+  assertEquals(getMessageContent({ type: 'button', button: {} }).messageBody, '[button]');
+  assertEquals(
+    getMessageContent({
+      type: 'interactive',
+      interactive: { type: 'list_reply', list_reply: { id: 'casa', title: 'Casa' } },
+    }).messageBody,
+    'Casa',
+  );
+});
+
 Deno.test('an ad-menu button keeps the title the person tapped', () => {
   const content = getMessageContent({
     type: 'interactive',

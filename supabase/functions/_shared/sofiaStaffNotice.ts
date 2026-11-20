@@ -10,6 +10,41 @@ import { staffNoticeCopy } from './sofiaAutomatic.ts';
 const SYSTEM_ID = 'prosavis-system';
 const ROLES = ['francy', 'marian'] as const;
 
+export async function staffNoticeReady(): Promise<{ francy: boolean; marian: boolean }> {
+  const ready = { francy: false, marian: false };
+  await Promise.all(ROLES.map(async (role) => {
+    const people = await runFirestoreQuery('staffRoles', {
+      where: {
+        fieldFilter: {
+          field: { fieldPath: 'role' },
+          op: 'EQUAL',
+          value: { stringValue: role },
+        },
+      },
+      limit: 2,
+    });
+    if (people.length !== 1) return;
+    const uid = people[0]?.id;
+    if (!uid) return;
+    const chats = await runFirestoreQuery('chats', {
+      where: {
+        fieldFilter: {
+          field: { fieldPath: 'clientId' },
+          op: 'EQUAL',
+          value: { stringValue: uid },
+        },
+      },
+      limit: 10,
+    });
+    ready[role] = chats.some((item) =>
+      item.data.context === 'system'
+      && item.data.isSystemChat === true
+      && item.data.providerId === SYSTEM_ID
+    );
+  }));
+  return ready;
+}
+
 export async function notifySofiaEscalation(nombre: string, motivo: string): Promise<void> {
   const copy = staffNoticeCopy(nombre, motivo);
   await Promise.all(ROLES.map(async (role) => {

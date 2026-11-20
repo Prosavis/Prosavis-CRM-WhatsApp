@@ -5,7 +5,9 @@ import {
   classifyInbound,
   noticeName,
   pickBooking,
+  reviewDisposition,
   staffNoticeCopy,
+  storedDraftSend,
 } from '../../supabase/functions/_shared/sofiaAutomatic';
 
 describe('classifyInbound', () => {
@@ -15,6 +17,61 @@ describe('classifyInbound', () => {
     expect(classifyInbound('Les mando el comprobante').motivo).toBe('comprobante');
     expect(classifyInbound('Quiero cambiar la cita').motivo).toBe('mover la cita');
     expect(classifyInbound('¿Dónde prestan el servicio?').kind).toBe('seguir');
+  });
+});
+
+describe('storedDraftSend', () => {
+  it('envía el borrador guardado y retiene una cita o un pago afirmados', () => {
+    expect(storedDraftSend('4 horas por $88.000. ¿Para qué fecha la necesita?')).toBe('enviar');
+    expect(storedDraftSend('La cita quedó confirmada para el lunes.')).toBe('retener');
+    expect(storedDraftSend('Ya recibimos su pago. Gracias.')).toBe('retener');
+  });
+});
+
+describe('reviewDisposition', () => {
+  it('reescribe un borrador corregible y eleva el riesgo', () => {
+    expect(reviewDisposition({
+      verdict: 'devolver',
+      feedback: 'Quite la temporada de diciembre.',
+      draft: 'Se viene diciembre.',
+      attempt: 1,
+      maxRewrites: 1,
+    })).toBe('reescribir');
+    expect(reviewDisposition({
+      verdict: 'devolver',
+      feedback: 'Sigue inventando la temporada.',
+      draft: 'Se viene diciembre.',
+      attempt: 2,
+      maxRewrites: 1,
+    })).toBe('elevar');
+    expect(reviewDisposition({
+      verdict: 'riesgo',
+      feedback: 'Confirmó un pago.',
+      draft: 'Ya recibimos su pago.',
+      attempt: 1,
+      maxRewrites: 1,
+    })).toBe('elevar');
+    expect(reviewDisposition({
+      verdict: 'aprobar',
+      feedback: 'Cumple.',
+      draft: '¿Para qué fecha la necesita?',
+      attempt: 1,
+      maxRewrites: 1,
+    })).toBe('enviar');
+    expect(reviewDisposition({
+      verdict: 'aprobar',
+      feedback: 'Cumple.',
+      draft: 'La cita quedó confirmada.',
+      attempt: 1,
+      maxRewrites: 1,
+    })).toBe('elevar');
+    expect(reviewDisposition({
+      verdict: 'riesgo',
+      feedback: 'El revisor no respondió',
+      draft: '¿Para qué fecha la necesita?',
+      attempt: 1,
+      maxRewrites: 1,
+    })).toBe('saltar');
   });
 });
 

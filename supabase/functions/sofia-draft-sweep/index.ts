@@ -5,6 +5,7 @@ import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 import { getServiceClient } from '../_shared/supabase.ts';
 import { createInboxSuggestion } from '../_shared/inboxAiSuggestPipeline.ts';
 import { createStageTimer } from '../_shared/suggestTiming.ts';
+import { DEFAULT_GEMINI_MODEL, GEMINI_BASE_URL } from '../_shared/geminiClient.ts';
 import { bridgeGreeting, teamIsInOffice } from '../_shared/sofiaTeamHours.ts';
 import { BOT_PHONE_NUMBER_ID } from '../_shared/whatsappLines.ts';
 import { buildInboxAiContext } from '../_shared/inboxAiContext.ts';
@@ -12,6 +13,7 @@ import { SOFIA_PROMPT_V1_RULES } from '../_shared/inboxAiContextFormat.ts';
 import { recordLlmUsage } from '../_shared/llmUsage.ts';
 import { reviewDraft } from '../_shared/sofiaReview.mjs';
 import {
+  DEFAULT_FIREBASE_CRM_APPOINTMENT_ACTIONS_URL,
   FirebaseCrmBridgeHttpError,
   postCrmAppointmentAction,
 } from '../_shared/firebaseHttp.ts';
@@ -20,6 +22,7 @@ import {
   AUTO_BATCH,
   AUTO_GOODBYE,
   AUTO_HANDOFF,
+  AUTO_REWRITES,
   AUTO_RIDER,
   AUTO_SILENCE_FLOOR_SECONDS,
   appointmentConfirmation,
@@ -27,14 +30,17 @@ import {
   classifyInbound,
   pickBooking,
   readAppointmentId,
+  reviewDisposition,
+  storedDraftSend,
   type CreatePayload,
 } from '../_shared/sofiaAutomatic.ts';
-import { notifySofiaEscalation } from '../_shared/sofiaStaffNotice.ts';
+import { notifySofiaEscalation, staffNoticeReady } from '../_shared/sofiaStaffNotice.ts';
 import {
   getGraphCredentials,
   persistOutboundLog,
   sendToMeta,
   updateConversationPreview,
+  WHATSAPP_API_VERSION,
 } from '../_shared/whatsappOutbound.ts';
 
 const SILENCE_FLOOR_SECONDS = 60;
@@ -62,6 +68,100 @@ interface DraftBody {
   proposedActions?: unknown;
 }
 
+async function runSalud(apiKey: string, anthropicKey: string): Promise<Record<string, unknown>> {
+  const [claude, gemini, whatsapp, agenda, avisos] = await Promise.all([
+    probeClaude(anthropicKey),
+    probeGemini(apiKey),
+    probeWhatsapp(),
+    probeAgenda(),
+    probeAvisos(),
+  ]);
+  const listo = claude.ok && gemini.ok && whatsapp.ok && agenda.ok && avisos.ok;
+  return { listo, claude, gemini, whatsapp, agenda, avisos };
+}
+
+async function probeClaude(anthropicKey: string): Promise<{ ok: boolean; status: number; veredicto: string }> {
+  if (!anthropicKey) return { ok: false, status: 0, veredicto: 'sin llave' };
+  try {
+    const judged = await reviewDraft({
+      anthropicKey,
+      rules: 'Responde corto. No inventes precio ni pago.',
+      context: 'La clienta preguntó la fecha.',
+      draft: 'Buenas tardes. ¿Para qué fecha la necesita?',
+    });
+    const veredicto = judged.review.verdict;
+    return {
+      ok: veredicto === 'aprobar' || veredicto === 'devolver' || veredicto === 'riesgo',
+      status: 200,
+      veredicto,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'revisor';
+    const status = Number(message.match(/\d{3}/)?.[0] ?? 0);
+    return { ok: false, status, veredicto: message.slice(0, 80) };
+  }
+}
+
+async function probeGemini(apiKey: string): Promise<{ ok: boolean; status: number }> {
+  if (!apiKey) return { ok: false, status: 0 };
+  try {
+    const response = await fetch(
+      `${GEMINI_BASE_URL}/models/${DEFAULT_GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: 'Responde solo ok' }] }],
+          generationConfig: { maxOutputTokens: 8 },
+        }),
+      },
+    );
+    await response.text();
+    return { ok: response.ok, status: response.status };
+  } catch {
+    return { ok: false, status: 0 };
+  }
+}
+
+async function probeWhatsapp(): Promise<{ ok: boolean; status: number }> {
+  try {
+    const graph = getGraphCredentials(BOT_PHONE_NUMBER_ID);
+    const response = await fetch(
+      `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${graph.phoneNumberId}?fields=id`,
+      { headers: { Authorization: `Bearer ${graph.accessToken}` } },
+    );
+    await response.text();
+    return { ok: response.ok, status: response.status };
+  } catch {
+    return { ok: false, status: 0 };
+  }
+}
+
+async function probeAgenda(): Promise<{ ok: boolean; status: number }> {
+  const secret = Deno.env.get('FIREBASE_CRM_BRIDGE_SECRET') ?? '';
+  if (!secret) return { ok: false, status: 0 };
+  try {
+    const response = await fetch(DEFAULT_FIREBASE_CRM_APPOINTMENT_ACTIONS_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-crm-secret': secret },
+      body: '{}',
+    });
+    await response.text();
+    return { ok: response.status === 400, status: response.status };
+  } catch {
+    return { ok: false, status: 0 };
+  }
+}
+
+async function probeAvisos(): Promise<{ ok: boolean; francy: boolean; marian: boolean }> {
+  try {
+    const ready = await staffNoticeReady();
+    return { ok: ready.francy && ready.marian, ...ready };
+  } catch {
+    return { ok: false, francy: false, marian: false };
+  }
+}
+
 interface AutoCandidate {
   stable_key: string;
   anchor_message_id: string;
@@ -74,10 +174,13 @@ Deno.serve(async (req) => {
   if (!isWorkerAuthorized(req)) return jsonResponse({ error: 'Worker no autorizado' }, 401);
 
   const apiKey = Deno.env.get('GEMINI_API_KEY') ?? '';
-  if (!apiKey) return jsonResponse({ error: 'Falta GEMINI_API_KEY' }, 412);
-
   const supabase = getServiceClient();
   const body = await req.json().catch(() => ({})) as { paso?: string; stable_key?: string; nota?: string };
+  const anthropicKeyEarly = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
+  if (body.paso === 'salud') {
+    return jsonResponse(await runSalud(apiKey, anthropicKeyEarly));
+  }
+  if (!apiKey) return jsonResponse({ error: 'Falta GEMINI_API_KEY' }, 412);
   const { data: settings } = await supabase
     .from('sofia_settings')
     .select('mode, active_prompt_version')
@@ -336,6 +439,19 @@ async function releaseAuto(
   await supabase.from('sofia_auto_log').delete().eq('anchor_message_id', anchorMessageId);
 }
 
+async function loadStoredDraft(
+  supabase: ReturnType<typeof getServiceClient>,
+  stableKey: string,
+): Promise<string | null> {
+  const { data } = await supabase
+    .from('sofia_pending_drafts')
+    .select('suggestion')
+    .eq('stable_key', stableKey)
+    .maybeSingle();
+  const suggestion = typeof data?.suggestion === 'string' ? data.suggestion.trim() : '';
+  return suggestion || null;
+}
+
 async function deliverAuto(
   supabase: ReturnType<typeof getServiceClient>,
   candidate: AutoCandidate,
@@ -426,6 +542,15 @@ async function runAutomatic(params: {
   for (const candidate of (data ?? []) as AutoCandidate[]) {
     if (!(await modeIsSola(params.supabase))) break;
     try {
+      const stored = await loadStoredDraft(params.supabase, candidate.stable_key);
+      if (stored) {
+        if (storedDraftSend(stored) === 'retener') {
+          await claimAuto(params.supabase, candidate, 'elevado', 'borrador afirma cita o pago');
+          continue;
+        }
+        if (await deliverAuto(params.supabase, candidate, stored, 'enviado', 'borrador listo')) sent += 1;
+        continue;
+      }
       const inbound = classifyInbound(candidate.inbound_text ?? '');
       if (inbound.kind === 'no') {
         if (await deliverAuto(params.supabase, candidate, AUTO_GOODBYE, 'enviado', inbound.motivo)) sent += 1;
@@ -450,6 +575,47 @@ async function runAutomatic(params: {
   return { sent, booked, escalated };
 }
 
+async function bookAutomatic(
+  supabase: ReturnType<typeof getServiceClient>,
+  candidate: AutoCandidate,
+  payload: CreatePayload,
+): Promise<'booked' | 'escalated' | 'skip'> {
+  if (!(await modeIsSola(supabase))) return 'skip';
+  if (!(await claimAuto(supabase, candidate, 'agendado', 'cupo real'))) return 'skip';
+  const created = await createHeldAppointment(
+    supabase,
+    candidate.stable_key,
+    candidate.anchor_message_id,
+    payload,
+  );
+  const text = created === 'created'
+    ? appointmentConfirmation(payload.scheduledDate, payload.duration)
+    : null;
+  if (created === 'retry' || !text) {
+    await releaseAuto(supabase, candidate.anchor_message_id);
+    if (created === 'retry') return 'skip';
+    return await handoffAuto(supabase, candidate, 'no se creó la cita') ? 'escalated' : 'skip';
+  }
+  if (!(await modeIsSola(supabase))) return 'skip';
+  let sent = false;
+  try {
+    sent = await sendBotText(supabase, candidate.stable_key, text);
+  } catch (error) {
+    console.warn(JSON.stringify({
+      scope: 'sofia-automatic',
+      event: 'envio-fallo',
+      error: error instanceof Error ? error.message : 'envio',
+    }));
+    sent = false;
+  }
+  if (!sent) {
+    await releaseAuto(supabase, candidate.anchor_message_id);
+    return 'skip';
+  }
+  await supabase.from('sofia_pending_drafts').delete().eq('stable_key', candidate.stable_key);
+  return 'booked';
+}
+
 async function answerAutomatic(
   params: {
     supabase: ReturnType<typeof getServiceClient>;
@@ -459,69 +625,60 @@ async function answerAutomatic(
   },
   candidate: AutoCandidate,
 ): Promise<'sent' | 'booked' | 'escalated' | 'skip'> {
-  if (!(await modeIsSola(params.supabase))) return 'skip';
-  const body = await generate(
-    params.supabase,
-    params.apiKey,
-    candidate.stable_key,
-    AUTO_RIDER,
-    params.rules,
-  );
-  if (!(await modeIsSola(params.supabase))) return 'skip';
-  const booking = pickBooking(body?.proposedActions);
-  if (booking.kind === 'mover') {
-    return await handoffAuto(params.supabase, candidate, 'mover la cita') ? 'escalated' : 'skip';
-  }
-  if (booking.kind === 'crear') {
+  let extra = AUTO_RIDER;
+  for (let attempt = 1; attempt <= AUTO_REWRITES + 1; attempt += 1) {
     if (!(await modeIsSola(params.supabase))) return 'skip';
-    if (!(await claimAuto(params.supabase, candidate, 'agendado', 'cupo real'))) return 'skip';
-    const created = await createHeldAppointment(
+    const body = await generate(
       params.supabase,
+      params.apiKey,
       candidate.stable_key,
-      candidate.anchor_message_id,
-      booking.payload,
+      extra,
+      params.rules,
     );
-    const text = created === 'created'
-      ? appointmentConfirmation(booking.payload.scheduledDate, booking.payload.duration)
-      : null;
-    if (created === 'retry' || !text) {
-      await releaseAuto(params.supabase, candidate.anchor_message_id);
-      if (created === 'retry') return 'skip';
-      return await handoffAuto(params.supabase, candidate, 'no se creó la cita') ? 'escalated' : 'skip';
-    }
     if (!(await modeIsSola(params.supabase))) return 'skip';
-    let sent = false;
-    try {
-      sent = await sendBotText(params.supabase, candidate.stable_key, text);
-    } catch (error) {
-      console.warn(JSON.stringify({
-        scope: 'sofia-automatic',
-        event: 'envio-fallo',
-        error: error instanceof Error ? error.message : 'envio',
-      }));
-      sent = false;
+    const booking = pickBooking(body?.proposedActions);
+    if (booking.kind === 'mover') {
+      return await handoffAuto(params.supabase, candidate, 'mover la cita') ? 'escalated' : 'skip';
     }
-    if (!sent) {
-      await releaseAuto(params.supabase, candidate.anchor_message_id);
-      return 'skip';
+    if (booking.kind === 'crear') {
+      return await bookAutomatic(params.supabase, candidate, booking.payload);
     }
-    await params.supabase.from('sofia_pending_drafts').delete().eq('stable_key', candidate.stable_key);
-    return 'booked';
+    const suggestion = body?.suggestion?.trim() ?? '';
+    if (!suggestion || !params.anthropicKey) return 'skip';
+    const verdict = await judge(
+      { ...params, stableKey: candidate.stable_key },
+      suggestion,
+      attempt,
+      body?.suggestionLogId ?? null,
+    );
+    const step = reviewDisposition({
+      verdict: verdict.verdict,
+      feedback: verdict.feedback,
+      draft: suggestion,
+      attempt,
+      maxRewrites: AUTO_REWRITES,
+    });
+    switch (step) {
+      case 'saltar':
+        return 'skip';
+      case 'enviar':
+        return await deliverAuto(params.supabase, candidate, suggestion, 'enviado', 'respuesta') ? 'sent' : 'skip';
+      case 'elevar':
+        return await handoffAuto(
+          params.supabase,
+          candidate,
+          claimsBooked(suggestion) ? 'dijo que agendó sin cita' : 'el revisor frenó el borrador',
+        ) ? 'escalated' : 'skip';
+      case 'reescribir':
+        extra = `${AUTO_RIDER} Nota de revisión: ${verdict.feedback}`;
+        break;
+      default: {
+        const unexpected: never = step;
+        return unexpected;
+      }
+    }
   }
-  const suggestion = body?.suggestion?.trim() ?? '';
-  if (!suggestion || !params.anthropicKey) return 'skip';
-  const verdict = await judge(
-    { ...params, stableKey: candidate.stable_key },
-    suggestion,
-    1,
-    body?.suggestionLogId ?? null,
-  );
-  if (verdict.feedback === 'El revisor no respondió' && !claimsBooked(suggestion)) return 'skip';
-  if (verdict.verdict !== 'aprobar' || claimsBooked(suggestion)) {
-    const motivo = claimsBooked(suggestion) ? 'dijo que agendó sin cita' : 'el revisor frenó el borrador';
-    return await handoffAuto(params.supabase, candidate, motivo) ? 'escalated' : 'skip';
-  }
-  return await deliverAuto(params.supabase, candidate, suggestion, 'enviado', 'respuesta') ? 'sent' : 'skip';
+  return 'skip';
 }
 
 /** Un solo mensaje puente por conversación y por día fuera de horario. Devuelve true si lo envió. */
