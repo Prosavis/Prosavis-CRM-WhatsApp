@@ -129,6 +129,119 @@ $$;
 revoke all on function public.sofia_auto_candidates(int, int) from public, anon, authenticated;
 grant execute on function public.sofia_auto_candidates(int, int) to service_role;
 
+-- Contraste del inbox contra lo que entra. Lo refresca el barrido, una vez por minuto.
+create table if not exists public.sofia_pass_snapshot (
+  id int primary key default 1 check (id = 1),
+  no_leidos int not null default 0,
+  entran int not null default 0,
+  ventana_cerrada int not null default 0,
+  ultimo_nuestro int not null default 0,
+  silencio_corto int not null default 0,
+  pausados int not null default 0,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.sofia_pass_snapshot enable row level security;
+revoke all on table public.sofia_pass_snapshot from public, anon, authenticated;
+grant select, insert, update, delete on table public.sofia_pass_snapshot to service_role;
+
+insert into public.sofia_pass_snapshot (id) values (1) on conflict (id) do nothing;
+
+create or replace function app_private.sofia_refresh_pass_snapshot()
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_no_leidos int;
+  v_entran int;
+  v_ventana int;
+  v_nuestro int;
+  v_silencio int;
+  v_pausados int;
+begin
+  with unread as (
+    select c.stable_key,
+           c.automated_inbound_disabled,
+           c.sofia_muted_until
+    from public.whatsapp_conversations c
+    where c.phone_number_id = '1035566289641219'
+      and c.unread_count > 0
+  ),
+  latest as (
+    select distinct on (log.conversation_stable_key)
+      log.conversation_stable_key as stable_key,
+      log.direction,
+      log.created_at
+    from public.whatsapp_message_log log
+    where log.phone_number_id = '1035566289641219'
+      and log.created_at >= now() - interval '24 hours'
+      and log.conversation_stable_key in (select stable_key from unread)
+    order by log.conversation_stable_key, log.created_at desc
+  )
+  select
+    (select count(*) from unread),
+    count(*) filter (
+      where l.direction = 'inbound'
+        and l.created_at <= now() - interval '60 seconds'
+        and u.automated_inbound_disabled = false
+        and (u.sofia_muted_until is null or u.sofia_muted_until < now())
+    ),
+    count(*) filter (where l.stable_key is null),
+    count(*) filter (where l.direction is not null and l.direction <> 'inbound'),
+    count(*) filter (
+      where l.direction = 'inbound'
+        and l.created_at > now() - interval '60 seconds'
+    ),
+    count(*) filter (
+      where u.automated_inbound_disabled
+        or (u.sofia_muted_until is not null and u.sofia_muted_until >= now())
+    )
+  into v_no_leidos, v_entran, v_ventana, v_nuestro, v_silencio, v_pausados
+  from unread u
+  left join latest l on l.stable_key = u.stable_key;
+
+  insert into public.sofia_pass_snapshot (
+    id, no_leidos, entran, ventana_cerrada, ultimo_nuestro, silencio_corto, pausados, updated_at
+  ) values (
+    1,
+    coalesce(v_no_leidos, 0),
+    coalesce(v_entran, 0),
+    coalesce(v_ventana, 0),
+    coalesce(v_nuestro, 0),
+    coalesce(v_silencio, 0),
+    coalesce(v_pausados, 0),
+    now()
+  )
+  on conflict (id) do update set
+    no_leidos = excluded.no_leidos,
+    entran = excluded.entran,
+    ventana_cerrada = excluded.ventana_cerrada,
+    ultimo_nuestro = excluded.ultimo_nuestro,
+    silencio_corto = excluded.silencio_corto,
+    pausados = excluded.pausados,
+    updated_at = excluded.updated_at;
+end;
+$$;
+
+revoke all on function app_private.sofia_refresh_pass_snapshot() from public, anon, authenticated;
+grant execute on function app_private.sofia_refresh_pass_snapshot() to service_role;
+
+create or replace function public.sofia_refresh_pass_snapshot()
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  perform app_private.sofia_refresh_pass_snapshot();
+end;
+$$;
+
+revoke all on function public.sofia_refresh_pass_snapshot() from public, anon, authenticated;
+grant execute on function public.sofia_refresh_pass_snapshot() to service_role;
+
 create or replace function public.sofia_monitor()
 returns jsonb
 language plpgsql
@@ -149,11 +262,12 @@ begin
 
   return jsonb_build_object(
     'modo', current_mode,
-    'en_pasada', case
-      when current_mode = 'sola'
-        then (select count(*) from app_private.sofia_auto_candidates(60, 500))
-      else 0
-    end,
+    'no_leidos', coalesce((select no_leidos from public.sofia_pass_snapshot where id = 1), 0),
+    'en_pasada', coalesce((select entran from public.sofia_pass_snapshot where id = 1), 0),
+    'ventana_cerrada', coalesce((select ventana_cerrada from public.sofia_pass_snapshot where id = 1), 0),
+    'ultimo_nuestro', coalesce((select ultimo_nuestro from public.sofia_pass_snapshot where id = 1), 0),
+    'silencio_corto', coalesce((select silencio_corto from public.sofia_pass_snapshot where id = 1), 0),
+    'pausados', coalesce((select pausados from public.sofia_pass_snapshot where id = 1), 0),
     'cola', coalesce((
       select jsonb_agg(jsonb_build_object(
         'nombre', public.sofia_monitor_name(conversation.contact_name, conversation.whatsapp_profile_name),
@@ -191,3 +305,5 @@ $$;
 
 revoke all on function public.sofia_monitor() from public, anon;
 grant execute on function public.sofia_monitor() to authenticated, service_role;
+
+select public.sofia_refresh_pass_snapshot();

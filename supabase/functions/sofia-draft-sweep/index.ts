@@ -38,7 +38,8 @@ import {
 } from '../_shared/whatsappOutbound.ts';
 
 const SILENCE_FLOOR_SECONDS = 60;
-const SILENCE_CEILING_SECONDS = 600;
+const SILENCE_CEILING_SECONDS = 24 * 60 * 60;
+const DRAFT_BATCH = 5;
 const MAX_REGENERATIONS = 2;
 
 function isWorkerAuthorized(req: Request): boolean {
@@ -106,6 +107,14 @@ Deno.serve(async (req) => {
     });
     return jsonResponse({ regenerado: saved });
   }
+  const { error: passError } = await supabase.rpc('sofia_refresh_pass_snapshot');
+  if (passError) {
+    console.warn(JSON.stringify({
+      scope: 'sofia-automatic',
+      event: 'contraste-fallo',
+      error: passError.message,
+    }));
+  }
   if (settings?.mode === 'sola') {
     const automaticRules = await proposalRules(supabase);
     if (!automaticRules) return jsonResponse({ sent: 0, reason: 'sin propuesta' });
@@ -129,7 +138,7 @@ Deno.serve(async (req) => {
   const inOffice = teamIsInOffice(new Date());
   let drafted = 0;
   let bridged = 0;
-  for (const candidate of (candidates ?? []) as Candidate[]) {
+  for (const candidate of ((candidates ?? []) as Candidate[]).slice(0, DRAFT_BATCH)) {
     if (!(await stillSupervised(supabase))) break;
     if (!inOffice) bridged += await sendBridge(supabase, candidate.stable_key) ? 1 : 0;
     const saved = await draftWithReview({
@@ -281,7 +290,12 @@ async function judge(
       missing_context: judged.review.missing,
     });
     return { verdict: judged.review.verdict, feedback: judged.review.feedback };
-  } catch {
+  } catch (error) {
+    console.warn(JSON.stringify({
+      scope: 'sofia-automatic',
+      event: 'revisor-fallo',
+      error: error instanceof Error ? error.message : 'revisor',
+    }));
     await params.supabase.from('sofia_draft_reviews').insert({
       stable_key: params.stableKey,
       suggestion_log_id: suggestionLogId,
@@ -290,7 +304,7 @@ async function judge(
       feedback: 'El revisor no respondió',
       missing_context: '',
     });
-    return { verdict: 'riesgo', feedback: '' };
+    return { verdict: 'riesgo', feedback: 'El revisor no respondió' };
   }
 }
 

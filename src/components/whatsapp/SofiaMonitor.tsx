@@ -37,7 +37,12 @@ export interface SofiaBridgeItem {
 
 export interface SofiaMonitorSnapshot {
   modo: SofiaMode;
+  noLeidos: number;
   enPasada: number;
+  ventanaCerrada: number;
+  ultimoNuestro: number;
+  silencioCorto: number;
+  pausados: number;
   cola: SofiaQueueItem[];
   puentes: SofiaBridgeItem[];
 }
@@ -74,6 +79,25 @@ function verdictLabel(verdict: Verdict | null): string {
       return never;
     }
   }
+}
+
+function countOf(value: unknown): number {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
+}
+
+export function sofiaPileCopy(snapshot: Pick<
+  SofiaMonitorSnapshot,
+  'noLeidos' | 'enPasada' | 'ventanaCerrada' | 'ultimoNuestro' | 'silencioCorto' | 'pausados'
+>): string {
+  const reasons = [
+    snapshot.silencioCorto > 0 ? `${snapshot.silencioCorto} todavía en silencio` : '',
+    snapshot.ultimoNuestro > 0 ? `${snapshot.ultimoNuestro} con nuestro mensaje de último` : '',
+    snapshot.ventanaCerrada > 0 ? `${snapshot.ventanaCerrada} con la ventana cerrada` : '',
+    snapshot.pausados > 0 ? `${snapshot.pausados} en pausa` : '',
+  ].filter((reason) => reason.length > 0);
+  const tail = reasons.length > 0 ? ` Fuera: ${reasons.join(', ')}.` : '';
+  return `El inbox tiene ${snapshot.noLeidos} no leídos. Entran ${snapshot.enPasada}.${tail}`;
 }
 
 function asText(value: unknown): string {
@@ -121,10 +145,14 @@ export function readSofiaMonitor(raw: unknown): SofiaMonitorSnapshot | null {
     ? record.modo
     : null;
   if (!modo) return null;
-  const rawCount = typeof record.en_pasada === 'number' ? record.en_pasada : Number(record.en_pasada);
   return {
     modo,
-    enPasada: Number.isFinite(rawCount) ? Math.max(0, Math.floor(rawCount)) : 0,
+    noLeidos: countOf(record.no_leidos),
+    enPasada: countOf(record.en_pasada),
+    ventanaCerrada: countOf(record.ventana_cerrada),
+    ultimoNuestro: countOf(record.ultimo_nuestro),
+    silencioCorto: countOf(record.silencio_corto),
+    pausados: countOf(record.pausados),
     cola: Array.isArray(record.cola) ? record.cola.flatMap(readQueue) : [],
     puentes: Array.isArray(record.puentes) ? record.puentes.flatMap(readBridge) : [],
   };
@@ -220,7 +248,11 @@ export function SofiaMonitor() {
         onClick={(event) => setAnchor(event.currentTarget)}
         size="small"
       >
-        <Badge color="primary" badgeContent={queue.length} invisible={queue.length === 0}>
+        <Badge
+          color="primary"
+          badgeContent={mode === 'sola' ? (snapshot?.enPasada ?? 0) : queue.length}
+          invisible={mode === 'sola' ? (snapshot?.enPasada ?? 0) === 0 : queue.length === 0}
+        >
           <VisibilityOutlinedIcon fontSize="small" />
         </Badge>
       </IconButton>
@@ -236,11 +268,16 @@ export function SofiaMonitor() {
           <Typography variant="body2" sx={{ mt: 0.5 }}>
             {sofiaNowCopy(mode, inOffice)}
           </Typography>
-          {mode === 'sola' ? (
-            <Typography variant="body2" sx={{ mt: 0.5 }}>
-              {`Lleva ${snapshot?.enPasada ?? 0} no leídos en esta pasada.`}
-            </Typography>
-          ) : null}
+          <Typography variant="body2" sx={{ mt: 0.5 }}>
+            {sofiaPileCopy({
+              noLeidos: snapshot?.noLeidos ?? 0,
+              enPasada: snapshot?.enPasada ?? 0,
+              ventanaCerrada: snapshot?.ventanaCerrada ?? 0,
+              ultimoNuestro: snapshot?.ultimoNuestro ?? 0,
+              silencioCorto: snapshot?.silencioCorto ?? 0,
+              pausados: snapshot?.pausados ?? 0,
+            })}
+          </Typography>
           {failed ? (
             <Alert severity="warning" sx={{ mt: 1 }} role="status">No pude leer el monitoreo.</Alert>
           ) : null}

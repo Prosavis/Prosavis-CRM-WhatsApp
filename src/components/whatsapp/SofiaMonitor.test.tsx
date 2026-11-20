@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { supabase } from '@/config/supabase';
-import { SofiaMonitor, sofiaNowCopy } from './SofiaMonitor';
+import { SofiaMonitor, sofiaNowCopy, sofiaPileCopy } from './SofiaMonitor';
 
 const state = vi.hoisted(() => ({
   inOffice: true,
@@ -110,5 +110,13 @@ describe('SofiaMonitor', () => {
     expect(sofiaNowCopy('supervisada', false)).toContain('los envía una persona');
     expect(sofiaNowCopy('sola', false)).toContain('Contesta y agenda');
     expect(sofiaNowCopy('sola', false)).toContain('Francy y a Marian');
+    expect(sofiaPileCopy({
+      noLeidos: 75,
+      enPasada: 73,
+      ventanaCerrada: 0,
+      ultimoNuestro: 1,
+      silencioCorto: 1,
+      pausados: 0,
+    })).toBe('El inbox tiene 75 no leídos. Entran 73. Fuera: 1 todavía en silencio, 1 con nuestro mensaje de último.');
   });
 });

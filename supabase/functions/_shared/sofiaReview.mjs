@@ -48,7 +48,16 @@ export async function reviewDraft(params) {
       }],
     }),
   });
-  if (!response.ok) throw new Error('revisor');
+  if (!response.ok) {
+    let kind = '';
+    try {
+      const body = await response.json();
+      kind = typeof body?.error?.type === 'string' ? body.error.type : '';
+    } catch {
+      kind = '';
+    }
+    throw new Error(`revisor ${response.status} ${kind}`.trim());
+  }
   const payload = await response.json();
   const text = payload?.content?.find((block) => block.type === 'text')?.text ?? '';
   return {
