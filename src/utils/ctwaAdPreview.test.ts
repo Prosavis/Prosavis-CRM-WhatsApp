@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { ctwaAdName, ctwaAdPreviewFromPayload, menuButtonsFromPayload } from './ctwaAdPreview';
+import {
+  ctwaAdName,
+  ctwaAdPreviewFromPayload,
+  menuButtonsFromPayload,
+  usableAdImageUrl,
+} from './ctwaAdPreview';
 
 describe('ctwaAdPreview', () => {
   it('names the four live WhatsApp ads', () => {
@@ -51,6 +56,30 @@ describe('ctwaAdPreview', () => {
       { id: 'ctwa_empleo', title: 'Empleo' },
     ]);
     expect(menuButtonsFromPayload({ messages: [] })).toEqual([]);
+  });
+
+  it('drops a Meta thumbnail whose signature already expired', () => {
+    const nowMs = 1_795_000_000_000;
+    const past = Math.floor(nowMs / 1000 - 60).toString(16);
+    const future = Math.floor(nowMs / 1000 + 3600).toString(16);
+    const expired = `https://scontent.xx.fbcdn.net/v/ad.png?oe=${past}`;
+    const fresh = `https://instagram.fclo8-1.fna.fbcdn.net/v/ad.png?oe=${future}`;
+
+    expect(usableAdImageUrl(expired, nowMs)).toBeUndefined();
+    expect(usableAdImageUrl(fresh, nowMs)).toBe(fresh);
+    expect(usableAdImageUrl('https://cdn.example/glamping.jpg', nowMs)).toBe(
+      'https://cdn.example/glamping.jpg',
+    );
+
+    const preview = ctwaAdPreviewFromPayload({
+      referral: {
+        source_id: '999',
+        headline: 'Otro',
+        image_url: 'https://scontent.xx.fbcdn.net/v/ad.png?oe=1',
+      },
+    });
+    expect(preview?.headline).toBe('Otro');
+    expect(preview?.imageUrl).toBeUndefined();
   });
 
   it('ignores a message that is not an ad click', () => {

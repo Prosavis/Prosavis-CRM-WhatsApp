@@ -80,7 +80,7 @@ import {
   type AdminSenderProfile,
   type OutboundSentVia,
 } from '@/utils/outboundSenderLabel';
-import type { CtwaAdPreview } from '@/utils/ctwaAdPreview';
+import { usableAdImageUrl, type CtwaAdPreview } from '@/utils/ctwaAdPreview';
 import type { WhatsAppTemplateActionButton } from '@/utils/whatsappTemplateHelpers';
 import TemplateActionButtons from './templates/TemplateActionButtons';
 
@@ -118,7 +118,8 @@ const MESSAGE_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
 };
 
 function AdReferralQuote({ preview }: { preview: CtwaAdPreview }) {
-  const [imageOk, setImageOk] = useState(Boolean(preview.imageUrl));
+  const imageUrl = usableAdImageUrl(preview.imageUrl);
+  const [imageOk, setImageOk] = useState(Boolean(imageUrl));
   const title = preview.name || preview.headline || 'Anuncio';
   return (
     <Box
@@ -134,10 +135,10 @@ function AdReferralQuote({ preview }: { preview: CtwaAdPreview }) {
         minWidth: 0,
       }}
     >
-      {preview.imageUrl && imageOk && (
+      {imageUrl && imageOk && (
         <Box
           component="img"
-          src={preview.imageUrl}
+          src={imageUrl}
           alt=""
           referrerPolicy="no-referrer"
           onError={() => setImageOk(false)}

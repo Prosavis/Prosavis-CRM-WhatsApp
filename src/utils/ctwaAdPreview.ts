@@ -28,6 +28,31 @@ export function ctwaAdName(sourceId: string | null | undefined): string | undefi
   return id ? AD_NAMES[id] : undefined;
 }
 
+function isMetaCdnHost(hostname: string): boolean {
+  return /(?:^|\.)fbcdn\.net$/i.test(hostname) || hostname.toLowerCase() === 'lookaside.fbsbx.com';
+}
+
+/**
+ * URL de miniatura que el navegador puede pedir.
+ * Las de Meta caducan en `oe` (unix, hex). Una vencida responde 403.
+ */
+export function usableAdImageUrl(url: string | undefined, nowMs = Date.now()): string | undefined {
+  const trimmed = url?.trim();
+  if (!trimmed) return undefined;
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return undefined;
+  }
+  if (!isMetaCdnHost(parsed.hostname)) return trimmed;
+  const oe = parsed.searchParams.get('oe');
+  if (!oe || !/^[0-9a-f]+$/i.test(oe)) return undefined;
+  const expiresMs = Number.parseInt(oe, 16) * 1000;
+  if (!Number.isFinite(expiresMs) || expiresMs <= nowMs) return undefined;
+  return trimmed;
+}
+
 /** Referral de un mensaje inbound (`raw_payload.referral`). Sin clic de anuncio, null. */
 export function ctwaAdPreviewFromPayload(payload: unknown): CtwaAdPreview | null {
   const message = asRecord(payload);
@@ -42,7 +67,7 @@ export function ctwaAdPreviewFromPayload(payload: unknown): CtwaAdPreview | null
     name: ctwaAdName(sourceId),
     headline: asText(referral.headline),
     body: asText(referral.body),
-    imageUrl: asText(referral.image_url),
+    imageUrl: usableAdImageUrl(asText(referral.image_url)),
   };
 }
 

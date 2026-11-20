@@ -147,6 +147,7 @@ import {
   type MetaSessionWindow,
 } from '../../../supabase/functions/_shared/metaSessionWindow';
 import { hasInboxAiUsedContext } from '@/utils/inboxAiUsedContext';
+import { outboundSendErrorMessage } from '@/utils/outboundSendError';
 import type { LoadedConversationInbound } from '@/utils/whatsappTemplateSuggestions';
 import {
   conversationMessageHistoryReducer,
@@ -720,10 +721,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         markInboxPerf(INBOX_PERF_MARKS.sendAck);
         quietSofiaUntilTomorrow();
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'No se pudo enviar el mensaje';
+        const message = outboundSendErrorMessage(error);
         setOptimisticMessages((current) => markOptimisticFailed(current, optimisticId, message));
         failListPreview(text);
-        throw error;
+        throw new Error(message);
       }
 
       const openLogId = suggestionLogIdRef.current;
