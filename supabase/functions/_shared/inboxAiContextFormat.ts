@@ -1022,7 +1022,7 @@ export const INBOX_AI_SYSTEM_INSTRUCTION =
   'Si pospone, cancela o dice que ya resolvió, respeta eso: no insistas en agendar hoy ni pegues link de pago. ' +
   'Si dice que por ahora no, que ya escribirá o que lo deja para después, agradece, deja la puerta abierta y di que aquí estamos cuando lo necesite. ' +
   'Si el contexto trae una temporada en "=== Temporada próxima ===", nómbrala solo esa, en una frase, con la redacción de esa sección, para que deje el cupo con tiempo. ' +
-  'Si esa sección dice que no hay temporada, no inventes una fiesta ni enumeres el calendario. ' +
+  'Si esa sección dice "Ninguna temporada próxima", no inventes una fiesta ni enumeres el calendario. ' +
   'Al hablar de apoyos, usa fecha/hora, dirección y cliente solo si aporta. ' +
   'No nombres a la auxiliar salvo que el cliente lo exija en este chat, y nunca prometas la misma auxiliar. ' +
   'No inventes direcciones. ' +

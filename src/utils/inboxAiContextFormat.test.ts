@@ -490,7 +490,8 @@ describe('formatInboxAiContextBlock', () => {
     expect(block.length).toBeLessThanOrEqual(INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET);
     expect(SECTION_CHAR_BUDGETS['=== Memoria del cliente ===']).toBe(3_000);
     expect(SECTION_CHAR_BUDGETS['=== Ficha de la clienta ===']).toBe(3_000);
-    expect(SECTION_CHAR_BUDGETS['=== Historial WhatsApp ===']).toBe(55_700);
+    expect(SECTION_CHAR_BUDGETS['=== Historial WhatsApp ===']).toBe(55_200);
+    expect(SECTION_CHAR_BUDGETS['=== Temporada próxima ===']).toBe(500);
   });
 });
 
@@ -529,6 +530,16 @@ describe('formatInboxAiContextBlock layout', () => {
   it('includes the cleaner name only when Grok asks for it', () => {
     const named = formatInboxAiContextBlock({ ...shared, includeProviderNames: true });
     expect(named).toContain('auxiliar: Laura Gómez');
+  });
+
+  it('puts the December season in the context on 20 Nov 2026', () => {
+    const block = formatInboxAiContextBlock({
+      ...shared,
+      nowIso: '2026-11-20T15:00:00.000Z',
+    });
+    expect(block).toContain('=== Temporada próxima ===');
+    expect(block).toContain('Temporada: temporada de diciembre');
+    expect(block).toContain('por el alto flujo');
   });
 });
 
@@ -674,6 +685,15 @@ describe('INBOX_AI_SYSTEM_INSTRUCTION', () => {
     expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(
       /No uses otros nombres de la memoria ni del historial para saludar/i,
     );
+  });
+
+  it('keeps the door open and names only the season in context when the client postpones', () => {
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(
+      /no insistas en agendar hoy ni pegues link de pago/,
+    );
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/deja la puerta abierta/i);
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toContain('=== Temporada próxima ===');
+    expect(INBOX_AI_SYSTEM_INSTRUCTION).toMatch(/no inventes una fiesta/i);
   });
 });
 
