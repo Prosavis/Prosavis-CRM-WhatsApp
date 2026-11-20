@@ -14,6 +14,7 @@ import type {
 import type { InboxAiMemory } from './inboxAiMemory.ts';
 import type { MetaSessionWindow } from './metaSessionWindow.ts';
 import { formatCoverageCatalogBlock } from './coverageCatalog.ts';
+import { formatDemandSeasonLines } from './demandSeasons.ts';
 import { formatPricingCatalogBlock } from './pricingCatalog.ts';
 
 const UPCOMING_APPTS = 5;
@@ -30,6 +31,7 @@ export const INBOX_AI_CONTEXT_TOTAL_CHAR_BUDGET = 78_000;
  */
 export const SECTION_CHAR_BUDGETS = Object.freeze({
   '=== Momento actual ===': 700,
+  '=== Temporada próxima ===': 500,
   '=== Canal / ventana WhatsApp ===': 350,
   '=== Memoria del cliente ===': 3_000,
   '=== Ficha de la clienta ===': 3_000,
@@ -43,7 +45,7 @@ export const SECTION_CHAR_BUDGETS = Object.freeze({
   '=== Cobertura oficial de servicios (fuente de verdad) ===': 1_200,
   '=== Respuestas oficiales de la casa ===': 3_300,
   '=== Citas / apoyos (Firestore, fuente de verdad) ===': 3_000,
-  '=== Historial WhatsApp ===': 55_700,
+  '=== Historial WhatsApp ===': 55_200,
 } as const);
 
 export type InboxAiSectionHeading = keyof typeof SECTION_CHAR_BUDGETS;
@@ -585,6 +587,11 @@ export function formatInboxAiContextBlock(params: {
       'propón llegada ~1 h antes para recepción segura del personal (nunca esa hora exacta).',
   ]));
 
+  sections.push(buildSection(
+    '=== Temporada próxima ===',
+    formatDemandSeasonLines(nowIso, directory?.city),
+  ));
+
   sections.push(buildSection('=== Canal / ventana WhatsApp ===', [
     `Estado: ${params.sessionWindow.status}`,
     `Último mensaje inbound: ${params.sessionWindow.lastInboundAt ?? 'desconocido'}`,
@@ -785,6 +792,7 @@ export function formatInboxAiContextBlock(params: {
     '=== Citas / apoyos (Firestore, fuente de verdad) ===',
     '=== Historial WhatsApp ===',
     '=== Canal / ventana WhatsApp ===',
+    '=== Temporada próxima ===',
     '=== Momento actual ===',
   ];
   const orderedSections = params.promptLayout === 'compact'
@@ -1012,6 +1020,9 @@ export const INBOX_AI_SYSTEM_INSTRUCTION =
   'AUDIOS: si el historial trae "[Audio transcrito]:", ese texto ES el mensaje del cliente. ' +
   'Nunca digas que no pudiste escuchar el audio ni pidas que lo escriba de nuevo. ' +
   'Si pospone, cancela o dice que ya resolvió, respeta eso: no insistas en agendar hoy ni pegues link de pago. ' +
+  'Si dice que por ahora no, que ya escribirá o que lo deja para después, agradece, deja la puerta abierta y di que aquí estamos cuando lo necesite. ' +
+  'Si el contexto trae una temporada en "=== Temporada próxima ===", nómbrala solo esa, en una frase, con la redacción de esa sección, para que deje el cupo con tiempo. ' +
+  'Si esa sección dice que no hay temporada, no inventes una fiesta ni enumeres el calendario. ' +
   'Al hablar de apoyos, usa fecha/hora, dirección y cliente solo si aporta. ' +
   'No nombres a la auxiliar salvo que el cliente lo exija en este chat, y nunca prometas la misma auxiliar. ' +
   'No inventes direcciones. ' +
