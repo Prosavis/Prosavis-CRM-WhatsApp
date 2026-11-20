@@ -18,6 +18,10 @@ import { runFirestoreQuery } from './firebaseAdminRest.ts';
 export const CLIENT_APPOINTMENT_LOOKBACK_MONTHS = 24;
 /** Días para considerar a un cliente "activo" (agendó recientemente). */
 export const ACTIVE_CLIENT_WINDOW_DAYS = 30;
+/**
+ * Umbrales del motor de 6 pasos, ya retirado.
+ * La reactivación vigente sale de reactivation_candidates.
+ */
 /** Máximo de días de inactividad para inscribir en reactivación. */
 export const REACTIVATION_MAX_INACTIVE_DAYS = 120;
 /** Días de inactividad tras los cuales se expulsa por stale. */

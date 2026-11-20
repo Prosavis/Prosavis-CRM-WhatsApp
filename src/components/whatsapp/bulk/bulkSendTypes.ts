@@ -76,6 +76,7 @@ export interface BulkAudienceAdvancedFilters {
   classificationMode: BulkAudienceListFilterMode;
   qualityTags: string[];
   qualityTagMode: BulkAudienceListFilterMode;
+  reactivationSegment: string;
 }
 
 export const DEFAULT_BULK_AUDIENCE_ADVANCED_FILTERS: BulkAudienceAdvancedFilters = {
@@ -87,6 +88,7 @@ export const DEFAULT_BULK_AUDIENCE_ADVANCED_FILTERS: BulkAudienceAdvancedFilters
   classificationMode: 'include',
   qualityTags: [],
   qualityTagMode: 'include',
+  reactivationSegment: '',
 };
 
 import type { WhatsAppTag } from '@/services/whatsappService';
@@ -163,6 +165,10 @@ export function summarizeBulkAdvancedFilters(
     parts.push(`${prefix}: ${names}`);
   }
 
+  if (advanced.reactivationSegment) {
+    parts.push(`Segmento de reactivación: ${advanced.reactivationSegment}`);
+  }
+
   if (advanced.directoryTags.length > 0) {
     const prefix =
       advanced.directoryTagMode === 'exclude_any'
@@ -198,6 +204,7 @@ export function hasActiveBulkAdvancedFilters(filters: BulkAudienceAdvancedFilter
     || filters.directoryTags.length > 0
     || filters.classifications.length > 0
     || filters.qualityTags.length > 0
+    || filters.reactivationSegment.length > 0
   );
 }
 

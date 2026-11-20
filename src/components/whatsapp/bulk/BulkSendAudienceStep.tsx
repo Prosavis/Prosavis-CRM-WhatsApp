@@ -37,6 +37,10 @@ import SortIcon from '@mui/icons-material/Sort';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { ContactAvatar } from '@/components/common/ContactAvatar';
 import { directoryService } from '@/services/directoryService';
+import {
+  listReactivationCandidates,
+  type ReactivationCandidate,
+} from '@/services/reactivationCandidatesService';
 import { listWhatsAppTags, listWhatsAppTagFolders, type WhatsAppTag, type WhatsAppTagFolder } from '@/services/whatsappService';
 import type { DirectoryEntry } from '@/types/lead';
 import { downloadDirectoryCsv } from '@/utils/exportDirectoryCsv';
@@ -101,6 +105,32 @@ export interface BulkSendAudienceStepProps {
   onAudienceNoticeDismiss?: () => void;
   /** Abre la sección de teléfonos manuales al preparar un reintento. */
   initialManualExpanded?: boolean;
+}
+
+function reactivationAsDirectoryEntry(row: ReactivationCandidate): DirectoryEntry {
+  return {
+    id: row.phone_key,
+    fullName: row.display_name || row.phone_key,
+    displayName: row.display_name || undefined,
+    phone: row.dial_phone || undefined,
+    isAppUser: false,
+    classification: 'lead',
+    qualityTag: 'standard',
+    status: 'active',
+    channels: ['WHATSAPP'],
+    pendingAmount: 0,
+    pendingAppointmentsCount: 0,
+    otpRequired: false,
+    messagesCount: 0,
+    activeSequence: '',
+    sequenceStep: 0,
+    optOut: Boolean(row.opt_out),
+    unreadWhatsAppCount: 0,
+    tags: [row.segment],
+    metadata: { template: row.template_name },
+    createdAt: '',
+    updatedAt: '',
+  };
 }
 
 const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
@@ -169,6 +199,16 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
     setLoading(true);
     setError(null);
     try {
+      if (advancedFilters.reactivationSegment) {
+        const items = await listReactivationCandidates({
+          segmentos: [advancedFilters.reactivationSegment],
+          limit: 50,
+          eligibleOnly: true,
+        });
+        setEntries(items.map(reactivationAsDirectoryEntry));
+        setTotalCount(items.length);
+        return;
+      }
       const result = await directoryService.getEntriesForBulk(bulkFilters);
       setEntries(result.entries);
       setTotalCount(result.totalCount);
@@ -177,7 +217,7 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [bulkFilters]);
+  }, [advancedFilters.reactivationSegment, bulkFilters]);
 
   useEffect(() => {
     void fetchEntries();
@@ -462,6 +502,11 @@ const BulkSendAudienceStep: React.FC<BulkSendAudienceStepProps> = ({
               showDirectoryTags={showDirectoryTagFilters}
               onToggleDirectoryTags={() => setShowDirectoryTagFilters((v) => !v)}
             />
+            {advancedFilters.reactivationSegment ? (
+              <Alert severity="info">
+                Este diálogo manda el mismo mensaje a todo el segmento. El lote con plantilla por persona se prepara en Directorio → Para reactivar.
+              </Alert>
+            ) : null}
 
             <Stack direction="row" spacing={0.5} flexWrap="wrap" alignItems="center">
               <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>

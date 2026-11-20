@@ -227,6 +227,8 @@ export interface Database {
           whatsapp_commercial_conversation_id: string | null;
           appointment_id: string | null;
           internal_notes: string | null;
+          internal_notes_summary: string | null;
+          reactivation_hold_reason: string | null;
           tags: string[];
           metadata: Json;
           created_at: string;

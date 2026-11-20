@@ -434,6 +434,7 @@ export type Database = {
           display_name: string | null
           email: string | null
           phone: string | null
+          phone_key: string | null
           photo_url: string | null
           address: string | null
           notes: string | null
@@ -471,6 +472,8 @@ export type Database = {
           whatsapp_commercial_conversation_id: string | null
           appointment_id: string | null
           internal_notes: string | null
+          internal_notes_summary: string | null
+          reactivation_hold_reason: string | null
           tags: string[]
           metadata: Json
           created_at: string

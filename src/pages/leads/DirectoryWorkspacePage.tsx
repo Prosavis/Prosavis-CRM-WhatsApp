@@ -2,6 +2,7 @@ import { Box, Tab, Tabs } from '@mui/material';
 import React, { useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { DirectorySegmentTable } from '@/components/directory/DirectorySegmentTable';
+import { ReactivationPool } from '@/components/directory/ReactivationPool';
 import { DirectoryWorkspaceKpisBar } from '@/components/directory/DirectoryWorkspaceKpis';
 import {
   useDirectoryWorkspaceFocusRefetch,
@@ -84,7 +85,9 @@ const DirectoryWorkspacePage: React.FC<LeadsPageProps> = ({
         <Tab label="Cancelados" data-testid="directory-tab-canceled" />
       </Tabs>
 
-      {view === 'all' && !segment ? (
+      {segment === 'reactivation' ? (
+        <ReactivationPool />
+      ) : view === 'all' && !segment ? (
         <LeadsPage
           embedded={embedded}
           onOpenInInbox={onOpenInInbox}

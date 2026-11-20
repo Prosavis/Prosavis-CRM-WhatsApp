@@ -97,6 +97,11 @@ export interface RunReactivationsParams {
   excludeCompanies?: boolean;
   /** Si true, no envía: solo calcula candidatos y pasos debidos. */
   previewOnly?: boolean;
+  /**
+   * La cadencia de 6 pasos quedó retirada. Solo un llamado explícito
+   * con allowLegacyEngine la vuelve a correr.
+   */
+  allowLegacyEngine?: boolean;
 }
 
 export interface RunReactivationsResult {
@@ -392,6 +397,17 @@ async function sendReactivationTemplate(params: {
 export async function runReactivations(
   params: RunReactivationsParams,
 ): Promise<RunReactivationsResult> {
+  if (params.allowLegacyEngine !== true) {
+    return {
+      runId: null,
+      runDate: bogotaDateKey(),
+      dryRun: true,
+      stats: emptyStats(),
+      events: [],
+      enrolled: [],
+      due: [],
+    };
+  }
   const dryRun = Boolean(params.dryRun || params.previewOnly);
   const runKind = params.runKind ?? (dryRun ? 'dry_run' : 'primary');
   const schedulerName = params.schedulerName ?? 'run-whatsapp-reactivations';

@@ -648,9 +648,10 @@ export const directoryService = {
    * Seed: Convert all Firebase users into directory entries.
    * Actual implementation calls the cloud function / edge function.
    */
-  async seedAllUsersAsEntries() {
-    // TODO: implement actual sync from Firebase users to crm_directory
-    return { created: 0, skipped: 0, errors: 0 };
+  async seedAllUsersAsEntries(): Promise<{ created: number; skipped: number; errors: number }> {
+    throw new Error(
+      'La importación masiva de usuarios de la app no está disponible. El directorio se alimenta de WhatsApp y de las citas.',
+    );
   },
 
   /**

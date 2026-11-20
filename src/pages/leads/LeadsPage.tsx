@@ -339,8 +339,12 @@ const LeadsPage: React.FC<LeadsPageProps> = ({
       setSeedDialogOpen(false);
       fetchEntries();
       fetchStats();
-    } catch {
-      setSnackbar({ open: true, message: 'No se pudieron importar los usuarios de la app', severity: 'error' });
+    } catch (err) {
+      setSnackbar({
+        open: true,
+        message: err instanceof Error ? err.message : 'No se pudieron importar los usuarios de la app',
+        severity: 'error',
+      });
     } finally {
       setSeedLoading(false);
     }

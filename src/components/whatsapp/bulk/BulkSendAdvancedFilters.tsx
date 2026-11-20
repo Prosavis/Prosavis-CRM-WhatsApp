@@ -39,6 +39,7 @@ export interface BulkSendAdvancedFiltersProps {
 }
 
 const QUALITY_OPTIONS = ['good', 'standard', 'bad'] as const;
+const REACTIVATION_SEGMENTS = ['VIP', 'C1', 'R', 'X', 'B', 'Bh', 'L', 'H', 'F', 'E1'] as const;
 
 const BulkSendAdvancedFilters: React.FC<BulkSendAdvancedFiltersProps> = ({
   filters,
@@ -63,6 +64,22 @@ const BulkSendAdvancedFilters: React.FC<BulkSendAdvancedFiltersProps> = ({
 
   return (
     <Stack spacing={2}>
+      <FormControl size="small" fullWidth>
+        <InputLabel id="bulk-reactivation-segment">Segmento de reactivación</InputLabel>
+        <Select
+          labelId="bulk-reactivation-segment"
+          label="Segmento de reactivación"
+          value={filters.reactivationSegment}
+          onChange={(event) => patch({ reactivationSegment: event.target.value })}
+        >
+          <MenuItem value="">Directorio general</MenuItem>
+          {REACTIVATION_SEGMENTS.map((segment) => (
+            <MenuItem key={segment} value={segment}>
+              {segment}
+            </MenuItem>
+          ))}
+        </Select>
+      </FormControl>
       <Box>
         <Typography variant="caption" color="text.secondary" fontWeight={600} display="block" sx={{ mb: 0.75 }}>
           Tags WhatsApp

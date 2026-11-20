@@ -130,7 +130,13 @@ export function DirectorySegmentTable({
         <Typography color="error">{query.error instanceof Error ? query.error.message : 'No se pudo cargar el directorio.'}</Typography>
       ) : items.length === 0 ? (
         <Typography color="text.secondary" sx={{ py: 6, textAlign: 'center' }}>
-          {view === 'canceled' ? 'No hay cancelaciones ni rechazos.' : 'No hay clientes agendados.'}
+          {view === 'canceled'
+            ? 'No hay cancelaciones ni rechazos.'
+            : segment === 'recurring'
+              ? 'No hay clientes recurrentes en este corte.'
+              : segment === 'reactivation'
+                ? 'No hay personas para reactivar en este corte.'
+                : 'No hay clientes agendados.'}
         </Typography>
       ) : (
         <TableContainer>
