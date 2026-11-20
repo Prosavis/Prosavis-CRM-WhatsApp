@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
-import { Box, Button, Chip, Stack, TextField, Typography } from '@mui/material';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, Box, Button, Chip, Stack, TextField, Typography } from '@mui/material';
 import { supabase } from '@/config/supabase';
+import { openPostgresChannel } from '@/utils/inboxRealtimeSync';
 import { customerPhoneFromStableKey } from '@/utils/whatsappLines';
 
 const DISCARD_REASONS = [
@@ -17,6 +18,9 @@ const VERDICT_LABEL = {
   riesgo: 'Riesgo',
 } as const;
 
+const DRAFT_POLL_MS = 20_000;
+const SENT_BUT_OPEN = 'El mensaje salió, pero el borrador no se cerró.';
+
 interface PendingDraft {
   suggestion: string;
   suggestion_log_id: string | null;
@@ -26,6 +30,7 @@ interface PendingDraft {
 interface DraftReview {
   verdict: keyof typeof VERDICT_LABEL;
   feedback: string | null;
+  created_at: string;
 }
 
 function cardValue(node: unknown): string {
@@ -63,6 +68,19 @@ function cardLines(ficha: unknown): string[] {
   return lines.length > 0 ? lines.map(([label, value]) => `${label}: ${value}`) : ['Sin ficha'];
 }
 
+function reviewForDraft(draft: PendingDraft, review: DraftReview | null): DraftReview | null {
+  if (!review) return null;
+  if (Number.isNaN(Date.parse(review.created_at)) || Number.isNaN(Date.parse(draft.created_at))) return null;
+  if (Date.parse(review.created_at) + 1000 < Date.parse(draft.created_at)) return null;
+  return review;
+}
+
+function asReview(row: { verdict?: string; feedback?: string | null; created_at?: string } | null): DraftReview | null {
+  if (!row?.created_at) return null;
+  if (row.verdict !== 'aprobar' && row.verdict !== 'devolver' && row.verdict !== 'riesgo') return null;
+  return { verdict: row.verdict, feedback: row.feedback ?? null, created_at: row.created_at };
+}
+
 /**
  * Borrador de Sofía sobre la caja de texto. El veredicto se muestra y no bloquea
  * el envío. Cualquier cuenta del CRM lo edita, lo envía o lo descarta.
@@ -79,50 +97,104 @@ export function SofiaDraftPanel({
   const [review, setReview] = useState<DraftReview | null>(null);
   const [card, setCard] = useState<string[]>(['Sin ficha']);
   const [busy, setBusy] = useState(false);
+  const [resolveNotice, setResolveNotice] = useState<string | null>(null);
+  const closedAt = useRef<string | null>(null);
 
   useEffect(() => {
     let active = true;
+    let generation = 0;
+    let shownSuggestion = '';
     const phone = customerPhoneFromStableKey(stableKey);
-    Promise.all([
-      supabase
-        .from('sofia_pending_drafts')
-        .select('suggestion, suggestion_log_id, created_at')
-        .eq('stable_key', stableKey)
-        .maybeSingle(),
-      supabase
-        .from('sofia_draft_reviews')
-        .select('verdict, feedback')
-        .eq('stable_key', stableKey)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      supabase
-        .from('whatsapp_client_cards')
-        .select('ficha')
-        .eq('phone', phone)
-        .maybeSingle(),
-    ]).then(([draftResult, reviewResult, cardResult]) => {
-      if (!active || !draftResult.data) return;
-      setDraft(draftResult.data as PendingDraft);
-      setText(draftResult.data.suggestion);
-      const verdict = reviewResult.data?.verdict;
-      if (verdict === 'aprobar' || verdict === 'devolver' || verdict === 'riesgo') {
-        setReview({ verdict, feedback: reviewResult.data?.feedback ?? null });
+
+    const load = async () => {
+      const ticket = ++generation;
+      const [draftResult, reviewResult, cardResult] = await Promise.all([
+        supabase
+          .from('sofia_pending_drafts')
+          .select('suggestion, suggestion_log_id, created_at')
+          .eq('stable_key', stableKey)
+          .maybeSingle(),
+        supabase
+          .from('sofia_draft_reviews')
+          .select('verdict, feedback, created_at')
+          .eq('stable_key', stableKey)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabase
+          .from('whatsapp_client_cards')
+          .select('ficha')
+          .eq('phone', phone)
+          .maybeSingle(),
+      ]);
+      if (!active || ticket !== generation) return;
+      const nextDraft = draftResult.data as PendingDraft | null;
+      if (!nextDraft?.suggestion || nextDraft.created_at === closedAt.current) {
+        setDraft(null);
+        return;
       }
+      setDraft(nextDraft);
+      setText((current) => {
+        if (current.trim() === '' || current === shownSuggestion) {
+          shownSuggestion = nextDraft.suggestion;
+          return nextDraft.suggestion;
+        }
+        return current;
+      });
+      setReview(reviewForDraft(nextDraft, asReview(reviewResult.data)));
       setCard(cardLines(cardResult.data?.ficha));
+    };
+
+    void load();
+    const unsubscribe = openPostgresChannel({
+      client: supabase,
+      baseName: `sofia-draft:${stableKey}`,
+      bindings: [
+        {
+          filter: {
+            event: '*',
+            schema: 'public',
+            table: 'sofia_pending_drafts',
+            filter: `stable_key=eq.${stableKey}`,
+          },
+          callback: () => { void load(); },
+        },
+        {
+          filter: {
+            event: '*',
+            schema: 'public',
+            table: 'sofia_draft_reviews',
+            filter: `stable_key=eq.${stableKey}`,
+          },
+          callback: () => { void load(); },
+        },
+      ],
     });
+    const timer = window.setInterval(() => { void load(); }, DRAFT_POLL_MS);
     return () => {
       active = false;
+      window.clearInterval(timer);
+      unsubscribe();
     };
   }, [stableKey]);
 
   if (!draft) return null;
 
   const edited = text.trim() !== draft.suggestion.trim();
+  const visibleReview = reviewForDraft(draft, review);
 
   const close = async (reason: string | null, sent: boolean) => {
     setBusy(true);
-    if (sent) await onSend(text.trim());
+    setResolveNotice(null);
+    if (sent) {
+      try {
+        await onSend(text.trim());
+      } catch {
+        setBusy(false);
+        setResolveNotice('No se pudo enviar el mensaje.');
+        return;
+      }
+    }
     const { error } = await supabase.rpc('sofia_resolve_draft', {
       p_stable_key: stableKey,
       p_sent: sent,
@@ -130,7 +202,11 @@ export function SofiaDraftPanel({
       p_reason: reason,
     });
     setBusy(false);
-    if (error) return;
+    if (error) {
+      setResolveNotice(sent ? SENT_BUT_OPEN : 'No se pudo cerrar el borrador.');
+      return;
+    }
+    closedAt.current = draft.created_at;
     setDraft(null);
   };
 
@@ -138,10 +214,13 @@ export function SofiaDraftPanel({
     <Box sx={{ px: 2, py: 1, borderTop: 1, borderColor: 'divider' }}>
       <Stack direction="row" spacing={1} alignItems="center">
         <Typography variant="caption" color="text.secondary">Borrador de Sofía</Typography>
-        {review ? <Chip size="small" label={VERDICT_LABEL[review.verdict]} /> : null}
+        <Chip size="small" label={visibleReview ? VERDICT_LABEL[visibleReview.verdict] : 'Revisando'} />
       </Stack>
-      {review?.feedback ? (
-        <Typography variant="caption" display="block" color="text.secondary">{review.feedback}</Typography>
+      {visibleReview?.feedback ? (
+        <Typography variant="caption" display="block" color="text.secondary">{visibleReview.feedback}</Typography>
+      ) : null}
+      {resolveNotice ? (
+        <Alert severity="warning" sx={{ mt: 0.5 }} role="status">{resolveNotice}</Alert>
       ) : null}
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ my: 0.5 }}>
         <TextField
