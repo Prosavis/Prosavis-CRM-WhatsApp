@@ -3,6 +3,9 @@ import {
   appointmentConfirmation,
   claimsBooked,
   classifyInbound,
+  closeReply,
+  coverageReply,
+  isJobApplication,
   noticeName,
   pickBooking,
   reviewDisposition,
@@ -17,6 +20,40 @@ describe('classifyInbound', () => {
     expect(classifyInbound('Les mando el comprobante').motivo).toBe('comprobante');
     expect(classifyInbound('Quiero cambiar la cita').motivo).toBe('mover la cita');
     expect(classifyInbound('¿Dónde prestan el servicio?').kind).toBe('seguir');
+    expect(classifyInbound('Hl yo estoy buscando trabajo').kind).toBe('empleo');
+    expect(classifyInbound('No tengo oficina, busco empleo para mí').kind).toBe('empleo');
+    expect(isJobApplication('¿Cuánto cuesta la limpieza?')).toBe(false);
+    expect(classifyInbound('Pereira?').kind).toBe('cobertura');
+    expect(classifyInbound('La auxiliar llegaría hasta la casa?').kind).toBe('cobertura');
+    expect(classifyInbound('Es en la etapa 5').kind).toBe('cobertura');
+    expect(classifyInbound('Es a las afueras de pereira').kind).toBe('cobertura');
+    expect(classifyInbound('Estoy en combia').kind).toBe('cobertura');
+    expect(coverageReply('La auxiliar llegaría hasta la casa?')).toContain('llega hasta su casa');
+    expect(coverageReply('La auxiliar llegaría hasta la casa?')).not.toMatch(/15\.000|diciembre/);
+    expect(coverageReply('¿Atienden en Bogotá?')).toContain('no lo prestamos');
+    const outskirts = coverageReply(
+      'Es a las afueras de pereira',
+      'Necesito 2 personas para el día 4 de diciembre\nDe 8 horas cada una\nEstoy en combia',
+    );
+    expect(outskirts).toContain('sector de Combia');
+    expect(outskirts).toContain('revisar el punto exacto');
+    expect(outskirts).toContain('$296.000');
+    expect(outskirts).toContain('4 de diciembre');
+    expect(outskirts).not.toMatch(/sí, la auxiliar llega|me indicas/i);
+    expect(outskirts).not.toContain('15.000');
+    expect(classifyInbound('6 horas considero suficiente').kind).toBe('cierre');
+    expect(classifyInbound('De 8 horas cada una').kind).not.toBe('cierre');
+    const close = closeReply(
+      '6 horas considero suficiente',
+      'Para mañana sábado 21 de noviembre podemos en tu dirección Cra. 25 #86-141.',
+    );
+    expect(close).toContain('$118.000');
+    expect(close).toContain('Cra. 25 #86-141');
+    expect(close).toContain('sábado 21 de noviembre');
+    expect(close).toContain('hora de inicio');
+    expect(close).toContain('Google Maps');
+    expect(close).not.toMatch(/12:00|disponibilidad|quedó agendada/);
+    expect(closeReply('6 horas considero suficiente', '')).toContain('dirección completa');
   });
 });
 

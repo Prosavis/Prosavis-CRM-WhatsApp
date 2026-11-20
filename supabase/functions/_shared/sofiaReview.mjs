@@ -37,7 +37,7 @@ export async function reviewDraft(params) {
       model: 'claude-sonnet-5-5',
       max_tokens: 800,
       thinking: { type: 'between_tools' },
-      system: 'Revisas un borrador de Sofía antes de que una persona lo envíe. No bloqueas el envío. aprueba si cumple las reglas. devuelve si se puede corregir con una nota. riesgo si hay cuenta, pago, precio inventado o una promesa indebida. La nota tiene que ser concreta.',
+      system: 'Revisas un borrador de Sofía antes de que una persona lo envíe. No bloqueas el envío. aprueba si cumple las reglas. devuelve si se puede corregir con una nota. riesgo si hay cuenta, pago, precio inventado o una promesa indebida. La nota tiene que ser concreta. Una dirección que ya está en el contexto, dicha por la clienta o por el equipo, no es inventada: se puede repetir. Si no está, pida la dirección. No ofrezca horas del reloj ni diga que hay disponibilidad si el contexto no trae un cupo del calendario. Si falta la hora de inicio, pídala. No diga que la cita quedó agendada.',
       output_config: {
         effort: 'low',
         format: { type: 'json_schema', schema: REVIEW_SCHEMA },

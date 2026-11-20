@@ -20,6 +20,7 @@ import {
 import { loadDirectoryByPhone } from '../_shared/inboxAiKnowledge.ts';
 import {
   AUTO_BATCH,
+  AUTO_EMPLEO,
   AUTO_GOODBYE,
   AUTO_HANDOFF,
   AUTO_REWRITES,
@@ -28,7 +29,10 @@ import {
   appointmentConfirmation,
   claimsBooked,
   classifyInbound,
+  closeReply,
+  coverageReply,
   pickBooking,
+  wantsCleaning,
   readAppointmentId,
   reviewDisposition,
   storedDraftSend,
@@ -244,6 +248,25 @@ Deno.serve(async (req) => {
   for (const candidate of ((candidates ?? []) as Candidate[]).slice(0, DRAFT_BATCH)) {
     if (!(await stillSupervised(supabase))) break;
     if (!inOffice) bridged += await sendBridge(supabase, candidate.stable_key) ? 1 : 0;
+    const inbound = await anchorBody(supabase, candidate.anchor_message_id);
+    const kind = classifyInbound(inbound).kind;
+    if (kind === 'cobertura' || kind === 'cierre') {
+      const thread = await recentThread(supabase, candidate.stable_key);
+      const suggestion = kind === 'cobertura'
+        ? coverageReply(inbound, thread)
+        : closeReply(inbound, thread);
+      if (!suggestion) continue;
+      const { error: fixedError } = await supabase.from('sofia_pending_drafts').upsert({
+        stable_key: candidate.stable_key,
+        anchor_message_id: candidate.anchor_message_id,
+        suggestion,
+        suggestion_log_id: null,
+        agent_version: agentVersion,
+        created_at: new Date().toISOString(),
+      });
+      if (!fixedError) drafted += 1;
+      continue;
+    }
     const saved = await draftWithReview({
       supabase,
       apiKey,
@@ -258,6 +281,36 @@ Deno.serve(async (req) => {
 
   return jsonResponse({ drafted, bridged });
 });
+
+async function recentThread(
+  supabase: ReturnType<typeof getServiceClient>,
+  stableKey: string,
+): Promise<string> {
+  const { data } = await supabase
+    .from('whatsapp_message_log')
+    .select('message_body')
+    .eq('conversation_stable_key', stableKey)
+    .eq('hidden_from_panel', false)
+    .order('created_at', { ascending: false })
+    .limit(8);
+  return (data ?? [])
+    .map((row) => (typeof row.message_body === 'string' ? row.message_body : ''))
+    .filter((line) => line.trim().length > 0)
+    .reverse()
+    .join('\n');
+}
+
+async function anchorBody(
+  supabase: ReturnType<typeof getServiceClient>,
+  anchorMessageId: string,
+): Promise<string> {
+  const { data } = await supabase
+    .from('whatsapp_message_log')
+    .select('message_body')
+    .eq('id', anchorMessageId)
+    .maybeSingle();
+  return typeof data?.message_body === 'string' ? data.message_body : '';
+}
 
 async function activeRules(supabase: ReturnType<typeof getServiceClient>): Promise<string> {
   const { data, error } = await supabase
@@ -525,6 +578,28 @@ async function createHeldAppointment(
   }
 }
 
+async function conversationSeeksJob(
+  supabase: ReturnType<typeof getServiceClient>,
+  stableKey: string,
+): Promise<boolean> {
+  const { data } = await supabase
+    .from('whatsapp_conversations')
+    .select('tag_ids, last_intent')
+    .eq('stable_key', stableKey)
+    .maybeSingle();
+  const intent = typeof data?.last_intent === 'string' ? data.last_intent.trim().toLowerCase() : '';
+  if (intent === 'empleo') return true;
+  const ids = Array.isArray(data?.tag_ids)
+    ? data.tag_ids.filter((id: unknown): id is string => typeof id === 'string')
+    : [];
+  if (ids.length === 0) return false;
+  const { data: tags } = await supabase.from('whatsapp_chat_tags').select('name').in('id', ids);
+  return (tags ?? []).some((tag) => {
+    const name = typeof tag.name === 'string' ? tag.name.trim().toLowerCase() : '';
+    return name === 'job' || name === 'jobs' || name === 'trabajo' || name === 'trabajo/cv' || name === 'trabajo / cv';
+  });
+}
+
 async function runAutomatic(params: {
   supabase: ReturnType<typeof getServiceClient>;
   apiKey: string;
@@ -542,6 +617,22 @@ async function runAutomatic(params: {
   for (const candidate of (data ?? []) as AutoCandidate[]) {
     if (!(await modeIsSola(params.supabase))) break;
     try {
+      const inbound = classifyInbound(candidate.inbound_text ?? '');
+      const taggedJob = inbound.kind !== 'empleo'
+        && !wantsCleaning(candidate.inbound_text ?? '')
+        && await conversationSeeksJob(params.supabase, candidate.stable_key);
+      if (inbound.kind === 'empleo' || taggedJob) {
+        if (await deliverAuto(params.supabase, candidate, AUTO_EMPLEO, 'enviado', 'empleo')) sent += 1;
+        continue;
+      }
+      if (inbound.kind === 'cobertura' || inbound.kind === 'cierre') {
+        const thread = await recentThread(params.supabase, candidate.stable_key);
+        const reply = inbound.kind === 'cobertura'
+          ? coverageReply(candidate.inbound_text ?? '', thread)
+          : closeReply(candidate.inbound_text ?? '', thread);
+        if (reply && await deliverAuto(params.supabase, candidate, reply, 'enviado', inbound.kind)) sent += 1;
+        continue;
+      }
       const stored = await loadStoredDraft(params.supabase, candidate.stable_key);
       if (stored) {
         if (storedDraftSend(stored) === 'retener') {
@@ -551,7 +642,6 @@ async function runAutomatic(params: {
         if (await deliverAuto(params.supabase, candidate, stored, 'enviado', 'borrador listo')) sent += 1;
         continue;
       }
-      const inbound = classifyInbound(candidate.inbound_text ?? '');
       if (inbound.kind === 'no') {
         if (await deliverAuto(params.supabase, candidate, AUTO_GOODBYE, 'enviado', inbound.motivo)) sent += 1;
         continue;
